@@ -11,6 +11,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { dataFile, writeFileAtomic } from './paths.js'
 import { asksToMeet, minutesAsked, theirZone, freeTimes, scheduleOf, offsetIn, utcName } from './freetimes.js'
+import { placeEn } from '../shared/places.js'
 
 const FILE = dataFile('mail', 'voice.json')
 const STALE = 7 * 864e5
@@ -21,7 +22,7 @@ const clip = (s, n) => { const t = String(s ?? '').trim(); return t.length > n ?
 const addrOf = (s) => ((/<([^>]+)>/.exec(String(s || '')) || [])[1] || (/[^\s<>,;"]+@[^\s<>,;"]+/.exec(String(s || '')) || [])[0] || '').toLowerCase()
 const nameOf = (s) => String(s || '').replace(/\s*<[^>]+>\s*/, '').replace(/"/g, '').trim()
 const fail = (message, code, status) => Object.assign(new Error(message), { ...(code ? { code } : {}), ...(status ? { status } : {}) })
-const noModel = () => fail('No model to write with. Sign in to an agent, or add an API key or a local model in Settings › Model Providers.', 'no_model')
+const noModel = () => fail(`No model to write with. Sign in to an agent, or add an API key or a local model in ${placeEn('providers')}.`, 'no_model')
 
 // A model's answer as text: without a code fence, quotes around it all, or a Subject line.
 function plain(text) {

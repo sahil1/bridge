@@ -9,6 +9,7 @@ import { PrepGlance } from './prep.jsx'
 import { useScreenAccess, useAllowCall, allowSteps, noteOpened } from './allowcall.jsx'
 import { joined } from '../Agenda.jsx'
 import { t, locale, tn } from '../../i18n/index.js'
+import { where } from '../settings/search.js'
 import './meetings.css'
 
 // The floating card (desktop app, ?float=1): a small window over your other windows. While a
@@ -492,7 +493,7 @@ export default function FloatCard() {
         )}
         {opts === 'off' && (
           <div className="fc-banner fc-confirm" role="alertdialog" aria-label={t('Turn off meeting reminders?')}>
-            <p><b>{t('Turn off meeting reminders?')}</b> {t("The card won't show before your meetings. Turn them back on in Settings › Voice & Meetings › Remind me before meetings.")}</p>
+            <p><b>{t('Turn off meeting reminders?')}</b> {t("The card won't show before your meetings. Turn them back on in {place}.", { place: where('meeting-remind') })}</p>
             <span className="fc-banner-acts">
               <button type="button" className="btn small" onClick={() => setOpts(null)}>{t('Cancel')}</button>
               <button type="button" className="btn small primary" disabled={busy} onClick={stop}><Icon name="bell-off" size={12} /> {t('Turn off')}</button>

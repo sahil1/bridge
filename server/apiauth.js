@@ -32,6 +32,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { cookieName, cookieValue, same } from './apitoken.js'
+import { placeEn } from '../shared/places.js'
 
 const SITE = /^(\/m\/[A-Za-z0-9_-]{1,20})?\/api\/agents\/([^/]+)\/site\/~([A-Za-z0-9_-]{16,64})\//
 const CODE_MS = 2 * 60_000
@@ -143,7 +144,7 @@ const WATCH_SHA = crypto.createHash('sha256').update(WATCH).digest('base64')
 function howTo(res, why, tailnet = false) {
   res.status(401).set({ 'Cache-Control': 'no-store', 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': `default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-${WATCH_SHA}'; connect-src 'self'; form-action 'self'; frame-ancestors 'self'`, 'X-Content-Type-Options': 'nosniff' })
   const steps = tailnet
-    ? `<ol><li>On your computer, open Bridge AI's <b>Settings › Account &amp; Devices › Phone</b>.</li><li>Scan the code there with this phone's camera.</li></ol>
+    ? `<ol><li>On your computer, open Bridge AI's <b>${placeEn('phone').replace(/&/g, '&amp;')}</b>.</li><li>Scan the code there with this phone's camera.</li></ol>
 <form method="get" action="/"><p>Or copy its link there and paste it here:</p><input name="open" autocomplete="off" aria-label="The link from your computer" style="width:100%;font:inherit;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)"> <button style="margin-top:8px;font:inherit;padding:6px 14px">Open</button></form>`
     : '<ol><li>In the Bridge AI app, choose <b>View › Open in Browser</b>.</li><li>Or, in a terminal on this computer, run <code>bridge-ai open</code>.</li></ol>'
   res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Open Bridge AI</title><style>${PAGE_STYLE}</style></head><body><main>

@@ -7,6 +7,7 @@ import { usePersisted } from '../layout.jsx'
 import { useTrial } from '../../trials.js'
 import { day } from './bulk.jsx'
 import { t, tx } from '../../i18n/index.js'
+import { where } from '../settings/search.js'
 
 // AI Assist's Suggest what to ask, while a meeting records (its Suggestions view): now and then a
 // model reads along and suggests what to ask, raise or check next, from what's been said, the
@@ -45,7 +46,7 @@ export function fromWords(s, x) {
 export function webWords(x) {
   if (x.web?.state === 'looking') return t('Looking it up on the web, via {via}…', { via: x.web.via })
   if (x.web?.state === 'failed') return t("Couldn't look it up on the web: {error}", { error: x.web.error || t('no reason given') })
-  if (x.web?.state === 'off') return t('Answers like this can be looked up on the web: add a Perplexity key in Settings › Model Providers.')
+  if (x.web?.state === 'off') return t('Answers like this can be looked up on the web: add a Perplexity key in {place}.', { place: where('providers') })
   return null
 }
 const openMeeting = (mid) => window.dispatchEvent(new CustomEvent('bridge-open-meeting', { detail: { id: mid } }))

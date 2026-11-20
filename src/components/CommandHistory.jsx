@@ -9,6 +9,7 @@ import { api } from '../api.js'
 import { Suggested } from './Routines.jsx'
 import { makeRoutine, nameFrom, scheduleNear, shortDir } from './routineDraft.js'
 import { t, tx, locale } from '../i18n/index.js'
+import { where } from './settings/search.js'
 
 const BOX = { message: tx('Message box'), new: tx('New'), tasks: tx('Tasks'), reply: tx('Needs you') }
 const KEEP = { '30d': tx('30 days'), '90d': tx('90 days'), '1y': tx('a year') }
@@ -41,7 +42,7 @@ export default function CommandHistory({ onClose, onSettings }) {
       <div className="hist-list cmd-list">
         {!q && data?.history && <Suggested onMade={onClose} />}
         {data && !data.history && (
-          <p className="st-note cmd-off"><Icon name="info" size={13} /> {t('Command History is off, so nothing new is kept.')} <button type="button" className="link-btn" onClick={onSettings}>{t('Turn it on in Settings › General')}</button></p>
+          <p className="st-note cmd-off"><Icon name="info" size={13} /> {t('Command History is off, so nothing new is kept.')} <button type="button" className="link-btn" onClick={onSettings}>{t('Turn it on in {place}', { place: where('commands') })}</button></p>
         )}
         {!data && !err && <p className="muted small hist-sub">{t('Loading…')}</p>}
         {data && (

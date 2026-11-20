@@ -63,6 +63,8 @@ import * as routines from './routines.js'
 import * as settings from './settings.js'
 import * as mcp from './mcp.js'
 import * as machines from './machines.js'
+import { placeEn } from '../shared/places.js'
+import { available as accountsOn } from './account.js'
 
 export const FILE_KIND = 'bridge-ai-backup' // the file
 const KIND = 'bridge-ai-setup' // what's sealed in it, and what a move sends
@@ -675,7 +677,7 @@ export function routes(app, x) {
   app.post('/api/backup/incoming', wrap((req) => {
     const m = fromMachine(req)
     const r = incoming(m, req.body || {})
-    x.notify?.({ kind: 'machine', title: `${m.name} is moving its Bridge AI setup here`, body: 'See what comes in Settings › Back Up & Move, and apply it there.', url: '/#settings/backup', tag: `backup-${r.id}` })
+    x.notify?.({ kind: 'machine', title: `${m.name} is moving its Bridge AI setup here`, body: `See what comes in ${placeEn('backup', { accounts: accountsOn() })}, and apply it there.`, url: '/#settings/backup', tag: `backup-${r.id}` })
     return r
   }))
   app.post('/api/backup/withdrawn', wrap((req) => withdrawn(fromMachine(req), req.body || {})))

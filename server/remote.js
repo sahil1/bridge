@@ -70,6 +70,7 @@ import { WebSocketServer } from 'ws'
 import { dataFile, ensureDir, writeFileAtomic } from './paths.js'
 import * as input from './remoteinput.js'
 import { cleanInput, iceServers, RATE, MAX_FRAME, PAUSE_MS, ACCESS, packFrame, plainName } from '../shared/remote.js'
+import { placeEn } from '../shared/places.js'
 
 const FILE = dataFile('remote.json')
 const LOG_MAX = 200
@@ -273,7 +274,7 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
   const canOpen = () => !!conf.password && !conf.quit && typeof openApp === 'function' && !!openApp(false)
   const permissionWhy = () => `macOS doesn't let Bridge AI record the screen on ${thisName()}. On ${thisName()}, turn on Bridge AI in System Settings › Privacy & Security › Screen & System Audio Recording, then open Bridge AI again there.`
   function screenStatus() {
-    if (!trialOn()) return { can: false, code: 'trial', why: `Remote Screen and Preview is off on ${thisName()}. Turn it on there in Settings › About & Updates › Beta Features.` }
+    if (!trialOn()) return { can: false, code: 'trial', why: `Remote Screen and Preview is off on ${thisName()}. Turn it on there in ${placeEn('beta-remote-screen')}.` }
     if (os === 'linux' && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY && !FAKE && !capture) return { can: false, code: 'noDisplay', why: `${thisName()} has no screen to show (Bridge AI runs there without a desktop, as on a server or in Docker).` }
     const permission = capture?.permission || null
     if (permission === 'denied' || permission === 'restricted') return { can: false, code: 'screenPermission', permission, why: permissionWhy(), ...(permission === 'denied' && os === 'mac' && desktopOpen() ? { fix: 'allow' } : {}) }
@@ -282,7 +283,7 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     if (desktopOpen() || expected()) return { can: true, permission, sources: null, p2p: true }
     return { can: false, code: 'noApp', why: desktopNeeded(), ...(canOpen() ? { fix: 'open' } : {}) }
   }
-  const passwordFirst = () => `Control needs a Remote Access Password on ${thisName()}. Set one there in Settings › Account & Devices › Computers, then turn on "Let my other devices control this computer".`
+  const passwordFirst = () => `Control needs a Remote Access Password on ${thisName()}. Set one there in ${placeEn('remote')}, then turn on "Let my other devices control this computer".`
   async function controlStatus(o) {
     const st = await input.status(o)
     return { on: controlOn(), ...st, ...(sinkError === 'accessibility' ? { allowed: false } : {}), ...(!conf.password ? { needs: 'password', ...(st.can ? { why: passwordFirst() } : {}) } : {}) }
@@ -628,7 +629,7 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
   const lockedWhy = (until) => `Too many wrong passwords: ${thisName()} won't let this device try again until ${clock(until)}.`
   const lockedSay = (fail, until) => fail(lockedWhy(until), 'locked', { until: new Date(until).toISOString() })
   // (Through another of your computers, the device it's for, when that computer itself may.)
-  const notAllowed = (s) => `${thisName()} doesn't let ${s.forId && s.by.id && allows(s.by.id) ? s.for || 'this device' : s.by.name} connect. That's changed at ${thisName()} itself, in Settings › Remote Access › Which Devices May Connect.`
+  const notAllowed = (s) => `${thisName()} doesn't let ${s.forId && s.by.id && allows(s.by.id) ? s.for || 'this device' : s.by.name} connect. That's changed at ${thisName()} itself, in ${placeEn('remote-devices')}.`
   // A session turned away, kept apart from the sessions that ran, so many can't push those out of
   // the record; the same again soon after (that device, the same why) is counted on the last one.
   function refuse(s, end, more = {}) {
@@ -922,7 +923,7 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     onChange()
   }
   const controlWhy = (s) => (!conf.password ? passwordFirst()
-    : !conf.control ? `Control is off on ${thisName()}. Turn on "Let my other devices control this computer" there, in Settings › Account & Devices › Computers.`
+    : !conf.control ? `Control is off on ${thisName()}. Turn on "Let my other devices control this computer" there, in ${placeEn('remote')}.`
       : s.source.kind !== 'screen' ? 'Control works on a whole screen: pick one of the screens to control it.'
         : s.idled ? `View only now: nothing was pressed for ${Math.round(CONTROL_IDLE_MS / 60000) || 1} minutes. Choose Control to take it again.` : null)
   const controlInfo = (s) => ({ on: controlOn(), allowed: ctl(s), ...(s.idled ? { idle: true } : {}), why: s.kind === 'screen' && !ctl(s) ? controlWhy(s) : null })

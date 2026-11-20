@@ -23,6 +23,7 @@ import { DATA, HOME, IS_WIN, dataFile, ensureDir, writeFileAtomic } from './path
 import { adapter, installed, loginPath } from './agents.js'
 import { agentEnv, quoteCommand } from './runtime/spawn.js'
 import { paneKey, inView, paneOfKey, adopt } from './scope.js'
+import { placeEn } from '../shared/places.js'
 
 const FILE = dataFile('accounts.json')
 const DIR = path.join(DATA, 'accounts')
@@ -563,7 +564,7 @@ export function rename(id, label) {
 export function setActive(kind, id) {
   if (!KINDS[kind]) throw new Error(`Accounts aren't supported for ${kind} yet`)
   const d = load()
-  if (id !== 'auto' && !listed(kind, id, d)) throw new Error(id === defaultId(kind) ? 'Your usual login is off the list. Show it again first (Settings › Model Providers › Accounts).' : 'No such account')
+  if (id !== 'auto' && !listed(kind, id, d)) throw new Error(id === defaultId(kind) ? `Your usual login is off the list. Show it again first (${placeEn('accounts')}).` : 'No such account')
   d.active[kind] = id
   save(d)
   return { kind, active: id }

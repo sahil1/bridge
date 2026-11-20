@@ -4,6 +4,7 @@ import { openSettings } from './SignIn.jsx'
 import { api } from '../api.js'
 import { useSetupPlan, publish, runProgress } from '../setupPlan.js'
 import { t } from '../i18n/index.js'
+import { where } from './settings/search.js'
 
 // The top bar's "Setting up · 3 of 6": setup's Everything (or Settings › General's Set up) carries
 // on in the background once its window is closed, and this says how far it is, quietly, until it's
@@ -40,14 +41,14 @@ export default function SetupChip({ line = false }) {
       return
     }
     if (leftKey) { try { localStorage.setItem(SEEN, leftKey) } catch { /* no storage */ } setSeen(leftKey) }
-    openSettings('general')
+    openSettings('setup')
   }
   const label = needs ? t('Setup needs you · {n} of {total}', { n: ready, total }) : t('Setting up · {n} of {total}', { n: ready, total })
   const title = you === 'password' ? t('Setup is waiting for your Mac\'s password, in the Set up Bridge AI tab.')
     : you === 'window' ? t('Click Install in the window macOS opened for the developer tools.')
       : you ? t('The Set up Bridge AI tab is waiting for you.')
-        : needs ? t('Some of setup is left for you: see Settings › General.')
-          : t('Bridge AI is setting up what it uses, in the background. Settings › General shows each part.')
+        : needs ? t('Some of setup is left for you: see {place}.', { place: where('setup') })
+          : t('Bridge AI is setting up what it uses, in the background. {place} shows each part.', { place: where('setup') })
   return (
     <button type="button" className={`${line ? 'top-note' : 'top-chip'} setup-chip${needs ? ' you' : ''}`} onClick={open} title={title} aria-label={label}>
       {needs ? <StatusDot status="blocked" size={8} /> : <span className="aa-spin" aria-hidden="true" />}

@@ -3,6 +3,7 @@ import Icon from './Icon.jsx'
 import { api, viaRelay } from '../api.js'
 import { usePermission, useFix, useRecheck, KINDS, appVersion, updateApp, desktopApp } from '../permissions.js'
 import { t, tx } from '../i18n/index.js'
+import { where as placeIn } from './settings/search.js'
 
 export { useFix, useRecheck }
 
@@ -132,7 +133,7 @@ export default function PermissionFix({ pane, folder, onCheck, stale = false, ro
       <>
         <p className="small">{t('{label} is allowed on the computer it\'s for: {device}.', { label, device })}</p>
         {step === 'told' ? <p className="muted small">{t('Asked. Answer on {device}; this notices when it\'s on.', { device })}</p>
-          : !p.listening && <p className="muted small">{t('On {device}, open Bridge AI and allow it in Settings › General › Permissions.', { device })}</p>}
+          : !p.listening && <p className="muted small">{t('On {device}, open Bridge AI and allow it in {place}.', { place: placeIn('permissions'), device })}</p>}
       </>
     )
   } else if (step === 'stuck') {

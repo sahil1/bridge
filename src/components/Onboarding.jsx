@@ -8,6 +8,7 @@ import { usePhoneOffer, PhonePick } from './OnboardingPhone.jsx'
 import { runProgress } from '../setupPlan.js'
 import { RecommendCard, useRecommended } from './Recommended.jsx'
 import { t, tn, tx } from '../i18n/index.js'
+import { where } from './settings/search.js'
 
 // First run, in three short steps: how much Bridge AI sets up by itself (just Node.js for the agents,
 // which asks for no password and nothing to allow; everything it uses, in the background while you
@@ -70,7 +71,7 @@ const STEPS = [tx('Set up'), tx('Your AI'), tx('Your projects')]
 const LEVELS = [
   ['basic', tx('Just what agents need (recommended)'), tx('Node.js, so any agent installs in one click. No password, nothing to allow. Meeting notes, voice notes and the calendar set themselves up the first time you use them.')],
   ['full', tx('Everything'), tx('Node.js, meeting notes, voice notes and your calendar, set up in the background while you carry on (the speech model is a 670 MB download). Asks for your password once, then for what macOS needs you to allow.')],
-  ['later', tx('Later'), tx('Nothing now. Settings › General has it all in one place whenever you want it.')],
+  ['later', tx('Later'), tx('Nothing now. {place} has it all in one place whenever you want it.')],
 ]
 const HAVE_NODE = tx('Node.js is already here, so there\'s nothing to install. Meeting notes, voice notes and the calendar set themselves up the first time you use them.')
 // Everything, as it is on this computer: off a Mac, nothing asks; on a Mac without Apple's developer
@@ -231,7 +232,7 @@ export default function Onboarding({ onDone }) {
               <ul className="wiz-levels" role="radiogroup" aria-label={t('How much to set up')}>
                 {levels.map(([id, label, note]) => (id === 'full' ? [id, label, fullNote(setup.plan, note)] : id === 'basic' && nodeHere ? [id, label, HAVE_NODE] : [id, label, note])).map(([id, label, note]) => (
                   <li key={id} className={level === id ? 'on' : ''}>
-                    <label><input type="radio" name="wiz-level" value={id} checked={level === id} onChange={() => setLevel(id)} /><b>{t(label)}</b><small>{t(note)}</small></label>
+                    <label><input type="radio" name="wiz-level" value={id} checked={level === id} onChange={() => setLevel(id)} /><b>{t(label)}</b><small>{t(note, { place: where('setup') })}</small></label>
                   </li>
                 ))}
               </ul>
@@ -321,7 +322,7 @@ export default function Onboarding({ onDone }) {
         {step > 0 && started && started !== 'later' && progress.total > 0 && (
           <p className="wiz-strip" aria-live="polite">
             {setup.plan.running ? <span className="aa-spin" /> : <Icon name="check" size={12} />}
-            {setup.plan.running ? t('Setting up in the background: {n} of {total} ready', { n: progress.ready, total: progress.total }) : t('Set up: {n} of {total} ready. The rest is in Settings › General.', { n: progress.ready, total: progress.total })}
+            {setup.plan.running ? t('Setting up in the background: {n} of {total} ready', { n: progress.ready, total: progress.total }) : t('Set up: {n} of {total} ready. The rest is in {place}.', { place: where('setup'), n: progress.ready, total: progress.total })}
             {WAITS[setup.plan.needsYou] && <span className="wiz-you"><span className="sa-you-dot" aria-hidden="true" /><b>{t('Needs you')}</b> <button type="button" className="link-btn small" onClick={() => setStep(0)}>{t(WAITS[setup.plan.needsYou])}</button></span>}
           </p>
         )}

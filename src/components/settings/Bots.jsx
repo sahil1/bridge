@@ -13,6 +13,8 @@ import { AnswerIn } from '../bots/Conversations.jsx'
 import BotFiles, { MadeFiles } from '../bots/BotFiles.jsx'
 import { useSettings } from './General.jsx'
 import { openBots } from '../bots/bots.js'
+import { BetaSwitch } from './Beta.jsx'
+import { where as placeIn } from './search.js'
 import { t } from '../../i18n/index.js'
 import './bots.css'
 
@@ -919,11 +921,11 @@ export function McpServers({ d, save }) {
   return (
     <section className="st-sec" data-setting="bots-mcp">
       <h4>{t('MCP Servers')}</h4>
-      <p className="muted small">{t('The tools of your own MCP servers its answers may use, from Claude Code\'s list (Settings › MCP Servers): only the ones ticked here, with Claude Code or a model answering. A tool that says it only reads may be used for anyone who may ask; any other only when you, or someone you named under Who Can Ask, asks.')}</p>
+      <p className="muted small">{t('The tools of your own MCP servers its answers may use, from Claude Code\'s list ({place}): only the ones ticked here, with Claude Code or a model answering. A tool that says it only reads may be used for anyone who may ask; any other only when you, or someone you named under Who Can Ask, asks.', { place: placeIn('mcp') })}</p>
       {notClaude && <p className="st-note warn"><Icon name="info" size={13} /><span>{t('Codex answers first here, and its runs don\'t get MCP servers: put Claude Code or a model first under What Answers.')}</span></p>}
       {error && <p className="error-text small" role="alert">{error}</p>}
       {!x && !error && <div className="skeleton-rows"><div /></div>}
-      {x && !servers.length && <p className="small sb-none">{t('Claude Code has no MCP servers of yours yet: add one in Settings › MCP Servers.')}</p>}
+      {x && !servers.length && <p className="small sb-none">{t('Claude Code has no MCP servers of yours yet: add one in {place}.', { place: placeIn('mcp') })}</p>}
       {servers.length > 0 && (
         <ul className="sb-mcp">
           {servers.map((sv) => {
@@ -1278,7 +1280,7 @@ export function AnswererList({ value, options = [], automatic = [], fallback = t
             })}
           </ol>
         )
-        : <p className="error-text small">{t('Nothing here can answer for it: install Claude Code or Codex (Settings › Agents), or add a model in Settings › Model Providers.')}</p>}
+        : <p className="error-text small">{t('Nothing here can answer for it: install Claude Code or Codex ({agents}), or add a model in {place}.', { agents: placeIn('agents'), place: placeIn('providers') })}</p>}
       {!auto && free.length > 0 && (
         <select className="st-input sb-ans-add" value="" onChange={(e) => e.target.value && set([...ids, e.target.value])} aria-label={t('Add one to fall back on')}>
           <option value="">{t('Add one to fall back on…')}</option>
@@ -1318,7 +1320,7 @@ function Replies({ d, save }) {
   const terms = !sign ? null
     : sign.kind === 'subscription' ? t('{bot} answers other people through your {account} account{plan}. If that\'s a personal plan, check {provider}\'s terms allow it; an API key is the usual choice for a shared bot.', { bot: d.name, account: sign.account, provider: sign.provider, plan: sign.plan ? ` (${sign.plan})` : '' })
       : sign.kind === 'unknown' ? t('Bridge AI can\'t tell how {agent} is signed in here. If it\'s through a personal plan, check {provider}\'s terms allow {bot} to answer other people with it; an API key is the usual choice for a shared bot.', { agent: label, provider: sign.provider, bot: d.name })
-        : sign.kind === 'none' ? t('{agent} isn\'t signed in here, so {bot} can\'t answer yet: sign it in under Settings › Agents.', { agent: label, bot: d.name }) : null
+        : sign.kind === 'none' ? t('{agent} isn\'t signed in here, so {bot} can\'t answer yet: sign it in under {place}.', { agent: label, bot: d.name, place: placeIn('agents') }) : null
   return (
     <section className="st-sec" data-setting="slack-replies">
       <h4>{t('Answers')}</h4>
@@ -1393,7 +1395,7 @@ function Scheduled({ d, reload }) {
     <section className="st-sec" data-setting="slack-scheduled">
       <h4>{t('Scheduled Posts')}</h4>
       <p className="muted small">{t('A question it answers on a schedule and posts in a channel: a weekly status, a Monday summary. Each goes through its usual approvals: a draft for you, unless it answers without asking.')}</p>
-      {!d.routinesOn && <p className="st-note warn"><Icon name="info" size={13} /><span>{t('Scheduled posts need Scheduled Routines: turn it on in Settings › About & Updates › Beta Features.')}</span></p>}
+      {!d.routinesOn && <p className="st-note warn"><Icon name="info" size={13} /><span>{t('Scheduled posts need Scheduled Routines: turn it on in {place}.', { place: placeIn('beta-routines') })}</span></p>}
       {list.length > 0 && (
         <ul className="sb-sched">
           {list.map((r) => {
@@ -2456,19 +2458,14 @@ export function DeletedBot({ d, reload }) {
 
 // Settings › Bots: the beta feature's switch, and Open Bots. Everything else about your bots is in
 // Bots itself (the sidebar's Bots, the phone's More › Bots): its Connections, Bots and Sessions.
+// Settings › Bots: the beta feature's switch, marked Beta, and Open Bots, where everything of theirs
+// is (the sidebar's Bots: its connections, its bots, and every conversation they're having).
 export default function Bots({ onClose }) {
-  const { s, save } = useSettings()
-  const [mine, setMine] = useState(null)
-  const on = mine ?? s?.effective?.trials?.['slack-bot'] === true
   const open = () => { onClose?.(); openBots('bots') }
   return (
     <div className="st-sections sb">
-      <section className="st-sec" data-setting="bots-beta">
-        <h4>{t('Bots')}</h4>
-        <label className="st-check">
-          <input type="checkbox" checked={on} disabled={!s} onChange={(e) => { setMine(e.target.checked); save({ trials: { 'slack-bot': e.target.checked } }) }} />
-          <span><b>{t('Bots (beta)')}</b> <span className="muted small">{t('Your own bots in Slack, Discord and Microsoft Teams, answering from folders on this computer. Off hides them; what you made stays.')}</span></span>
-        </label>
+      <BetaSwitch id="slack-bot" />
+      <section className="st-sec">
         <div className="st-row"><button type="button" className="btn small primary" onClick={open} data-setting="bots-open"><Icon name="bot" size={12} /> {t('Open Bots')}</button><span className="muted small">{t('Its connections, its bots, and every conversation they\'re having.')}</span></div>
       </section>
     </div>

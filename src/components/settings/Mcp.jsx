@@ -4,6 +4,7 @@ import { api, onThisComputer } from '../../api.js'
 import { AgentIcon } from './ProviderIcon.jsx'
 import { MCP_CATALOG, MCP_CATEGORIES } from './mcpCatalog.js'
 import BridgeServer from './BridgeServer.jsx'
+import { More } from './Advanced.jsx'
 import { t, tn, tx } from '../../i18n/index.js'
 import './mcp.css'
 
@@ -81,7 +82,7 @@ function Row({ s, agents, onAddMore, onRemoved }) {
           <div className="mcp-row-top">
             <span className="mcp-name">{s.name}</span>
             <span className="mcp-tag">{s.transport === 'stdio' ? t('local') : s.transport}</span>
-            {s.agents.some((a) => a.differs) && <span className="mcp-tag warn" title={t('Agents have this name set up with different commands or URLs')}>{t('differs')}</span>}
+            {s.agents.some((a) => a.differs) && <span className="mcp-tag warn">{t('differs')} <More>{t('Agents have this name set up with different commands or URLs')}</More></span>}
           </div>
           <code className="mcp-target" title={target}>{target || t('(no command)')}</code>
           {(s.envKeys.length > 0 || s.headerKeys?.length > 0) && (
@@ -343,7 +344,7 @@ export default function Mcp() {
     <div className="mcp">
       <BridgeServer here={onThisComputer()} />
       <div className="mcp-intro">
-        <p className="muted small" title={t("Tools your agents can call: browsers, GitHub, docs search, databases and more. Servers added here go to each agent's own config, for all projects.")}>{t("Tools your agents can call, added to each agent's own config for all projects.")}</p>
+        <p className="muted small">{t("Tools your agents can call, added to each agent's own config for all projects.")} <More>{t("Tools your agents can call: browsers, GitHub, docs search, databases and more. Servers added here go to each agent's own config, for all projects.")}</More></p>
         {!adding && <button type="button" className="btn small primary" onClick={() => setAdding({ start: null })} disabled={!data}><Icon name="plus" size={13} />{t('Add server')}</button>}
       </div>
 
@@ -351,7 +352,7 @@ export default function Mcp() {
         <AddPanel start={adding.start} agents={agents} installedNames={names} onClose={() => setAdding(null)} onAdded={() => load()} />
       )}
 
-      <section className="mcp-sec">
+      <section className="mcp-sec" data-setting="mcp-list">
         <div className="mcp-sec-head">
           <h4>{t('Installed')}</h4>
           {data && <span className="muted small">{servers.length === 1

@@ -19,6 +19,7 @@ import { dataFile, ensureDir } from './paths.js'
 import { authHeaders, localKey } from './apitoken.js'
 import { parseScreen } from '../src/components/questionParse.js'
 import { openNote, sealNote, unb64u, NOTE_DAYS } from '../relay/web/link.js'
+import { placeEn } from '../shared/places.js'
 
 const FILE = dataFile('relay-inbox.json')
 const DAY = 24 * 3600 * 1000
@@ -49,7 +50,7 @@ const WHY = {
   gone: 'the agent was closed',
   question: 'the question had already been answered or changed',
   'not-allowed': 'your computer only takes messages and answers while it\'s away',
-  'not-let-in': 'your computer hasn\'t let this phone in (Settings › Remote Access › Which Devices May Connect there)',
+  'not-let-in': `your computer hasn't let this phone in (${placeEn('remote-devices')} there)`,
   unsure: 'Bridge AI stopped while sending it. Check the agent',
 }
 const fail = (why, text) => ({ ok: false, why, text: text || WHY[why] || why })

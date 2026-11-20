@@ -1,14 +1,15 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import CopyButton from '../CopyButton.jsx'
 import { api, settingsChanged } from '../../api.js'
 import { SaveNote } from './General.jsx'
 import { useBusy } from '../../busy.js'
-import { Advanced } from './Advanced.jsx'
+import { Advanced, More } from './Advanced.jsx'
 import { t } from '../../i18n/index.js'
 
-// Settings › Config file: your config.json as text, checked before it's saved; under Advanced, the
-// full effective settings (defaults merged with yours) and the defaults, for reference.
-export default function ConfigFile() {
+// Settings › About & Updates › Config File (under Advanced): your config.json as text, checked
+// before it's saved; then the full effective settings (defaults merged with yours) and the defaults,
+// for reference. inline: already under Advanced, so all of it shows there.
+export default function ConfigFile({ inline = false }) {
   const [s, setS] = useState(null)
   const [text, setText] = useState('')
   const [note, setNote] = useState(null)
@@ -17,6 +18,7 @@ export default function ConfigFile() {
   // Changed and not saved: the desktop app doesn't update by itself meanwhile (busy.js).
   useBusy('file', !!s && text !== s.raw)
   if (!s) return <div className="skeleton-rows"><div /><div /><div /></div>
+  const Wrap = inline ? Fragment : Advanced
 
   let parseError = null
   try { const o = JSON.parse(text); if (!o || typeof o !== 'object' || Array.isArray(o)) parseError = t('The file must hold a JSON object ({ ... })') } catch (e) { parseError = e.message }
@@ -26,12 +28,12 @@ export default function ConfigFile() {
   }
 
   return (
-    <div className="st-sections" data-setting="config-file">
+    <div className="st-sections st-config">
       <div className="st-row between">
         <code className="st-path" title={s.file}>{s.file}</code>
         <CopyButton text={s.file} label={t('Copy path')} />
       </div>
-      <p className="muted small" title={t('Only what you set goes here; everything else comes from the defaults. Most changes apply right away; {keys} apply after a restart.', { keys: s.restartKeys.join(', ') })}>{t("Only what you set; the rest comes from the defaults. API keys don't belong here: add them under Model Providers.")}</p>
+      <p className="muted small">{t("Only what you set; the rest comes from the defaults. API keys don't belong here: add them under Model Providers.")} <More>{t('Only what you set goes here; everything else comes from the defaults. Most changes apply right away; {keys} apply after a restart.', { keys: s.restartKeys.join(', ') })}</More></p>
       <textarea className="st-code" value={text} onChange={(e) => { setText(e.target.value); setNote(null) }} spellCheck={false} rows={16} aria-label="config.json" />
       <div className="st-row between">
         <span className={parseError ? 'error-text' : 'muted small'}>{parseError ? t('Not valid yet: {error}', { error: parseError }) : dirty ? t('Valid JSON, not saved') : t('Saved')}</span>
@@ -41,7 +43,7 @@ export default function ConfigFile() {
         </span>
       </div>
       <SaveNote note={note} />
-      <Advanced order={10}>
+      <Wrap {...(inline ? {} : { order: 10 })}>
         <section className="st-sec" data-setting="config-effective">
           <h4>{t('Effective Settings and Defaults')}</h4>
           <div className="seg ap-seg">
@@ -50,7 +52,7 @@ export default function ConfigFile() {
           </div>
           {view && <pre className="st-code ro">{JSON.stringify(view === 'effective' ? s.effective : s.defaults, null, 2)}</pre>}
         </section>
-      </Advanced>
+      </Wrap>
     </div>
   )
 }

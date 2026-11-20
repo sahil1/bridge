@@ -13,6 +13,7 @@ import { solidBackground, fontsReady } from './look.js'
 import { before, mark, markOne, keep as keepIt, discard as discardIt } from './suggest.js'
 import { holderOf, contents } from './holders.js'
 import CopyButton from '../CopyButton.jsx'
+import { where } from '../settings/search.js'
 
 // "Draw this", "Change it" and "Ask" (about the shapes selected, answered here and changing
 // nothing): words (typed, or said with the dictation key) to a model, and back as shapes on the
@@ -508,7 +509,7 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
         </button>
       </div>
       {noModel
-        ? <p className="small wb-privacy">{t('No model to draw with yet: sign in to an agent (Claude Code, Codex…) or add a key in Settings › Model Providers. You can still draw by hand.')} <button type="button" className="link-btn" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'providers' } }))}>{t('Model Providers')}</button></p>
+        ? <p className="small wb-privacy">{t('No model to draw with yet: sign in to an agent (Claude Code, Codex…) or add a key in {place}. You can still draw by hand.', { place: where('providers') })} <button type="button" className="link-btn" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'providers' } }))}>{t('Model Providers')}</button></p>
         : <p className="muted small wb-privacy">{asking ? goesAsk(m.model, sel) : goesTo(m.model, mode === 'draw' ? from : '', rounds > 0)}{!compact && dictKey ? ` ${t('Hold {key} to say it.', { key: dictKey })}` : ''}</p>}
       {asking && answer && (
         <div className="wb-answer" role="status" aria-label={t('The answer')}>

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
 import CopyButton from '../CopyButton.jsx'
 import UsageCounts from './UsageCounts.jsx'
@@ -12,21 +12,32 @@ import { t, tx, locale } from '../../i18n/index.js'
 import { TRIALS } from '../../trials.js'
 import { AWAY_MINUTES, RELEASE_HOURS, waitingLong } from '../../../shared/autoupdate.js'
 import { isPre } from '../../../shared/version.js'
-import { Advanced } from './Advanced.jsx'
+import { Advanced, More } from './Advanced.jsx'
+import ConfigFile from './ConfigFile.jsx'
+import { SETTINGS, placeOf } from './search.js'
 import { StaysOut } from '../remote/Settings.jsx'
 
 const REPO = 'https://github.com/sahil1/bridge'
 
 // Settings › About & Updates: which version you have, whether there's a newer one (and updating
-// to it, now or by itself while you're away), the update channel, reporting a problem, usage stats
-// and crash reports, and last, the features on trial. Under Advanced: the tour again, the details a
-// report includes, and the license and credits.
+// to it, now or by itself while you're away), the update channel, every beta feature (each with its
+// switch here too, and the way to its own place, where its switch is first), privacy (usage counts
+// and crash reports), and reporting a problem. Under Advanced: the tour again, the details a report
+// includes, the license and credits, and the config file.
 // Every action here is the same small button (btn small, a 13 px icon); the one that matters most
 // in a section is primary.
 export default function About() {
   return (
     <div className="st-sections">
       <Updates />
+      <Trials />
+      <section className="st-sec" data-setting="privacy">
+        <h4>{t('Privacy')}</h4>
+        <p className="muted small">{t('What Bridge AI sends about itself: never what you typed, said or opened.')} <a href={`${REPO}/blob/main/PRIVACY.md`} target="_blank" rel="noreferrer">{t('Privacy')}</a></p>
+        <UsageCounts />
+        <CrashReports />
+      </section>
+      <Report />
       <Advanced order={10}>
         <section className="st-sec" data-setting="tour">
           <h4>{t('Tour')}</h4>
@@ -34,10 +45,12 @@ export default function About() {
           <div className="st-row"><button type="button" className="btn small" onClick={startTour}><Icon name="sparkle" size={13} /> {t('Take the tour')}</button></div>
         </section>
       </Advanced>
-      <Report />
-      <UsageCounts />
-      <CrashReports />
-      <Trials />
+      <Advanced order={40}>
+        <section className="st-sec" data-setting="config-file">
+          <h4>{t('Config File')}</h4>
+          <ConfigFile inline />
+        </section>
+      </Advanced>
     </div>
   )
 }
@@ -222,17 +235,9 @@ function ByItself({ u, checks }) {
   )
 }
 
-// Beta features (src/trials.js): each hidden until it's turned on here, for this computer. Each
-// says what it is in a line (all of it on hover).
-const SHORT = {
-  home: tx('Where Bridge AI opens: what needs you on every computer, and what\'s coming up.'),
-  'dictation-cleanup': tx('Dictation from other apps tidied by a model before it\'s pasted.'),
-  'usage-everywhere': tx('The tokens each provider and model used, in Today › Usage. It stays on this computer.'),
-  'meeting-insights': tx('Your meetings added up, and the people you meet. It turns on by itself once 5 meetings are recorded here.'),
-  routines: tx('Routines that run by themselves at the time you set, and History › Commands.'),
-  'call-video': tx("On a call, whose mouth moves on its video names who said what. Read on this Mac; no pictures kept."),
-  'mcp-server': tx('Claude Code, Claude Desktop, Cursor and Codex read your boards, files and meeting summaries, and suggest changes you keep. Set up in Settings › MCP Servers.'),
-}
+// Beta features (src/trials.js): each hidden until it's turned on, for this computer, here or at the
+// top of its own place in Settings (each says where, and goes there). Each says what it is in a
+// line, the rest under More.
 // Bots just turned on: Set up a bot, which opens Bots (Settings closes), at its Bots tab, where a
 // first bot is three questions away.
 function StartBots() {
@@ -250,18 +255,19 @@ function Trials() {
   return (
     <section className="st-sec" data-setting="beta">
       <h4>{t('Beta Features')}</h4>
-      <p className="muted small" title={t("New parts of Bridge AI, in beta. Each stays hidden until you turn it on here, and turning it off hides it again; what you made with it stays where it is.")}>{t('Each stays hidden until you turn it on here.')}</p>
+      <p className="muted small">{t('Each stays hidden until it\'s turned on, here or in its own place.')} <More>{t("New parts of Bridge AI, in beta. Each stays hidden until you turn it on, here or at the top of its own place in Settings, and turning it off hides it again; what you made with it stays where it is.")}</More></p>
       {TRIALS.filter((x) => !x.mac || conf?.platform === 'darwin').map((x) => (
-        <Fragment key={x.id}>
+        <div key={x.id} className="ab-trial" data-beta={x.id}>
           <label className="st-check"><input type="checkbox" checked={on(x.id)} disabled={!s || (x.id === 'remote-screen' && !onThisComputer())} onChange={(e) => set(x.id, e.target.checked)} />
-            <span title={t(x.hint)}><b>{t(x.label)}</b> <span className="muted small">{SHORT[x.id] ? t(SHORT[x.id]) : t(x.hint)}</span>{auto[x.id] && on(x.id) && <span className="muted small ab-auto-on"> {t('Turned on by itself on {date}, once there were meetings to add up.', { date: new Date(auto[x.id]).toLocaleDateString(locale(), { month: 'long', day: 'numeric' }) })}</span>}</span></label>
+            <span><b>{t(x.label)}</b> <span className="muted small">{t(x.short)}</span>{auto[x.id] && on(x.id) && <span className="muted small ab-auto-on"> {t('Turned on by itself on {date}, once there were meetings to add up.', { date: new Date(auto[x.id]).toLocaleDateString(locale(), { month: 'long', day: 'numeric' }) })}</span>} <More>{t(x.hint)}</More></span></label>
+          <button type="button" className="link-btn small ab-trial-at" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: x.setting } }))} aria-label={t('Open {name} in Settings', { name: t(x.label) })}>{placeOf(SETTINGS.find((y) => y.id === x.setting) || { section: 'about' })}<Icon name="chevron" size={11} /></button>
           {/* (Bots on: where to start, right there.) */}
           {x.id === 'slack-bot' && on(x.id) && <StartBots />}
           {/* Remote Screen and Preview guards which devices may connect: changed at the computer itself,
               and off, the devices unticked there still stay out (server/remote.js). */}
           {x.id === 'remote-screen' && !onThisComputer() && <p className="muted small ab-trial-go">{t('Turned on and off at the computer itself.')}</p>}
           {x.id === 'remote-screen' && !on(x.id) && <StaysOut />}
-        </Fragment>
+        </div>
       ))}
     </section>
   )
@@ -275,7 +281,7 @@ function Report() {
   return (
     <section className="st-sec" data-setting="report">
       <h4>{t('Report a problem or suggest something')}</h4>
-      <p className="muted small" title={t('Bridge AI is open source. Problems and ideas go in GitHub issues. Include the details below; they say which version and system you have, and nothing about you (no names, emails, folders or location).')}>{t('In GitHub issues, with your version and system, and nothing about you.')}</p>
+      <p className="muted small">{t('In GitHub issues, with your version and system, and nothing about you.')} <More>{t('Bridge AI is open source. Problems and ideas go in GitHub issues. Include the details below; they say which version and system you have, and nothing about you (no names, emails, folders or location).')}</More></p>
       <div className="st-row">
         <a className="btn small primary" href={issue} target="_blank" rel="noreferrer"><Icon name="alert" size={13} /> {t('Report a problem')}</a>
         <a className="btn small" href={`${REPO}/issues/new?template=feature.yml`} target="_blank" rel="noreferrer"><Icon name="sparkle" size={13} /> {t('Suggest an idea')}</a>

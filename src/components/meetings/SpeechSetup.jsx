@@ -5,6 +5,7 @@ import PermissionFix, { useRecheck } from '../PermissionFix.jsx'
 import { appSide } from '../../permissions.js'
 import { CalendarSetup } from '../Agenda.jsx'
 import { t } from '../../i18n/index.js'
+import { where } from '../settings/search.js'
 
 // Before you record: whether what you say will be turned into text, and if not, what it needs and
 // the one step that fixes it (server/speech.js status: ready, needs). A meeting recorded meanwhile
@@ -48,7 +49,7 @@ function useSpeechStep(d, refresh) {
       : label ? (mb ? t('The speech model ({model}, {mb} MB) downloads once.', { model: label, mb }) : t('The speech model ({model}) downloads once.', { model: label }))
         : mb ? t('The speech model ({mb} MB) downloads once.', { mb }) : t('The speech model downloads once.'),
     apple: d.apple?.why ? t("The Mac's own speech isn't available here ({why}).", { why: d.apple.why.replace(/^\w/, (c) => c.toLowerCase()) }) : t("The Mac's own speech isn't available here."),
-    key: service?.label ? t('{service} needs its key, in Settings › Model Providers.', { service: service.label }) : t('That service needs its key, in Settings › Model Providers.'),
+    key: service?.label ? t('{service} needs its key, in {place}.', { place: where('providers-speech'), service: service.label }) : t('That service needs its key, in {place}.', { place: where('providers-speech') }),
   }[d.needs] || t("Speech to text isn't set up yet.")
   const here = !viaRelay
   const actions = (
@@ -154,7 +155,7 @@ export function MeetingsSetup({ onDone }) {
             {(mic.state === 'denied' || mic.state === 'restricted') && <PermissionFix pane="microphone" onCheck={mic.check}><p className="small">{t('The mic is turned off for Bridge AI in System Settings.')}</p></PermissionFix>}
           </Step>
         )}
-        <Step ok={notesOk} title={t('Writing the notes')} detail={models == null ? t('Looking…') : notesOk ? t('The summary, decisions and action items, by your sign-in or key. Pick which in Settings › Voice & Meetings.') : t('The summary needs a model: sign in to an agent like Claude Code, or add a key.')}>
+        <Step ok={notesOk} title={t('Writing the notes')} detail={models == null ? t('Looking…') : notesOk ? t('The summary, decisions and action items, by your sign-in or key. Pick which in {place}.', { place: where('notes-model') }) : t('The summary needs a model: sign in to an agent like Claude Code, or add a key.')}>
           {models && !notesOk && <span className="mt-step-acts"><button type="button" className="btn small primary" onClick={() => settings('providers')}>{t('Model Providers')}</button></span>}
         </Step>
         {d.mac && (

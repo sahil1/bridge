@@ -8,6 +8,7 @@ import { execFile } from 'node:child_process'
 import { AGENTS } from './agents.js'
 import { mayLook } from './projects.js'
 import * as memory from './meetmemory.js'
+import { placeEn } from '../shared/places.js'
 
 // The words every Bridge AI has: its agents and the models they run.
 const KNOWN = ['Bridge AI', 'Chief of Staff', 'Claude Code', 'Codex', 'Gemini', 'Copilot', 'GitHub', 'OpenCode', 'Cursor', 'Grok', 'Qwen', 'DeepSeek', 'Kimi', 'Ollama', 'LM Studio', 'OpenAI', 'Anthropic', 'Opus', 'Sonnet', 'Haiku', 'worktree', 'herdr', 'npm', 'pnpm', 'TypeScript', 'JavaScript', 'README']
@@ -105,7 +106,7 @@ export async function edit({ text, instruction, model, reply }) {
   if (!t.trim()) throw new Error('Nothing was selected to change')
   if (!said) throw new Error('Nothing was said about what to change')
   if (t.length > EDIT_MAX) throw new Error('That\'s more text than edit by voice takes (20,000 characters)')
-  if (!model) throw new Error('Pick the model that rewrites it, in Settings › Voice & Meetings › Dictation')
+  if (!model) throw new Error(`Pick the model that rewrites it, in ${placeEn('dictation')}`)
   const names = namesIn(`${said.slice(0, 2000)}\n${t}`)
   const r = await reply(model, [{ role: 'user', text: `Instruction: ${said.slice(0, 2000)}\n\nText:\n${t}` }], { system: names ? `${EDIT_SYSTEM}\n\n${names}` : EDIT_SYSTEM, feature: 'voice-edit' })
   let out = String(r?.text || '').trim()

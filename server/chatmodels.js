@@ -34,6 +34,7 @@ import { machine } from './machine.js'
 import * as llm from './llm.js'
 import * as usagelog from './usagelog.js'
 import * as counts from './counts.js'
+import { placeEn } from '../shared/places.js'
 
 const TIMEOUT = 5 * 60 * 1000
 const until = (signal, ms = TIMEOUT) => (AbortSignal.any && signal ? AbortSignal.any([signal, AbortSignal.timeout(ms)]) : signal || AbortSignal.timeout(ms)) // any(): Node 20+
@@ -139,7 +140,7 @@ function sigv4({ method, host, pathname, query = {}, body = '', region, creds, s
 // A Bedrock request, signed whichever way you set up. pathname has its segments encoded once.
 async function bedrock(host, pathname, { method = 'GET', query = {}, body, signal, ms } = {}) {
   const a = aws()
-  if (a.none) throw new Error(a.sso ? 'Your AWS profile signs in with SSO, which Bridge AI can\'t use yet. Add a Bedrock API key in Settings › Model Providers instead.' : 'No AWS access keys or Bedrock API key found. Add a Bedrock API key in Settings › Model Providers.')
+  if (a.none) throw new Error(a.sso ? `Your AWS profile signs in with SSO, which Bridge AI can't use yet. Add a Bedrock API key in ${placeEn('providers')} instead.` : `No AWS access keys or Bedrock API key found. Add a Bedrock API key in ${placeEn('providers')}.`)
   const h = `${host}.${a.region}.amazonaws.com`
   const text = body == null ? '' : JSON.stringify(body)
   const qs = Object.keys(query).length ? `?${new URLSearchParams(query)}` : ''
@@ -181,7 +182,7 @@ async function googleToken() {
     const sig = b64url(crypto.createSign('RSA-SHA256').update(`${head}.${claims}`).sign(c.private_key))
     const r = await fetch('https://oauth2.googleapis.com/token', form({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: `${head}.${claims}.${sig}` }))
     const j = await r.json().catch(() => ({}))
-    if (!r.ok || !j.access_token) throw new Error(`Google turned down the service account (${j.error_description || j.error || `HTTP ${r.status}`}). Check the file in Settings › Model Providers › Vertex AI.`)
+    if (!r.ok || !j.access_token) throw new Error(`Google turned down the service account (${j.error_description || j.error || `HTTP ${r.status}`}). Check the file in ${placeEn('providers')} › Vertex AI.`)
     got = { value: j.access_token, until: Date.now() + ((j.expires_in || 3600) - 300) * 1000, user: false }
   } else if (c?.type === 'authorized_user' && c.refresh_token) {
     const r = await fetch('https://oauth2.googleapis.com/token', form({ grant_type: 'refresh_token', client_id: c.client_id, client_secret: c.client_secret, refresh_token: c.refresh_token }))
@@ -192,7 +193,7 @@ async function googleToken() {
     const PATH = await loginPath()
     const run = (args) => new Promise((resolve, reject) => execFile('gcloud', args, { timeout: 15000, env: { ...process.env, PATH } }, (err, out) => (err ? reject(err) : resolve(String(out).trim()))))
     const value = await run(['auth', 'application-default', 'print-access-token']).catch(() => run(['auth', 'print-access-token'])).catch(() => null)
-    if (!value) throw new Error('No Google Cloud login found. Add a service account file in Settings › Model Providers › Vertex AI, or run "gcloud auth application-default login".')
+    if (!value) throw new Error(`No Google Cloud login found. Add a service account file in ${placeEn('providers')} › Vertex AI, or run "gcloud auth application-default login".`)
     got = { value, until: Date.now() + 45 * 60 * 1000, user: true }
   }
   gtoken = got
@@ -292,7 +293,7 @@ function asTranscript(messages, system) {
 
 const failed = (who, status, body) => {
   const msg = body?.error?.message || body?.message || body?.Message || (typeof body?.error === 'string' ? body.error : '') || `HTTP ${status}`
-  if (status === 401 || status === 403) return Object.assign(new Error(`${who} turned the key down (${msg}). Check it in Settings › Model Providers.`), { status })
+  if (status === 401 || status === 403) return Object.assign(new Error(`${who} turned the key down (${msg}). Check it in ${placeEn('providers')}.`), { status })
   if (status === 404) return Object.assign(new Error(`${who} doesn't know that model (${msg}). Pick another with /model.`), { status })
   if (status === 429) return Object.assign(new Error(`${who} says you're over your limit for now (${msg}). Try again later, or pick another model with /model.`), { status })
   return Object.assign(new Error(`${who}: ${msg}`), { status })
@@ -698,7 +699,7 @@ async function answer(id, messages, o) {
   }
   if (route === 'anthropic') {
     const key = keyFor(API.anthropic)
-    if (!key) throw new Error('No Anthropic key saved. Add one in Settings › Model Providers.')
+    if (!key) throw new Error(`No Anthropic key saved. Add one in ${placeEn('providers')}.`)
     return anthropicStyle('Anthropic', `${anthropicUrl()}/v1/messages`, { 'x-api-key': key, 'anthropic-version': '2023-06-01' }, { model }, messages, o)
   }
   if (route === 'ollama') return ollamaChat(model, messages, o)
@@ -706,12 +707,12 @@ async function answer(id, messages, o) {
   if (route === 'bridge') return builtinChat(model, messages, o)
   if (MORE[route]) {
     const key = env()[MORE[route].key]
-    if (!key) throw new Error(`No ${MORE[route].label} key saved. Add one in Settings › Model Providers.`)
+    if (!key) throw new Error(`No ${MORE[route].label} key saved. Add one in ${placeEn('providers')}.`)
     return openaiStyle(MORE[route].label, `${MORE[route].base()}/chat/completions`, bearer(key), model, messages, o)
   }
   if (route === 'azure') {
     const a = azure()
-    if (!a.key || !a.endpoint) throw new Error('Azure OpenAI needs its key and endpoint. Add them in Settings › Model Providers.')
+    if (!a.key || !a.endpoint) throw new Error(`Azure OpenAI needs its key and endpoint. Add them in ${placeEn('providers')}.`)
     // A dated API version: the deployment's own URL. Otherwise the v1 API, with the deployment as the model.
     const dated = /^\d{4}-\d{2}-\d{2}/.test(a.version)
     const url = dated ? `${a.endpoint}/openai/deployments/${encodeURIComponent(model)}/chat/completions?api-version=${encodeURIComponent(a.version)}` : `${a.endpoint}/openai/v1/chat/completions`
@@ -720,7 +721,7 @@ async function answer(id, messages, o) {
   if (route === 'bedrock') return converse(model, messages, o)
   if (route === 'vertex') {
     const v = vertex()
-    if (!v.project) throw new Error('Vertex AI needs your Google Cloud project. Add it in Settings › Model Providers.')
+    if (!v.project) throw new Error(`Vertex AI needs your Google Cloud project. Add it in ${placeEn('providers')}.`)
     const headers = await vertexHeaders()
     if (/^claude/.test(model)) return anthropicStyle(PROVIDER.vertex, `${v.root}/publishers/anthropic/models/${encodeURIComponent(model)}:rawPredict`, headers, { anthropic_version: 'vertex-2023-10-16' }, messages, o)
     return openaiStyle(PROVIDER.vertex, `${v.root}/endpoints/openapi/chat/completions`, headers, model, messages, o)
@@ -728,7 +729,7 @@ async function answer(id, messages, o) {
   const a = API[route]
   if (!a || a.local || a.anthropic) throw new Error(`Unknown model "${id}". Type /models to see what you can use.`)
   const key = keyFor(a)
-  if (!key) throw new Error(`No ${a.label} key saved. Add one in Settings › Model Providers.`)
+  if (!key) throw new Error(`No ${a.label} key saved. Add one in ${placeEn('providers')}.`)
   const base = route === 'openai' ? trim(env().OPENAI_BASE_URL || a.base) : a.base
   return openaiStyle(PROVIDER[route] || a.label, `${base}/chat/completions`, bearer(key), model, messages, o)
 }

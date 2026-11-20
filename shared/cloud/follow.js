@@ -12,6 +12,7 @@
 //   f.on({ change, watched }): change() when the fleet should be sent again; watched() while
 //     someone is looking (finished agents are checked more often then)
 import { ADAPTERS, PROVIDERS } from './index.js'
+import { placeEn } from '../places.js'
 
 export const SPACE = { id: 'cloud', label: 'Cloud' }
 const PREFIX = 'cloud:'
@@ -53,7 +54,7 @@ export function apply(t, fresh) {
 }
 
 export function follow({ tasks: initial = [], client, saved, save = () => {}, place = {} }) {
-  const where = { keys: 'in Bridge AI', settings: 'Settings › Model Providers', ...place }
+  const where = { keys: 'in Bridge AI', settings: placeEn('cloud'), ...place }
   let tasks = initial.filter((t) => ADAPTERS[t?.provider] && t.id)
   const has = (id) => !!(ADAPTERS[id] && saved(id))
   let onChange = () => {}

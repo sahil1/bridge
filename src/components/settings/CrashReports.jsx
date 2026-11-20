@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
 import { api } from '../../api.js'
+import { More } from './Advanced.jsx'
 import { t } from '../../i18n/index.js'
 import './counts.css'
 
@@ -27,12 +28,12 @@ export default function CrashReports() {
     try { setDoc(await api(`/crashes/sent/${encodeURIComponent(id)}`)) } catch (x) { setErr(x.message) }
   }
   return (
-    <section className="st-sec">
-      <h4>{t('Crash Reports')}</h4>
+    <div className="ab-priv">
+      <h5>{t('Crash Reports')}</h5>
       {s.refused ? <p className="muted small">{t('Off on this computer: {setting} is set.', { setting: s.refused })}</p> : (
         <>
           <label className="ph-check" data-setting="crash-reports"><input type="checkbox" checked={!!s.send} disabled={busy} onChange={toggle} /> {t('Send crash reports by themselves')}</label>
-          <p className="muted small" title={`${t('When something in Bridge AI crashes, its report goes to {host}: what crashed, the error and where in Bridge AI\'s code, the version, your system and the last lines of its log, the same text Report on GitHub shows. Names, folders, emails and keys are taken out first. Kept for 90 days, with no ID for you or this computer. On unless you turn it off.', { host: s.to })} ${t('It also says its update channel.')}`}>{t('To {host}, with names, folders, emails and keys taken out, and no ID. Kept for 90 days.', { host: s.to })}</p>
+          <p className="muted small">{t('To {host}, with names, folders, emails and keys taken out, and no ID. Kept for 90 days.', { host: s.to })} <More>{`${t('When something in Bridge AI crashes, its report goes to {host}: what crashed, the error and where in Bridge AI\'s code, the version, your system and the last lines of its log, the same text Report on GitHub shows. Names, folders, emails and keys are taken out first. Kept for 90 days, with no ID for you or this computer. On unless you turn it off.', { host: s.to })} ${t('It also says its update channel.')}`}</More></p>
           {s.stopped && <p className="st-note"><Icon name="info" size={13} /><span>{t('The project asked Bridge AI to stop sending crash reports: {why}', { why: s.stopped })}</span></p>}
           {s.sent?.length > 0 && (
             <div className="st-row">
@@ -49,6 +50,6 @@ export default function CrashReports() {
           {err && <p className="st-note bad"><Icon name="alert" size={13} /> {err}</p>}
         </>
       )}
-    </section>
+    </div>
   )
 }

@@ -13,6 +13,7 @@ import { t, tx } from '../../i18n/index.js'
 import { sentTo } from '../../sendbox.js'
 import Memory, { useElsewhere } from '../memory/Memory.jsx'
 import { setMemoryAll } from '../memory/open.js'
+import { where as placeIn } from '../settings/search.js'
 import './dictations.css'
 
 // Dictations: everything you've said with the dictation key, kept on this computer
@@ -102,7 +103,7 @@ export default function Dictations({ toMeetings = null }) {
       </PaneHeader>
       {tab === 'memory' ? <Memory from="dictations" /> : <div className="dc-home" ref={listRef}>
         {data && !data.history && (
-          <p className="dc-off small" role="status"><Icon name="info" size={13} /> {t('History is off, so new dictations aren\'t kept. Turn it on in Settings › Voice & Meetings › Dictation.')}</p>
+          <p className="dc-off small" role="status"><Icon name="info" size={13} /> {t('History is off, so new dictations aren\'t kept. Turn it on in {place}.', { place: placeIn('dictation-history') })}</p>
         )}
         {(total > 0 || q) && <input className="dc-search" type="search" placeholder={t('Search what you said, and where')} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t('Search dictations')} />}
         {error && !data && <p className="error-text small">{error}</p>}

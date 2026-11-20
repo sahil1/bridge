@@ -24,6 +24,7 @@ import { adapter } from './agents.js'
 import * as accounts from './accounts.js'
 import * as consult from './consult.js'
 import { attributor, STEP_MS } from './usagesplit.js'
+import { placeEn } from '../shared/places.js'
 
 const HOME = os.homedir()
 const CLAUDE = path.join(HOME, '.claude', 'projects')
@@ -549,7 +550,7 @@ let lastError = null
 export async function run(who) {
   if (job) return { running: job }
   const all = await writers()
-  if (!all.length) throw new Error('Nothing can write insights yet: sign in to an agent, or add an API key in Settings › Model Providers.')
+  if (!all.length) throw new Error(`Nothing can write insights yet: sign in to an agent, or add an API key in ${placeEn('providers')}.`)
   const w = all.find((x) => x.id === who) || all[0]
   const s = await scan({ force: true })
   if (!s.sessions.length) throw new Error(`No sessions with your agents in the last ${DAYS} days yet. Insights fill in as you work.`)

@@ -3,7 +3,7 @@ import Icon from '../Icon.jsx'
 import { api, apiUrl } from '../../api.js'
 import { download } from '../../download.js'
 import { t } from '../../i18n/index.js'
-import { useDevicesName } from './search.js'
+import { where } from './search.js'
 import { Advanced } from './Advanced.jsx'
 import './backup.css'
 
@@ -155,7 +155,6 @@ export default function BackUp() {
   const [opened, setOpened] = useState(null) // { id, plan, kind, from }
   const [applied, setApplied] = useState(null)
   const fileIn = useRef(null)
-  const devices = useDevicesName()
   const load = () => api('/backup').then((x) => { setS(x); setTo((v) => v || x.linked.find((m) => m.online)?.id || '') }, (e) => setErr(e.message))
   useEffect(() => { load(); const id = setInterval(() => { if (!document.hidden) load() }, 5000); return () => clearInterval(id) }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const run = async (what, fn) => { setBusy(what); setErr(null); try { await fn() } catch (e) { setErr(e.message) } setBusy(null); load() }
@@ -237,7 +236,7 @@ export default function BackUp() {
 
       <section className="st-sec">
         <h4>{t('Move to Another Computer')}</h4>
-        {!linked.length ? <p className="muted small">{t('Link the other computer first, in Settings › {devices} › Computers.', { devices })}</p> : (
+        {!linked.length ? <p className="muted small">{t('Link the other computer first, in {place}.', { place: where('machines') })}</p> : (
           <>
             <div className="st-row">
               <select className="st-input" value={to} onChange={(e) => setTo(e.target.value)} aria-label={t('Move to')}>

@@ -1,13 +1,15 @@
-// Settings › Account & Devices › Computers, with Remote Screen and Preview on (a Beta Feature):
+// Settings › Devices & Access › Remote Access, with Remote Screen and Preview's switch (a beta
+// feature) at the top:
 //   This Computer's Screen  whether your other devices can see it, and if not why; who's looking now,
 //                           with Stop
 //   Remote Access           1. the Remote Access Password, 2. "Let my other devices control this
 //                           computer" (which needs it; on a Mac, macOS's Accessibility question then),
-//                           as two steps of one block; Ask Here First, which devices may connect (one
-//                           unticked may use nothing here), and who's locked out, with Unlock; and
-//                           Screen Sharing Notifications: on or off, where they go, and the way to set
-//                           one up when nothing would hear of it (server/screentell.js)
+//                           as two steps of one block; Ask Here First, and who's locked out, with Unlock
+//   Which Devices May Connect  always, the beta on or off: one unticked may use nothing here, so it's
+//                           never behind a beta feature (server/remote.js)
 //   Screen Activity         the record of every session, and every one turned away
+// Screen Sharing Notifications (on or off, where they go, and the way to set one up when nothing would
+// hear of it: server/screentell.js) are Settings › Notifications' (ScreenNotify, below).
 // Each is changed here, at this computer, only: elsewhere (another computer's window, a phone) the
 // password and Ask Here First are shown as they are, saying where they're changed; the devices and
 // the record are this computer's own to see. Each says what it does in a line; the rest is under More.
@@ -16,6 +18,9 @@ import Icon from '../Icon.jsx'
 import { BASE, api, onThisComputer, usePoll } from '../../api.js'
 import { useTrial } from '../../trials.js'
 import { t, locale } from '../../i18n/index.js'
+import { BetaSwitch, useBeta } from '../settings/Beta.jsx'
+import { Needs } from '../settings/Advanced.jsx'
+import { where } from '../settings/search.js'
 import { ACCESS } from '../../../shared/remote.js'
 import { useRemote, remoteDo } from './remote.js'
 import { Sessions, whoOf } from './Here.jsx'
@@ -24,11 +29,12 @@ const desktop = () => (window.bridgeApp?.desktop && window.bridgeApp.remote ? wi
 const dayOf = (iso) => new Date(iso).toLocaleDateString(locale(), { month: 'short', day: 'numeric', year: 'numeric' })
 const clockOf = (iso) => new Date(iso).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' })
 
-// active: look at all (the devices menu looks only while it's open).
-export function useControl(active = true) {
+// active: look at all (the devices menu looks only while it's open). always: with the beta feature
+// off too (Which Devices May Connect, Screen Sharing Notifications).
+export function useControl(active = true, always = false) {
   const here = onThisComputer()
   const on = useTrial('remote-screen')
-  const r = useRemote(BASE, 4000, on && active)
+  const r = useRemote(BASE, 4000, (on || always) && active)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const set = async (want) => {
@@ -67,41 +73,13 @@ function SameToo({ d, all, keep }) {
   )
 }
 
-// With Remote Screen and Preview off, the devices you unticked here are still kept out of this
-// computer (server/remote.js): listed with Allow where the Beta Feature's settings would be, at this
-// computer only, which is where they're let back in.
-export function KeptOut() {
-  const here = onThisComputer()
-  const on = useTrial('remote-screen')
-  const { data, refresh } = usePoll('/remote', 15000, { enabled: here && !on })
-  const [err, setErr] = useState(null)
-  const out = (data?.access?.devices || []).filter((d) => d.out)
-  if (on || !here || !out.length) return null
-  const allow = async (id) => { setErr(null); try { await remoteDo(BASE, '/devices', { id, allowed: true }); refresh() } catch (e) { setErr(e.message) } }
-  return (
-    <section className="st-sec rs-settings" data-setting="remote-kept-out">
-      <h4>{t('Kept Out of This Computer')}</h4>
-      <p className="muted small">{t('You unticked these in Which Devices May Connect. They can\'t use this computer at all, with Remote Screen and Preview on or off.')}</p>
-      <ul className="rs-devices">
-        {out.map((d) => (
-          <li key={d.id}>
-            <span><Icon name={d.kind === 'computer' ? 'laptop' : 'phone'} size={12} /> {deviceName(d)} <span className="muted">{d.kind === 'computer' ? t('computer') : t('phone')}</span></span>
-            <button type="button" className="btn small" onClick={() => allow(d.id)}>{t('Allow')}</button>
-            <Older d={d} />
-          </li>
-        ))}
-      </ul>
-      {err && <p className="error-text small" role="alert">{err}</p>}
-    </section>
-  )
-}
 // Under the Beta Feature, once it's off here: that the devices you unticked stay out.
 export function StaysOut() {
   const here = onThisComputer()
   const { data } = usePoll('/remote', 15000, { enabled: here })
   const n = (data?.access?.devices || []).filter((d) => d.out).length
   if (!here || !n) return null
-  return <p className="muted small ab-trial-go"><Icon name="lock" size={11} /> {n === 1 ? t('The device you unticked stays out of this computer while this is off. Settings › Account & Devices › Computers lets it back in.') : t('The {n} devices you unticked stay out of this computer while this is off. Settings › Account & Devices › Computers lets them back in.', { n })}</p>
+  return <p className="muted small ab-trial-go"><Icon name="lock" size={11} /> {n === 1 ? t('The device you unticked stays out of this computer while this is off. {place} lets it back in.', { place: where('remote-devices') }) : t('The {n} devices you unticked stay out of this computer while this is off. {place} lets them back in.', { n, place: where('remote-devices') })}</p>
 }
 
 // What a setting does in full, folded away under its one line.
@@ -175,7 +153,7 @@ function Notify({ nt, here, name, set }) {
   const through = (nt.computers || []).filter((c) => c.devices > 0)
   // (Where they go is said at this computer only.)
   const nowhere = !!nt.devices && !devices.length && !through.length
-  const setUp = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'notifications' } }))
+  const setUp = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'this-device' } }))
   return (
     <div className="rs-block" data-setting="remote-notify">
       <label className="st-check">
@@ -204,11 +182,10 @@ function Notify({ nt, here, name, set }) {
   )
 }
 
-export function RemoteSettings() {
-  const { on, here, data, error, busy, err, set, refresh } = useControl()
+function RemoteSettings({ c: ctl }) {
+  const { here, data, error, busy, err, set, refresh } = ctl
   const [asked, setAsked] = useState(null)
   const [aErr, setAErr] = useState(null)
-  if (!on) return null
   if (!data) return <section className="st-sec"><h4>{t("This Computer's Screen")}</h4>{error ? <p className="error-text small">{error.message === 'update' ? t('Bridge AI here is too old for this. Update it.') : error.message}</p> : <div className="skeleton-rows"><div /></div>}</section>
   const sc = data.screen || {}
   const c = data.control || {}
@@ -293,46 +270,97 @@ export function RemoteSettings() {
           {!here && elsewhere}
         </div>
 
-        <div className="rs-block" data-setting="remote-devices">
-          <b>{t('Which Devices May Connect')}</b>
-          <p className="muted small">{t('A device you untick can\'t use this computer at all.')}</p>
-          {!here ? null : ac.devices?.length
-            ? (
-              <ul className="rs-devices">
-                {ac.devices.map((d) => (
-                  <li key={d.id}>
-                    <label className="st-check">
-                      <input type="checkbox" checked={d.allowed} disabled={!here} onChange={(e) => access('/devices', { id: d.id, allowed: e.target.checked })} />
-                      <span><Icon name={d.kind === 'computer' ? 'laptop' : 'phone'} size={12} /> {deviceName(d)} <span className="muted">{d.kind === 'computer' ? t('computer') : t('phone')}</span>{d.fresh && !d.allowed && <span className="st-chip rs-new">{t('New')}</span>}</span>
-                    </label>
-                    {d.locked && <span className="rs-locked small"><Icon name="lock" size={11} /> {t('Locked out until {time}', { time: clockOf(d.locked) })}</span>}
-                    {d.out && <SameToo d={d} all={ac.devices} keep={(id) => access('/devices', { id, allowed: false })} />}
-                    <Older d={d} />
-                    {d.locked && here && <button type="button" className="ghost-btn small" onClick={() => access(`/locks/${encodeURIComponent(d.id)}/clear`)}>{t('Unlock')}</button>}
-                  </li>
-                ))}
-              </ul>
-            )
-            : <p className="muted small">{t('No phone or computer is paired with this one yet.')}</p>}
-          {(ac.locks || []).filter((l) => !ac.devices?.some((d) => d.id === l.id)).map((l) => (
-            <p key={l.id} className="small rs-locked"><Icon name="lock" size={11} /> {t('{name} is locked out until {time}', { name: whoOf({ by: { name: l.name }, for: l.for }), time: clockOf(l.until) })} {here && <button type="button" className="ghost-btn small" onClick={() => access(`/locks/${encodeURIComponent(l.id)}/clear`)}>{t('Unlock')}</button>}</p>
-          ))}
-          {!here && elsewhere}
-          <More>
-            <p className="muted small">{t('Every phone paired with this computer and every computer linked to it, unless you untick it. One unticked can\'t use this computer at all, with Remote Screen and Preview on or off: no agents, terminals, files, previews or screen, and what it has open here ends.')}</p>
-            {here && <p className="muted small">{t('A device of another of your computers comes through that computer, which checks its own list first; once it has, it\'s listed here too, as coming through it, to untick here. So the same phone can be here more than once: paired here, and through each of your other computers it\'s paired with. It\'s known as the same device only if it paired with both using the same key, which a phone\'s browser and the Android app don\'t: untick it each way it comes.')}</p>}
-            {here && <p className="muted small">{t('Once you set a password or Ask Here First, or untick a device, a phone or computer paired after that, or first seen through another of your computers, starts New, and waits in Needs You while Remote Screen and Preview is on: tick it here, or Allow it there, to let it in.')}</p>}
-          </More>
-        </div>
-        <Notify nt={data.notify} here={here} name={name} set={(on) => access('/notify', { on })} />
         {aErr && <p className="error-text small" role="alert">{aErr}</p>}
       </section>
-
-      <section className="st-sec" data-setting="remote-sessions">
-        <h4>{t('Screen Activity')}</h4>
-        <p className="muted small">{t('Who connected to this computer, from which device, when, for how long and whether they used control; and each one turned away, and why. Kept on this computer only, the last 200.')}</p>
-        {here ? <Sessions log={data.log} here={here} /> : <p className="muted small">{t('Kept at {name} itself: see it there.', { name })}</p>}
-      </section>
     </>
+  )
+}
+
+// Which Devices May Connect: every phone paired with this computer and every computer linked to it,
+// each ticked unless you untick it, and who's locked out, with Unlock. Always here, the beta feature
+// on or off: one unticked can't use this computer at all.
+function WhichDevices({ c }) {
+  const { here, data, refresh } = c
+  const [aErr, setAErr] = useState(null)
+  if (!data) return null
+  const ac = data.access || { devices: [], locks: [], limits: ACCESS }
+  const name = data.name
+  const access = async (path, body) => { setAErr(null); try { await remoteDo(BASE, path, body); refresh() } catch (e) { setAErr(e.message) } }
+  const elsewhere = <p className="muted small">{t('Changed at {name} itself.', { name })}</p>
+  return (
+    <section className="st-sec rs-settings">
+      <div className="rs-block" data-setting="remote-devices">
+        <b>{t('Which Devices May Connect')}</b>
+        <p className="muted small">{t('A device you untick can\'t use this computer at all.')}</p>
+        {!here ? null : ac.devices?.length
+          ? (
+            <ul className="rs-devices">
+              {ac.devices.map((d) => (
+                <li key={d.id}>
+                  <label className="st-check">
+                    <input type="checkbox" checked={d.allowed} disabled={!here} onChange={(e) => access('/devices', { id: d.id, allowed: e.target.checked })} />
+                    <span><Icon name={d.kind === 'computer' ? 'laptop' : 'phone'} size={12} /> {deviceName(d)} <span className="muted">{d.kind === 'computer' ? t('computer') : t('phone')}</span>{d.fresh && !d.allowed && <span className="st-chip rs-new">{t('New')}</span>}</span>
+                  </label>
+                  {d.locked && <span className="rs-locked small"><Icon name="lock" size={11} /> {t('Locked out until {time}', { time: clockOf(d.locked) })}</span>}
+                  {d.out && <SameToo d={d} all={ac.devices} keep={(id) => access('/devices', { id, allowed: false })} />}
+                  <Older d={d} />
+                  {d.locked && here && <button type="button" className="ghost-btn small" onClick={() => access(`/locks/${encodeURIComponent(d.id)}/clear`)}>{t('Unlock')}</button>}
+                </li>
+              ))}
+            </ul>
+          )
+          : <p className="muted small">{t('No phone or computer is paired with this one yet.')}</p>}
+        {(ac.locks || []).filter((l) => !ac.devices?.some((d) => d.id === l.id)).map((l) => (
+          <p key={l.id} className="small rs-locked"><Icon name="lock" size={11} /> {t('{name} is locked out until {time}', { name: whoOf({ by: { name: l.name }, for: l.for }), time: clockOf(l.until) })} {here && <button type="button" className="ghost-btn small" onClick={() => access(`/locks/${encodeURIComponent(l.id)}/clear`)}>{t('Unlock')}</button>}</p>
+        ))}
+        {!here && elsewhere}
+        <More>
+          <p className="muted small">{t('Every phone paired with this computer and every computer linked to it, unless you untick it. One unticked can\'t use this computer at all, with Remote Screen and Preview on or off: no agents, terminals, files, previews or screen, and what it has open here ends.')}</p>
+          {here && <p className="muted small">{t('A device of another of your computers comes through that computer, which checks its own list first; once it has, it\'s listed here too, as coming through it, to untick here. So the same phone can be here more than once: paired here, and through each of your other computers it\'s paired with. It\'s known as the same device only if it paired with both using the same key, which a phone\'s browser and the Android app don\'t: untick it each way it comes.')}</p>}
+          {here && <p className="muted small">{t('Once you set a password or Ask Here First, or untick a device, a phone or computer paired after that, or first seen through another of your computers, starts New, and waits in Needs You while Remote Screen and Preview is on: tick it here, or Allow it there, to let it in.')}</p>}
+        </More>
+      </div>
+      {aErr && <p className="error-text small" role="alert">{aErr}</p>}
+    </section>
+  )
+}
+
+// The Remote Access tab: Remote Screen and Preview's switch, and with it on, this screen, the password
+// and control, and the record; Which Devices May Connect either way.
+export function RemoteAccess() {
+  const c = useControl(true, true)
+  const data = c.data
+  return (
+    <div className="st-sections">
+      <BetaSwitch id="remote-screen" disabled={!c.here ? t('Turned on and off at the computer itself.') : null} />
+      {c.on && <RemoteSettings c={c} />}
+      {!data && c.error && <p className="error-text small">{c.error.message === 'update' ? t('Bridge AI here is too old for this. Update it.') : c.error.message}</p>}
+      <WhichDevices c={c} />
+      {c.on && data && (
+        <section className="st-sec" data-setting="remote-sessions">
+          <h4>{t('Screen Activity')}</h4>
+          <p className="muted small">{t('Who connected to this computer, from which device, when, for how long and whether they used control; and each one turned away, and why. Kept on this computer only, the last 200.')}</p>
+          {c.here ? <Sessions log={data.log} here={c.here} /> : <p className="muted small">{t('Kept at {name} itself: see it there.', { name: data.name })}</p>}
+        </section>
+      )}
+    </div>
+  )
+}
+
+// Settings › Notifications › Screen Sharing Notifications: greyed while Remote Screen and Preview is
+// off (with Turn On, at this computer), as nothing is told then.
+export function ScreenNotify() {
+  const c = useControl(true, true)
+  const beta = useBeta('remote-screen')
+  const [err, setErr] = useState(null)
+  if (!c.data?.notify) return null
+  const set = async (on) => { setErr(null); try { await remoteDo(BASE, '/notify', { on }); c.refresh() } catch (e) { setErr(e.message) } }
+  return (
+    <section className="st-sec">
+      <Needs what={t('Remote Screen and Preview')} on={c.on} onTurnOn={c.here ? () => beta.set(true) : null}>
+        <Notify nt={c.data.notify} here={c.here} name={c.data.name} set={set} />
+      </Needs>
+      {err && <p className="error-text small" role="alert">{err}</p>}
+    </section>
   )
 }

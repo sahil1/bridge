@@ -1,7 +1,9 @@
-// Settings › Providers: which agents are signed in, and the model providers Bridge AI can hand
-// keys for. Cards in a grid by group; clicking one opens its editor in place. The model labs and
-// the models on this computer first, then the model for each task; under Advanced, cloud agents'
-// keys, the clouds, hosted open models, more models and speech to text services.
+// Settings › Agents & Models › Model Providers: the model providers Bridge AI can hand keys for,
+// and the accounts your agents sign in with. Cards in a grid by group; clicking one opens its
+// editor in place. The model labs and the models on this computer first; under Advanced, cloud
+// agents' keys, the clouds, hosted open models, more models and speech to text services. Usage
+// Across Every Provider (a beta feature) has its switch at the top. The model for each task is the
+// next tab's, Which Model Does What (WhichModel, below), with every other model Bridge AI picks.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, refetch, settingsChanged } from '../../api.js'
 import Icon from '../Icon.jsx'
@@ -9,9 +11,12 @@ import { AllowKeychain, Left, nameOf, makeDefault, removeAccount, signOut, Defau
 import { t, tn, tx } from '../../i18n/index.js'
 import { addAccount } from '../AddAccount.jsx'
 import ProviderIcon, { AgentIcon } from './ProviderIcon.jsx'
-import { GROUPS, AGENT_LABEL, providerChip, agentChip } from './providerCatalog.js'
+import { GROUPS, AGENT_LABEL, providerChip } from './providerCatalog.js'
 import CloudKeys from './CloudKeys.jsx'
-import { Advanced } from './Advanced.jsx'
+import { Advanced, More } from './Advanced.jsx'
+import { BetaSwitch } from './Beta.jsx'
+import { useSettings } from './General.jsx'
+import { useTrial } from '../../trials.js'
 import { ago } from '../Machines.jsx'
 import './providers.css'
 
@@ -20,47 +25,6 @@ const LATER = { clouds: 40, hosted: 50, speech: 60 }
 
 function Chip({ tone, children, title }) {
   return <span className={`pv-chip pv-chip-${tone}`} title={title}>{children}</span>
-}
-
-function AgentsStrip({ subs, error, onRefresh, refreshing }) {
-  const [showAll, setShowAll] = useState(false)
-  if (error) return <p className="pv-note pv-err">{t("Couldn't check agent sign-ins: {error}", { error })} <button type="button" className="ghost-btn" onClick={onRefresh} disabled={refreshing}>{t('Retry')}</button></p>
-  if (!subs) return <div className="pv-agents pv-loading" aria-busy="true"><span className="pv-skel" /><span className="pv-skel" /><span className="pv-skel" /></div>
-  const inst = subs.filter((s) => s.installed)
-  const list = showAll ? subs : inst
-  return (
-    <section className="pv-sec">
-      <div className="pv-head">
-        <h4>{t('Your agents')}</h4>
-        <span className="muted small">{inst.length ? t('{n} of {total} installed signed in', { n: inst.filter((s) => s.signedIn).length, total: inst.length }) : t('No agent CLIs found on your PATH')}</span>
-        <button type="button" className="ghost-btn pv-head-btn" onClick={onRefresh} disabled={refreshing} aria-label={t('Check sign-ins again')}>
-          <Icon name="refresh" size={12} className={refreshing ? 'spin' : ''} />{t('Recheck')}
-        </button>
-      </div>
-      <ul className="pv-agents">
-        {list.map((s) => {
-          const c = agentChip(s)
-          return (
-            <li key={s.kind} className={`pv-agent ${s.installed ? '' : 'pv-dim'}`}>
-              <AgentIcon kind={s.kind} size={26} name={s.label} />
-              <div className="pv-agent-text">
-                <span className="pv-agent-name">{s.label}</span>
-                {s.installed
-                  ? <Chip tone={c.tone} title={s.signedIn === null ? t("Bridge AI couldn't tell from this computer's files") : undefined}>{c.text}</Chip>
-                  : <span className="muted small">{t('Not installed')}</span>}
-                {s.installed && s.signedIn !== true && s.hint && <span className="pv-hint">{s.hint}</span>}
-              </div>
-            </li>
-          )
-        })}
-      </ul>
-      {subs.length > inst.length && (
-        <button type="button" className="ghost-btn pv-more" onClick={() => setShowAll((v) => !v)}>
-          {showAll ? t('Show installed only') : t('Show all {n} agents', { n: subs.length })}
-        </button>
-      )}
-    </section>
-  )
 }
 
 // Auto: new agents start on whichever account has the most left at the time. Turned off, your
@@ -487,10 +451,10 @@ function ModelJobs({ stamp, providers = [], labels, installedSet, onSaved }) {
   const local = d.local?.label
   const cloud = d.cloud?.label
   const now = (j) => {
-    if (!here) return cloud ? t('{model}, the first model you reach.', { model: cloud }) : t('No model yet: sign in to an agent or add a key above.')
+    if (!here) return cloud ? t('{model}, the first model you reach.', { model: cloud }) : t('No model yet: sign in to an agent, or add a key in Model Providers.')
     if (j.set === 'local') return local ? t('Always on this computer, with {model}.', { model: local }) : d.anyHere ? t('Always on this computer.') : t('Set to stay here, but {why}: it says so instead of running.', { why: d.missing?.why || t('there\'s no model on this computer') })
     if (j.set === 'cloud') return cloud ? t('{model} first, as before.', { model: cloud }) : t('Your sign-in or key first; there isn\'t one yet, so a model here.')
-    if (!local) return cloud ? t('{model}. Download a local model above to run short ones here.', { model: cloud }) : t('No model yet: download one above, or add a key.')
+    if (!local) return cloud ? t('{model}. Download a local model in Model Providers to run short ones here.', { model: cloud }) : t('No model yet: download one in Model Providers, or add a key.')
     if (!cloud) return t('{model}, on this computer: there\'s no other model.', { model: local })
     if (j.cloudBetter) return t('{model}: small models are weaker at this.', { model: cloud })
     if (j.id === 'notes' && d.limit) return t('Meetings up to about {n} minutes on {local}, here; longer ones on {cloud}.', { n: d.limit.minutes, local, cloud })
@@ -589,7 +553,6 @@ function ModelJobs({ stamp, providers = [], labels, installedSet, onSaved }) {
           )
         })}
       </ul>
-      <p className="pv-note">{t('Edit by voice and Tidy what I say stay on this computer unless you pick a model for them in Settings › Voice & Meetings, and so does AI Assist\'s look at a folder unless you pick one there.')}</p>
     </section>
   )
 }
@@ -686,11 +649,11 @@ export default function Providers() {
 
   return (
     <div className="pv">
-      <p className="pv-intro muted small" title={t('Sign in to an agent with its own subscription, or add API keys for the providers below. Keys are stored on this computer in your Bridge AI data folder (readable only by you) and handed to the agents Bridge AI starts.')}>
-        {t('Keys stay on this computer, readable only by you, and go to the agents Bridge AI starts.')}
+      <BetaSwitch id="usage-everywhere" />
+      <p className="pv-intro muted small">
+        {t('Keys stay on this computer, readable only by you, and go to the agents Bridge AI starts.')} <More>{t('Sign in to an agent with its own subscription, or add API keys for the providers below. Keys are stored on this computer in your Bridge AI data folder (readable only by you) and handed to the agents Bridge AI starts.')}</More>
       </p>
-
-      <AgentsStrip subs={subs} error={subsErr} onRefresh={() => loadSubs(true)} refreshing={refreshing} />
+      {subsErr && <p className="pv-note pv-err">{t("Couldn't check agent sign-ins: {error}", { error: subsErr })} <button type="button" className="ghost-btn" onClick={() => loadSubs(true)} disabled={refreshing}>{t('Retry')}</button></p>}
       <AccountsSection shown={!!subs || !!subsErr} />
       <Advanced order={30}><CloudKeys /></Advanced>
 
@@ -719,7 +682,6 @@ export default function Providers() {
             )
             return LATER[g.id] ? <Advanced key={g.id} order={LATER[g.id]}>{group}</Advanced> : group
           })}
-          <ModelJobs stamp={`${providers.filter((p) => p.status === 'connected').map((p) => p.id).join()}:${localStamp}`} providers={providers} labels={labels} installedSet={installedSet} onSaved={onSaved} />
           {more != null && (
             <Advanced order={55}>
               <section className="pv-sec pv-extra" data-setting="more-models">
@@ -733,4 +695,69 @@ export default function Providers() {
       )}
     </div>
   )
+}
+
+// Settings › Agents & Models › Which Model Does What: every model Bridge AI picks, in one place.
+// Which agent new agents and chats start with, and the Chief of Staff's (each changed where it is,
+// on the Agents tab); the model for each task (ModelJobs), changed here, with what to fall back
+// on; and the speech model and dictation's own (changed in their tabs).
+export function WhichModel() {
+  const { s } = useSettings()
+  const tidyOn = useTrial('dictation-cleanup')
+  const [providers, setProviders] = useState(null)
+  const [subs, setSubs] = useState(null)
+  const [agents, setAgents] = useState(null)
+  const [models, setModels] = useState(null)
+  const voice = usePollOnce('/voice')
+  const loadProviders = useCallback(() => api('/providers').then((d) => setProviders(d.providers)).catch(() => setProviders([])), [])
+  useEffect(() => {
+    loadProviders()
+    api('/subscriptions').then(setSubs).catch(() => setSubs([]))
+    api('/agents/catalog').then(setAgents).catch(() => setAgents([]))
+    api('/chat/models').then((r) => setModels(r.models || [])).catch(() => setModels([]))
+  }, [loadProviders])
+  const labels = useMemo(() => Object.fromEntries((subs || []).map((x) => [x.kind, x.label])), [subs])
+  const installedSet = useMemo(() => new Set((subs || []).filter((x) => x.installed).map((x) => x.kind)), [subs])
+  const onSaved = (next) => setProviders((list) => list.map((p) => (p.id === next.id ? next : p)))
+  if (!providers || !s) return <div className="skeleton-rows"><div /><div /><div /></div>
+  const eff = s.effective
+  const agentName = (kind) => (agents || []).find((a) => a.kind === kind)?.label || AGENT_LABEL[kind] || kind
+  const modelName = (id) => (models || []).find((m) => m.id === id)?.label || String(id || '').split(':').slice(1).join(':') || id
+  const def = eff.defaultAgent || 'claude'
+  const own = eff.agents?.[def]?.model
+  const d = eff.dictation || {}
+  const go = (id) => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: id } }))
+  const row = (name, what, to) => (
+    <li>
+      <span className="st-which-text"><b>{name}</b><span className="muted small">{what}</span></span>
+      <button type="button" className="ghost-btn small" onClick={() => go(to)}>{t('Change')}</button>
+    </li>
+  )
+  return (
+    <div className="st-sections">
+      <section className="st-sec" data-setting="models-agents">
+        <h4>{t('Agents and the Chief of Staff')}</h4>
+        <ul className="st-which">
+          {row(t('New agents and chats'), own ? t('{agent}, with {model}', { agent: agentName(def), model: own }) : t('{agent}, with its own default model', { agent: agentName(def) }), 'default-agent')}
+          {row(t('Chief of Staff'), agentName(eff.chief?.kind || 'claude'), 'chief')}
+        </ul>
+      </section>
+      <ModelJobs stamp={providers.filter((p) => p.status === 'connected').map((p) => p.id).join()} providers={providers} labels={labels} installedSet={installedSet} onSaved={onSaved} />
+      <section className="st-sec" data-setting="models-elsewhere">
+        <h4>{t('Speech and Dictation')}</h4>
+        <ul className="st-which">
+          {row(t('Speech to text'), voice?.engine === 'apple' ? t("The Mac's own speech, on this computer") : voice?.model?.label ? t('{model}, on this computer', { model: voice.model.label }) : t('A speech model on this computer'), 'speech-model')}
+          {window.bridgeApp?.desktop && row(t('Edit by voice'), d.editModel ? modelName(d.editModel) : t('The local model, on this computer (the default)'), 'edit-by-voice')}
+          {tidyOn && row(t('Tidy what I say'), d.tidyModel ? modelName(d.tidyModel) : t('The local model, on this computer (the default)'), 'tidy')}
+        </ul>
+      </section>
+    </div>
+  )
+}
+
+// One answer from the server, asked once (what the speech model is, for a line here).
+function usePollOnce(path) {
+  const [d, setD] = useState(null)
+  useEffect(() => { api(path).then(setD, () => setD(null)) }, [path])
+  return d
 }

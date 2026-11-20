@@ -5,17 +5,23 @@ import AgentMark from './agentMark.jsx'
 import { api } from '../../api.js'
 import SignInButton, { canSignIn } from '../SignIn.jsx'
 import { useRecheck } from '../PermissionFix.jsx'
-import { Advanced } from './Advanced.jsx'
+import { More, reveal } from './Advanced.jsx'
+import { BetaSwitch } from './Beta.jsx'
+import { useSettings, SaveNote, DefaultAgent, ChiefOfStaff, AgentsAdvanced } from './General.jsx'
 import { RecommendCard, StartsWith, useRecommended } from '../Recommended.jsx'
 import { t } from '../../i18n/index.js'
 
-// Settings › Agents: every agent CLI Bridge AI knows, whether it's installed and signed in,
-// and one click to install it (in a terminal tab you can watch) or start it.
-// Their own sign-in, from here (SignIn.jsx); the others sign in the first time they open. Under
-// Advanced: the models the Chief of Staff can consult. Under Claude Code (Recommended Settings):
-// what's recommended for your plan, and what it starts with.
+// Settings › Agents & Models › Agents: Scheduled Routines' switch (a beta feature, it's about what
+// your agents do by themselves), the default agent and its model, picking up unfinished work, the
+// Chief of Staff (its agent, its helpers, and the models it can consult), then every agent CLI
+// Bridge AI knows, whether it's installed and signed in, and one click to install it (in a terminal
+// tab you can watch) or start it. Their own sign-in, from here (SignIn.jsx); the others sign in the
+// first time they open. Under Claude Code (Recommended Settings): what's recommended for your plan,
+// and what it starts with. Under Advanced: plan usage, Command History, the terminal, where agents
+// run (General.jsx).
 
 export default function Agents({ onOpenAgent }) {
+  const { s, save, note } = useSettings()
   const [list, setList] = useState(null)
   const [subs, setSubs] = useState({})
   const [consult, setConsult] = useState(null)
@@ -50,32 +56,37 @@ export default function Agents({ onOpenAgent }) {
     setBusy(null)
   }
 
-  if (!list) return <div className="skeleton-rows"><div /><div /><div /></div>
+  if (!list || !s) return <div className="skeleton-rows"><div /><div /><div /></div>
   const sorted = [...list].sort((a, b) => b.installed - a.installed)
   return (
-    <div className="st-sections">
+    <div className="st-sections st-agents-tab">
+      <SaveNote note={note} />
+      <BetaSwitch id="routines" />
+      <DefaultAgent s={s} save={save} agents={list} onMore={() => reveal('agent-list')} />
+      <ChiefOfStaff s={s} save={save} agents={list}>
+        {consult && consult.length > 0 && (
+          <div className="st-consult" data-setting="consult">
+            <span className="st-line-label">{t('Your Chief of Staff can consult')}</span>
+            <span className="muted small">{t('Other models, for second opinions, live news or long documents.')} <More>{t("One-off questions to other models for second opinions, live news or long documents (bridge ask). Most use the subscriptions you're already signed in with; others need a key under Model Providers.")}</More></span>
+            <div className="st-consult-list">
+              {consult.map((c) => (
+                <span key={c.id} className={`st-consult-chip ${c.available ? 'on' : ''}`} title={`${c.good}\n${c.available ? `Via ${c.route}` : `To set up: ${c.route}`}`}>
+                  <Icon name={c.available ? 'check' : 'dot'} size={11} />{c.label}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </ChiefOfStaff>
+      <section className="st-sec st-agents-sec">
       <div className="st-row between">
-        <p className="muted small">{t("Bridge AI uses the agents' own sign-ins and subscriptions; it never sees your passwords or tokens.")}</p>
+        <h4>{t('Your Agents')}</h4>
         <button type="button" className="ghost-btn" onClick={() => { load(); rec.reload(true) }}><Icon name="refresh" size={12} /> {t('Refresh')}</button>
       </div>
+      <p className="muted small">{t("Bridge AI uses the agents' own sign-ins and subscriptions; it never sees your passwords or tokens.")}</p>
       {msg?.error && <p className="st-note bad"><Icon name="alert" size={13} /> {msg.error}</p>}
       {rec.error && <p className="st-note bad"><Icon name="alert" size={13} /> {t("Couldn't look up the settings recommended for your plan: {error}", { error: rec.error })}</p>}
       {msg?.ok && <p className="st-note ok"><Icon name="terminal" size={13} /> {msg.ok} {msg.paneId && <button className="link-btn" onClick={() => onOpenAgent?.(msg.paneId)}>{t('Open it')}</button>}</p>}
-      {consult && consult.length > 0 && (
-        <Advanced order={10}>
-        <section className="st-consult" data-setting="consult">
-          <h4>{t('Your Chief of Staff can consult')}</h4>
-          <p className="muted small" title={t("One-off questions to other models for second opinions, live news or long documents (bridge ask). Most use the subscriptions you're already signed in with; others need a key under Model Providers.")}>{t('Other models, for second opinions, live news or long documents.')}</p>
-          <div className="st-consult-list">
-            {consult.map((c) => (
-              <span key={c.id} className={`st-consult-chip ${c.available ? 'on' : ''}`} title={`${c.good}\n${c.available ? `Via ${c.route}` : `To set up: ${c.route}`}`}>
-                <Icon name={c.available ? 'check' : 'dot'} size={11} />{c.label}
-              </span>
-            ))}
-          </div>
-        </section>
-        </Advanced>
-      )}
       <ul className="st-agents" data-setting="agent-list">
         {sorted.map((a) => {
           const sub = subs[a.kind]
@@ -113,6 +124,8 @@ export default function Agents({ onOpenAgent }) {
           )
         })}
       </ul>
+      </section>
+      <AgentsAdvanced s={s} save={save} />
     </div>
   )
 }

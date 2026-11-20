@@ -4,6 +4,7 @@ import { api, fmtTime } from '../../api.js'
 import { t, tx, locale } from '../../i18n/index.js'
 import { AssistHead } from '../AiAssist.jsx'
 import { Guests, openPerson } from './invite.jsx'
+import { where } from '../settings/search.js'
 import './prep.css'
 
 // AI Assist's Prepare for this meeting, before a meeting, as its suggestions are during one
@@ -69,7 +70,7 @@ function Suggestions({ p, prep, compact, onSettings }) {
   if (!d.writer && !items.length) {
     return (
       <div className="prep-none">
-        <p className="muted small">{t('Suggested goals and questions need a model to write them. Add one in Settings › Model Providers, or sign in to an agent.')}</p>
+        <p className="muted small">{t('Suggested goals and questions need a model to write them. Add one in {place}, or sign in to an agent.', { place: where('providers') })}</p>
         {onSettings && <button type="button" className="ghost-btn" onClick={onSettings}><Icon name="layers" size={12} /> {t('Add a model')}</button>}
       </div>
     )
@@ -284,7 +285,7 @@ export function PrepGlance({ e, onOpenEvent }) {
           {s?.error && <p className="error-text small">{t("Couldn't suggest anything: {error}", { error: s.error })}</p>}
           {!items.length && !working && (d.writer
             ? <button type="button" className="btn small pg-suggest" onClick={() => p.suggest(!!s?.error)}><Icon name="wand" size={12} /> {s?.error ? t('Try again') : t('Suggest goals and questions')}</button>
-            : <p className="pg-none">{t('Suggested goals and questions need a model to write them. Add one in Settings › Model Providers, or sign in to an agent.')}</p>)}
+            : <p className="pg-none">{t('Suggested goals and questions need a model to write them. Add one in {place}, or sign in to an agent.', { place: where('providers') })}</p>)}
           {(items.length > 0 || onOpenEvent) && (
             <div className="pg-foot">
               {items.length > 0 && <span className="pg-by" title={writtenWith(s)}>{t('By Bridge AI at {time}', { time: fmtTime(s.at) })}</span>}

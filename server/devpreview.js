@@ -23,6 +23,7 @@
 import http from 'node:http'
 import WebSocket, { WebSocketServer } from 'ws'
 import { PREVIEW, PREVIEW_HEADERS as H } from '../shared/remote.js'
+import { placeEn } from '../shared/places.js'
 
 const HOP = new Set(['connection', 'keep-alive', 'transfer-encoding', 'upgrade', 'proxy-connection', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'host', 'content-length', 'accept-encoding', 'cookie', 'authorization', 'origin', 'referer'])
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]'])
@@ -43,7 +44,7 @@ export function serve({ trialOn, deviceOf, may: maySee = () => null, isDevPort, 
     if (!m) return { status: 404, error: 'Not found' }
     const dev = deviceOf(req.headers['x-bridge-relay'])
     if (!dev) return { status: 403, error: 'Previews are for your other devices, through their link to this computer.' }
-    if (!trialOn()) return { status: 404, error: `Remote Screen and Preview is off on ${thisName()}. Turn it on there in Settings › About & Updates › Beta Features.`, trial: 'remote-screen' }
+    if (!trialOn()) return { status: 404, error: `Remote Screen and Preview is off on ${thisName()}. Turn it on there in ${placeEn('beta-remote-screen')}.`, trial: 'remote-screen' }
     const port = Number(m[1])
     const no = maySee(dev.id, port)
     if (no?.code === 'device') return { status: 403, error: no.why, code: 'device' }
