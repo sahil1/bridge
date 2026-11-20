@@ -147,14 +147,14 @@ try {
   // commands on); and its post waits for you, though the bot may answer on its own, as Dana's words
   // are in it.
   await part('a post that sums up the channel', async () => {
-    await kit.api('/bots/b1/settings', { auto: true, bash: 'sandboxed' })
+    await kit.api('/bots/b1/settings', { auto: true })
     try {
       const made = await kit.api('/routines', { name: 'Channel digest', command: 'Sum up the channel today [run ls] [answer Here is the digest.]', to: 'bot', bot: 'b1', channel: { id: 'C0LAUNCH', name: 'launch' } })
       await kit.api(`/routines/${made.id}/run`, {})
       const s = await mac.startOf('Sum up the channel today', 30000)
       const brief = mac.briefOf(s)
       ok(!!s && /latest messages from the people who may ask you/.test(brief) && /Lunch anyone\?/.test(brief) && !/Does anyone know the leave policy/.test(brief) && !/Eve:/.test(brief), 'it reads the channel\'s recent messages from those who may ask it, and nobody else\'s', brief.slice(0, 1200))
-      ok(!!s && !s.args.join(' ').includes('Bash') && !s.given?.sandbox, 'and runs no commands, with commands on', s?.args?.slice(0, 2))
+      ok(!!s && !s.args.join(' ').includes('Bash') && !s.given?.sandbox, 'and runs no commands', s?.args?.slice(0, 2))
       const d = await mac.draftOf('Sum up the channel today')
       ok(d?.how === 'scheduled' && !(await slack.state()).posted.some((x) => x.channel === 'C0LAUNCH' && /Here is the digest/.test(x.text || '')), 'its post waits for you, though the bot may answer on its own: others\' words are in it', d && { draft: d.draft, state: d.state })
       if (d) await kit.api(`/bots/questions/${d.id}`, { send: false })

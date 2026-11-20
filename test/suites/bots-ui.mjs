@@ -14,7 +14,7 @@
 //     folder, where it answers) sent as one (/bots/quick), the bot as asked for: its page opens.
 //   A bot's page: Overview, Settings, Memory, Activity; its Overview's sessions and Start a Test
 //     Session; Settings with five fields (name, what it's for, its folder, who can ask, edits files)
-//     and the rest under Advanced, commands in a sandbox among them.
+//     and the rest under Advanced, commands among them (none in this version, saying why).
 //   Sessions: every session (Hiring's in #launch with your change and Dana's question waiting, Front
 //     Desk's with Sam in a direct message, one ended), waiting for you first, filtered by bot and by
 //     how it stands; Start a test session, opening it. A session: its Thread (Dana's reply sent as
@@ -264,11 +264,9 @@ try {
     ok(!(await p.locator('.bp [data-setting="bot-advanced"] [data-setting="slack-changes"] [data-mode="pr"]').count()) && /Proposes a PR \(waits for your OK\)/.test(await textOf(p, '.bp [data-setting="slack-changes"]')), 'one pull-request mode: Proposes a PR (waits for your OK)')
     ok(/Longest Run/.test(await textOf(p, '.bp [data-setting="slack-limits"]')) && /With no answer it carries on/.test(await textOf(p, '.bp [data-setting="slack-limits"]')), 'Longest Run, and silence carries on')
     ok((await kit.api(`/bots/${HI}`)).settings.limits.longest === 240, '(240 minutes, the server\'s)')
-    await p.locator('.bp [data-setting="bots-bash"] [role="radio"]', { hasText: 'In a Sandbox' }).click()
-    ok(!!(await until(async () => (await kit.api(`/bots/${HI}`)).commands?.bash === 'sandboxed', 8000)), 'Commands: In a Sandbox, kept by the server (its commands: sandboxed)')
-    ok(!!(await until(async () => (await p.locator('.bp [data-setting="bots-bash"] [role="radio"][aria-checked="true"]').innerText()).includes('In a Sandbox'), 8000)), 'and shown as kept')
-    await p.locator('.bp [data-setting="bots-bash"] [role="radio"]', { hasText: 'None' }).click()
-    await until(async () => (await kit.api(`/bots/${HI}`)).commands?.bash === 'off', 8000)
+    // (No commands in this version: the reason, as the server gives it, and no switch.)
+    const why = (await kit.api(`/bots/${HI}`)).commands?.why
+    ok(!!why && !(await p.locator('.bp [data-setting="bots-bash"] [role="radio"]').count()) && (await textOf(p, '.bp [data-setting="bots-bash"]')).includes(why), 'Commands: none in this version, saying why, with no switch', { why, text: await textOf(p, '.bp [data-setting="bots-bash"]') })
     await adv.locator(':scope > summary').click()
     // Edits files, on and off.
     const before = (await kit.api(`/bots/${HI}`)).settings.changes

@@ -84,7 +84,18 @@ const MCP_RUNS = dataFile('front-desk', 'mcp')
 // auto-allow does, for a command in it (autoAllowBashIfSandboxed, which holds in dontAsk too:
 // code.claude.com/docs/en/sandboxing, Auto-allow mode), so a command the sandbox doesn't hold,
 // because of a policy of your organization's Bridge AI can't read, is refused by dontAsk.)
+// Commands (Bash) in bot sessions: off in this version, for every bot, whatever its settings say, so
+// no session's agent ever has Bash among its tools. A security review found that a session's commands
+// could still reach outside its copy (its top made a link, a command left running racing Bridge AI's
+// own work in it, git in a repository's copy) and, on Linux, read other processes' environments; a
+// later version brings commands back whole. What they'd run in stays, behind this one switch: the
+// sandbox (botmcp.js sandboxOf, sandboxClosed and bashProblem here), botguard.mjs's command checks,
+// botsessions.js stopShells. BRIDGE_TEST_BOT_COMMANDS=1 turns them on for the tests of that code only
+// (test/suites); Bridge AI never sets it.
+export const COMMANDS = process.env.BRIDGE_TEST_BOT_COMMANDS === '1'
+export const COMMANDS_OFF = 'Commands in bot sessions come in a later version'
 export const sandboxClosed = (s) => {
+  if (!COMMANDS) return false
   const x = s?.sandbox
   return !!x && x.enabled === true && x.failIfUnavailable === true && x.allowUnsandboxedCommands === false && x.autoAllowBashIfSandboxed === true
     && x.network?.strictAllowlist === true && Array.isArray(x.network?.allowedDomains) && x.filesystem?.disabled === false && !x.excludedCommands?.length
@@ -461,7 +472,7 @@ export const BASH_MIN = KEPT_MIN.claude.version
 const MANAGED_SETTINGS = () => (process.env.BRIDGE_CLAUDE_MANAGED ? [process.env.BRIDGE_CLAUDE_MANAGED]
   : process.platform === 'darwin' ? ['/Library/Application Support/ClaudeCode/managed-settings.json']
     : IS_WIN ? ['C:\\ProgramData\\ClaudeCode\\managed-settings.json'] : ['/etc/claude-code/managed-settings.json'])
-const widens = (j, managed) => {
+export const widens = (j, managed) => {
   const s = j?.sandbox || {}
   const n = s.network || {}
   const f = s.filesystem || {}
@@ -494,6 +505,7 @@ const widens = (j, managed) => {
 // Why a bot can't run commands here, or null: this system, its Claude Code, or settings of yours or
 // your organization's. home: whose ~/.claude/settings.json (tests).
 export async function bashProblem(kind = 'claude', { home = os.homedir() } = {}) {
+  if (!COMMANDS) return COMMANDS_OFF
   if (kind !== 'claude') return 'Commands need Claude Code, which runs them in its sandbox'
   if (IS_WIN) return 'Claude Code has no sandbox on Windows, so a bot runs no commands here'
   const PATH = await loginPath()

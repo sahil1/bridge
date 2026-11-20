@@ -1502,6 +1502,15 @@ function Commands({ d, save }) {
   const domains = Array.isArray(s.domains) ? s.domains : Array.isArray(d.commands?.domains) ? d.commands.domains : []
   const [add, setAdd] = useState('')
   const keep = (e) => { e.preventDefault(); const x = add.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, ''); if (x && !domains.includes(x)) save({ domains: [...domains, x] }); setAdd('') }
+  // (None in this version, the server says why: no switch, only that.)
+  if (d.commands?.available === false) {
+    return (
+      <section className="st-sec" data-setting="bots-bash">
+        <h4>{t('Commands')}</h4>
+        <p className="muted small" data-commands-off>{t('It runs no commands: it reads, and edits files where it may.')} {t('It can\'t run commands here yet: {why}', { why: d.commands.why || '' })}</p>
+      </section>
+    )
+  }
   return (
     <section className="st-sec" data-setting="bots-bash">
       <h4>{t('Commands')}</h4>

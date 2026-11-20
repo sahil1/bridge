@@ -37,6 +37,7 @@ import { dataFile, writeFileAtomic, HOME } from './paths.js'
 import * as store from './bots.js'
 import * as conns from './connections.js'
 import * as botwrite from './botwrite.js'
+import { COMMANDS, COMMANDS_OFF } from './agents.js'
 
 export const DIR = dataFile('front-desk', 'sessions')
 const FILE = dataFile('front-desk', 'sessions.json')
@@ -309,7 +310,12 @@ export function makeBotSessions({ desk, rt, guard, wrap, connect = () => {}, res
           const b = store.get(String(req.params.id))
           if (!b) throw bad('No such bot', 404)
           const patch = {}
-          if (x.bash !== undefined) { if (!store.BASH.includes(x.bash)) throw bad('Commands are off or sandboxed'); patch.bash = x.bash }
+          if (x.bash !== undefined) {
+            if (!store.BASH.includes(x.bash)) throw bad('Commands are off or sandboxed')
+            // (None in this version: agents.js COMMANDS. One kept from before stays as it was, and does nothing.)
+            if (x.bash === 'sandboxed' && !COMMANDS) throw bad(COMMANDS_OFF)
+            patch.bash = x.bash
+          }
           if (x.domains !== undefined) {
             const list = Array.isArray(x.domains) ? x.domains : String(x.domains || '').split(/[\s,]+/)
             const out = []

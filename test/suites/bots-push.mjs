@@ -1,8 +1,9 @@
 // Pushes wait for you (server/frontdesk.js pushAct, botguard.mjs, sessionmcp.js), with the stand-in
 // Slack, Claude Code and GitHub CLI (stand-ins/slack.mjs, helper-claude.cjs, gh.cjs), a repository
 // of its own and a bare one as its remote.
-//   A bot's session that may run commands (Bash, in its sandbox) can't push: git push and gh are
-//   refused by its hook, saying pushing waits for you and to call request_push. Its agent's
+//   A bot's session runs no commands in this version (agents.js COMMANDS), so it can't push: a git
+//   push or gh asked of it isn't run; its hook on commands, kept for a later version, still refuses
+//   one (botguard.mjs, run here as Claude Code would), saying to call request_push. Its agent's
 //   request_push: in Needs You (the commit you're shown), where it was asked (Push and Don't push,
 //   only yours count) and your DM; nothing pushed until you say so; approving another commit than the
 //   one waiting is refused (409); approved, Bridge AI pushes its branch only and opens a draft pull
@@ -12,7 +13,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { checks, until, TEST, IS_WIN } from '../lib/harness.mjs'
+import { checks, until, TEST, IS_WIN, ROOT } from '../lib/harness.mjs'
 import { botKit, M, OWNER } from '../lib/bots.mjs'
 
 const { ok, done } = checks('bots-push')
@@ -45,8 +46,8 @@ try {
   await kit.api('/agents/catalog')
   await kit.api('/bots', { name: 'Code Bot' })
   await kit.api('/bots/b1/tokens', { appToken: 'xapp-test', botToken: 'xoxb-test' })
-  await kit.api('/bots/b1/settings', { answerIn: 'thread', askers: [{ id: 'U0DANA', name: 'Dana' }], readsFrom: ['~/code/app'], owner: OWNER, changes: 'suggest', bash: 'sandboxed' })
-  ok(!!(await connected()), 'a bot, connected, proposing changes in a repository, with commands')
+  await kit.api('/bots/b1/settings', { answerIn: 'thread', askers: [{ id: 'U0DANA', name: 'Dana' }], readsFrom: ['~/code/app'], owner: OWNER, changes: 'suggest' })
+  ok(!!(await connected()), 'a bot, connected, proposing changes in a repository')
 
   // ---------- Its hook refuses a push ----------
   let q1 = null
@@ -55,13 +56,21 @@ try {
     q1 = await slack.ask({ user: 'U0DANA', text: `${M} Fix the typo, then push it. [edit README.md Hello world] [run git push origin HEAD] [run gh pr create --fill] [push Fix the README typo] [answer Fixed it, and asked to push.]` })
     const s = await startOf('Fix the typo, then push it')
     const a = s?.args.join(' ') || ''
-    ok(a.includes('Read,Grep,Glob,Edit,Write,Bash') && a.includes('mcp__bridge_session__request_push') && s?.given?.sandbox?.filesystem?.denyWrite?.some((d) => d.endsWith(`${path.sep}.git`)), 'its session may edit its copy and run commands, with request_push, and no writing git\'s own file', { args: s?.args, deny: s?.given?.sandbox?.filesystem })
+    ok(a.includes('--tools Read,Grep,Glob,Edit,Write ') && !a.includes('Bash') && a.includes('mcp__bridge_session__request_push'), 'its session may edit its copy, with request_push, and runs no commands', { args: s?.args })
     d1 = await draftOf('Fix the typo, then push it')
     const runs = logOf('answer-tries.log').filter((x) => x.try === 'run')
-    ok(runs.length === 2 && runs.every((x) => !x.done && /wait for Tester: call your request_push tool/.test(x.why)), 'git push and gh are refused by its hook, saying pushing waits for you and to call request_push', runs)
-    const hooks = logOf('hooks.log').filter((x) => x.tool === 'Bash')
-    ok(hooks.length === 2 && hooks.every((x) => x.status === 2), '(each refused by its hook, exit 2)', hooks)
+    ok(runs.length === 2 && runs.every((x) => !x.done && x.why === 'no Bash'), 'git push and gh asked of it: not run', runs)
     ok(!branches().length && !ghCalls().length, 'nothing pushed, no pull request')
+    // (Its hook on commands, kept for a later version: a push refused, saying to call request_push.)
+    const g = path.join(kit.dir, 'guard')
+    fs.mkdirSync(g, { recursive: true })
+    fs.writeFileSync(path.join(g, 'guard.key'), 'c'.repeat(64))
+    fs.writeFileSync(path.join(g, 'guard.log'), '')
+    const hook = (command) => spawnSync(process.execPath, [path.join(ROOT, 'server', 'botguard.mjs'), '--bash-only', '--log', path.join(g, 'guard.log'), '--key', path.join(g, 'guard.key'), '--who', 'Tester', '--push'], { input: JSON.stringify({ tool_name: 'Bash', tool_input: { command } }), encoding: 'utf8' })
+    const push = hook('git push origin HEAD')
+    const gh = hook('gh pr create --fill')
+    const ls = hook('ls -la')
+    ok(push.status === 2 && gh.status === 2 && /wait for Tester: call your request_push tool/.test(push.stderr) && ls.status === 0, 'its hook on commands, kept: git push and gh refused, saying to call request_push; another command let through', { push: push.stderr.trim().slice(0, 160), gh: gh.status, ls: ls.status })
   })
 
   // ---------- request_push: waits for you ----------

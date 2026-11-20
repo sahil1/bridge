@@ -972,7 +972,9 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     const said = (m) => {
       const own = !!((m.user && m.user === kept.bot?.userId) || (m.bot_id && m.bot_id === kept.bot?.botId))
       const u = m.user ? users[m.user] : null
-      const flags = { ...(u?.guest ? { guest: true } : {}), ...(u?.stranger || other(u?.team) || other(m.user_team) || other(m.source_team) ? { external: true } : {}) }
+      // (Someone Slack said nothing of, never looked up: taken as one who can't be checked, so their
+      // words are masked, as a guest's are.)
+      const flags = { ...(u?.guest ? { guest: true } : {}), ...(u?.stranger || other(u?.team) || other(m.user_team) || other(m.source_team) ? { external: true } : {}), ...(!u && m.user && !own ? { unknown: true } : {}) }
       return {
         ts: m.ts, person: { id: m.user || m.bot_id || null, name: (m.bot_id && m.username) || names[m.user] || m.username || m.bot_profile?.name || m.user || null, ...flags },
         text: clip(plainText(m.text, { bot: kept.bot?.userId, names }), LONGEST_SAID), you: own,

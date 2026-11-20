@@ -172,7 +172,7 @@ import * as botattach from './botattach.js'
 import * as botsessions from './botsessions.js'
 import * as conns from './connections.js'
 import * as paneQueue from './queue.js'
-import { bashProblem } from './agents.js'
+import { bashProblem, COMMANDS, COMMANDS_OFF } from './agents.js'
 
 const FILE = dataFile('front-desk.json')
 const DIR = dataFile('front-desk')
@@ -1434,7 +1434,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     }
     ctxRaw = ownOnly(bot, q, ctxRaw)
     // (A scheduled post's: everyone whose message it read, not its own, for whether its post may go.)
-    if (routineOf(q)) q.authors = [...new Map([...(ctxRaw?.messages || []), ...(ctxRaw?.pins || [])].filter((m) => !(m.you && (!m.as || m.as === bot.name))).map((m) => [m.person?.id || '?', { ...(m.person || {}), ...(m.bot || m.you || /^B[A-Z0-9]{6,}$/.test(String(m.person?.id || '')) ? { bot: true } : {}) }])).values()]
+    if (routineOf(q) && ctxRaw) q.authors = ctxRaw.problem ? null : [...new Map([...(ctxRaw?.messages || []), ...(ctxRaw?.pins || [])].filter((m) => !(m.you && (!m.as || m.as === bot.name))).map((m) => [m.person?.id || '?', { ...(m.person || {}), ...(m.bot || m.you || /^B[A-Z0-9]{6,}$/.test(String(m.person?.id || '')) ? { bot: true } : {}) }])).values()]
     const voices = voicesIn(heardFrom(bot, ctxRaw))
     // (Asked or handed this by a Chief: no more than the least of everyone its session had heard. And
     // never more than the least of everyone whose words in the conversation reach it.)
@@ -4341,7 +4341,8 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
         writes: [...b.st.writes.values()].filter((w) => !w.try).slice(-5).reverse().map(writeView),
         // Its commands (bash: off or sandboxed), the domains they may reach, and why it can't run
         // them here when it can't (agents.js bashProblem); and its sessions going on.
-        commands: { bash: bot.bash || 'off', domains: bot.domains || [], problem: bot.bash === 'sandboxed' ? await bashProblem('claude').catch((e) => e.message) : null },
+        // (available: whether this version runs commands at all, agents.js COMMANDS; why not, as said.)
+        commands: { bash: bot.bash || 'off', domains: bot.domains || [], problem: bot.bash === 'sandboxed' ? await bashProblem('claude').catch((e) => e.message) : null, available: COMMANDS, ...(COMMANDS ? {} : { why: COMMANDS_OFF }) },
         sessions: { live: going().filter((s) => s.bot === id && s.paneId).length, going: going().filter((s) => s.bot === id).length },
       }
     },
