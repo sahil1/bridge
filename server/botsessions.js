@@ -152,8 +152,9 @@ export function makeBotSessions({ desk, rt, guard, wrap, connect = () => {}, res
         const purpose = String(req.body?.purpose || '').replace(/\r\n/g, '\n').trim().slice(0, 4000)
         if (!purpose) throw bad('Say what it\'s for')
         if (!req.body?.folder) throw bad('Pick its folder')
-        const folder = await resolve(String(req.body.folder))
-        const real = await fs.promises.realpath(folder)
+        let folder
+        let real
+        try { folder = await resolve(String(req.body.folder)); real = await fs.promises.realpath(folder) } catch (e) { throw bad(e.message) }
         const home = await fs.promises.realpath(HOME).catch(() => null)
         const rel = home ? path.relative(home, real) : ''
         if (!home || !rel || rel.startsWith('..') || path.isAbsolute(rel)) throw bad('Pick a folder inside your home folder')
@@ -203,10 +204,10 @@ export function makeBotSessions({ desk, rt, guard, wrap, connect = () => {}, res
     },
   }
 }
-// A name from what it's for: its first words that say something, as a name ("Hiring questions" from
-// "Answer hiring questions about…"), else New Bot.
+// A name from what it's for: its first word that says something ("Hiring Bot" from "Answer hiring
+// questions about…"), else New Bot.
 const PLAIN = new Set('a an the and or of for to in on at by with about from my our your their its this that these those answer answers answering help helps helping questions question people team me us we you i is are be do does'.split(' '))
 function nameFor(purpose) {
-  const words = String(purpose).toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !PLAIN.has(w)).slice(0, 2)
+  const words = String(purpose).toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !PLAIN.has(w)).slice(0, 1)
   return words.length ? `${words.map((w) => w[0].toUpperCase() + w.slice(1)).join(' ')} Bot` : 'New Bot'
 }
