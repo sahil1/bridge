@@ -204,7 +204,7 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKUIDel
     // it pairs as a scanned code does. iOS opens only links the relay says are the app's
     // (https://<id>.boldbridge.app/ with #pair=…).
     func openLink(_ link: URL) {
-        if !usePairingLink(link.absoluteString) { alert("That isn't a Bridge AI pairing code. On your computer, open Settings › Devices and click Pair a device.") }
+        if !usePairingLink(link.absoluteString) { alert("That isn't a Bridge AI pairing code. On your computer, open Settings › Devices & Access › Phone and click Pair a device.") }
     }
 
     // The lock screen card was tapped (bridgeai://agent?id=<pane>): show that agent. Or a pairing
@@ -214,7 +214,7 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKUIDel
         if url.scheme == "bridgeai", url.host == "pair" {
             let link = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "link" })?.value
             if let link, usePairingLink(link) { return }
-            return alert("That isn't a Bridge AI pairing code. On your computer, open Settings › Devices and click Pair a device.")
+            return alert("That isn't a Bridge AI pairing code. On your computer, open Settings › Devices & Access › Phone and click Pair a device.")
         }
         guard url.scheme == "bridgeai", url.host == "agent",
               let id = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "id" })?.value else { return }
@@ -282,7 +282,7 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKUIDel
             guard let self else { return }
             let ok = text.map { link ? Self.pairingLink($0) != nil : self.usePairingLink($0) } ?? false
             if link { self.giveScan(ok ? text : nil) }
-            if text != nil && !ok { self.alert("That isn't a Bridge AI pairing code. On your computer, open Settings › Devices and click Pair a device.") }
+            if text != nil && !ok { self.alert("That isn't a Bridge AI pairing code. On your computer, open Settings › Devices & Access › Phone and click Pair a device.") }
         }
         top.present(scanner, animated: true)
     }

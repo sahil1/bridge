@@ -38,6 +38,7 @@ import { setMemoryAll, takePerson } from '../memory/open.js'
 import { ANY as ANY_DICTATION } from '../dictations/shared.jsx'
 import { Dictations } from '../../lazy.jsx'
 import { sayPlace } from '../../backForward.js'
+import { where } from '../settings/search.js'
 
 // The meeting pages: the list of meetings, and one meeting with your notes beside its transcript, the
 // summary, questions about it, and its action items for the Chief of Staff. The recording itself is
@@ -212,7 +213,7 @@ function InsightsOn({ n, onShow }) {
   return (
     <div className="mt-insights-on" role="status">
       <Icon name="trend" size={15} />
-      <p className="small"><b>{t('Meeting Insights is on.')}</b> {t('With {n} meetings recorded on this computer, Insights and People add them up: the time you spend in meetings, when, in which series and with whom. Worked out here and never sent. It\'s a beta feature, also in Settings › About & Updates › Beta Features.', { n })}</p>
+      <p className="small"><b>{t('Meeting Insights is on.')}</b> {t('With {n} meetings recorded on this computer, Insights and People add them up: the time you spend in meetings, when, in which series and with whom. Worked out here and never sent. It\'s a beta feature, also in {place}.', { place: where('beta-meeting-insights'), n })}</p>
       <div className="mt-insights-acts">
         <button type="button" className="btn small primary" disabled={busy} onClick={() => { onShow(); done() }}>{t('Show Insights')}</button>
         <button type="button" className="btn small" disabled={busy} onClick={() => done(true)}>{t('Turn off')}</button>

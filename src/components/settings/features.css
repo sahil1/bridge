@@ -1,0 +1,28 @@
+/* Settings › Your Features (Features.jsx): a card for each feature, in a grid. */
+.ft { gap: 10px; }
+.ft-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(214px, 1fr)); gap: 10px; }
+.ft-card { position: relative; display: grid; grid-template-rows: auto 1fr auto; gap: 6px; min-width: 0; padding: 12px 12px 8px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--pane); transition: border-color .15s, box-shadow .15s; }
+.ft-card:hover { border-color: var(--line-2); box-shadow: var(--shadow); }
+.ft-top { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.ft-ico { flex: none; display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; color: var(--accent); background: var(--accent-soft); }
+.ft-card.off .ft-ico { color: var(--ink-3); background: var(--pane-3); }
+.ft-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ft-name b { font-size: 13.5px; font-weight: 600; line-height: 1.25; }
+.ft-status { margin: 0; line-height: 1.4; min-height: 1.4em; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ft-status.warn { color: var(--warning); }
+.ft-foot { display: flex; align-items: center; gap: 8px; min-height: 26px; }
+.ft-open { margin-left: auto; display: inline-flex; align-items: center; gap: 3px; min-height: 26px; padding: 0 4px 0 8px; border-radius: 7px; font-size: 12.5px; font-weight: 550; color: var(--accent); }
+.ft-open:hover { background: var(--accent-soft); }
+.ft-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ft-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 14px 0 0; font-size: 13.5px; font-weight: 600; }
+.ft-head .muted { font-weight: 400; }
+.ft > [data-setting="setup"] > .st-sec { margin-top: 10px; }
+
+@media (max-width: 760px) {
+  .ft-grid { grid-template-columns: 1fr; gap: 8px; }
+  .ft-card { grid-template-columns: 1fr auto; grid-template-rows: auto auto; padding: 10px 8px 6px 12px; gap: 2px 8px; }
+  .ft-top { grid-column: 1 / -1; }
+  .ft-status { align-self: center; padding-left: 39px; }
+  .ft-foot { align-self: center; }
+  .ft-open { min-height: 40px; }
+}

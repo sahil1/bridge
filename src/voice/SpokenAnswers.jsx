@@ -3,6 +3,7 @@ import Icon from '../components/Icon.jsx'
 import { api } from '../api.js'
 import { how, onVoices, prefs, setPrefs, say, choice, keyOf, tier, quality, betterVoices } from './speak.js'
 import { t } from '../i18n/index.js'
+import { More } from '../components/settings/Advanced.jsx'
 import './voice.css'
 
 // Settings › Voice & Meetings › Spoken Answers: the voice that reads the Chief of Staff's answers aloud on this
@@ -72,8 +73,7 @@ export default function SpokenAnswers() {
   ].filter(Boolean)
   return (
     <section className="st-sec st-voice-out">
-      <h4>{t('Spoken Answers')}</h4>
-      <p className="muted small">{t('Hold Ask out loud above the Chief of Staff\'s message box, ask "what\'s blocked?", and its answer is read to you by a voice on this device. What you ask goes to the Chief of Staff like any message; nothing else is sent anywhere.')}</p>
+      <p className="muted small">{t('The voice that reads the Chief of Staff\'s answers to you, on this device.')} <More>{t('Hold Ask out loud above the Chief of Staff\'s message box, ask "what\'s blocked?", and its answer is read to you by a voice on this device. What you ask goes to the Chief of Staff like any message; nothing else is sent anywhere.')}</More></p>
       {err && <p className="st-note bad"><Icon name="alert" size={13} /> {err}</p>}
       {options.length > 0 && (
         <>

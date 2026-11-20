@@ -31,6 +31,7 @@ import { spawn, execFile } from 'node:child_process'
 import { DATA, ROOT, NODE } from './paths.js'
 import { machine, freeBytes, atLeast } from './machine.js'
 import { downloadError } from './speech.js'
+import { placeEn } from '../shared/places.js'
 
 // Smallest first. The llama.cpp team's own 4-bit conversions of Google's models, each pinned to the
 // revision of 19 October 2026 and its file's SHA-256 (from Hugging Face's own listing). active: the
@@ -338,7 +339,7 @@ async function start(m) {
   if (!f.ok || !f.bin) throw Object.assign(new Error(f.why || 'The local model can\'t run on this computer'), { code: 'not_here' })
   const here = runsHere(f, m.id)
   if (!here.ok) throw Object.assign(new Error(here.why), { code: 'not_here' })
-  if (!have(m.id)) throw Object.assign(new Error(`${m.label} isn't downloaded. Download it in Settings › Model Providers.`), { code: 'not_downloaded' })
+  if (!have(m.id)) throw Object.assign(new Error(`${m.label} isn't downloaded. Download it in ${placeEn('providers')}.`), { code: 'not_downloaded' })
   const port = await freePort()
   const key = crypto.randomBytes(24).toString('hex')
   const ctx = contextFor(f.machine.memGB)
@@ -399,7 +400,7 @@ async function wanted(id) {
   if (m) return m
   if (id) throw Object.assign(new Error(`There's no local model called ${String(id).replace(/^bridge:/, '')}`), { code: 'not_here' })
   const c = await chosen()
-  throw Object.assign(new Error(`${c?.label || 'The local model'} isn't downloaded. Download it in Settings › Model Providers.`), { code: 'not_downloaded' })
+  throw Object.assign(new Error(`${c?.label || 'The local model'} isn't downloaded. Download it in ${placeEn('providers')}.`), { code: 'not_downloaded' })
 }
 // Runs fn({ url, key, ctx, model }) against llama-server running that model (id; none: the one in
 // use), starting it first if need be. One that stops in the middle (a crash, or the computer short

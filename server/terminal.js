@@ -12,6 +12,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { execFile, spawn } from 'node:child_process'
 import { ROOT, NODE, cacheFile, ensureDir, IS_MAC, IS_WIN } from './paths.js'
+import { placeEn } from '../shared/places.js'
 
 const HOME = os.homedir()
 // Where Mac apps are (Terminal is in Utilities). BRIDGE_APPLICATIONS (tests): the one folder to look in.
@@ -141,7 +142,7 @@ async function openAndWait(pick, [cmd, args], token, { wait = WAIT, yourself } =
     if (r?.state === 'attached') return { app: pick.name, attached: true }
     if (r?.state === 'failed') throw new Error(`${pick.name} opened, but couldn't show the agent: ${r.error || 'the attach failed'}`)
     if (w.started) throw new Error(`${pick.name} opened, but the agent didn't show there within ${Math.round(wait / 1000)} seconds. Its window says why.`)
-    throw new Error(`${pick.name} didn't run Bridge AI's command within ${Math.round(wait / 1000)} seconds, so the agent isn't open there. Choose another app in Settings › General › Terminal app${yourself ? `, or run this in any terminal: ${yourself}` : ''}.`)
+    throw new Error(`${pick.name} didn't run Bridge AI's command within ${Math.round(wait / 1000)} seconds, so the agent isn't open there. Choose another app in ${placeEn('terminal')}${yourself ? `, or run this in any terminal: ${yourself}` : ''}.`)
   } finally {
     waiting.delete(token)
   }

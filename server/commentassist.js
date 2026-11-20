@@ -1,3 +1,4 @@
+import { placeEn } from '../shared/places.js'
 // @bridge in a comment (Comments and @bridge): AI Assist asked, in a document's
 // comment, about the words the comment is on. What it's given is that place only: the words, the
 // document around them, the thread so far and the request; what it gives back is a reply for the
@@ -59,7 +60,7 @@ export function answerOf(raw, words = '', withSlide = false) {
 // Asked and answered: { reply, change }. reply(model, messages, options): chatmodels.js's.
 export async function assist({ model, reply, ...q }) {
   const { system, prompt } = ask(q)
-  if (!model) throw Object.assign(new Error('There\'s no model for AI Assist to answer with. Sign in to an agent like Claude Code, or add a model in Settings › Model Providers.'), { code: 'no-model', status: 409 })
+  if (!model) throw Object.assign(new Error(`There's no model for AI Assist to answer with. Sign in to an agent like Claude Code, or add a model in ${placeEn('providers')}.`), { code: 'no-model', status: 409 })
   const r = await reply(model, [{ role: 'user', text: prompt }], { system, feature: 'studio' })
   return answerOf(r?.text, q.text)
 }
@@ -92,7 +93,7 @@ export function deckAsk({ request, text, shape = false, before = '', name = '', 
 }
 export async function deckAssist({ model, reply, ...q }) {
   const { system, prompt } = deckAsk(q)
-  if (!model) throw Object.assign(new Error('There\'s no model for AI Assist to answer with. Sign in to an agent like Claude Code, or add a model in Settings › Model Providers.'), { code: 'no-model', status: 409 })
+  if (!model) throw Object.assign(new Error(`There's no model for AI Assist to answer with. Sign in to an agent like Claude Code, or add a model in ${placeEn('providers')}.`), { code: 'no-model', status: 409 })
   const r = await reply(model, [{ role: 'user', text: prompt }], { system, feature: 'studio' })
   return answerOf(r?.text, q.text, true)
 }

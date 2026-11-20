@@ -5,6 +5,7 @@ import { usePersisted } from '../layout.jsx'
 import { CalendarSetup } from '../Agenda.jsx'
 import { AssistHead } from '../AiAssist.jsx'
 import { locale, t, tx } from '../../i18n/index.js'
+import { where } from '../settings/search.js'
 
 // AI Assist's Draft a reply: beside the open email, a reply drafted in your own tone and language by
 // the model you picked for meeting notes (server mailassist.js), from your How You Write profile
@@ -168,8 +169,8 @@ export function ReplyAssist({ id, data, nudge, times = false, onClose, beside })
         <div className="massist-intro">
           <p className="small">{t("AI Assist drafts a reply in your own words. To learn how you write, it reads your replies in Mail's Sent folders and what you said in recorded meetings (the lines Who spoke marks as yours) from the last four months.")}</p>
           <p className="small">{v.now.local
-            ? t('Up to 40 of each go to {model}, which runs on this computer, and a short How You Write profile is kept here, for you to read, change or clear in Settings › Mail.', { model: v.now.label })
-            : t('Up to 40 of each go to {model} once, and a short How You Write profile is kept on this computer, for you to read, change or clear in Settings › Mail.', { model: v.now.label })}</p>
+            ? t('Up to 40 of each go to {model}, which runs on this computer, and a short How You Write profile is kept here, for you to read, change or clear in {place}.', { place: where('how-you-write'), model: v.now.label })
+            : t('Up to 40 of each go to {model} once, and a short How You Write profile is kept on this computer, for you to read, change or clear in {place}.', { place: where('how-you-write'), model: v.now.label })}</p>
           <div className="massist-acts">
             <button type="button" className="btn small primary" onClick={learn} disabled={!!busy}><Icon name="wand" size={12} /> {busy === 'learn' ? t('Learning how you write…') : t('Learn how I write')}</button>
             <button type="button" className="ghost-btn" onClick={() => { setSkip(true); write({ voice: false }) }} disabled={!!busy}>{t('Draft without it')}</button>

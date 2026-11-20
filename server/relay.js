@@ -64,6 +64,7 @@ import * as shares from './shares.js'
 import { LIMITS as SHARE_LIMITS } from '../shared/shares.js'
 import { authHeaders, localKey } from './apitoken.js'
 import { plainName } from '../shared/remote.js'
+import { placeEn } from '../shared/places.js'
 
 const FILE = dataFile('relay.json')
 const WRANGLER = 'wrangler@4.149.0'
@@ -261,7 +262,7 @@ function connect() {
   const relayToken = conf.hosted ? acct?.relayTokenNow() : null
   if (conf.hosted && !relayToken) {
     const st = acct?.relayState() || {}
-    lastError = !st.signedIn ? 'Bridge AI\'s relay needs this computer signed in to your Bold Bridge account (Settings › Account & Devices).' : st.status === 'suspended' ? 'Your Bold Bridge account is suspended, so Bridge AI\'s relay doesn\'t carry this computer for now.' : st.relay !== 'approved' ? 'Your Bold Bridge account doesn\'t have Bridge AI\'s relay any more. Use your own Cloudflare or Tailscale, in Settings › Account & Devices.' : 'Getting a pass for Bridge AI\'s relay from your Bold Bridge account…'
+    lastError = !st.signedIn ? `Bridge AI's relay needs this computer signed in to your Bold Bridge account (${placeEn('account', { accounts: true })}).` : st.status === 'suspended' ? 'Your Bold Bridge account is suspended, so Bridge AI\'s relay doesn\'t carry this computer for now.' : st.relay !== 'approved' ? `Your Bold Bridge account doesn't have Bridge AI's relay any more. Use your own Cloudflare or Tailscale, in ${placeEn('phone')}.` : 'Getting a pass for Bridge AI\'s relay from your Bold Bridge account…'
     limit = { why: !st.signedIn ? 'token' : st.status === 'suspended' ? 'suspended' : st.relay !== 'approved' ? 'relay' : 'token', text: lastError, until: Date.now() + 5 * 60000 }
     if (st.signedIn && st.relay === 'approved') acct?.relayToken().then((t) => { if (t) connect() }).catch(() => {})
     retry = setTimeout(connect, 5 * 60000)
@@ -991,7 +992,7 @@ export function endViewers(id, said) { for (const c of viewing(id)) c.endView(sa
 // A one-time code for another of your devices: when one links to this one, it hands this one a
 // code to link back; when one introduces another, it asks this one for a code to hand on.
 export async function invite() {
-  if (!conf.url) throw new Error(`This device has no relay yet. Set it up in Settings › ${accountsOn() ? 'Account & Devices' : 'Devices'}.`)
+  if (!conf.url) throw new Error(`This device has no relay yet. Set it up in ${placeEn('phone')}.`)
   await key()
   const c = newPairCode()
   const { id, secret } = splitCode(c)
@@ -1461,11 +1462,11 @@ async function deployWith(token, account) {
 // line), with the code the app offers a fix for: sign in, ask for it, wait for it, or nothing to be done.
 function needsAccount(st) {
   const say = (code, text) => { throw Object.assign(new Error(text), { code }) }
-  if (!st.signedIn) say('accountSignIn', 'Bridge AI\'s relay comes with a Bold Bridge account. Sign in first, in Settings › Account & Devices: it takes your email and a code.')
+  if (!st.signedIn) say('accountSignIn', `Bridge AI's relay comes with a Bold Bridge account. Sign in first, in ${placeEn('account', { accounts: true })}: it takes your email and a code.`)
   if (st.status === 'suspended') say('accountSuspended', 'Your Bold Bridge account is suspended, so it can\'t use Bridge AI\'s relay for now. Your own Cloudflare or Tailscale still work.')
   if (st.relay === 'requested') say('accountRequested', 'You\'ve asked for Bridge AI\'s relay, and the request is waiting. Bold Bridge emails you when it\'s on.')
-  if (st.relay === 'declined') say('accountDeclined', 'Your request for Bridge AI\'s relay was declined. Ask again in Settings › Account & Devices, or use your own Cloudflare or Tailscale.')
-  if (st.relay !== 'approved') say('accountRequest', 'Your Bold Bridge account doesn\'t have Bridge AI\'s relay yet. Ask for it in Settings › Account & Devices.')
+  if (st.relay === 'declined') say('accountDeclined', `Your request for Bridge AI's relay was declined. Ask again in ${placeEn('account', { accounts: true })}, or use your own Cloudflare or Tailscale.`)
+  if (st.relay !== 'approved') say('accountRequest', `Your Bold Bridge account doesn't have Bridge AI's relay yet. Ask for it in ${placeEn('account', { accounts: true })}.`)
 }
 
 // Using it by itself (accountChanged, and as Bridge AI starts): once the account signed in here has

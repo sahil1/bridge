@@ -4,6 +4,7 @@ import AgentMark from './settings/agentMark.jsx'
 import { AllowKeychain, nameOf } from './AccountMenu.jsx'
 import { api, refetch, viaRelay } from '../api.js'
 import { t, tx } from '../i18n/index.js'
+import { where } from './settings/search.js'
 import './addAccount.css'
 
 // Another sign-in for Claude Code or Codex (as many as you like, each named as you like), in one
@@ -206,7 +207,7 @@ export default function AddAccount({ initial = {}, onClose, onStart, onOpenAgent
           <form className="aa-body" onSubmit={create}>
             <p className="aa-lead">{t('Add as many {agent} accounts as you like and name each one: Work main, Work backup, Personal. Each agent you start runs on one of them, with its own sign-in and plan. Settings, skills and history stay shared.', { agent: agentName })}</p>
             {loadErr && <p className="error-text">{loadErr}</p>}
-            {groups && !kinds.length && <p className="na-warn">{t('Install Claude Code or Codex first (Settings › Agents).')}</p>}
+            {groups && !kinds.length && <p className="na-warn">{t('Install Claude Code or Codex first ({place}).', { place: where('agents') })}</p>}
             {kinds.length > 1 && (
               <div className="na-field">
                 <span className="na-label">{t('Agent')}</span>
@@ -225,7 +226,7 @@ export default function AddAccount({ initial = {}, onClose, onStart, onOpenAgent
             </label>
             <div className="aa-suggest">
               {SUGGEST.map((s) => t(s)).filter((s) => !taken.has(s.toLowerCase())).slice(0, 3).map((s) => <button type="button" key={s} className="fchip" onClick={() => setLabel(s)}>{s}</button>)}
-              {group && <span className="muted small">{t('You have: {accounts}. Rename any of them in Settings › Model Providers.', { accounts: group.accounts.map((a) => (a.isDefault && a.named !== false ? t('{name} (your usual login)', { name: a.label }) : nameOf(a))).join(', ') })}</span>}
+              {group && <span className="muted small">{t('You have: {accounts}. Rename any of them in {place}.', { place: where('accounts'), accounts: group.accounts.map((a) => (a.isDefault && a.named !== false ? t('{name} (your usual login)', { name: a.label }) : nameOf(a))).join(', ') })}</span>}
             </div>
             {err && <p className="error-text" role="alert">{err}</p>}
             <footer className="modal-foot">

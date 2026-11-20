@@ -5,7 +5,7 @@ import { THEMES, TEXT_SIZES, FONTS, DEFAULTS, useAppearance, resolve, isDark, va
 import { PINS, usePins, setPin } from '../pins.js'
 import { cloudOnly } from '../api.js'
 import { t, tx, LANGS, chosen, setLang } from '../i18n/index.js'
-import { Advanced } from './settings/Advanced.jsx'
+import { Advanced, More } from './settings/Advanced.jsx'
 
 // Preferences › Appearance, laid out like Slack's: color mode, theme, text size and language; under
 // Advanced, density, the font, sharing a theme, what's in the top bar and Reset.
@@ -81,7 +81,7 @@ function TopBarPins() {
   return (
     <section className="ap-sec" id="st-topbar" data-setting="topbar">
       <h4>{t('In the Top Bar')}</h4>
-      <p className="muted small" title={t('What shows in the top bar beside what needs you, search and the next meeting. Each is in the Status menu too, with a pin that does the same. On a smaller window they become icons first, then move into Status.')}>{t('Each is in the Status menu too, with a pin that does the same.')}</p>
+      <p className="muted small">{t('Each is in the Status menu too, with a pin that does the same.')} <More>{t('What shows in the top bar beside what needs you, search and the next meeting. Each is in the Status menu too, with a pin that does the same. On a smaller window they become icons first, then move into Status.')}</More></p>
       <div className="ap-pins">
         {PINS.map((x) => (
           <label key={x.id} className="st-check"><input type="checkbox" role="switch" checked={!!pins[x.id]} onChange={(e) => setPin(x.id, e.target.checked)} />
@@ -121,7 +121,7 @@ export default function Appearance() {
 
         <section className="ap-sec" data-setting="theme">
           <h4>{t('Theme')}</h4>
-          <p className="muted small" title={t('Colors the window frame (top bar, sidebar and tabs) and the accent. Each theme has its own dark-mode shade.')}>{t('The window frame and the accent, light and dark.')}</p>
+          <p className="muted small">{t('The window frame and the accent, light and dark.')} <More>{t('Colors the window frame (top bar, sidebar and tabs) and the accent. Each theme has its own dark-mode shade.')}</More></p>
           <div className="ap-themes">
             {THEMES.map((th) => {
               const c = resolve({ ...a, theme: th.id }, dark)
@@ -147,11 +147,11 @@ export default function Appearance() {
 
         <section className="ap-sec ap-rows">
           <div className="ap-row" data-setting="text-size">
-            <div><h4>{t('Text Size')}</h4><p className="muted small" title={t('Chat, the message box and the terminal. ⌘+ and ⌘− zoom everything.')}>{t('⌘+ and ⌘− zoom everything.')}</p></div>
+            <div><h4>{t('Text Size')}</h4><p className="muted small">{t('⌘+ and ⌘− zoom everything.')} <More>{t('Chat, the message box and the terminal. ⌘+ and ⌘− zoom everything.')}</More></p></div>
             <Seg label={t('Text Size')} value={a.text} options={TEXT_SIZES} onChange={(v) => save({ text: v })} />
           </div>
           <div className="ap-row" data-setting="language">
-            <div><h4>{t('Language')}</h4><p className="muted small" title={t('Bridge AI\'s own words. Not every screen is translated yet; the rest shows in English.')}>{t('Not every screen is translated yet.')}</p></div>
+            <div><h4>{t('Language')}</h4><p className="muted small">{t('Not every screen is translated yet.')} <More>{t('Bridge AI\'s own words. Not every screen is translated yet; the rest shows in English.')}</More></p></div>
             <select className="st-input ap-lang" aria-label={t('Language')} value={chosen()} onChange={(e) => setLang(e.target.value)}>
               <option value="auto">{t('Match this computer')}</option>
               {LANGS.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}

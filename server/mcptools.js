@@ -12,6 +12,7 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { asData, clean, SHAPES_URI } from './mcpdefs.js'
+import { placeEn } from '../shared/places.js'
 
 const PAGE = 12_000
 const MAX_READ = 400_000
@@ -33,7 +34,7 @@ const why = (e) => Object.assign(new Error(e), { said: true })
 // agents(): the agents running ({ paneId, name, kind, status, folder }); deliver(paneId, text): sends
 // a message to one, now or once it's free; outside: outside.js.
 export function make({ on, sendOn, boards, meetings, places, files, studio, doctext, tasks, agents, deliver, outside }) {
-  const OFF = 'Bridge AI\'s MCP server is turned off. The user can turn it on in Bridge AI: Settings › MCP Servers › Bridge AI as an MCP Server.'
+  const OFF = `Bridge AI's MCP server is turned off. The user can turn it on in Bridge AI: ${placeEn('mcp-server')}.`
 
   // ---------- Places, and where things are ----------
   // A place's name in an address: its folder's name, or with its id when two share one.
@@ -300,7 +301,7 @@ export function make({ on, sendOn, boards, meetings, places, files, studio, doct
     let r
     try {
       if (!on()) throw why(OFF)
-      if (name === 'bridge_send_to_agent' && !sendOn()) throw why('Sending to agents is turned off in Bridge AI (Settings › MCP Servers).')
+      if (name === 'bridge_send_to_agent' && !sendOn()) throw why(`Sending to agents is turned off in Bridge AI (${placeEn('mcp-server')}).`)
       if (times.length > PER_MINUTE) throw why(`That's more than ${PER_MINUTE} calls a minute: wait a minute and try again.`)
       r = await RUN[name](args || {}, client)
     } catch (e) {

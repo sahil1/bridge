@@ -1,11 +1,12 @@
 // Setting up a bot, as someone does it the first time, in the browser named by BRIDGE_TEST_BROWSER,
 // with stand-ins for Slack, Discord and Microsoft Teams (stand-ins/slack.mjs, discord.mjs,
 // teams.mjs) and Claude Code answering (stand-ins/helper-claude.cjs).
-//   Beta Features: the Bots line says where to start, and turned on offers Set up a bot, which
-//   opens Bots. With no bot yet, Make Your First Bot says what one is in a line, and AI Assist with no
-//   model offers the form. A bot made, its page says it isn't reached anywhere yet, with Open in
-//   Connections; there, each app of its own (Slack, Discord, Teams) has its checklist on its card:
-//   seven steps from the bot made to its first answer, each with the clicks on that
+//   Beta Features: the Bots line says what it is (all of it under More) and goes to its own place,
+//   Settings › Bots, and turned on offers Set up a bot, which opens Bots. With no bot yet, Make Your
+//   First Bot says what one is in a line, and AI Assist with no model offers the form. A bot made,
+//   its page says it isn't reached anywhere yet, with Open in Connections; there, each app of its
+//   own (Slack, Discord, Teams) has its checklist on its card: seven steps from the bot made to its
+//   first answer, each with the clicks on that
 //   platform's own site, a button to the page where there is one, and what to do when it doesn't
 //   work. Each step ticks itself as it's done: the app and its tokens, connected, you there,
 //   invited (or added to a server, or to Teams), and its first answer sent. All done, it folds away
@@ -44,9 +45,12 @@ try {
   // ---------- Where to start ----------
   await part('where to start', async () => {
     await openSettings(p, 'about', '.modal.settings [data-setting="beta"]')
-    const line = p.locator('[data-setting="beta"] label.st-check', { hasText: /^Bots/ })
-    const hint = await line.locator('span[title]').first().getAttribute('title')
-    ok(/Slack, Discord and Microsoft Teams/.test(hint || '') && /To start: Bots in the sidebar\.$/.test(hint || ''), 'the Bots beta feature says what it is, and ends with where to start', hint)
+    const row = p.locator('[data-setting="beta"] .ab-trial[data-beta="slack-bot"]')
+    const line = row.locator('label.st-check', { hasText: /^Bots/ })
+    await line.locator('.st-more').click()
+    const hint = await line.locator('.st-more-text').innerText().catch(() => '')
+    const way = (await row.locator('.ab-trial-at').innerText().catch(() => '')).trim()
+    ok(/Slack, Discord and Microsoft Teams/.test(hint) && /^Bots$/.test(way) && !(await line.locator('input[type="checkbox"]').isChecked()), 'the Bots beta feature says what it is (under More), and has the way to where it starts, Settings › Bots', { hint, way })
     ok(!(await p.locator('[data-setting="beta-bots-start"]').count()), 'off: no Set up a bot')
     await line.locator('input[type="checkbox"]').check()
     const start = p.locator('[data-setting="beta-bots-start"] button', { hasText: 'Set up a bot' })

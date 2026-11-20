@@ -152,6 +152,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { dataFile, ensureDir, writeFileAtomic, IS_WIN } from './paths.js'
+import { placeEn } from '../shared/places.js'
 import { makeTasks } from './chieftasks.js'
 import { adapter, readOnly, keptProblem } from './agents.js'
 import { locate as findTranscript, transcript } from './transcripts.js'
@@ -1504,7 +1505,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     if (!pickd) {
       next(id)
       const why = (q.skips || []).map((x) => `${x.label}: ${x.why}`)
-      return toYou(id, q, !list.length ? 'Nothing here can answer for it: install Claude Code or Codex, or add a model in Settings › Model Providers' : `Nothing could answer it${!fallback ? ' (fallback is off)' : ''}: ${why.join('; ') || 'none of its list is here'}`)
+      return toYou(id, q, !list.length ? `Nothing here can answer for it: install Claude Code or Codex, or add a model in ${placeEn('providers')}` : `Nothing could answer it${!fallback ? ' (fallback is off)' : ''}: ${why.join('; ') || 'none of its list is here'}`)
     }
     const entry = pickd.e
     const kind = entry.kind === 'agent' ? entry.agent : 'model'
@@ -3294,7 +3295,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     }
     // (A change to files, or a request held before it started: writeAct.)
     if (['wok', 'wview', 'wno', 'sok', 'sno', 'undo'].includes(a.act)) return writeAct(id, a)
-    if (!bot.owner?.id) return { ok: false, error: 'Link yourself under You Here in Bridge AI first (Bots › Connections)' }
+    if (!bot.owner?.id) return { ok: false, error: `Link yourself under You Here in Bridge AI first (${placeEn('connections')})` }
     if (a.user?.id !== bot.owner.id) return { ok: false, error: `Only ${you()} can decide this` }
     const by = `${bot.owner.name || you()}`
     try {

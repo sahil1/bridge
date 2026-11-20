@@ -20,6 +20,7 @@ import { hiddenAgent, hiddenProvider, hiddenModel, OFF } from './labs.js'
 import * as accounts from './accounts.js'
 import * as usagelog from './usagelog.js'
 import * as counts from './counts.js'
+import { placeEn } from '../shared/places.js'
 
 const DIR = () => ensureDir(dataFile('consult'))
 // BRIDGE_ANTHROPIC_URL (tests): a stand-in for Anthropic's API.
@@ -159,7 +160,7 @@ export async function options() {
       const a = API[c.api]
       if (a.local ? local : keyFor(a)) return { ...c, available: true, via: 'api', route: a.local ? localRoute(local) : `${a.label} key`, ...(a.local ? { model: local.id } : {}) }
     }
-    const need = [c.cli && (have.has(c.cli) ? `sign in to ${adapter(c.cli).label}` : `install ${adapter(c.cli).label}`), c.api && (API[c.api].local ? 'run Ollama or LM Studio, or download the local model in Settings › Model Providers' : `add your ${API[c.api].label} key in Settings › Model Providers`)].filter(Boolean).join(' or ')
+    const need = [c.cli && (have.has(c.cli) ? `sign in to ${adapter(c.cli).label}` : `install ${adapter(c.cli).label}`), c.api && (API[c.api].local ? `run Ollama or LM Studio, or download the local model in ${placeEn('providers')}` : `add your ${API[c.api].label} key in ${placeEn('providers')}`)].filter(Boolean).join(' or ')
     return { ...c, available: false, via: null, route: need }
   })
 }
@@ -242,7 +243,7 @@ async function runApi(id, prompt, model, feature, ms = TIMEOUT) {
   const a = API[id]
   if (a.local) {
     const m = await localModel(model)
-    if (!m) throw new Error('No model is running on this computer. Start Ollama or LM Studio, download the local model in Settings › Model Providers, or pick another consultant.')
+    if (!m) throw new Error(`No model is running on this computer. Start Ollama or LM Studio, download the local model in ${placeEn('providers')}, or pick another consultant.`)
     const r = await (await chat()).reply(m.id, [{ role: 'user', text: prompt }], { system: 'You answer a one-off question directly and accurately. Say so when you are not sure.', feature })
     return { text: r.text, model: m.id, route: localRoute(m) }
   }
@@ -290,7 +291,7 @@ const SEARCH_MS = 60_000
 export async function search(question, { feature = 'assist' } = {}) {
   const q = String(question || '').replace(/\s+/g, ' ').trim().slice(0, 300)
   if (!q) throw new Error('Nothing to look up')
-  if (!searchVia()) throw new Error('No web search is set up: add a Perplexity key in Settings › Model Providers.')
+  if (!searchVia()) throw new Error(`No web search is set up: add a Perplexity key in ${placeEn('providers')}.`)
   // (What a refusal says, without consult's tip on picking another model: a key turned down isn't that.)
   const r = await runApi('perplexity', `Answer in one to three plain sentences, from what the web says now: ${q}`, conf.consult?.models?.perplexity, feature, SEARCH_MS)
     .catch((e) => { throw new Error(String(e.message).replace(/\.? Set another model with [\s\S]*$/, '').replace(/\.?$/, '.')) })

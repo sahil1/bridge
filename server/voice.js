@@ -15,6 +15,7 @@ import { IS_MAC, brewInstall } from './paths.js'
 import { tool } from './fixes.js'
 import * as speech from './speech.js'
 import * as memory from './meetmemory.js'
+import { placeEn } from '../shared/places.js'
 
 let cfg = {}
 export const configure = (c) => { cfg = c || {} }
@@ -122,7 +123,7 @@ async function viaFfmpeg(audio, type) {
 function notYet(s) {
   const m = s.model
   if (s.needs === 'model') return Object.assign(new Error(`Speech to text needs a one-time download: ${m.label}, ${m.mb} MB. It stays on this computer, and so does what you say.`), { code: 'needs-model', status: 409, model: m })
-  return Object.assign(new Error(`${m.label} needs whisper.cpp, which isn't on this computer. Set it up in Settings › Voice & Meetings, or pick Parakeet there.`), { code: s.needs === 'brew' ? 'needs-brew' : 'needs-whisper', status: 409, model: m })
+  return Object.assign(new Error(`${m.label} needs whisper.cpp, which isn't on this computer. Set it up in ${placeEn('voice')}, or pick Parakeet there.`), { code: s.needs === 'brew' ? 'needs-brew' : 'needs-whisper', status: 409, model: m })
 }
 
 // The names Parakeet listens for in a voice note, besides yours: the agents' and what they work in.

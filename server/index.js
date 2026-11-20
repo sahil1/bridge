@@ -151,6 +151,7 @@ import * as agentMap from './agentmap.js'
 import * as home from './home.js'
 import * as engagedJs from './engaged.js'
 import { blocking, isQuiet } from '../shared/focus.js'
+import { placeEn } from '../shared/places.js'
 
 ensureDir(DATA)
 // Meetings, transcripts, settings and keys: for you only, not other people with an account on this
@@ -583,7 +584,7 @@ const rootOf = async (pane) => {
 // Files (Folders, now Studio's home) and Recommended Settings, part of the app since 3.19.0.
 const TRIALS = ['home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'routines', 'mcp-server', 'meeting-board', 'assist-answers', 'call-video', 'slack-bot', 'remote-screen']
 const trialOn = (id) => cfg.trials?.[id] === true
-const trialOff = (id, label) => (req, res, next) => (trialOn(id) ? next() : res.status(404).json({ error: `${label} is a beta feature. Turn it on in Settings › About & Updates › Beta Features.`, trial: id }))
+const trialOff = (id, label) => (req, res, next) => (trialOn(id) ? next() : res.status(404).json({ error: `${label} is a beta feature. Turn it on in ${placeEn('beta')}.`, trial: id }))
 
 // ---------- Studio's home: your folders (explorer.js) ----------
 // Your folders as Finder shows them: its sidebar, a folder's listing, Get Info, a folder's size and a
@@ -613,7 +614,7 @@ app.use('/api/agents/:pane', async (req, res, next) => {
 // through these routes; and only while Bots is on.
 app.use('/api/agents/:pane', (req, res, next) => {
   if (!String(req.params.pane).startsWith('botfiles:')) return next()
-  if (!trialOn('slack-bot')) return res.status(404).json({ error: 'Bots is a beta feature. Turn it on in Settings › About & Updates › Beta Features.', trial: 'slack-bot' })
+  if (!trialOn('slack-bot')) return res.status(404).json({ error: `Bots is a beta feature. Turn it on in ${placeEn('bots')}.`, trial: 'slack-bot' })
   if (['GET', 'HEAD'].includes(req.method)) return next()
   if (req.method === 'POST' && req.path === '/fileop' && LOOK_ONLY.has(req.body?.op)) {
     // (Opened in its app only when it can't run anything as it opens; the rest shown in Finder.)
@@ -805,7 +806,7 @@ app.post('/api/studio/deck/ai', wrap(async (req) => {
   if (mode === 'deck' && !String(b.prompt || '').trim() && !source) throw new Error('Say what the deck is about, or pick a document to make it from')
   const ask = studio.deckAsk({ mode, prompt: b.prompt, slides: Array.isArray(b.slides) ? b.slides.map(String) : [], at: b.at, source: source?.text, sourceName: source?.name, count: b.count })
   const use = String(b.model || '') || cfg.meetings?.model || await pickModelFor('assist', { text: ask.prompt })
-  if (!use) throw Object.assign(new Error('No model to write with yet: sign in to an agent (Claude Code, Codex…) or add a key in Settings › Model Providers.'), { code: 'noModel' })
+  if (!use) throw Object.assign(new Error(`No model to write with yet: sign in to an agent (Claude Code, Codex…) or add a key in ${placeEn('providers')}.`), { code: 'noModel' })
   const r = await replyFor('assist')(use, [{ role: 'user', text: ask.prompt }], { system: ask.system, feature: 'studio' })
   return { ...studio.deckAnswer(r?.text), model: r.model, by: await byName(r.model) }
 }))
@@ -818,7 +819,7 @@ const sheetAi = async (req, thread = null) => {
   const book = b.mode === 'book' && !thread
   const ask = book ? studio.bookAsk({ instruction: b.instruction, rel: sq(req).path }) : studio.sheetAsk({ rel: sq(req).path, instruction: b.instruction, selection: b.selection, where: b.where, sheet: b.sheet, sheets: b.sheets, used: b.used, thread })
   const use = String(b.model || '') || await studioModel(ask.prompt)
-  if (!use) throw Object.assign(new Error('No model to answer with yet: sign in to an agent (Claude Code, Codex…) or add a key in Settings › Model Providers.'), { code: 'noModel' })
+  if (!use) throw Object.assign(new Error(`No model to answer with yet: sign in to an agent (Claude Code, Codex…) or add a key in ${placeEn('providers')}.`), { code: 'noModel' })
   const r = await replyFor('assist')(use, [{ role: 'user', text: ask.prompt }], { system: ask.system, json: book ? studio.BOOK_SCHEMA : studio.SHEET_SCHEMA, feature: 'studio' })
   const d = (await chatModels.models().catch(() => [])).find((x) => x.id === r.model)
   return { ...(book ? studio.bookAnswer(r?.text) : studio.sheetAnswer(r?.text)), model: r.model, by: d?.label || String(r.model).split(':').slice(1).join(':') || r.model }
@@ -1544,7 +1545,7 @@ app.post('/api/routines/:id/run', wrap(async (req) => {
 async function startRoutine(def) {
   // A bot's scheduled post: put to the bot, answered and posted in its channel (frontdesk.js).
   if (def.to === 'bot') {
-    if (!botsOn()) throw new Error('Bots is off: turn it on in Settings › About & Updates › Beta Features')
+    if (!botsOn()) throw new Error(`Bots is off: turn it on in ${placeEn('bots')}`)
     const out = await desk.scheduled(def.bot, { routine: def.id, name: def.name, channel: def.channel, text: def.command })
     pushFleet()
     return out
@@ -2118,7 +2119,7 @@ app.delete('/api/speech/models/:id', wrap(async (req) => { await speech.removeMo
 app.post('/api/speech/install', wrap(async (req) => {
   onComputer(req)
   const s = await speech.status(cfg)
-  if (!s.local.installCommand) throw new Error(s.local.program ? 'whisper.cpp is already installed' : 'Install Homebrew first (brew.sh), or pick a service in Settings › Voice & Meetings')
+  if (!s.local.installCommand) throw new Error(s.local.program ? 'whisper.cpp is already installed' : `Install Homebrew first (brew.sh), or pick a service in ${placeEn('meetings')}`)
   return { openId: await setupTab('Install whisper.cpp', s.local.installCommand) }
 }))
 // The list without each meeting's pictures and files (counts only): they can be long.
@@ -3395,7 +3396,7 @@ app.post('/api/account/offer', wrap(async (req) => {
   if (!viaMachine(req)) throw Object.assign(new Error('Only another of your computers hands this one a sign-in'), { status: 403 })
   const by = relay.deviceOf(req.headers['x-bridge-relay'])?.name || 'Another of your computers'
   const r = await account.redeem({ grant: req.body?.grant, by })
-  if (r.ok) notify.send({ kind: 'machine', title: `${by} signed this computer in to Bold Bridge`, body: `As ${account.status().account?.email}. If you'd rather it weren't, sign it out in Settings › Account.`, url: '/#settings/account', tag: 'account-followed' }).catch(() => {})
+  if (r.ok) notify.send({ kind: 'machine', title: `${by} signed this computer in to Bold Bridge`, body: `As ${account.status().account?.email}. If you'd rather it weren't, sign it out in ${placeEn('account', { accounts: true })}.`, url: '/#settings/account', tag: 'account-followed' }).catch(() => {})
   return r
 }))
 
@@ -4270,7 +4271,7 @@ app.all('/mcp', async (req, res) => {
   if (req.headers.origin) return no(403, -32600, 'Not from a web page')
   if (!/^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i.test(req.headers.host || '') || req.headers['x-bridge-relay']) return no(403, -32600, 'Only at this computer\'s own address')
   if (!/^Bearer\s+\S+/i.test(req.headers.authorization || '')) return res.status(401).set('WWW-Authenticate', 'Bearer').json({ error: 'Send Bridge AI\'s key as Authorization: Bearer <key> (it\'s in api-token in Bridge AI\'s data folder)' })
-  if (!mcpOn()) return no(404, -32600, 'Bridge AI as an MCP server is turned off (Settings › MCP Servers)')
+  if (!mcpOn()) return no(404, -32600, `Bridge AI as an MCP server is turned off (${placeEn('mcp')})`)
   if (req.method !== 'POST') return res.status(405).set('Allow', 'POST').json({ error: 'POST one JSON-RPC message' })
   const msg = req.body
   const asked = String(req.headers['mcp-protocol-version'] || '')
@@ -4595,7 +4596,7 @@ app.get('/api/bots/templates', botsGuard, wrapBot(async () => {
 // ---------- Setting a bot up by saying what it's for (botsetup.js) ----------
 // AI Assist's model (the one picked for Studio, else the one AI Assist reaches first: studioModel),
 // asked for a bot from your words, with the folders, MCP servers, templates and agents it may pick from.
-const NO_MODEL = 'There\'s no model for AI Assist to set it up with. Sign in to an agent like Claude Code, or add a model in Settings › Model Providers.'
+const NO_MODEL = `There's no model for AI Assist to set it up with. Sign in to an agent like Claude Code, or add a model in ${placeEn('providers')}.`
 async function setupAsk(system, prompt) {
   let model
   try { model = await studioModel(prompt) } catch (e) { throw Object.assign(e, { code: e.code === 'local_missing' ? 'no-model' : e.code }) }
@@ -4780,7 +4781,7 @@ app.post('/api/bots/:id/assist/apply', botsGuard, wrapBot(async (req) => {
   for (const l of s.change.lines) { const k = SETTING_OF[l.key]; if (k && patch[k] !== undefined) x[k] = patch[k] }
   // Posts on a schedule (Scheduled Routines): each in a channel it's in, checked before anything's kept.
   const posts = s.change.lines.some((l) => l.key === 'posts') ? s.change.proposal.posts || [] : []
-  if (posts.length && !trialOn('routines')) throw new Error('Scheduled posts need Scheduled Routines: turn it on in Settings › About & Updates › Beta Features')
+  if (posts.length && !trialOn('routines')) throw new Error(`Scheduled posts need Scheduled Routines: turn it on in ${placeEn('beta')}`)
   const where = posts.map((pp) => ({ pp, c: known.channels.find((c) => String(c.name || '').toLowerCase() === pp.channel) }))
   const notIn = where.filter((w) => !w.c).map((w) => `#${w.pp.channel}`)
   if (notIn.length) throw new Error(`${b.name} isn't in ${notIn.join(', ')}${known.channels.length ? '' : ' (it isn\'t connected yet)'}: invite it there first, then say it again`)
@@ -5065,7 +5066,7 @@ async function checkSettings(b, x, req) {
     const want = [...new Set(x.mcp.map((n) => String(n || '').trim()).filter(Boolean))].slice(0, 20)
     const have = botMcp.names()
     const bad = want.filter((n) => !have.includes(n) && !(b.mcp || []).includes(n))
-    if (bad.length) throw new Error(`${bad.join(', ')} ${bad.length === 1 ? 'isn\'t one of your MCP servers' : 'aren\'t among your MCP servers'} in Claude Code (Settings › MCP Servers)`)
+    if (bad.length) throw new Error(`${bad.join(', ')} ${bad.length === 1 ? 'isn\'t one of your MCP servers' : 'aren\'t among your MCP servers'} in Claude Code (${placeEn('mcp')})`)
     next.mcp = want
   }
   return next
@@ -5667,7 +5668,7 @@ app.post('/api/bots/import', botsGuard, wrapBot(async (req) => {
   const problems = [
     ...r.problems,
     ...(r.renamed ? [`There's a bot called ${r.bot.name.replace(/ \(\d+\)$/, '')} here already, so this one is ${r.bot.name}`] : []),
-    'Connect its Slack app here: in Bots › Connections, it\'s reached through your shared connection, or give it an app of its own there. (A bot\'s tokens never go in its file.)',
+    `Connect its Slack app here: in ${placeEn('connections')}, it's reached through your shared connection, or give it an app of its own there. (A bot's tokens never go in its file.)`,
     'If it answered in Discord or Teams too, the same goes for those.',
   ]
   pushFleet()

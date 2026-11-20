@@ -5,6 +5,7 @@ import { usePersisted } from '../layout.jsx'
 import { openSettings } from '../SignIn.jsx'
 import { md } from './ask.jsx'
 import { t, locale } from '../../i18n/index.js'
+import { where as placeIn } from '../settings/search.js'
 
 // A meeting's action items, each turned into work in one click: Start an agent (in the project
 // it's about, on its own branch, told what was said about it; you confirm the project first) or To
@@ -110,7 +111,7 @@ function StartAgent({ id, item, onStarted, onCancel }) {
       {where === ':other' && <input className="mt-start-dir" value={other} onChange={(e) => setOther(e.target.value)} placeholder="~/code/project" aria-label={t('Folder')} autoFocus />}
       {picked && <p className="muted small mt-start-why">{picked.why.map(why).join(' · ')} · {picked.short}</p>}
       {none ? (
-        <p className="muted small">{t('No agents on this computer yet.')} <button type="button" className="link-btn" onClick={() => openSettings('agents')}>{t('Install one in Settings › Agents')}</button></p>
+        <p className="muted small">{t('No agents on this computer yet.')} <button type="button" className="link-btn" onClick={() => openSettings('agents')}>{t('Install one in {place}', { place: placeIn('agents') })}</button></p>
       ) : (
         <label className="mt-start-row"><span>{t('Agent')}</span>
           <select value={kind} onChange={(e) => setKind(e.target.value)} aria-label={t('Agent')}>{(kinds || []).map((k) => <option key={k.kind} value={k.kind}>{k.label}</option>)}</select>

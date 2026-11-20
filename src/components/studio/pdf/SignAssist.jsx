@@ -9,6 +9,7 @@ import { pageData, pagesText } from './read.js'
 import { SignatureCard } from './Signatures.jsx'
 import { KIND } from './Marks.jsx'
 import { AssistHead } from '../../AiAssist.jsx'
+import { where } from '../../settings/search.js'
 
 // AI Assist's Sign this, beside a PDF: one step at a time, as calm as its suggestions in a meeting.
 //   1. What you're signing: the model you pick reads its text and says, in plain words, what it is,
@@ -161,7 +162,7 @@ function Explain({ file, pdf, setup, said, onSaid, onPoint, onNext, onSkip }) {
           <p className="muted small sd-sent"><Icon name={local ? 'laptop' : 'cloud'} size={11} /> {local ? t('Its text goes to {model}, on this computer: it doesn\'t leave it. Your signature is never sent.', { model: name }) : t('Its text goes to {model} to be explained. Your signature is never sent.', { model: name })}</p>
         </>
       ) : (
-        <p className="sd-warn small" role="alert"><Icon name="alert" size={11} /> {t('There\'s no model to read it with yet. Sign in to an agent, or add a key or a model on this computer in Settings › Model Providers. You can skip this and sign anyway.')}{' '}
+        <p className="sd-warn small" role="alert"><Icon name="alert" size={11} /> {t('There\'s no model to read it with yet. Sign in to an agent, or add a key or a model on this computer in {place}. You can skip this and sign anyway.', { place: where('providers') })}{' '}
           <button type="button" className="link-btn" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'providers' } }))}>{t('Model Providers')}</button></p>
       )}
       {err && <p className="error-text small" role="alert">{t("Couldn't explain it: {error}", { error: err })}</p>}

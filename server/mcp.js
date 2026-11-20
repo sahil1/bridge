@@ -27,6 +27,7 @@ import { parse as parseToml, stringify as stringifyToml } from 'smol-toml'
 import { loginPath, adapter } from './agents.js'
 import { writeFileAtomic, DATA, ROOT, NODE } from './paths.js'
 import { MCP_CATALOG } from '../src/components/settings/mcpCatalog.js'
+import { placeEn } from '../shared/places.js'
 
 const TEST_HOME = process.env.BRIDGE_MCP_HOME ? path.resolve(process.env.BRIDGE_MCP_HOME) : null
 const HOME = TEST_HOME || os.homedir()
@@ -543,7 +544,7 @@ export function bridgeCommand({ data = DATA } = {}) {
   const cli = path.join(ROOT, 'scripts', 'cli.js')
   if (process.platform === 'win32') return { command: NODE.bin, args: [cli, 'mcp'], env }
   const file = path.join(data, 'bin', 'bridge-ai-mcp')
-  const text = `#!/bin/sh\n# Bridge AI as an MCP server (bridge-ai mcp), for the apps Settings › MCP Servers added it to.\n# Bridge AI writes this again each time it starts, with where it is now.\n${Object.entries(env).map(([k, v]) => `${k}=${sh(v)} `).join('')}exec ${sh(NODE.bin)} ${sh(cli)} mcp "$@"\n`
+  const text = `#!/bin/sh\n# Bridge AI as an MCP server (bridge-ai mcp), for the apps ${placeEn('mcp-server')} added it to.\n# Bridge AI writes this again each time it starts, with where it is now.\n${Object.entries(env).map(([k, v]) => `${k}=${sh(v)} `).join('')}exec ${sh(NODE.bin)} ${sh(cli)} mcp "$@"\n`
   try { if (readText(file) !== text) { fs.mkdirSync(path.dirname(file), { recursive: true }); writeFileAtomic(file, text, { mode: 0o700 }) } } catch { /* said when it's added */ }
   return { command: file, args: [], env: {} }
 }

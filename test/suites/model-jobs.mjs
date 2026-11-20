@@ -1,5 +1,5 @@
-// A model for each kind of job (server/modeljobs.js, modellist.js; Settings › Model Providers ›
-// Models for Each Task), with the stand-in model as OpenAI, a stand-in Ollama (stand-ins/
+// A model for each kind of job (server/modeljobs.js, modellist.js; Settings › Agents & Models ›
+// Which Model Does What › Models for Each Task), with the stand-in model as OpenAI, a stand-in Ollama (stand-ins/
 // local-model.mjs), a stand-in for Anthropic's API here that can say it's over its limit, and LM
 // Studio not running. Nothing goes to a real provider: a model whose key isn't there is passed over
 // before it's tried.
@@ -9,12 +9,12 @@
 //   A job's own list (modeljobs.js): kept as ids, each once, at most six; its first that can run now,
 //   the ones before it passed over with why; none, an error saying why rather than anything else.
 //   The server: every model and the providers a key would reach, to pick from; the pick used for
-//   meeting notes, diagrams and AI Assist; a pick where it's used still first (Settings › Voice &
-//   Meetings, a meeting's own); a provider over its limit and one with no key passed over for the
+//   meeting notes, diagrams and AI Assist; a pick where it's used still first (Settings › Meetings &
+//   Voice, a meeting's own); a provider over its limit and one with no key passed over for the
 //   next, each said in the job's last run, the usage log and under the notes; a list none of which
 //   can run says so and runs nothing; a model on this computer that can't run never goes elsewhere
 //   unless the list says so.
-//   Settings › Model Providers: a row for each job, Automatic with where it runs, the picker by
+//   Settings › Agents & Models › Which Model Does What: a row for each job, Automatic with where it runs, the picker by
 //   provider and searchable, a model with no key yet opening its provider's key form there and the
 //   row saying it can't run until there's one, fallbacks added, moved and removed, back to
 //   Automatic, the last run; on a phone's screen too, with nothing wider than it.
@@ -106,8 +106,8 @@ try {
   // A pick where it's used still comes first.
   await kit.api('/settings', { meetings: { model: 'openai:gpt-5' } }, 'PATCH')
   let n = openaiAsked()
-  m = await notes('Voice & Meetings picks')
-  ok(m.summaryModel === 'openai:gpt-5' && openaiAsked() > n, 'Settings › Voice & Meetings\' model still comes first', m.summaryModel)
+  m = await notes('Meetings & Voice picks')
+  ok(m.summaryModel === 'openai:gpt-5' && openaiAsked() > n, 'Settings › Meetings & Voice\' model still comes first', m.summaryModel)
   await kit.api('/settings', { meetings: { model: null } }, 'PATCH')
   m = await notes('The meeting picks', 'anthropic:claude-opus-5-5')
   ok(m.summaryModel === 'anthropic:claude-opus-5-5', 'and so does a meeting\'s own pick', m.summaryModel)
@@ -142,7 +142,7 @@ try {
   asked = anth.asked
   let sent = ollama.sent().length
   m = await notes('No key yet')
-  ok(/^Meeting notes can't run: llama-3\.3-70b-versatile isn't set up here: no Groq key for it in Model Providers\. Set it up in Settings › Model Providers, or set Meeting notes to Automatic there\./.test(m.summaryError || '') && !m.summaryModel, 'Meeting notes with only a model whose key isn\'t there: the meeting says it can\'t run, and why', m.summaryError)
+  ok(/^Meeting notes can't run: llama-3\.3-70b-versatile isn't set up here: no Groq key for it in Model Providers\. Set it up in Settings › Agents & Models › Model Providers, or set Meeting notes to Automatic in Settings › Agents & Models › Which Model Does What\./.test(m.summaryError || '') && !m.summaryModel, 'Meeting notes with only a model whose key isn\'t there: the meeting says it can\'t run, and why', m.summaryError)
   ok(openaiAsked() === n && anth.asked === asked && ollama.sent().length === sent, 'and nothing else wrote it')
 
   // A model on this computer that can't run never goes elsewhere, unless its list says so.
@@ -166,20 +166,21 @@ try {
   await own('notes', null)
   await own('assist', null)
 
-  // ---------- Settings › Model Providers ----------
+  // ---------- Settings › Agents & Models › Which Model Does What ----------
   const here = ((x) => x.offered || x.anyHere)(await kit.api('/model-jobs'))
   ;({ b } = await browser())
   const which = b.browserType().name()
-  const openProviders = async (p) => {
+  const openJobs = async (p) => {
     await p.waitForSelector('.rail-nav-btn, body', { timeout: 30000 }).catch(() => {})
     await until(async () => {
-      if (!(await p.locator('.modal.settings').count())) await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'providers' } })))
+      if (!(await p.locator('.modal.settings').count())) await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'model-jobs' } })))
       return (await p.locator('[data-model-jobs] li[data-job]').count()) === KINDS
     }, 45000, 1500)
   }
   const saved = async () => (await kit.api('/settings')).user.jobModels || {}
   const { ctx, p, errors } = await page(b, kit.url)
-  await openProviders(p)
+  await openJobs(p)
+  ok((await p.locator('.st-tabs [role="tab"][aria-selected="true"]').innerText()).trim() === 'Which Model Does What', 'Models for Each Task is in Agents & Models › Which Model Does What')
   const box = p.locator('[data-model-jobs]')
   const row = box.locator('li[data-job="notes"]')
   ok(/Models for Each Task/.test(await box.locator('h4').innerText()) && /Automatic/.test(await row.locator('.pv-job-model').innerText()) && (await row.locator('select').count()) === (here ? 1 : 0) && /\S/.test(await row.locator('[data-job-now]').innerText()), 'Models for Each Task: Meeting notes on Automatic, with where it runs and what it runs on now', await row.innerText())
@@ -221,7 +222,7 @@ try {
 
   // On a phone's screen: the same, nothing wider than it.
   const ph = await page(b, kit.url, { phone: true })
-  await openProviders(ph.p)
+  await openJobs(ph.p)
   const pbox = ph.p.locator('[data-model-jobs]')
   await pbox.scrollIntoViewIfNeeded()
   const prow = pbox.locator('li[data-job="assist"]')

@@ -26,6 +26,7 @@ import { providerEnv } from './providers.js'
 import { machine, freeBytes, atLeast } from './machine.js'
 import * as asr from './asr.js'
 import * as memory from './meetmemory.js'
+import { placeEn } from '../shared/places.js'
 
 const env = () => ({ ...process.env, ...providerEnv() })
 const fatal = (msg, more) => Object.assign(new Error(msg), { fatal: true }, more)
@@ -381,7 +382,7 @@ async function local(wav, o) {
   }
   // An older whisper.cpp without the server: the command line, loading the model each time.
   const cli = await tool('whisper-cli')
-  if (!cli) throw fatal(`${m.label} needs whisper.cpp, which isn't on this computer. Install it, or pick Parakeet, in Settings › Voice & Meetings.`, { needs: 'whisper' })
+  if (!cli) throw fatal(`${m.label} needs whisper.cpp, which isn't on this computer. Install it, or pick Parakeet, in ${placeEn('voice')}.`, { needs: 'whisper' })
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-speech-'))
   try {
     fs.writeFileSync(path.join(tmp, 'in.wav'), wav)
@@ -406,7 +407,7 @@ async function appleStatus(language) {
 }
 async function apple(wav, { language }) {
   const bin = appleBin()
-  if (!bin) throw fatal('Transcribing on the Mac itself needs macOS 26 or later. Pick another engine in Settings › Voice & Meetings.')
+  if (!bin) throw fatal(`Transcribing on the Mac itself needs macOS 26 or later. Pick another engine in ${placeEn('meetings')}.`)
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-speech-'))
   try {
     fs.writeFileSync(path.join(tmp, 'in.wav'), wav)
@@ -432,7 +433,7 @@ export const SERVICES = {
 
 async function answer(r, label) {
   const j = await r.json().catch(() => ({}))
-  if (r.status === 401 || r.status === 403) throw fatal(`${label} turned the key down (${r.status}). Check it in Settings › Model Providers.`)
+  if (r.status === 401 || r.status === 403) throw fatal(`${label} turned the key down (${r.status}). Check it in ${placeEn('providers')}.`)
   if (!r.ok) throw new Error(`${label}: ${j.error?.message || j.error || j.message || j.detail?.message || j.err_msg || `HTTP ${r.status}`}`.slice(0, 300))
   return j
 }
@@ -441,13 +442,13 @@ async function service(id, wav, { cfg, language, prompt }) {
   const s = SERVICES[id]
   const e = env()
   const key = e[s.key] || (id === 'gemini' && (e.GOOGLE_API_KEY || e.GOOGLE_GENERATIVE_AI_API_KEY))
-  if (!key && !s.custom) throw fatal(`No ${s.label} key saved. Add one in Settings › Model Providers, or pick another engine in Settings › Voice & Meetings.`)
+  if (!key && !s.custom) throw fatal(`No ${s.label} key saved. Add one in ${placeEn('providers')}, or pick another engine in ${placeEn('meetings')}.`)
   const model = cfg?.meetings?.serviceModel?.[id] || (s.custom ? e.SPEECH_MODEL : s.models[0])
   const lang = language && language !== 'auto' ? language : null
   const timeout = AbortSignal.timeout(120_000)
   if (s.style === 'openai') {
     const base = s.base(e)
-    if (!base) throw fatal('Give the service\'s address in Settings › Model Providers › Another speech service.')
+    if (!base) throw fatal(`Give the service's address in ${placeEn('providers')} › Another speech service.`)
     const form = new FormData()
     form.append('file', new Blob([wav], { type: 'audio/wav' }), 'speech.wav')
     form.append('model', model || 'whisper-1')

@@ -16,8 +16,8 @@
 //   within the budget saying so), an error, a provider that fell for an instruction (turned down),
 //   the model started while you talk; no model: what's needed, and on a 4 GB computer, a model of
 //   your own. Nothing is downloaded until asked.
-//   In the app, the desktop app simulated: Beta Features lists it; Settings › Voice & Meetings › Dictation has
-//   Tidy what I say only with the trial on (off to start with), the model it uses and whether the
+//   In the app, the desktop app simulated: Beta Features lists it; Settings › Meetings & Voice › Dictation has
+//   its switch first, marked Beta, and Tidy what I say under Advanced only with the trial on (off to start with), the model it uses and whether the
 //   words leave the computer, picked in a field like Settings' others; with no model, the download
 //   in one click and its progress; on 4 GB, where to add one, with the way there, and turned on
 //   without one, a warning that your words go as you said them. The dictation window: Tidying…, then tidied and pasted; off, as before; too
@@ -237,11 +237,13 @@ try {
   }
   const tidyBox = (s) => s.locator('.dict-tidy')
 
-  // Beta Features lists it; with the trial off, Settings › Voice & Meetings doesn't show it.
+  // Beta Features lists it; with the trial off, Settings › Meetings & Voice › Dictation has only its switch.
   await kit.api('/settings', { trials: { 'dictation-cleanup': false } }, 'PATCH')
   {
     const { ctx, p, s } = await voice(kit)
-    ok(await tidyBox(s).count() === 0 && !/Tidy what I say/.test(await s.innerText()), 'the trial off: Settings › Voice & Meetings › Dictation has no Tidy what I say', await s.innerText())
+    ok(await tidyBox(s).count() === 0 && !/Tidy what I say/.test(await s.innerText()), 'the trial off: Dictation\'s Advanced has no Tidy what I say', await s.innerText())
+    const top = p.locator('.modal.settings [data-setting="beta-dictation-cleanup"]')
+    ok(await top.isVisible() && await top.locator('.st-chip.beta').count() === 1 && !(await top.locator('input[role="switch"]').isChecked()) && await top.evaluate((e) => !e.closest('.st-adv')), 'but its switch is first in the Dictation tab, marked Beta, off', await top.innerText().catch(() => ''))
     await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'about' } })))
     const trial = p.locator('.st-check', { hasText: 'Tidy what I say' })
     ok(!!(await until(() => trial.isVisible(), 10000, 200)) && /tidied by a model before it's pasted/.test(await trial.innerText()) && !(await trial.locator('input').isChecked()), 'Settings › About & Updates › Beta Features: Tidy what I say, off', await trial.innerText().catch(() => ''))
@@ -252,7 +254,10 @@ try {
   }
   {
     const { ctx, p, s, errors } = await voice(kit)
+    ok(await p.locator('.modal.settings [data-setting="beta-dictation-cleanup"] input[role="switch"]').isChecked(), 'the trial on: its switch in the Dictation tab says so')
     const box = tidyBox(s).locator('input[type=checkbox]')
+    // (What it doesn't do, in full, is under its More.)
+    await tidyBox(s).locator('.st-more').first().click({ timeout: 5000 }).catch(() => {})
     ok(await box.count() === 1 && !(await box.isChecked()) && /Tidy what I say/.test(await tidyBox(s).innerText()) && /never answers them or adds to them/.test(await tidyBox(s).innerText()), 'the trial on: Tidy what I say, off to start with, saying what it does and doesn\'t', await tidyBox(s).innerText().catch(() => ''))
     ok(await s.locator('.dict-tidy-model').count() === 0, 'off: no model to pick yet')
     await box.click()
@@ -281,7 +286,7 @@ try {
   }
   {
     const { ctx, p, s } = await voice(small)
-    ok(!!(await until(async () => /Tidying needs a model: add one in Settings › Model Providers \(Ollama, LM Studio or a key\)/.test(await tidyBox(s).innerText().catch(() => '')), 8000, 100)) && await tidyBox(s).locator('button', { hasText: /Download/ }).count() === 0, 'a computer with 4 GB: no download offered, but where to add a model of your own', await tidyBox(s).innerText().catch(() => ''))
+    ok(!!(await until(async () => /Tidying needs a model: add one in Settings › Agents & Models › Model Providers \(Ollama, LM Studio or a key\)/.test(await tidyBox(s).innerText().catch(() => '')), 8000, 100)) && await tidyBox(s).locator('button', { hasText: /Download/ }).count() === 0, 'a computer with 4 GB: no download offered, but where to add a model of your own', await tidyBox(s).innerText().catch(() => ''))
     ok(!(await tidyBox(s).locator('.tidy-needs.warn').count()) && !/Until then/.test(await tidyBox(s).innerText()), 'tidying off: said as a note, not a warning')
     await tidyBox(s).locator('input[type=checkbox]').click()
     const warn = tidyBox(s).locator('.tidy-needs.warn')
@@ -289,8 +294,8 @@ try {
     await tidyBox(s).scrollIntoViewIfNeeded()
     await shot(p, `${tag}dictation-cleanup-no-model-on`)
     await warn.locator('button', { hasText: 'Open Model Providers' }).click()
-    const at = () => p.locator('.st-nav-item[aria-current="page"]').innerText().catch(() => '')
-    ok(!!(await until(async () => /Model Providers/.test(await at()), 5000, 100)), 'and the way there: Open Model Providers opens that section', await at())
+    const at = () => p.evaluate(() => `${document.querySelector('.st-nav-item[aria-current="page"]')?.innerText.trim()} › ${document.querySelector('.st-tabs [role="tab"][aria-selected="true"]')?.innerText.trim()}`).catch(() => '')
+    ok(!!(await until(async () => (await at()) === 'Agents & Models › Model Providers', 5000, 100)), 'and the way there: Open Model Providers opens that tab', await at())
     await small.api('/settings', { dictation: { tidy: null } }, 'PATCH')
     await ctx.close()
   }

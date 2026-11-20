@@ -314,7 +314,7 @@ try {
   if (mailOn) ok(p0.mail?.available && p0.mail.threads.map((m) => m.subject).join() === 'Seat count for the renewal' && p0.mail.waiting.map((m) => m.subject).join() === 'Intro and the renewal deck', 'your mail with them: a thread from Maya (not the shop\'s), and what you sent Ravi with no reply yet', p0.mail)
   else ok(p0.mail === null || p0.mail.available === false, 'no Mail here: none shown, or why', p0.mail)
   const nm = await err('/prep/suggest', { event: laterEv })
-  ok(nm && /No model to write with/.test(nm.message) && /Settings › Model Providers/.test(nm.message), 'Suggest with no model: refused, saying how to add one', nm?.message)
+  ok(nm && /No model to write with/.test(nm.message) && /Settings › Agents & Models › Model Providers/.test(nm.message), 'Suggest with no model: refused, saying how to add one', nm?.message)
   ok(!asked(/Prepare me for a meeting/).length, 'nothing was sent to a model')
 
   // ---------- The app: no model ----------
@@ -664,7 +664,7 @@ try {
   // ---------- The reminder: put off, turned off and on ----------
   // Remind me 1 min before: gone until then, for that meeting alone, kept through a restart, and
   // back once it's due. Remind me before meetings off (from the card's menu, or Settings): no
-  // reminder; on again, it's back. Settings › Voice & Meetings has the switch in the desktop app.
+  // reminder; on again, it's back. Settings › Meetings & Voice › Meetings has the switch in the desktop app.
   {
     const soonNow = (await api('/calls')).soon
     const snoozed = await api('/calls/snooze', { id: soonNow.id })
@@ -735,9 +735,9 @@ try {
       ok(!!(await until(async () => { const c = await api('/calls'); return c.soon?.id === soonNow.id && !c.soon.others.length }, 8000)), 'the other gone from the calendar: one meeting on the card again')
     }
     await api('/settings', { meetings: { prep: true } }, 'PATCH')
-    // Settings › Voice & Meetings, in the desktop app: Remind me before meetings, off and on. (Only where
+    // Settings › Meetings & Voice › Meetings, in the desktop app: Remind me before meetings, off and on. (Only where
     // there's a calendar to remind from: a Mac's.)
-    if (!IS_MAC) skip('Settings › Voice & Meetings › Remind me before meetings, off and on', 'it shows only with a calendar, which is a Mac\'s (Calendar or icalBuddy)')
+    if (!IS_MAC) skip('Settings › Meetings & Voice › Meetings › Remind me before meetings, off and on', 'it shows only with a calendar, which is a Mac\'s (Calendar or icalBuddy)')
     else {
       // (Said to be the desktop app once the page is up, for Settings to show what's the app's.)
       const { p, errors } = await open({ mode: 'light' })
@@ -745,12 +745,22 @@ try {
       const sw = p.locator('.modal.settings [data-setting="meeting-remind"]')
       await until(() => sw.isVisible(), 10000)
       const box = sw.locator('input[type="checkbox"]')
-      ok(await sw.isVisible() && /Remind me before meetings/.test(await sw.innerText()) && await box.isChecked(), 'Settings › Voice & Meetings › Remind me before meetings, on, found as ⌘K finds it', await sw.innerText().catch(() => ''))
+      ok(await sw.isVisible() && /Remind me before meetings/.test(await sw.innerText()) && await box.isChecked(), 'Settings › Meetings & Voice › Meetings › Remind me before meetings, on, found as ⌘K finds it', await sw.innerText().catch(() => ''))
       await box.click() // (it shows off once the server has it)
       ok(!!(await until(async () => (await api('/settings')).effective.meetings?.remind === false && (await api('/calls')).soon === null && !(await box.isChecked()), 5000)), 'turned off there: no reminder, and it shows off')
       await shot(p, `${tag}calendar-remind-setting`)
       await box.click()
       ok(!!(await until(async () => (await api('/calls')).soon?.id === soonNow.id, 5000)), 'and on again: the reminder is back')
+      // The floating card off: the reminder, which needs it, stays where it is, greyed, with Turn On.
+      await api('/settings', { meetings: { floatCard: 'off' } }, 'PATCH')
+      await p.locator('.modal.settings button[aria-label="Close settings"]').click()
+      await until(async () => !(await p.locator('.modal.settings').count()), 5000)
+      await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'meeting-remind' } })))
+      const needs = sw.locator('.st-needs-line')
+      ok(!!(await until(() => needs.isVisible(), 8000)) && /Needs the floating card on/i.test(await needs.innerText()) && await box.evaluate((e) => !!e.closest('[inert]')), 'the floating card off: Remind me before meetings still there, greyed, saying it needs the card', await sw.innerText().catch(() => ''))
+      await needs.locator('button', { hasText: 'Turn On' }).click()
+      ok(!!(await until(async () => (await api('/settings')).effective.meetings?.floatCard === 'meetings' && !(await needs.count()), 5000)), 'and Turn On shows the card again, the reminder usable')
+      await api('/settings', { meetings: { floatCard: null } }, 'PATCH')
       ok(real(errors).length === 0, 'Settings: no page errors', errors)
       await p.context().close()
     }

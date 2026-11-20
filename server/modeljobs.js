@@ -30,6 +30,7 @@
 import fs from 'node:fs'
 import { DATA, dataFile, ensureDir, writeFileAtomic } from './paths.js'
 import * as modelList from './modellist.js'
+import { placeEn } from '../shared/places.js'
 
 // cloud: Auto keeps it on your cloud model when you have one (small models are slow and weaker at
 // live suggestions, and draw weaker diagrams).
@@ -86,7 +87,7 @@ export function fromList({ job, own, models = [], provider }) {
     return { id, where: modelList.isLocal(id) ? 'local' : 'cloud', auto: false, kept: true, why: 'picked', picked: true, own, passed }
   }
   const name = nameOf(job)
-  return { error: Object.assign(new Error(`${name} can't run: ${passed.map((p) => p.why).join('; ')}. Set it up in Settings › Model Providers, or set ${name} to Automatic there.`), { code: 'not_ready', passed }) }
+  return { error: Object.assign(new Error(`${name} can't run: ${passed.map((p) => p.why).join('; ')}. Set it up in ${placeEn('providers')}, or set ${name} to Automatic in ${placeEn('models')}.`), { code: 'not_ready', passed }) }
 }
 
 // Where one job runs. Pure, so tests can ask it anything.
@@ -106,7 +107,7 @@ export function route({ job, set = 'auto', first = null, cloud = null, local = n
     const use = here || local
     if (use) return { id: use.id, where: 'local', auto: false, kept: true, why: 'kept' }
     const why = missing?.why || 'there\'s no model on this computer'
-    const fix = missing?.code === 'not_downloaded' ? `Download it in Settings › Model Providers, or set ${name} to Auto there.` : missing?.code === 'downloading' ? 'It runs once the download is done.' : `Set ${name} to Auto in Settings › Model Providers to use your cloud model.`
+    const fix = missing?.code === 'not_downloaded' ? `Download it in ${placeEn('providers')}, or set ${name} to Auto in ${placeEn('models')}.` : missing?.code === 'downloading' ? 'It runs once the download is done.' : `Set ${name} to Auto in ${placeEn('models')} to use your cloud model.`
     return { error: Object.assign(new Error(`${name} is set to run on this computer, but ${why}. ${fix}`), { code: 'local_missing' }) }
   }
   if (set === 'cloud' || !local || !cloud) return { id: first, where: at(first), auto: set !== 'cloud', kept: false, why: !cloud && first ? 'nothing else' : null }

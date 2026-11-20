@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from
 import { createPortal } from 'react-dom'
 import { StatusDot } from './Icon.jsx'
 import { openSettings } from './SignIn.jsx'
-import { useDevicesName } from './settings/search.js'
+import { where } from './settings/search.js'
 import { t, tn, tx } from '../i18n/index.js'
 
 // A short walk through the real UI for someone new: the page dims, the part being explained stays
@@ -35,7 +35,7 @@ const STEPS = {
     { at: 'composer', title: tx('Talk to it'), body: tx('Type here to send a message: @ adds a file, / runs a command. When an agent asks you something, its question shows up just above as a card you can click.') },
     { at: 'changes', title: tx('Review and ship'), body: tx('Changes shows what the agent edited. Comment on any line to send it feedback, then commit, push and open a pull request from here.') },
     { at: 'usage', title: tx('Status at a glance'), body: tx('The ring is how much of your plan is left. Click it for this 5-hour window and this week, your accounts, updates, sounds, the weather and the time.') },
-    { at: 'settings', title: tx('On your phone too, free'), body: tx('In Settings › {devices}, follow the steps and scan the QR code with your phone. Everything between your phone and this computer is end-to-end encrypted, and you get a ping when an agent needs you or finishes.'), link: { label: tx('Set up phone'), section: 'phone' } },
+    { at: 'settings', title: tx('On your phone too, free'), place: 'phone', body: tx('In {place}, follow the steps and scan the QR code with your phone. Everything between your phone and this computer is end-to-end encrypted, and you get a ping when an agent needs you or finishes.'), link: { label: tx('Set up phone'), section: 'phone' } },
     { at: 'new-agent', title: tx('Your turn'), body: tx('Pick a folder and the agent to work in it, or start a chat with any model. Agents in the same project can each get their own copy, so they don\'t get in each other\'s way.'), last: true },
   ],
   // The simple layout: what you need on day one.
@@ -43,13 +43,13 @@ const STEPS = {
     CHIEF,
     { at: 'composer', title: tx('Talk to it'), body: tx('Type here and press Enter. When it asks you something, the question shows up just above as a card you can click.') },
     { at: 'agents', title: tx('Your agents'), body: tx('Everything you run is listed here. The dot shows what each one is doing: {legend}') },
-    { at: 'new-agent', title: tx('Your turn'), body: tx('Start an agent in a project folder, or a chat with any model. Settings › General › Layout shows every panel when you want more.'), last: true },
+    { at: 'new-agent', title: tx('Your turn'), place: 'layout', body: tx('Start an agent in a project folder, or a chat with any model. {place} shows every panel when you want more.'), last: true },
   ],
   phone: [
     { at: 'agents', title: tx('Your agents'), body: tx('Every agent you run and what it\'s doing: {legend} The badge counts the ones waiting on you.') },
     CHIEF_PHONE,
     { at: 'views', title: tx('Chat or terminal'), body: tx('Switch between the conversation, the agent\'s live terminal, its files and its changes.') },
-    { at: 'settings', title: tx('Get notified'), body: tx('In Settings › {devices} › Notifications, turn on notifications to hear when an agent needs you or finishes.') },
+    { at: 'settings', title: tx('Get notified'), place: 'notifications', body: tx('In {place}, turn on notifications to hear when an agent needs you or finishes.') },
     { at: 'search', title: tx('Your turn'), body: tx('Search finds any agent, file or command. It\'s also where you start a new agent.'), last: true },
   ],
 }
@@ -110,7 +110,6 @@ export default function Tour({ phone, simple, actionLabel, onAction, onClose }) 
   const primaryRef = useRef(null)
   const titleId = useId()
   const bodyId = useId()
-  const devices = useDevicesName() // (Settings' name for it: a {devices} in a step's words)
   const step = steps[at]
   const last = !!step.last
 
@@ -196,7 +195,7 @@ export default function Tour({ phone, simple, actionLabel, onAction, onClose }) 
         <button type="button" className="ghost-btn tour-skip" onClick={onClose}>{last ? t('Close') : t('Skip')}</button>
         <div className="tour-text" aria-live="polite">
           <h3 id={titleId}>{t(step.title)}</h3>
-          <p id={bodyId}>{tn(step.body, { legend: <Legend />, devices })}</p>
+          <p id={bodyId}>{tn(step.body, { legend: <Legend />, place: step.place ? where(step.place) : '' })}</p>
         </div>
         <footer className="tour-foot">
           {live.avail.length > 1 && (

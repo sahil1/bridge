@@ -4,10 +4,11 @@
 //   The Slack Bot as #216 left it (its settings in config.json, its tokens in slack-bot.json, a
 //   question waiting) is carried over as the first bot: named as before, its folders what it reads
 //   from, their topics lines in its instructions, its tokens in its own folder (yours only), the
-//   waiting question still waiting. Off, none of it is there. On: its app, made from the old
-//   manifest, lacks scopes, and its card in Bots › Connections says which and how to update it;
-//   renamed, its manifest carries the new name; its page says where it answers in a line. A second
-//   bot, made by name, given an app of its own in Connections, connects as its own app.
+//   waiting question still waiting. Off, none of it is there but its switch in Settings, marked
+//   Beta. On: its app, made from the old manifest, lacks scopes, and its card in Bots › Connections
+//   says which and how to update it; renamed, its manifest carries the new name; its page says
+//   where it answers in a line. A second bot, made by name, given an app of its own in Connections,
+//   connects as its own app.
 //   Questions: a mention at the top of a channel, answered by one agent that can read all of the
 //   bot's folders and nothing else (--add-dir; a read outside refused), briefed with the bot's
 //   name, whose it is, its instructions (which steer the answer), and nobody else's messages in the
@@ -110,8 +111,10 @@ try {
   ok(!(await kit.api('/needs-you')).slack?.length, 'and nothing of them in Needs You')
   await part('off, in Settings', async () => {
     const { ctx, p, errors } = await page(b, kit.url)
-    await openSettings(p, 'mcp', '.modal.settings .st-nav')
-    ok(!(await p.locator('.st-nav-item', { hasText: /^Bots$/ }).count()), 'nor in Settings')
+    await openSettings(p, 'slack-bot', '.modal.settings [data-setting="bots-beta"]')
+    const nav = p.locator('.st-nav-item', { hasText: /^Bots/ })
+    ok(await nav.count() === 1 && await nav.locator('.st-chip.beta').count() === 1, 'in Settings, Bots is there, marked Beta (a beta feature isn\'t hidden there)')
+    ok(!(await p.locator('.modal.settings [data-setting="bots-beta"] input[role="switch"]').isChecked()) && !(await p.locator('.modal.settings [data-setting="slack-askers"], .modal.settings .sb-bots').count()), 'with its switch off, and nothing of the bots there')
     ok(errors.length === 0, 'no page errors', errors)
     await ctx.close()
   })
@@ -485,10 +488,10 @@ try {
       await shot(p, `${tag}slack-bot-activity-${mode}${phone ? '-phone' : ''}`)
       await p.locator('.sb-tabs [role="tab"]', { hasText: 'Settings' }).click()
       if (phone) {
-        // Settings' list of sections has it, with what's in it, while the beta feature is on.
+        // Settings' list of sections has it, marked Beta, with what's in it.
         await openSettings(p, 'all', '.modal.settings .st-list')
         const row = p.locator('.st-list-row', { hasText: 'Bots' })
-        ok(/Your own named bots in Slack/.test(await row.innerText().catch(() => '')), 'on a phone, Settings\' list of sections has it', await p.locator('.st-list').innerText().catch(() => ''))
+        ok(/Turned on here, then made and run in Bots/.test(await row.innerText().catch(() => '')) && await row.locator('.st-chip.beta').count() === 1, 'on a phone, Settings\' list of sections has it, marked Beta', await p.locator('.st-list').innerText().catch(() => ''))
       }
       ok(errors.length === 0, 'no page errors', errors)
       await ctx.close()

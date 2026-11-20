@@ -3,8 +3,8 @@ import Icon from '../Icon.jsx'
 import { api, apiUrl } from '../../api.js'
 import { download } from '../../download.js'
 import { t } from '../../i18n/index.js'
-import { useDevicesName } from './search.js'
-import { Advanced } from './Advanced.jsx'
+import { where } from './search.js'
+import { Advanced, More } from './Advanced.jsx'
 import './backup.css'
 
 // Settings › Back Up & Move (server/backup.js): this computer's setup to another computer. Move sends
@@ -155,7 +155,6 @@ export default function BackUp() {
   const [opened, setOpened] = useState(null) // { id, plan, kind, from }
   const [applied, setApplied] = useState(null)
   const fileIn = useRef(null)
-  const devices = useDevicesName()
   const load = () => api('/backup').then((x) => { setS(x); setTo((v) => v || x.linked.find((m) => m.online)?.id || '') }, (e) => setErr(e.message))
   useEffect(() => { load(); const id = setInterval(() => { if (!document.hidden) load() }, 5000); return () => clearInterval(id) }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const run = async (what, fn) => { setBusy(what); setErr(null); try { await fn() } catch (e) { setErr(e.message) } setBusy(null); load() }
@@ -197,7 +196,7 @@ export default function BackUp() {
 
   return (
     <div className="bk" data-setting="backup">
-      <p className="st-note small"><Icon name="info" size={13} /><span>{t('One app can\'t be connected from two computers at once (Slack would hand each computer some of its questions), so what comes arrives paused until the computer it came from has stopped its bots.')}</span></p>
+      <p className="st-note small"><Icon name="info" size={13} /><span>{t('Bots arrive paused, until the computer they came from has stopped them.')} <More>{t('One app can\'t be connected from two computers at once (Slack would hand each computer some of its questions), so what comes arrives paused until the computer it came from has stopped its bots.')}</More></span></p>
 
       {s.incoming.length > 0 && (
         <section className="st-sec bk-incoming">
@@ -237,7 +236,7 @@ export default function BackUp() {
 
       <section className="st-sec">
         <h4>{t('Move to Another Computer')}</h4>
-        {!linked.length ? <p className="muted small">{t('Link the other computer first, in Settings › {devices} › Computers.', { devices })}</p> : (
+        {!linked.length ? <p className="muted small">{t('Link the other computer first, in {place}.', { place: where('machines') })}</p> : (
           <>
             <div className="st-row">
               <select className="st-input" value={to} onChange={(e) => setTo(e.target.value)} aria-label={t('Move to')}>
@@ -269,7 +268,7 @@ export default function BackUp() {
         <>
           <section className="st-sec">
             <h4>{t('Back Up to a File')}</h4>
-            <p className="muted small">{t('One file, everything in it sealed with a passphrase you pick (AES-256): without the passphrase nothing in it can be read, and it isn\'t kept anywhere, so keep it somewhere safe.')}</p>
+            <p className="muted small">{t('One file, sealed with a passphrase you pick. Keep the passphrase safe: it isn\'t kept anywhere.')} <More>{t('One file, everything in it sealed with a passphrase you pick (AES-256): without the passphrase nothing in it can be read, and it isn\'t kept anywhere, so keep it somewhere safe.')}</More></p>
             <div className="st-row bk-pass">
               <input type="password" className="st-input" autoComplete="new-password" value={pass.a} onChange={(e) => setPass((p) => ({ ...p, a: e.target.value }))} placeholder={t('Passphrase, {n} characters or more', { n: s.passMin })} aria-label={t('Passphrase')} />
               <input type="password" className="st-input" autoComplete="new-password" value={pass.b} onChange={(e) => setPass((p) => ({ ...p, b: e.target.value }))} placeholder={t('The same again')} aria-label={t('The passphrase again')} />

@@ -10,11 +10,11 @@
 // one, it offers to learn How You Write first, then drafts in your voice, says which model and what
 // went to it (word for word on request), Shorter changes it, Copy copies it and Open in your mail
 // app is a mailto: with it in. On an email that asks to meet: free times with theirs beside them,
-// put into the draft; Find a time on one that doesn't, the times with no draft. Settings › Mail:
+// put into the draft; Find a time on one that doesn't, the times with no draft. Settings › Mail & Calendar:
 // How You Write shown, changed, an example taken out, cleared; the working hours. At 1440 and on a
 // 390 px phone, light and dark, with nothing wider than the phone and every target whole. Mail is
 // never scripted. Off a Mac (Mail reads Apple Mail) there's no way into Mail at all: no Mail tab or
-// Inbox card in Today, on a computer or a phone, no Settings › Mail and nothing for mail in ⌘K.
+// Inbox card in Today, on a computer or a phone, no Settings › Mail & Calendar and nothing for mail in ⌘K.
 import fs from 'node:fs'
 import path from 'node:path'
 import { startKit, startModel, checks, until, browser, page, shot, phoneFaults, noServiceWorker, IS_MAC } from '../lib/harness.mjs'
@@ -59,7 +59,7 @@ if (!IS_MAC) {
     await p.locator('.settings-btn').click()
     await p.locator('.modal.settings .st-nav').waitFor({ timeout: 8000 })
     const nav = (await p.locator('.st-nav .st-nav-item').allInnerTexts()).map((x) => x.trim())
-    ok(nav.includes('Voice & Meetings') && !nav.includes('Mail'), 'Settings has no Mail section', nav)
+    ok(nav.includes('Meetings & Voice') && !nav.some((x) => /^Mail\b/.test(x)), 'Settings has no Mail & Calendar section', nav)
     await shot(p, `${tag}mail-not-mac-1440`)
     ok(!real(errors).length, 'no page errors', errors)
     const ph = await page(b, kit.url, { phone: true })
@@ -251,7 +251,7 @@ INSERT INTO messages VALUES (150, 0, 0, 0, ${t2}, ${t2 - 1}, 1, 1, 95, 150, NULL
   await p.locator('.ai-menu button', { hasText: 'Draft a reply' }).click()
   await p.waitForSelector('.massist-intro', { timeout: 8000 })
   const intro = await p.locator('.massist-intro').innerText()
-  ok(/Sent folders/.test(intro) && /Who spoke/.test(intro) && /gpt-5/.test(intro) && /Settings › Mail/.test(intro), 'the first time, it says what it would learn from, which model it goes to and where it\'s kept', intro)
+  ok(/Sent folders/.test(intro) && /Who spoke/.test(intro) && /gpt-5/.test(intro) && /Settings › Mail & Calendar › How You Write/.test(intro), 'the first time, it says what it would learn from, which model it goes to and where it\'s kept', intro)
   await shot(p, `${tag}mail-assist-intro-1440`)
   await p.locator('.massist button', { hasText: 'Learn how I write' }).click()
   const drafted = await until(async () => (await p.locator('.massist-draft').inputValue().catch(() => '')).startsWith('Hi Dana,'), 20000)
@@ -295,10 +295,10 @@ INSERT INTO messages VALUES (150, 0, 0, 0, ${t2}, ${t2 - 1}, 1, 1, 95, 150, NULL
   await shot(p, `${tag}mail-find-time-1440`)
   ok(!real(errors).length, 'no page errors', errors)
 
-  // ---------- Settings › Mail ----------
+  // ---------- Settings › Mail & Calendar ----------
   await p.locator('.massist-foot button', { hasText: 'How You Write' }).click()
   await p.waitForSelector('.modal.settings .st-mail', { timeout: 8000 })
-  ok((await p.locator('.st-head h3').innerText()).trim() === 'Mail', 'How You Write opens Settings › Mail')
+  ok((await p.locator('.st-head h3').innerText()).trim() === 'Mail & Calendar', 'How You Write opens Settings › Mail & Calendar')
   const profile = await p.locator('.mvoice-text').inputValue()
   const about = await p.locator('.st-mail').innerText()
   ok(/Signs off with "Cheers"/.test(profile) && /Learnt on .* from 23 emails you sent and 2 things you said in 2 meetings, by gpt-5/.test(about) && (await p.locator('.mvoice-example').count()) === 1, 'it shows the profile, what it was learnt from and by which model, and its example', { profile, about: about.slice(0, 400) })

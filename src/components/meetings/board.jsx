@@ -4,6 +4,7 @@ import { api, fmtTime } from '../../api.js'
 import { clock } from './recording.jsx'
 import { openBoard } from '../whiteboard/links.js'
 import { t, tx } from '../../i18n/index.js'
+import { where } from '../settings/search.js'
 
 // AI Assist's live board of a meeting (a Beta Feature, Live Meeting Board, src/trials.js): its
 // Board view. While the meeting records with it on, the model that writes your notes reads along a
@@ -31,7 +32,7 @@ export function boardWords(b) {
 
 // Where what's said goes: the model that writes your notes, by name, and who runs it.
 function goesTo(model) {
-  if (!model) return t('No model to keep it with yet: sign in to an agent, or add one in Settings › Model Providers.')
+  if (!model) return t('No model to keep it with yet: sign in to an agent, or add one in {place}.', { place: where('providers') })
   return model.via === 'local'
     ? t('It uses the model that writes your notes, {model}, on this computer: what\'s said stays here.', { model: model.label })
     : t('It uses the model that writes your notes, {model} ({provider}): what\'s said goes there as it comes, a minute or so at a time, with what\'s on the board.', { model: model.label, provider: model.provider || model.label })

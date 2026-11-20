@@ -18,6 +18,7 @@ import readline from 'node:readline'
 import { execFile } from 'node:child_process'
 import { dataFile, cacheFile, writeFileAtomic } from './paths.js'
 import { parse, tidy, next, lastDue, sentence } from '../shared/schedule.js'
+import { placeEn } from '../shared/places.js'
 
 const DEFS = dataFile('routines.json')
 const LOG = cacheFile('routines-log.json')
@@ -230,7 +231,7 @@ export const noteLaunch = (id, paneId, how = 'hand') => noteRun(id, { at: new Da
 export const noteFailed = (id, error, how = 'hand') => noteRun(id, { at: new Date().toISOString(), how, error })
 
 const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'routine'
-const BETA = 'Scheduling a routine is a beta feature. Turn on Scheduled Routines in Settings › About & Updates › Beta Features.'
+const BETA = `Scheduling a routine is a beta feature. Turn on Scheduled Routines in ${placeEn('beta')}.`
 
 // A schedule as typed ("every weekday at 9"), read here too, so a routine is only ever saved with
 // one this computer understands. The time it was set from is where every n days or weeks count from.

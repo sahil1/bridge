@@ -137,12 +137,40 @@ export function reveal(id, near = null) {
 }
 
 // One setting as a row: its name, at most one short line under it, and the control beside them
-// (under them on a phone). title: the rest, on hover. setting: its id for ⌘K and links (search.js).
+// (under them on a phone). title: the rest, under More (with no hint, the line itself). setting: its
+// id for ⌘K and links (search.js).
 export function Line({ label, hint, title, setting, className = '', children }) {
   return (
     <div className={`st-line ${className}`} data-setting={setting}>
-      <div className="st-line-text" title={title}><span className="st-line-label">{label}</span>{hint && <span className="muted small">{hint}</span>}</div>
+      <div className="st-line-text"><span className="st-line-label">{label}</span>{(hint || title) && <span className="muted small">{hint || title}{hint && title && <> <More>{title}</More></>}</span>}</div>
       <div className="st-line-ctl">{children}</div>
+    </div>
+  )
+}
+
+// What a setting does in full, folded away after its one line: More shows it there, Less folds it
+// again. Inside a setting's label it's a button of its own, so it never ticks the box.
+export function More({ children }) {
+  const [open, setOpen] = useState(false)
+  if (!children) return null
+  const flip = (e) => { e.preventDefault(); e.stopPropagation(); setOpen((o) => !o) }
+  return (
+    <>
+      {open && <span className="st-more-text">{children}</span>}
+      <button type="button" className="st-more" aria-expanded={open} onClick={flip}>{open ? t('Less') : t('More')}</button>
+    </>
+  )
+}
+
+// A setting that needs another one on, greyed where it is with what it needs and Turn On, rather
+// than gone until then (Dictation's extras while it's off, Edit by voice, Remind me before meetings).
+// what: the other setting's name.
+export function Needs({ what, on = false, onTurnOn, children }) {
+  if (on) return children
+  return (
+    <div className="st-needs">
+      <div className="st-needs-body" inert>{children}</div>
+      <p className="st-needs-line small"><Icon name="lock" size={11} /> {t('Needs {what} on', { what })}{onTurnOn && <> · <button type="button" className="link-btn" onClick={onTurnOn}>{t('Turn On')}</button></>}</p>
     </div>
   )
 }

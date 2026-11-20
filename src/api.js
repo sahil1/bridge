@@ -154,6 +154,10 @@ function sharedGet(path, force) {
   return p
 }
 
+// The last answer any view had for a path, without asking (null if none yet): what Settings'
+// where() reads to know whether Bold Bridge accounts exist.
+export const peek = (path) => lastData.get(path)?.data ?? null
+
 export function usePoll(path, intervalMs, { enabled = true } = {}) {
   const [state, setState] = useState(() => {
     const hit = path && lastData.get(path)

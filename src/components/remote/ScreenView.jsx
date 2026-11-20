@@ -24,6 +24,7 @@ import { baseFor, remoteStatus, connect, pointOn, setViewing } from './remote.js
 import { hostApi, viaRelay } from '../../api.js'
 import { newer } from '../../../shared/version.js'
 import { SWAP, swapsKeys, RATE, ACCESS, fitIn } from '../../../shared/remote.js'
+import { where } from '../settings/search.js'
 import './remote.css'
 
 const HERE = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? 'mac' : /Win/.test(navigator.platform || '') ? 'windows' : 'linux'
@@ -530,8 +531,8 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
         locked: lockedUntil > Date.now() ? t('Too many wrong passwords. {name} lets this device try again at {time}.', { name, time: timeOf(err.until) }) : t('Too many wrong passwords were typed here. You can try again now.'),
         denied: t('Someone at {name} said no to this.', { name }),
         unanswered: t("Nobody at {name} answered within {n} seconds, so it wasn't allowed.", { name, n: limits.askSeconds }),
-        device: t("{name} doesn't let this device connect. That's changed at {name} itself, in Settings › Account & Devices › Computers.", { name }),
-        blocked: t("{name} doesn't let this device connect. That's changed at {name} itself, in Settings › Account & Devices › Computers.", { name: err.at || name }),
+        device: t("{name} doesn't let this device connect. That's changed at {name} itself, in {place}.", { place: where('remote-devices'), name }),
+        blocked: t("{name} doesn't let this device connect. That's changed at {name} itself, in {place}.", { place: where('remote-devices'), name: err.at || name }),
         stopped: t('Stopped from {device}.', { device: err.by || t('another of your devices') }),
         timeout: t("The password wasn't typed in time. Try again."),
         screenPermission: t("macOS doesn't let Bridge AI record the screen on {name}. On {name}, turn on Bridge AI in System Settings › Privacy & Security › Screen & System Audio Recording, then open Bridge AI again there.", { name }),

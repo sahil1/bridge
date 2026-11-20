@@ -8,8 +8,10 @@ import { createPortal } from 'react-dom'
 import Icon from './Icon.jsx'
 import CopyButton from './CopyButton.jsx'
 import { api, usePoll, fmtRelative } from '../api.js'
+import { More } from './settings/Advanced.jsx'
 import { t, tx } from '../i18n/index.js'
 import { LASTS, LAST_DEFAULT } from '../../shared/shares.js'
+import { where } from './settings/search.js'
 import './share.css'
 
 const LASTS_LABEL = { hour: tx('1 Hour'), day: tx('1 Day'), week: tx('7 Days') }
@@ -73,7 +75,7 @@ export function ShareDialog({ what, onClose }) {
           <div className="share-body">
             <p className="st-note warn" role="alert"><Icon name="alert" size={13} /> {info.can.text}</p>
             <div className="modal-foot">
-              {info.can.why !== 'full' && <button type="button" className="btn small" onClick={() => { onClose(); window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'phone' } })) }}>{t('Open Settings › Devices')}</button>}
+              {info.can.why !== 'full' && <button type="button" className="btn small" onClick={() => { onClose(); window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'phone' } })) }}>{t('Open {place}', { place: where('phone') })}</button>}
               <button type="button" className="btn small primary" onClick={onClose}>{t('Close')}</button>
             </div>
           </div>
@@ -128,7 +130,7 @@ export function ShareDialog({ what, onClose }) {
               <div className="share-link">
                 <input className="st-input mono" readOnly value={made.link} aria-label={t('The link')} onFocus={(e) => e.target.select()} />
                 <div className="st-row"><CopyButton text={made.link} label={t('Copy Link')} className="btn small primary" /></div>
-                <p className="muted small">{t('Anyone you pass it to can open it. You see each open in Settings › Sharing, and your devices hear of the first.')}</p>
+                <p className="muted small">{t('Anyone you pass it to can open it. You see each open in {place}, and your devices hear of the first.', { place: where('sharing') })}</p>
               </div>
             </div>
             {err && <p className="error-text small" role="alert">{err}</p>}
@@ -209,7 +211,7 @@ export function SharesList() {
           <ul className="share-list">{done.map(row)}</ul>
         </details>
       )}
-      <p className="muted small">{limitsText(data.limits)}</p>
+      <p className="muted small">{t('Limits on links, devices and password tries.')} <More>{limitsText(data.limits)}</More></p>
       {data.relay && <p className="muted small share-relay-limits">{t('On Bridge AI\'s relay, your links have an allowance apart from your phones\': {window} messages in {hours} hours and {week} a week ({linkWindow} and {linkWeek} for one link), at up to {perSecond} a second.', { hours: data.relay.hours, window: data.relay.window.toLocaleString(), week: data.relay.week.toLocaleString(), linkWindow: data.relay.linkWindow.toLocaleString(), linkWeek: data.relay.linkWeek.toLocaleString(), perSecond: data.relay.perSecond })}</p>}
     </div>
   )

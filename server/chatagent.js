@@ -19,6 +19,7 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { DATA, dataFile, ensureDir } from './paths.js'
 import { models, describe, reply, canUseTools, SYSTEM } from './chatmodels.js'
+import { placeEn } from '../shared/places.js'
 
 const args = process.argv.slice(2)
 let sessionId = null
@@ -271,7 +272,7 @@ async function runTool(c0, signal) {
 }
 
 // ---------- Talking to the model ----------
-const NONE = 'No model to talk to yet. Add an API key in Settings › Model Providers, start Ollama or LM Studio, or sign in to an agent like Claude Code or Codex. Then send your message again.'
+const NONE = `No model to talk to yet. Add an API key in ${placeEn('providers')}, start Ollama or LM Studio, or sign in to an agent like Claude Code or Codex. Then send your message again.`
 const MAX_STEPS = 40
 let noTools = false // the model turned tools down once: it only talks from then on
 const tools = () => (PROJECT && !noTools && canUseTools(model) ? TOOLS : null)

@@ -3,7 +3,7 @@ import Icon from '../Icon.jsx'
 import { api, usePoll } from '../../api.js'
 import { useSettings, SaveNote } from './General.jsx'
 import { locale, t } from '../../i18n/index.js'
-import { Advanced } from './Advanced.jsx'
+import { Advanced, More } from './Advanced.jsx'
 import '../mail/mail.css'
 
 // Settings › Mail, where Mail is read (a Mac): How You Write, the profile AI Assist writes replies in
@@ -66,13 +66,13 @@ function HowYouWrite() {
       {!v.now && <p className="small">{t('No model to learn with yet.')} <button type="button" className="link-btn" onClick={openProviders}>{t('Model Providers')}</button></p>}
       {msg && <p className={`small ${msg.error ? 'error-text' : 'muted'}`} role="status">{msg.text}</p>}
       {!msg && v.error && !busy && <p className="error-text small">{t("Last time it couldn't learn: {error}", { error: v.error })}</p>}
-      <p className="muted small" title={v.now
-        ? (v.now.local ? t("It reads your replies in Mail's Sent folders and your own lines in recorded meetings (the ones Who spoke marks as yours), up to 40 of each from the last four months, here on this computer. {model}, the model for your meeting notes, runs on this computer too, so none of it leaves it. Only the profile and its examples are kept, in Bridge AI's folder.", { model: v.now.label })
-          : t("It reads your replies in Mail's Sent folders and your own lines in recorded meetings (the ones Who spoke marks as yours), up to 40 of each from the last four months, on this computer, and sends them to {model}, the model for your meeting notes, to write the profile. Only the profile and its examples are kept, in Bridge AI's folder.", { model: v.now.label }))
-        : t("It reads your replies in Mail's Sent folders and your own lines in recorded meetings (the ones Who spoke marks as yours), up to 40 of each from the last four months, for the model for your meeting notes to write the profile.")}>{v.now
+      <p className="muted small">{v.now
         ? (v.now.local ? t('Learnt from your sent replies and your lines in meetings by {model}, on this computer: none of it leaves it.', { model: v.now.label })
           : t('Learnt from your sent replies and your lines in meetings, which go to {model} to write it.', { model: v.now.label }))
-        : t('Learnt from your sent replies and your lines in meetings, by the model for your meeting notes.')}</p>
+        : t('Learnt from your sent replies and your lines in meetings, by the model for your meeting notes.')} <More>{v.now
+        ? (v.now.local ? t("It reads your replies in Mail's Sent folders and your own lines in recorded meetings (the ones Who spoke marks as yours), up to 40 of each from the last four months, here on this computer. {model}, the model for your meeting notes, runs on this computer too, so none of it leaves it. Only the profile and its examples are kept, in Bridge AI's folder.", { model: v.now.label })
+          : t("It reads your replies in Mail's Sent folders and your own lines in recorded meetings (the ones Who spoke marks as yours), up to 40 of each from the last four months, on this computer, and sends them to {model}, the model for your meeting notes, to write the profile. Only the profile and its examples are kept, in Bridge AI's folder.", { model: v.now.label }))
+        : t("It reads your replies in Mail's Sent folders and your own lines in recorded meetings (the ones Who spoke marks as yours), up to 40 of each from the last four months, for the model for your meeting notes to write the profile.")}</More></p>
     </>
   )
 }
@@ -91,18 +91,18 @@ export default function Mail() {
       <SaveNote note={note} />
       <section className="st-sec" data-setting="how-you-write">
         <h4>{t('How You Write')}</h4>
-        <p className="muted small" title={t('AI Assist drafts replies in your own tone and language from this: a few lines on how you write, and some of your own replies as examples. Read it, change it, or clear it.')}>{t('AI Assist drafts replies in your tone from this. Read it, change it, or clear it.')}</p>
+        <p className="muted small">{t('AI Assist drafts replies in your tone from this. Read it, change it, or clear it.')} <More>{t('AI Assist drafts replies in your own tone and language from this: a few lines on how you write, and some of your own replies as examples. Read it, change it, or clear it.')}</More></p>
         <HowYouWrite />
         {/* On unless turned off, and it reads your mail again for that model: said here, not under Advanced. */}
         <label className="st-check" data-setting="mail-learn">
           <input type="checkbox" checked={mail.learn !== false} onChange={(e) => save({ mail: { learn: e.target.checked } })} />
-          <span title={t("Once a week or so, while AI Assist drafts your replies, from the mail and meetings you have then. Not once you've changed it yourself.")}><b>{t('Learn it again now and then')}</b> <span className="muted small">{t("Once a week or so, read again the same way, unless you've changed it yourself.")}</span></span>
+          <span><b>{t('Learn it again now and then')}</b> <span className="muted small">{t("Once a week or so, read again the same way, unless you've changed it yourself.")} <More>{t("Once a week or so, while AI Assist drafts your replies, from the mail and meetings you have then. Not once you've changed it yourself.")}</More></span></span>
         </label>
       </section>
 
       <section className="st-sec" data-setting="find-a-time">
         <h4>{t('Find a Time')}</h4>
-        <p className="muted small" title={t('When an email asks to meet, AI Assist offers free times from your calendar, read-only: nothing is held or added. They fit these hours, and the other side\'s working day when their time zone is known.')}>{t('AI Assist offers free times from your calendar, read-only: nothing is held or added.')}</p>
+        <p className="muted small">{t('AI Assist offers free times from your calendar, read-only: nothing is held or added.')} <More>{t('When an email asks to meet, AI Assist offers free times from your calendar, read-only: nothing is held or added. They fit these hours, and the other side\'s working day when their time zone is known.')}</More></p>
         <div className="st-row mdays" role="group" aria-label={t('Working days')}>
           <span>{t('Working days')}</span>
           {order.map((d) => {
@@ -146,7 +146,7 @@ export default function Mail() {
 
       <section className="st-sec" data-setting="mail-read-only">
         <h4>{t('Read-Only')}</h4>
-        <p className="muted small" title={t('Bridge AI reads Mail and never changes it: it doesn\'t send, archive, flag, move or delete mail, or put drafts in your mailbox. Done and Remind me are kept by Bridge AI, and you send replies from your own mail app.')}>{t('Bridge AI never changes Mail: nothing is sent, moved or deleted. You send replies from your own mail app.')}</p>
+        <p className="muted small">{t('Bridge AI never changes Mail: nothing is sent, moved or deleted. You send replies from your own mail app.')} <More>{t('Bridge AI reads Mail and never changes it: it doesn\'t send, archive, flag, move or delete mail, or put drafts in your mailbox. Done and Remind me are kept by Bridge AI, and you send replies from your own mail app.')}</More></p>
       </section>
     </div>
   )

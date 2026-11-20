@@ -32,6 +32,7 @@ import { canOpen } from './files.js'
 import { mayLook, noteAsked } from './projects.js'
 import { isLimit, search as searchWeb, searchVia } from './consult.js'
 import * as modelList from './modellist.js'
+import { placeEn } from '../shared/places.js'
 
 const DIR = path.join(DATA, 'meetings')
 const RATE = 16000
@@ -531,7 +532,7 @@ export function start({ title, event, language, kind, call = true, callApps = []
     // Its live board, a beta feature (boardSoon): on when you have it on for every meeting.
     board: cfg.meetings?.board === true,
   })
-  const why = call && cfg.meetings?.callAudio !== false ? listen(id) : 'Recording the call\'s sound is off (Settings › Voice & Meetings).'
+  const why = call && cfg.meetings?.callAudio !== false ? listen(id) : `Recording the call's sound is off (${placeEn('call-audio')}).`
   speech.prepare(cfg)
   return patchMeta(id, why ? { call: 'off', callWhy: why } : { call: 'on' })
 }
@@ -675,7 +676,7 @@ export function reopen(id, { call = true, callApps = [] } = {}) {
     callEnded: null, callEndedApp: null, endWhy: null, stopsAt: null, call: 'off', callWhy: null, callError: null, summaryRetryAt: null,
     callApps: [...new Set([].concat(callApps || []).map(String))].slice(0, 5),
   })
-  const why = call && cfg.meetings?.callAudio !== false ? listen(id) : 'Recording the call\'s sound is off (Settings › Voice & Meetings).'
+  const why = call && cfg.meetings?.callAudio !== false ? listen(id) : `Recording the call's sound is off (${placeEn('call-audio')}).`
   speech.prepare(cfg)
   return patchMeta(id, why ? { call: 'off', callWhy: why } : { call: 'on' })
 }
@@ -824,11 +825,11 @@ export async function retranscribe(id, { engine, localModel, language } = {}) {
   const st = await speech.status(c)
   if (st.engine === 'local') {
     const lm = st.local.models.find((x) => x.id === st.local.model)
-    if (lm?.runtime === 'whisper' && !st.local.program) throw new Error(`${lm.label} needs whisper.cpp. Install it in Settings › Voice & Meetings, or pick Parakeet there.`)
-    if (!lm?.have) throw new Error(`Download ${lm?.label || 'that speech model'} first, in Settings › Voice & Meetings.`)
+    if (lm?.runtime === 'whisper' && !st.local.program) throw new Error(`${lm.label} needs whisper.cpp. Install it in ${placeEn('voice')}, or pick Parakeet there.`)
+    if (!lm?.have) throw new Error(`Download ${lm?.label || 'that speech model'} first, in ${placeEn('voice')}.`)
   } else if (st.engine === 'apple') {
-    if (!st.apple.available) throw new Error(`The Mac's own speech isn't available here (${st.apple.why || 'it needs macOS 26 or later'}). Pick another engine in Settings › Voice & Meetings.`)
-  } else if (!st.services.find((x) => x.id === st.engine)?.ready) throw new Error('That service needs its key first, in Settings › Model Providers.')
+    if (!st.apple.available) throw new Error(`The Mac's own speech isn't available here (${st.apple.why || 'it needs macOS 26 or later'}). Pick another engine in ${placeEn('meetings')}.`)
+  } else if (!st.services.find((x) => x.id === st.engine)?.ready) throw new Error(`That service needs its key first, in ${placeEn('providers')}.`)
   const old = path.join(d, 'transcript.jsonl')
   if (fs.existsSync(old)) fs.renameSync(old, path.join(d, `transcript-${Date.now()}.jsonl`))
   fs.rmSync(path.join(d, 'pending'), { recursive: true, force: true })
@@ -2353,7 +2354,7 @@ async function replyAny(use, msgs, { anywhere = false, own = null, passed = [], 
     }
   }
 }
-const noModel = () => Object.assign(new Error('No model to write with. Sign in to an agent, or add an API key or a local model in Settings › Model Providers.'), { code: 'no_model' })
+const noModel = () => Object.assign(new Error(`No model to write with. Sign in to an agent, or add an API key or a local model in ${placeEn('providers')}.`), { code: 'no_model' })
 
 // What to make of a meeting. General fits most; the others change what to look for.
 export const KINDS = {
@@ -2592,7 +2593,7 @@ export function summarize(id, { model, kind, language, again = false } = {}) {
     // stepped in; a model on this computer read it in parts (its context is short); or took
     // minutes, when a smaller one would be quicker.
     const said = [
-      pick.auto?.why === 'short' && r.model === use ? `Written on this computer by ${r.model}: with Auto, a meeting this short stays here (Settings › Model Providers).` : '',
+      pick.auto?.why === 'short' && r.model === use ? `Written on this computer by ${r.model}: with Auto, a meeting this short stays here (${placeEn('models')}).` : '',
       // (Ones of Meeting notes' own list passed over before it was tried.)
       pick.passed?.length ? `${pick.passed.map((x) => String(x.why).slice(0, 160)).join('; ')}, so ${use}, next in Meeting notes' list, wrote it.` : '',
       r.fellBack ?`${r.fellBack} ${isLocal(r.fellBack) ? 'couldn\'t write it here' : 'couldn\'t be reached'} (${String(r.why).slice(0, 120)}), so ${r.model} wrote it.` : '',
@@ -3376,7 +3377,7 @@ async function writeNotes(id, { auto = false } = {}) {
   const m = meta(id)
   const o = saving()
   const { note, transcript: tfile } = target(m, o)
-  if (!note && !tfile) throw new Error('A combined meeting has no transcript of its own, and only transcripts are saved (Settings › Voice & Meetings). Its meetings are saved one by one.')
+  if (!note && !tfile) throw new Error(`A combined meeting has no transcript of its own, and only transcripts are saved (${placeEn('save-notes')}). Its meetings are saved one by one.`)
   const at = new Date(m.startedAt)
   const day = `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`
   const vault = await vaultOf(path.dirname(note || tfile))
@@ -3499,7 +3500,7 @@ function resave(id, ms = 0) {
   resaving.set(id, setTimeout(() => { resaving.delete(id); save(id, { auto: true }).catch(() => {}) }, ms))
 }
 // Why a save didn't work: macOS not letting Bridge AI into the folder, a disk full.
-const savingError = (e) => (e?.code === 'EPERM' || e?.code === 'EACCES' ? `Bridge AI isn't allowed to write to ${folder().replace(os.homedir(), '~')}.${IS_MAC ? ' Allow it in System Settings › Privacy & Security › Files and Folders, or pick' : ' Pick'} another folder in Settings › Voice & Meetings.` : String(e?.message || e).slice(0, 300))
+const savingError = (e) => (e?.code === 'EPERM' || e?.code === 'EACCES' ? `Bridge AI isn't allowed to write to ${folder().replace(os.homedir(), '~')}.${IS_MAC ? ' Allow it in System Settings › Privacy & Security › Files and Folders, or pick' : ' Pick'} another folder in ${placeEn('save-notes')}.` : String(e?.message || e).slice(0, 300))
 
 // ---------- A deck from a meeting ----------
 // Make a deck: a short Marp deck (Markdown slides, MIT), written by the notes model from the

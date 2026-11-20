@@ -116,7 +116,7 @@ try {
   // No model yet: it says so, and where to add one, rather than nothing.
   const none = await api('/studio/sign/setup')
   const noModel = await err('/studio/sign/explain', { ...F('agreement.pdf'), pages: [{ n: 1, text: 'Terms' }] })
-  ok(none.model === null && /No model to read it with.*Settings › Model Providers/.test(noModel?.message || ''), 'no model to read with yet: said, with where to add one', { model: none.model, said: noModel?.message })
+  ok(none.model === null && /No model to read it with.*Settings › Agents & Models › Model Providers/.test(noModel?.message || ''), 'no model to read with yet: said, with where to add one', { model: none.model, said: noModel?.message })
   await api('/providers/openai', { values: { OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: `${model.url}/v1` } }, 'PUT')
   await api('/settings', { meetings: { model: 'openai:gpt-5' } }, 'PATCH')
   let setup = await api('/studio/sign/setup')

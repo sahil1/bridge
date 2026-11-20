@@ -3,15 +3,16 @@ import Icon from '../Icon.jsx'
 import { api, usePoll, viaRelay } from '../../api.js'
 import { useSettings, SaveNote } from './General.jsx'
 import SpokenAnswers from '../../voice/SpokenAnswers.jsx'
+import { More } from './Advanced.jsx'
 import { t, tx } from '../../i18n/index.js'
 import '../meetings/meetings.css'
 
-// Settings › Voice & Meetings › Speech to Text: the speech models this computer can run (the ones it
-// can't aren't listed), the one voice notes, dictation and meetings use, and their downloads.
-// Parakeet first; Whisper, for the languages Parakeet doesn't hear, folded away until it's wanted.
-// Server: speech.js (status, and what this computer can run), voice.js. Then the voice that reads
-// the Chief of Staff's answers aloud (voice/SpokenAnswers.jsx), where a robotic one is swapped for a
-// natural one, so it isn't under Advanced. Dictation's own settings are the tab before (Dictation.jsx).
+// Settings › Meetings & Voice › Speech Models (listening): the speech models this computer can run
+// (the ones it can't aren't listed), the one voice notes, dictation and meetings use, and their
+// downloads. Parakeet first; Whisper, for the languages Parakeet doesn't hear, folded away until
+// it's wanted. Server: speech.js (status, and what this computer can run), voice.js. The voice that
+// reads the Chief of Staff's answers aloud (speaking) is the next tab, Spoken Answers (Spoken,
+// below: voice/SpokenAnswers.jsx). Dictation's own settings are the tab before (Dictation.jsx).
 const size = (mb) => (mb >= 1000 ? t('{n} GB', { n: (mb / 1000).toFixed(1) }) : t('{n} MB', { n: mb }))
 // What the server says of each speech model (server/speech.js), marked here so it's translated.
 tx('Accurate and quick on any computer. English and 24 more European languages, which it tells apart itself.'); tx('The best at tool names and jargon (worktree, Claude Code).')
@@ -81,7 +82,7 @@ export default function Voice() {
 
       <section className="st-sec" data-setting="speech-model">
         <h4>{t('Speech Model')}</h4>
-        <p className="muted small" title={t('Voice notes, dictation and meetings are turned into text on this computer by the speech model you pick here. What you say never leaves it. Each model is one download, from Hugging Face.')}>{t('Voice notes, dictation and meetings are turned into text here: what you say never leaves this computer.')}</p>
+        <p className="muted small">{t('Voice notes, dictation and meetings are turned into text here: what you say never leaves this computer.')} <More>{t('Voice notes, dictation and meetings are turned into text on this computer by the speech model you pick here. What you say never leaves it. Each model is one download, from Hugging Face.')}</More></p>
         {v.standIn === 'apple' && <p className="small">{t("Until {model} is downloaded, the Mac's own speech turns what you say into text.", { model: v.model.label })}</p>}
         <ul className="mt-models" aria-label={t('Speech models')}>
           {parakeets.map(row)}
@@ -105,7 +106,12 @@ export default function Voice() {
         )}
         {d.hidden?.length > 0 && <p className="muted small">{t('More speech models are offered on other computers.')}</p>}
       </section>
-      <div data-setting="spoken-answers"><SpokenAnswers /></div>
     </div>
   )
+}
+
+// Settings › Meetings & Voice › Spoken Answers (speaking): the voice that reads the Chief of Staff's
+// answers aloud, where a robotic one is swapped for a natural one.
+export function Spoken() {
+  return <div className="st-sections st-spoken"><div data-setting="spoken-answers"><SpokenAnswers /></div></div>
 }

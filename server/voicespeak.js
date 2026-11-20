@@ -13,6 +13,7 @@ import { machine } from './machine.js'
 import * as speech from './speech.js'
 import * as asr from './asr.js'
 import { wavOf } from './voice.js'
+import { placeEn } from '../shared/places.js'
 
 // BRIDGE_ESPEAK (tests): a script standing in for eSpeak NG, run on the app's own Node.
 let found = null // { at, bin }
@@ -158,7 +159,7 @@ async function natural(text, { lang, voice, rate }) {
   const n = speech.NATURAL
   const f = await fit()
   if (!f.ok) throw fail(`The natural voice can't run on this computer: ${f.why}`, 409)
-  if (!speech.have(n)) throw fail(speech.downloading(n.id) && !speech.downloading(n.id).error ? 'The natural voice is still downloading' : 'The natural voice isn\'t downloaded. Download it in Settings › Voice & Meetings.', 409)
+  if (!speech.have(n)) throw fail(speech.downloading(n.id) && !speech.downloading(n.id).error ? 'The natural voice is still downloading' : `The natural voice isn't downloaded. Download it in ${placeEn('spoken')}.`, 409)
   const code = String(lang || 'en').toLowerCase().split('-')[0]
   if (!n.languages.includes(code)) throw fail('The natural voice doesn\'t speak this language', 400)
   // A sentence or two at a time comes from the page; a long one is still read whole.

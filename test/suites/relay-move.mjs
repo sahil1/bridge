@@ -250,7 +250,7 @@ try {
   await until(async () => { if (await dp.locator('#home').isVisible().catch(() => false)) await dp.locator('#skip').click().catch(() => {}); return dp.frameLocator('#app').locator('.tabbar button').first().isVisible().catch(() => false) }, 40000, 300)
   await desk.api('/relay/forget', {})
   const err = await until(async () => (await dp.locator('#pair').isVisible() ? dp.locator('#pair-err').innerText() : null), 15000, 200)
-  ok(/^Desk stopped using its relay, so it forgot this phone\. To use it again: on Desk, set up the phone in Settings › Account & Devices, click Pair a device, and scan its code with this phone's camera\.$/.test(err || ''), 'a phone page connected as its computer stops using the relay says so, with how to pair again', err)
+  ok(/^Desk stopped using its relay, so it forgot this phone\. To use it again: on Desk, set up the phone in Settings › Devices & Access › Phone, click Pair a device, and scan its code with this phone's camera\.$/.test(err || ''), 'a phone page connected as its computer stops using the relay says so, with how to pair again', err)
   await shot(dp, `${tag}relay-forgot-phone`)
 
   // (WebKit reports what the phone page was waiting on when its link dropped, as a computer moving

@@ -298,7 +298,7 @@ try {
     const refused = await kit.api('/accounts/active/claude', { id: 'claude-default' }).then(() => null, (e) => e.message)
     ok(/off the list/.test(refused || ''), `${t}: it can't be made default while it's off the list`, refused)
 
-    // Settings › Model Providers › Accounts: shows it again. Opened at Accounts, the panel is on its
+    // Settings › Agents & Models › Model Providers › Accounts: shows it again. Opened at Accounts, the panel is on its
     // way to them in the frame they're drawn (at the top, or as far as it goes until what's below
     // them comes), not a moment later: they moved up from under a click on Show your usual login.
     await p.evaluate(() => {
@@ -455,10 +455,11 @@ try {
     ok(!!(await until(async () => (await p.locator('#pv-cloud .cl-list').count()) > 0 && !(await err("Couldn't load cloud agents").count()), 10000)), 'and Retry brings the cloud agents')
     await err("Couldn't load accounts").getByRole('button', { name: 'Retry' }).click()
     ok(!!(await until(async () => /Main/.test(await p.locator('#pv-accounts').innerText().catch(() => '')), 10000)), 'and Retry brings the accounts')
+    // (The agents' sign-ins themselves are the Agents tab's now: here, Retry has them, and nothing says it failed.)
     await err("Couldn't check agent sign-ins").getByRole('button', { name: 'Retry' }).click()
     const retriedAt = Date.now()
-    const signIns = await until(async () => (await p.locator('.modal.settings .pv-agent').count()) > 0 && !(await p.locator('.modal.settings .pv-err').count()), 10000)
-    ok(!!signIns, 'and the agents\' sign-ins', signIns ? undefined : { agents: await p.locator('.modal.settings .pv-agent').count(), errs: await p.locator('.modal.settings .pv-err').allInnerTexts().catch(() => []), loading: await p.locator('.modal.settings .pv-loading').count(), later: !!(await until(async () => (await p.locator('.modal.settings .pv-agent').count()) > 0 && !(await p.locator('.modal.settings .pv-err').count()), 30000)) && Date.now() - retriedAt })
+    const signIns = await until(async () => !(await p.locator('.modal.settings .pv-err').count()) && /Main/.test(await p.locator('#pv-accounts').innerText().catch(() => '')), 10000)
+    ok(!!signIns, 'and the agents\' sign-ins', signIns ? undefined : { errs: await p.locator('.modal.settings .pv-err').allInnerTexts().catch(() => []), later: !!(await until(async () => !(await p.locator('.modal.settings .pv-err').count()), 30000)) && Date.now() - retriedAt })
     ok(errors.length === 0, 'no page errors', errors)
     await ctx.close()
   }

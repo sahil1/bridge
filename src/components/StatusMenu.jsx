@@ -14,6 +14,7 @@ import { useShared } from './layout.jsx'
 import { usePoll } from '../api.js'
 import { PINS, usePins, setPin } from '../pins.js'
 import { t, locale } from '../i18n/index.js'
+import { where } from './settings/search.js'
 import './status.css'
 
 // The top bar's Status menu (decided with the app's layout): what used to be a row of chips that
@@ -358,7 +359,7 @@ export default function StatusMenu({ quota, primary, update, upNote, fresh, flee
           {/* How to change what's in the bar, said where the pins are. */}
           <p className="status-foot">
             <Icon name="pin" size={12} />
-            <span>{t('Pin any of these to see it in the top bar too.')} {onPins && <button type="button" className="link-btn" onClick={close(onPins)}>{t('Settings › Appearance')}</button>}</span>
+            <span>{t('Pin any of these to see it in the top bar too.')} {onPins && <button type="button" className="link-btn" onClick={close(onPins)}>{where('topbar')}</button>}</span>
           </p>
         </div>
       )}
