@@ -165,7 +165,7 @@ function TurnBody({ x, s, onDone, setNote }) {
       {x.write && <ul className="sb-writes"><WriteRow w={x.write} busy={busy} onUndo={x.write.state === 'applied' ? undo : null} /></ul>}
       {x.push && x.push.state !== 'waiting' && <p className="muted small" data-push={x.push.state}><Icon name="branch" size={11} /> {x.push.state === 'pushed' || x.push.state === 'approved' || x.push.pr ? t('Pushed as a draft pull request.') : x.push.state === 'denied' ? t('Its push was denied.') : x.push.error ? t('Its push couldn\'t go through: {why}', { why: x.push.error }) : t('A push: {state}', { state: x.push.state })}{x.push.pr?.url && <> <a href={x.push.pr.url} target="_blank" rel="noreferrer">{x.push.pr.url}</a></>}</p>}
       {x.limit?.carried && <p className="muted small"><Icon name="clock" size={11} /> {t('Nobody answered at its time limit, so it carried on.')}</p>}
-      {x.limit?.phase === 'stopped' && <p className="muted small"><Icon name="clock" size={11} /> {t('Stopped at its Longest Run. Say “carry on” in the thread to go on.')}</p>}
+      {x.limit?.phase === 'longest' && <p className="muted small"><Icon name="clock" size={11} /> {t('Stopped at its Longest Run. Say “carry on” in the thread to go on.')}</p>}
     </>
   )
 }

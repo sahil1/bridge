@@ -3583,7 +3583,9 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       const a = s.paneId ? (f?.agents || []).find((x) => x.paneId === s.paneId) : null
       const h = s.helper ? delegate.get(s.helper) : null
       const n = a && h ? await nowOf({ ...h, paneId: a.paneId }).catch(() => null) : null
-      // (Who asked each, and whether that's you: you there, as the connection has you linked.)
+      // (Who asked each, and whether that's you: you there, as the connection has you linked. A turn's
+      // limit: the question at its time limit while it's asked, else whether nobody answered it and
+      // it carried on, or it was stopped at its Longest Run.)
       const bot = botOf(s.bot)
       const fromOf = (p) => (p ? { ...p, ...(bot && isOwner(bot, p) ? { owner: true } : {}) } : null)
       return {
@@ -3592,7 +3594,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
           q: q.id, at: q.heardAt, from: fromOf(q.from), text: q.text, more: q.more.map((x) => ({ from: x.person, text: x.text, at: x.at })), files: (q.files || []).map((x) => ({ name: x.name, size: x.size })),
           state: sending(q) ? 'sending' : q.state === 'starting' ? 'queued' : q.state, draft: q.state === 'draft' ? q.draft ?? null : null, sent: q.sentText || null, auto: !!q.auto, steer: !!q.steer,
           needsOwner: !!q.needsOwner, why: q.why || null, warn: q.warn || null, problem: q.problem || null, outFiles: (q.outFiles || []).map((x) => ({ name: x.name, size: x.size, ...(x.from ? { from: x.from } : {}) })),
-          write: writeView(q.write), push: pushView(q.push), limit: waitsAtLimit(q) ? limitView(q) : null, change: q.change ? { branch: q.change.branch, stat: q.change.stat, files: q.change.files, pr: q.change.pr, approved: !!q.change.approved } : null,
+          write: writeView(q.write), push: pushView(q.push), limit: waitsAtLimit(q) ? limitView(q) : q.state === 'stopped' && q.stopped?.why === 'longest' ? { phase: 'longest' } : q.limitCarried ? { carried: true } : null, change: q.change ? { branch: q.change.branch, stat: q.change.stat, files: q.change.files, pr: q.change.pr, approved: !!q.change.approved } : null,
           consulting: q.consulting || null, handed: q.handed || null,
         })),
         pane: { paneId: a?.paneId || null, live: !!a, status: a?.status || null, asking: n?.asking || null, doing: n?.doing || null },

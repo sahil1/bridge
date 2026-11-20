@@ -148,6 +148,8 @@
 .bh.phone .bh-tools select.st-input { flex: 1 1 140px; }
 .bh.phone :is(.bh-quick textarea, .bh-test-sess textarea, .ro-try-form textarea) { font-size: 16px; }
 .bh.phone .bh-sv-head { padding: 10px 12px 8px; }
+/* (A session's title, its first words as asked, wraps on a phone rather than being cut short.) */
+.bh.phone .bh-sv-title .bp-name { white-space: normal; overflow-wrap: anywhere; text-overflow: clip; font-size: 16px; }
 .bh.phone .bh-sv-note { margin: 8px 12px 0; }
 .bh.phone .bh-thread { padding: 10px 12px 32px; }
 .bh.phone .bh-sv-acts .seg { display: flex; }
