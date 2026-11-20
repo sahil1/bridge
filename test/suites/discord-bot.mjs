@@ -24,7 +24,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { startKit, startDiscord, checks, until, sleep, browser, page, shot, phoneFaults, TEST, IS_WIN } from '../lib/harness.mjs'
-import { lookers, openSettings, ownFile } from '../lib/bots.mjs'
+import { lookers, ownFile, openBot } from '../lib/bots.mjs'
 
 const { ok, done } = checks('discord-bot')
 const dc = await startDiscord('discord-bot')
@@ -63,7 +63,7 @@ try {
   // ---------- Set up in Settings ----------
   await part('connecting in Settings', async () => {
     const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
-    await openSettings(p)
+    await openBot(p)
     const tabs = await p.locator('.sb-where-tabs [role="tab"]').allInnerTexts()
     ok(tabs.map((x) => x.trim()).join('|').replace(/(not set up|connected|not connected)/g, '').split('|').map((x) => x.trim()).join() === 'Slack,Discord,Microsoft Teams', 'Where It Answers: Slack, Discord and Microsoft Teams', tabs)
     await p.locator('.sb-where-tabs [data-platform="discord"]').click()
@@ -306,7 +306,7 @@ try {
   await part('Settings', async () => {
     for (const [mode, phone] of [['dark', false], ['light', true], ['dark', true]]) {
       const { ctx, p, errors } = await page(b, kit.url, { mode, theme: mode === 'dark' ? 'midnight' : 'sky', phone })
-      await openSettings(p)
+      await openBot(p)
       await p.locator('.sb-where-tabs [data-platform="discord"]').click()
       await p.locator('[data-setting="discord-owner"]').waitFor({ timeout: 8000 })
       ok(/Tester/.test(await p.locator('[data-setting="discord-owner"]').innerText()), `${mode}${phone ? ', a phone' : ''}: you in Discord`)
@@ -314,7 +314,7 @@ try {
       ok(/Dana\s*Discord/.test(asked), `${mode}${phone ? ', a phone' : ''}: who may ask, with where they're from`, asked)
       if (phone) {
         await sleep(300)
-        const faults = await phoneFaults(p, '.modal.settings .sb')
+        const faults = await phoneFaults(p, '.bp.phone .bp-main')
         ok(!Object.keys(faults).length, `${mode}, a phone: nothing too small or wider than the screen`, faults)
       }
       await shot(p, `${tag}discord-bot-${mode}${phone ? '-phone' : ''}`)

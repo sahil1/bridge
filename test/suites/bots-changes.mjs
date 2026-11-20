@@ -16,7 +16,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { checks, until, sleep, browser, page, shot, phoneFaults, TEST, IS_WIN } from '../lib/harness.mjs'
-import { botKit, openSettings, M, OWNER } from '../lib/bots.mjs'
+import { botKit, M, OWNER, openBot } from '../lib/bots.mjs'
 
 const { ok, done } = checks('bots-changes')
 // Its server needs git, as Bridge AI does for a change: on Windows the kit's PATH has only the
@@ -162,7 +162,7 @@ try {
     const v = await botOf()
     ok(v.changes?.hook?.need === '2.1.257' && v.changes.hook.have === '2.1.100', 'its Access says Claude Code is too old for its hook, and which it needs', v.changes?.hook)
     const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
-    await openSettings(p)
+    await openBot(p)
     const said = await p.locator('[data-setting="bots-changes-hook"]').first().innerText({ timeout: 15000 }).catch(() => '')
     ok(/needs Claude Code 2\.1\.257 or later, and this computer has 2\.1\.100: update it with claude update/.test(said), 'and its Changes say so, with how to update it', said)
     ok(errors.length === 0, 'no page errors', errors)
@@ -239,7 +239,7 @@ try {
       if (phone) { const faults = await phoneFaults(p, '.ny-item.t-slack'); ok(!Object.keys(faults).length, 'on a phone: nothing too small to tap, off the screen or cut short', faults) }
       await shot(p, `${tag}bots-changes-needs-you-${mode}${phone ? '-phone' : ''}`)
       await p.keyboard.press('Escape')
-      await openSettings(p)
+      await openBot(p)
       const sec = p.locator('[data-setting="slack-changes"]')
       await sec.scrollIntoViewIfNeeded()
       const said = await sec.innerText()

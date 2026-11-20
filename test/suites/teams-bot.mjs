@@ -21,7 +21,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { startKit, startTeams, checks, until, sleep, browser, page, shot, phoneFaults, TEST, IS_WIN } from '../lib/harness.mjs'
-import { lookers, openSettings, ownFile } from '../lib/bots.mjs'
+import { lookers, ownFile, openBot } from '../lib/bots.mjs'
 import { unzip } from '../../server/teamsapp.js'
 
 const { ok, done } = checks('teams-bot')
@@ -57,7 +57,7 @@ try {
   let port = null
   await part('connecting in Settings', async () => {
     const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
-    await openSettings(p)
+    await openBot(p)
     await p.locator('.sb-where-tabs [data-platform="teams"]').click()
     const sec = p.locator('[data-setting="teams-connect"]')
     const steps = await sec.locator('.sb-steps').innerText()
@@ -214,7 +214,7 @@ try {
   await part('Settings', async () => {
     for (const [mode, phone] of [['dark', false], ['light', true], ['dark', true]]) {
       const { ctx, p, errors } = await page(b, kit.url, { mode, theme: mode === 'dark' ? 'midnight' : 'sky', phone })
-      await openSettings(p)
+      await openBot(p)
       await p.locator('.sb-where-tabs [data-platform="teams"]').click()
       await p.locator('[data-setting="teams-owner"]').waitFor({ timeout: 8000 })
       const sec = await p.locator('[data-setting="teams-connect"]').innerText()
@@ -222,7 +222,7 @@ try {
       ok(/Dana Reyes\s*Microsoft Teams/.test(await p.locator('[data-setting="slack-askers"] .sb-askers').innerText()), `${mode}${phone ? ', a phone' : ''}: who may ask, with where they're from`)
       if (phone) {
         await sleep(300)
-        const faults = await phoneFaults(p, '.modal.settings .sb')
+        const faults = await phoneFaults(p, '.bp.phone .bp-main')
         ok(!Object.keys(faults).length, `${mode}, a phone: nothing too small or wider than the screen`, faults)
       }
       await shot(p, `${tag}teams-bot-${mode}${phone ? '-phone' : ''}`)

@@ -179,6 +179,10 @@ const SUITES = [
   { name: 'bots-sessions', build: null, minutes: 10, covers: [/^server\/(botsessions|frontdesk|delegate|agents|botmcp|botguard|sessionmcp|botwrite|bots|index)\.(js|mjs)$/, /^server\/runtime\/(builtin|herdr)\.js$/, /^test\/stand-ins\/(slack\.mjs|helper-claude\.cjs)$/, /^test\/lib\/bots\.mjs$/] },
   { name: 'bots-push', build: null, minutes: 8, covers: [/^server\/(botsessions|frontdesk|botchanges|botguard|sessionmcp|botmcp|bots|agents|index)\.(js|mjs)$/, /^test\/stand-ins\/(slack\.mjs|helper-claude\.cjs|gh\.cjs)$/, /^test\/lib\/bots\.mjs$/] },
   { name: 'bots-chief', build: null, minutes: 8, covers: [/^server\/(botsessions|frontdesk|sessionmcp|botmcp|connections|connhub|bots|index)\.js$/, /^test\/stand-ins\/(slack\.mjs|helper-claude\.cjs)$/, /^test\/lib\/bots\.mjs$/] },
+  // Bots as the owner meets it: one row in the sidebar, Connections, Bots and Sessions, a bot's
+  // Overview and Settings (Basic and Advanced), a session's Thread and Live; sessions and checks
+  // stood in for in the page, as the API contract has them.
+  { name: 'bots-ui', build: 'dist', browser: true, minutes: 8, covers: [/^src\/components\/bots\//, /^src\/components\/settings\/(Bots\.jsx|bots\.css)$/, /^src\/components\/(NeedsYou|Console|Rail)\.jsx$/, /^src\/(App|lazy)\.jsx$/, /^server\/(connections|bots|index)\.js$/, /^test\/stand-ins\/(slack\.mjs|claude\.cjs)$/] },
   { name: 'bots-routing', build: 'dist', browser: true, minutes: 8, covers: [/^server\/(connections|connhub|bots|bottemplates|frontdesk|index)\.js$/, /^src\/components\/bots\//, /^src\/components\/settings\/(Bots\.jsx|bots\.css)$/, /^src\/App\.jsx$/, /^test\/stand-ins\/(slack|model)\.mjs$/, /^test\/stand-ins\/helper-claude\.cjs$/, /^test\/lib\/bots\.mjs$/] },
   // Files a bot makes: its run's outbox, sent with its answer (Slack's upload API, Discord's
   // attachments, Teams' reply saying it can't), what's refused, and its Activity's files with Open

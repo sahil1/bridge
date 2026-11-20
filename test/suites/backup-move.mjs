@@ -32,7 +32,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { startKit, startRelay, startSlack, checks, until, browser, page, shot, TEST, IS_WIN } from '../lib/harness.mjs'
-import { lookers, openSettings, M } from '../lib/bots.mjs'
+import { lookers, openSettings, M, openBot } from '../lib/bots.mjs'
 import { linkAs } from '../lib/linkclient.mjs'
 
 const { ok, done } = checks('backup-move')
@@ -303,7 +303,7 @@ try {
   await part('Send to… from Activity', async () => {
     const place = (await laptop.api('/places', { path: path.join(laptop.home, 'inbox') })).place
     const { ctx, p, errors } = await page(b, studio.url)
-    await openSettings(p)
+    await openBot(p)
     await p.locator('.sb-tabs [role="tab"]', { hasText: 'Activity' }).click()
     const row = p.locator('[data-setting="bots-files"] [data-file="prices.md"]')
     await row.waitFor({ timeout: 15000 })

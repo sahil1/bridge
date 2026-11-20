@@ -41,12 +41,37 @@ const traceLines = () => fs.readFileSync(path.join(TRACE, `${month}.jsonl`), 'ut
 const events = () => traceLines().map((l) => JSON.parse(l))
 const raw = (p) => fetch(`${kit.url}/api${p}`).then(async (r) => ({ status: r.status, type: r.headers.get('content-type'), name: r.headers.get('content-disposition'), text: await r.text() }))
 const part = async (name, fn) => { try { await fn() } catch (e) { ok(false, `${name}: crashed: ${e.stack}`) } }
-const openSettings = async (p) => {
+// Bots (the sidebar's, a phone's More › Bots) at its Bots tab, and a bot's page from its card: by its
+// name, or the first.
+const openBots = async (p) => {
   await p.locator('.topbar, .tabbar').first().waitFor({ timeout: 20000 })
-  await until(async () => {
-    await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'slack-bot' } })))
-    return p.locator('.modal.settings .sb').first().waitFor({ timeout: 2500 }).then(() => true, () => false)
-  }, 20000, 100)
+  if (await p.locator('.tabbar').count()) {
+    await p.locator('.tabbar button', { hasText: 'More' }).click()
+    await p.locator('.m-more-row[data-id="bots"]').click()
+  } else await p.locator('[data-setting="rail-bots"] .rail-nav-btn').click({ timeout: 20000 })
+  await p.locator('.bh-tabs [data-tab="bots"]').click()
+}
+const openBot = async (p, name = null) => {
+  await openBots(p)
+  await (name ? p.locator('.bh .bo-card', { hasText: name }) : p.locator('.bh .bo-card')).first().click()
+  await p.locator('.bp .sb-tabs').waitFor({ timeout: 10000 })
+}
+// Its Settings, with Advanced open.
+const openAdvanced = async (p) => {
+  await p.locator('.bp .sb-tabs [data-tab="settings"]').click()
+  const adv = p.locator('.bp [data-setting="bot-advanced"]')
+  if (!(await adv.evaluate((d) => d.open))) await adv.locator(':scope > summary').click()
+}
+// A deleted bot, under Bots' Deleted Bots.
+const openGone = async (p, id) => {
+  await openBots(p)
+  const all = p.locator('.bh [data-group="deleted"]')
+  await all.waitFor({ timeout: 4000 })
+  if (!(await all.evaluate((d) => d.open))) await all.locator(':scope > summary').click()
+  const one = p.locator(`.bh .bh-gone-one[data-bot="${id}"]`)
+  await one.waitFor({ timeout: 4000 })
+  if (!(await one.evaluate((d) => d.open))) await one.locator(':scope > summary').click()
+  return one
 }
 const M = '<@UBOT>'
 // A folder or file as shown, with / between its parts (Windows shows ~\notes).
@@ -122,10 +147,10 @@ try {
   const none = await raw(`/bots/b1/export?format=csv&to=${encodeURIComponent('2001-01-01T00:00:00.000Z')}`)
   ok(none.text.trim().split('\r\n').length === 1, 'a date range with nothing in it: only the header')
 
-  // ---------- Activity, in Settings ----------
-  await part('Activity in Settings', async () => {
+  // ---------- Activity, on its page ----------
+  await part('Activity on its page', async () => {
     const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
-    await openSettings(p)
+    await openBot(p)
     await p.locator('.sb-tabs [role="tab"]', { hasText: 'Activity' }).click()
     await p.locator('.sb-convs li').first().waitFor({ timeout: 10000 })
     ok(/The record holds: \d+ events since/.test(await p.locator('.sb-integrity').innerText()), 'Activity says the record holds')
@@ -173,14 +198,14 @@ try {
   for (const [mode, theme, phone] of [['dark', 'midnight', false], ['light', 'sky', true], ['dark', 'midnight', true]]) {
     await part(`Activity, ${mode}${phone ? ', on a phone' : ''}`, async () => {
       const { ctx, p, errors } = await page(b, kit.url, { mode, theme, phone })
-      await openSettings(p)
+      await openBot(p)
       await p.locator('.sb-tabs [role="tab"]', { hasText: 'Activity' }).click()
       await p.locator('.sb-convs li').first().waitFor({ timeout: 10000 })
       await p.locator('.sb-conv').first().click()
       await p.locator('.sb-tl li').first().waitFor({ timeout: 10000 })
       if (phone) {
         await sleep(300)
-        const faults = await phoneFaults(p, '.modal.settings .sb')
+        const faults = await phoneFaults(p, '.bp.phone .bp-main')
         ok(!Object.keys(faults).length, 'on a phone: nothing too small to tap, off the screen or cut short', faults)
       }
       await sleep(300)
@@ -199,45 +224,44 @@ try {
   await kit.api('/bots', { name: 'Temp' })
   await part('deleting bots', async () => {
     const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
-    await openSettings(p)
-    await p.locator('.sb-chip', { hasText: 'Helpdesk' }).click()
-    await p.locator('.sb-tabs [role="tab"]', { hasText: 'Set Up' }).click()
+    await openBot(p, 'Helpdesk')
+    await openAdvanced(p)
     await p.locator('[data-setting="slack-replies"]').waitFor({ timeout: 10000 })
-    ok(!(await p.locator('.sb-terms').count()), 'and Settings shows no note on the terms')
+    ok(!(await p.locator('.sb-terms').count()), 'and its Settings show no note on the terms')
     await p.locator('button', { hasText: 'Delete this bot…' }).click()
     const sure = p.locator('.sb-sure')
     const box = sure.locator('input[type="checkbox"]')
     ok(/Its activity stays, to look at and export here/.test(await sure.innerText()) && /Also delete its activity history/.test(await sure.innerText()) && !(await box.isChecked()), 'Delete says its activity stays, with a box to delete that too, not ticked', await sure.innerText())
     await sure.locator('button', { hasText: 'Delete Helpdesk' }).click()
-    const chip = p.locator('.sb-chip.gone', { hasText: 'Helpdesk (deleted)' })
-    await chip.waitFor({ timeout: 10000 })
+    await until(() => !fs.existsSync(path.join(B1, 'bot.json')), 10000)
     ok(!fs.existsSync(path.join(B1, 'bot.json')) && !fs.existsSync(path.join(B1, 'instructions.md')) && !fs.existsSync(path.join(B1, 'slack.json')) && fs.existsSync(path.join(TRACE, `${month}.jsonl`)) && fs.existsSync(path.join(B1, 'deleted.json')), 'deleted: its settings, instructions and tokens go; its record stays')
-    await chip.click()
-    await p.locator('.sb-convs li').first().waitFor({ timeout: 10000 })
-    ok(/Helpdesk was deleted on .*Its record stays here, to look at and export/.test(await p.locator('.sb-deleted').innerText()) && await p.locator('.sb-convs li').count() === 3 && !(await p.locator('.sb-keep').count()), 'Settings › Bots has it under its name, marked deleted, its conversations still there', await p.locator('.sb-deleted').innerText())
+    let gone = await until(() => openGone(p, 'b1').catch(() => null), 20000, 500)
+    await gone.locator('.sb-convs li').first().waitFor({ timeout: 10000 })
+    ok(/Helpdesk was deleted on .*Its record stays here, to look at and export/.test(await gone.locator('.sb-deleted').innerText()) && await gone.locator('.sb-convs li').count() === 3 && !(await gone.locator('.sb-keep').count()), 'Bots has it under Deleted Bots, by its name, its conversations still there', await gone.locator('.sb-deleted').innerText())
     await sleep(300)
     await shot(p, `${tag}bots-activity-deleted`)
     const left = await raw('/bots/b1/export?format=jsonl')
     ok(left.status === 200 && /Helpdesk-activity\.jsonl/.test(left.name) && left.text.includes('"setting":"deleted"') && left.text.includes('When is support open'), 'and it still exports, with its deletion in it', left.name)
     ok(events().some((e) => e.type === 'settings.changed' && e.setting === 'deleted' && e.new?.history === 'kept' && e.by === 'Tester'), 'the deletion is in its record')
     // The other: its history deleted too, by ticking the box.
-    await p.locator('.sb-chip', { hasText: /^Temp$/ }).click()
-    await p.locator('.sb-tabs [role="tab"]', { hasText: 'Set Up' }).click()
-    await p.locator('button', { hasText: 'Delete this bot…' }).click()
-    await p.locator('.sb-sure input[type="checkbox"]').check()
-    await p.locator('.sb-sure button', { hasText: 'Delete Temp' }).click()
-    const temp = p.locator('.sb-chip.gone', { hasText: 'Temp (deleted)' })
-    await temp.waitFor({ timeout: 10000 })
+    await openBot(p, 'Temp')
+    await openAdvanced(p)
+    await p.locator('.bp button', { hasText: 'Delete this bot…' }).click()
+    await p.locator('.bp .sb-sure input[type="checkbox"]').check()
+    await p.locator('.bp .sb-sure button', { hasText: 'Delete Temp' }).click()
+    await until(() => fs.existsSync(path.join(kit.data, 'bots', 'b2', 'deleted.json')), 10000)
     const T2 = path.join(kit.data, 'bots', 'b2', 'trace')
     const tl = fs.readdirSync(T2).filter((f) => f.endsWith('.jsonl')).flatMap((f) => fs.readFileSync(path.join(T2, f), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)))
     ok(tl.length === 1 && tl[0].type === 'trace.deleted' && tl[0].all && tl[0].by === 'Tester' && tl[0].months.includes(month), 'with the box ticked: its activity history goes, and a trace.deleted line takes its place, saying when and by whom', tl)
-    await temp.click()
-    ok(/Temp was deleted on .*and its activity history with it/.test(await p.locator('.sb-deleted').innerText()) && !(await p.locator('button', { hasText: 'Delete its activity history' }).count()), 'Settings says so', await p.locator('.sb-deleted').innerText())
-    // A deleted bot's history deleted later, from its page.
-    await chip.click()
-    await p.locator('button', { hasText: 'Delete its activity history…' }).click()
-    await p.locator('.sb-sure button', { hasText: 'Delete the history' }).click()
-    ok(!!(await until(async () => /and its activity history with it/.test(await p.locator('.sb-deleted').innerText().catch(() => '')), 10000)), 'a kept record deleted later, from its page')
+    const temp = await until(() => openGone(p, 'b2').catch(() => null), 20000, 500)
+    ok(/Temp was deleted on .*and its activity history with it/.test(await temp.locator('.sb-deleted').innerText()) && !(await temp.locator('button', { hasText: 'Delete its activity history' }).count()), 'Bots says so', await temp.locator('.sb-deleted').innerText())
+    // A deleted bot's history deleted later, from Deleted Bots.
+    const one = p.locator('.bh .bh-gone-one[data-bot="b1"]')
+    if (!(await one.evaluate((d) => d.open))) await one.locator(':scope > summary').click()
+    gone = one
+    await gone.locator('button', { hasText: 'Delete its activity history…' }).click()
+    await gone.locator('.sb-sure button', { hasText: 'Delete the history' }).click()
+    ok(!!(await until(async () => /and its activity history with it/.test(await gone.locator('.sb-deleted').innerText().catch(() => '')), 10000)), 'a kept record deleted later, from Deleted Bots')
     const after = events()
     ok(after.length === 1 && after[0].type === 'trace.deleted' && (await kit.api('/bots/b1/activity')).conversations.length === 0 && (await kit.api('/bots/b1/activity')).integrity.ok, 'only its trace.deleted line is left, and the chain holds', after.map((e) => e.type))
     ok(errors.length === 0, 'no page errors', errors)
@@ -333,14 +357,12 @@ try {
   for (const [mode, theme, phone] of [['light', 'sky', false], ['dark', 'midnight', true]]) {
     await part(`Conversations on its page, ${mode}${phone ? ', on a phone' : ''}`, async () => {
       const { ctx, p, errors } = await page(b, kit.url, { mode, theme, phone })
-      if (phone) {
-        await openSettings(p)
-        await p.locator('.sb-chip', { hasText: 'Front Desk' }).click()
-      } else {
-        await p.locator('.rail-bot-list .bt-row', { hasText: 'Front Desk' }).click({ timeout: 20000 })
-        ok(!/Front Desk: question|Bot Runs/.test(await p.locator('.rail').innerText()), 'the sidebar: the bot, and none of its conversations or runs')
-      }
-      await p.locator('.sb-tabs [role="tab"]', { hasText: 'Conversations' }).click()
+      await openBot(p, 'Front Desk')
+      if (!phone) ok(!/Front Desk: question|Bot Runs/.test(await p.locator('.rail').innerText()), 'the sidebar: none of its conversations or runs')
+      await p.locator('.bp .sb-tabs [data-tab="overview"]').click()
+      const convs = p.locator('.bp [data-setting="bot-conversations"]')
+      await convs.waitFor({ timeout: 10000 })
+      if (!(await convs.evaluate((d) => d.open))) await convs.locator(':scope > summary').click()
       await p.locator('.bcv-row').first().waitFor({ timeout: 10000 })
       ok((await p.locator('.bcv-row').count()) === 3 && /^Dana/.test(await p.locator('.bcv-row').first().locator('.bcv-name').innerText()), 'Conversations: a row for each person, the latest first', await p.locator('.bcv-rows').innerText())
       await p.locator('.bcv-row[data-key="U0DANA"] .bcv-head').click()
@@ -363,7 +385,7 @@ try {
         ok((await p.locator('.bcv-row').count()) === 2 && /#launch/.test(await p.locator('.bcv-rows').innerText()), 'by channel: #launch and her direct messages', await p.locator('.bcv-rows').innerText())
       } else {
         await sleep(300)
-        const faults = await phoneFaults(p, '.modal.settings .sb')
+        const faults = await phoneFaults(p, '.bp.phone .bp-main')
         ok(!Object.keys(faults).length, 'on a phone: nothing too small to tap, off the screen or cut short', faults)
         await shot(p, `${tag}bots-conversations-${mode}-phone`)
       }
