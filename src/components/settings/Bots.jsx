@@ -785,7 +785,7 @@ export function Askers({ d, save }) {
           <span><b>{t('Everyone in channels it\'s invited to')}</b><span className="muted small">{t('Anyone in your workspace who mentions it in a channel it\'s in, or messages it directly.')}</span></span>
         </label>
       </div>
-      <p className="muted small">{t('Guests and people from other companies (in channels shared through Slack Connect) are never answered, either way.')} {t('Nor, in Discord, anyone outside its server or still to pass its screening, or, in Teams, guests and people from other organizations.')}</p>
+      <p className="muted small" title={`${t('Guests and people from other companies (in channels shared through Slack Connect) are never answered, either way.')} ${t('Nor, in Discord, anyone outside its server or still to pass its screening, or, in Teams, guests and people from other organizations.')}`}>{t('Guests and people from other companies are never answered.')}</p>
       {s.changes === 'edit'
         ? <p className="muted small">{t('Anyone who may ask can ask it to change files: it waits for you to approve, unless they\'re under May Change Files Without Asking Me (Changes).')}</p>
         : everyone
@@ -871,8 +871,8 @@ export function ReadsFrom({ d, save }) {
   const drop = (f) => save({ readsFrom: d.settings.readsFrom.filter((x, i) => list[i] !== f) })
   return (
     <section className="st-sec" data-setting="slack-folders">
-      <h4>{t('Reads From')}</h4>
-      <p className="muted small">{t('Every question is answered by one agent that can read all of these, and only these: it can\'t change files, run commands or send anything.')}</p>
+      <h4>{t('Folders')}</h4>
+      <p className="muted small">{t('It works only in these: it reads them, and edits files there when Edits Files is on.')}</p>
       {list.length > 0 && (
         <ul className="sb-folders">
           {list.map((f) => (
@@ -892,7 +892,7 @@ export function ReadsFrom({ d, save }) {
       <form className="sb-add" onSubmit={add}>
         <input className="st-input mono" value={where} onChange={(e) => setWhere(e.target.value)} placeholder="~/code" aria-label={t('Folder')} spellCheck={false} />
         <button type="button" className="btn small" aria-expanded={browse} onClick={async () => { if (!pickFolder) return setBrowse((x) => !x); const p = await pickFolder().catch(() => null); if (p) setWhere(p) }}>{t('Choose…')}</button>
-        <button type="submit" className="btn small" disabled={!where.trim()}><Icon name="plus" size={12} /> {t('Read from it')}</button>
+        <button type="submit" className="btn small" disabled={!where.trim()}><Icon name="plus" size={12} /> {t('Add')}</button>
       </form>
       {browse && <Browse onPick={async (f) => { if (await keep(f)) setBrowse(false) }} onClose={() => setBrowse(false)} />}
     </section>

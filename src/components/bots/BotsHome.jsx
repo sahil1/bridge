@@ -118,7 +118,6 @@ function BotCard({ b, chief = [] }) {
       <span className="bo-card-head">
         <BotDot status={st} size={8} />
         <b className="bo-name">{b.name}</b>
-        {chief.length > 0 && <span className="bt-tag bh-chief-tag">{t('Chief')}</span>}
         <span className="muted small bo-status">{t(STATUS[st])}</span>
       </span>
       <span className={`small bo-for${b.description ? '' : ' muted'}`}>{b.description || t('No line on what it\'s for yet: the Chief has only its name to go by.')}</span>
@@ -200,9 +199,9 @@ function QuickCreate({ conns, first = false, onClose }) {
           </select>
         </label>
       )}
-      {shared.length === 1 && <p className="muted small">{t('Reached through {name} on {platform}, with nothing to set up there.', { name: shared[0].platform === 'teams' ? shared[0].name : `@${shared[0].name}`, platform: platName(shared[0].platform) })}</p>}
+      {shared.length === 1 && <p className="muted small">{t('It answers through {name} on {platform}.', { name: shared[0].platform === 'teams' ? shared[0].name : `@${shared[0].name}`, platform: platName(shared[0].platform) })}</p>}
       {conns && !shared.length && <p className="muted small">{t('No connection yet: make one in Connections once it\'s made, for all your bots.')}</p>}
-      <p className="muted small">{folder.trim() ? t('It reads and edits files in that folder (yours at once, with Undo; anyone else\'s waits for your OK), answers in a thread, and remembers each one. Change any of it in its Settings.') : t('With no folder it answers from what it knows. Change any of it in its Settings.')}</p>
+      {folder.trim() && <p className="muted small">{t('It reads and edits files there: yours at once, anyone else\'s once you OK them.')}</p>}
       {error && <p className="error-text small" role="alert">{error}</p>}
       <div className="st-row">
         <button type="submit" className="btn small primary" disabled={busy || !purpose.trim()}><Icon name="plus" size={12} /> {busy ? t('Making it…') : t('Make the bot')}</button>

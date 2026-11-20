@@ -31,7 +31,11 @@ export default function TestConnection({ c, onDone }) {
   const [out, setOut] = useState(null) // { list, at }
   const [missing, setMissing] = useState(false)
   const [error, setError] = useState(null)
+  const [all, setAll] = useState(false)
   const last = out || (c.check ? { list: listOf(c.check), at: atOf(c.check) } : null)
+  // (What needs you first: the warnings and failures; every check a click away.)
+  const shown = (last?.list || []).filter((x) => all || x.state === 'warn' || x.state === 'fail')
+  const hidden = (last?.list?.length || 0) - shown.length
   const run = async () => {
     setBusy(true)
     setError(null)
@@ -55,9 +59,9 @@ export default function TestConnection({ c, onDone }) {
       </div>
       {missing && <p className="muted small">{t('This Bridge AI can\'t test a connection yet: update it, then test again.')}</p>}
       {error && <p className="error-text small" role="alert">{error}</p>}
-      {last?.list?.length > 0 && (
+      {shown.length > 0 && (
         <ul className="bh-checks" aria-label={t('What was tested')}>
-          {last.list.map((x, i) => (
+          {shown.map((x, i) => (
             <li key={x.id || i} className={`bh-check ${x.state}`} data-check={x.id || i} data-state={x.state}>
               <Icon name={ICON[x.state] || 'info'} size={12} />
               <span className="bh-check-text">
@@ -69,6 +73,7 @@ export default function TestConnection({ c, onDone }) {
           ))}
         </ul>
       )}
+      {last?.list?.length > 0 && (hidden > 0 || all) && <button type="button" className="link-btn small bh-all-checks" onClick={() => setAll(!all)}>{all ? t('Only what needs you') : hidden === 1 ? t('1 more check, passed') : t('{n} more checks, passed or skipped', { n: hidden })}</button>}
       {c.shared && <TryMessage c={c} />}
     </div>
   )

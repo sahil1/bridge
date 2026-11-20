@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
 import Console from '../Console.jsx'
+import { Menu } from '../Rail.jsx'
 import { ago } from '../Machines.jsx'
 import { SlackItem, PushItem } from '../NeedsYou.jsx'
 import { WriteRow } from '../settings/Bots.jsx'
@@ -33,6 +34,7 @@ export default function SessionView({ sid, phone = false, fleet = null }) {
   const [view, setView] = useState(() => { try { return localStorage.getItem(viewKey(sid)) === 'live' ? 'live' : 'thread' } catch { return 'thread' } })
   const [note, setNote] = useState(null)
   const [busy, setBusy] = useState(null)
+  const [more, setMore] = useState(false)
   const pick = (v) => { setView(v); try { localStorage.setItem(viewKey(sid), v) } catch { /* private window */ } }
   const s = r.data?.session || null
   useEffect(() => { if (s) noteTitle(s) }, [s?.title]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -70,10 +72,10 @@ export default function SessionView({ sid, phone = false, fleet = null }) {
         </div>
         <p className="muted small bh-sv-meta">
           {s.bot && <button type="button" className="link-btn" onClick={() => openBot(s.bot.id)}><Icon name="bot" size={11} /> {s.bot.name}</button>}
-          <span>{placeOf(s.place)}{s.connection ? ` · ${s.connection.name}` : ''}</span>
+          <span>{placeOf(s.place)}</span>
           {who.length > 0 && <span>{who.join(', ')}</span>}
           <span className={`bh-state s-${st}`}>{st === 'waiting' && s.waiting?.kind ? t('Waiting for you: {what}', { what: WAITING()[s.waiting.kind] || s.waiting.kind }) : t(SESSION_STATE[st])}</span>
-          <span>{[s.turns === 1 ? t('1 turn') : t('{n} turns', { n: s.turns || turns.length }), sinceOf(s), s.ran != null && s.longest ? t('{ran} of {longest} min this turn', { ran: s.ran, longest: s.longest }) : null].filter(Boolean).join(' · ')}</span>
+          <span>{[s.turns === 1 ? t('1 turn') : t('{n} turns', { n: s.turns || turns.length }), sinceOf(s), working && s.ran != null && s.longest ? t('{ran} of {longest} min this turn', { ran: s.ran, longest: s.longest }) : null].filter(Boolean).join(' · ')}</span>
         </p>
         <div className="bh-sv-acts">
           <div className="seg" role="tablist" aria-label={t('Session')}>
@@ -82,8 +84,13 @@ export default function SessionView({ sid, phone = false, fleet = null }) {
           </div>
           <span className="sb-grow" />
           {view === 'thread' && st !== 'closed' && <button type="button" className="btn small" onClick={() => pick('live')} data-setting="session-step-in"><Icon name="edit" size={12} /> {t('Step in')}</button>}
-          {working && <button type="button" className="btn small" disabled={!!busy} onClick={() => act('stop')} data-setting="session-stop"><Icon name="stop" size={12} /> {t('Stop')}</button>}
-          {st !== 'closed' && <button type="button" className="ghost-btn danger" disabled={!!busy} onClick={() => { if (window.confirm(t('End this session? Its pane closes; the thread stays here, and a new message in it starts a new session.'))) act('end') }} data-setting="session-end"><Icon name="x" size={12} /> {t('End session')}</button>}
+          {working && view === 'thread' && <button type="button" className="btn small" disabled={!!busy} onClick={() => act('stop')} data-setting="session-stop"><Icon name="stop" size={12} /> {t('Stop')}</button>}
+          {st !== 'closed' && (
+            <span className="menu-anchor">
+              <button type="button" className="win-btn bh-sv-more" disabled={!!busy} onClick={() => setMore(!more)} aria-label={t('More actions')} title={t('More')} data-setting="session-more"><Icon name="more" size={14} /></button>
+              {more && <Menu onClose={() => setMore(false)} items={[{ icon: 'x', label: t('End session'), danger: true, run: () => { if (window.confirm(t('End this session? Its pane closes; the thread stays here, and a new message in it starts a new session.'))) act('end') } }]} />}
+            </span>
+          )}
         </div>
       </header>
       {note && <p className={`st-note ${note.bad ? 'bad' : 'ok'} bh-sv-note`} role={note.bad ? 'alert' : 'status'}><Icon name={note.bad ? 'alert' : 'check'} size={13} /><span>{note.text}</span></p>}

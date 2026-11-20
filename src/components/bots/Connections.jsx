@@ -105,7 +105,7 @@ export function Defaults({ c, reload, bare = false }) {
   return (
     <div className="cn-part" data-setting="connection-defaults">
       {!bare && <b className="small">{t('Channels\' Bots')}</b>}
-      {!bare && <p className="muted small">{t('In these channels, everything asked of {name} goes to one bot, whatever it names. Elsewhere it goes by the bot named first, the thread, or the Chief.', { name: c.name })}</p>}
+      {!bare && <p className="muted small">{t('Every question asked in these channels goes to one bot.')}</p>}
       {c.defaults.length > 0
         ? (
           <ul className="sb-askers">
@@ -118,7 +118,7 @@ export function Defaults({ c, reload, bare = false }) {
             ))}
           </ul>
         )
-        : <p className="small sb-none">{t('None: it goes by what each question names.')}</p>}
+        : <p className="small sb-none">{t('None yet.')}</p>}
       {up && c.bots.length > 0 && (
         <div className="sb-add cn-add-default">
           <select className="st-input" value={chan} onChange={(e) => setChan(e.target.value)} aria-label={t('A channel')}>

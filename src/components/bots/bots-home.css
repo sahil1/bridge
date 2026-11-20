@@ -141,10 +141,10 @@
 .bh.phone .bh-tabs button { flex: 1; justify-content: center; min-height: 40px; }
 .bh.phone .bh-body { padding: 12px 12px 32px; }
 .bh.phone .bh-cards { grid-template-columns: minmax(0, 1fr); }
-.bh.phone :is(.bo-card, .bh-sess, .sb-chip) { min-height: 44px; }
-.bh.phone .bh-sess { grid-template-columns: 10px minmax(0, 1fr) 12px; }
-.bh.phone .bh-sess-side { grid-column: 2; grid-row: 2; justify-items: start; text-align: left; }
-.bh.phone .bh-sess .bh-go { grid-column: 3; grid-row: 1 / span 2; }
+:is(.bh, .bp).phone :is(.bo-card, .bh-sess, .sb-chip) { min-height: 44px; }
+:is(.bh, .bp).phone .bh-sess { grid-template-columns: 10px minmax(0, 1fr) 12px; }
+:is(.bh, .bp).phone .bh-sess-side { grid-column: 2; grid-row: 2; justify-items: start; text-align: left; }
+:is(.bh, .bp).phone .bh-sess .bh-go { grid-column: 3; grid-row: 1 / span 2; }
 .bh.phone .bh-tools select.st-input { flex: 1 1 140px; }
 .bh.phone :is(.bh-quick textarea, .bh-test-sess textarea, .ro-try-form textarea) { font-size: 16px; }
 .bh.phone .bh-sv-head { padding: 10px 12px 8px; }
@@ -164,3 +164,15 @@
 .app.narrow .bh-tabs span.bt-count { font-size: 10px; padding: 0 5px; }
 .app.narrow .bp .sb-tabs .sb-tag { font-size: 10px; }
 .bh-body > * { max-width: 980px; }
+/* On a phone: a session's words wrap rather than cut off; its Live gives the pane the room. */
+:is(.bh, .bp).phone :is(.bh-sess-title, .bh-sess-meta) { white-space: normal; overflow-wrap: anywhere; }
+.bh-sv.phone.v-live .bh-sv-meta { display: none; }
+.bh-all-checks { justify-self: start; }
+:is(.bh, .bp).phone .bh-all-checks { min-height: 40px; }
+/* A phone: Thread and Live a row of their own, the actions under them; filters side by side. */
+.bh-sv.phone .bh-sv-acts .seg { flex: 1 1 100%; }
+.bh-sv.phone .bh-sv-acts .seg button { flex: 1; justify-content: center; }
+.bh-sv.phone .bh-sv-acts .sb-grow { display: none; }
+.bh-sv.phone .bh-sv-more { min-width: 40px; min-height: 40px; margin-left: auto; }
+.bh.phone .bh-tools select.st-input { flex: 1 1 0; max-width: none; }
+.bh.phone .bh-tools .btn { flex: 1 1 100%; justify-content: center; }

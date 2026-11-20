@@ -385,7 +385,8 @@ export function SlackItem(props) {
 // session's own Thread, just its name.
 function BotLink({ it, bot }) {
   const sid = it.session?.id || (typeof it.session === 'string' ? it.session : null) || it.sid || null
-  if (it.inSession || (!sid && !it.bot?.id)) return <span className="ny-device here"><Icon name="chat" size={11} />{bot}</span>
+  if (it.inSession) return null
+  if (!sid && !it.bot?.id) return <span className="ny-device here"><Icon name="chat" size={11} />{bot}</span>
   const open = () => window.dispatchEvent(sid ? new CustomEvent('bridge-open-bots', { detail: { session: sid } }) : new CustomEvent('bridge-open-bot', { detail: { id: it.bot.id } }))
   return <button type="button" className="ny-device here ny-bot-link" onClick={open} title={sid ? t('Open its session') : t('Open {bot}', { bot })}><Icon name="chat" size={11} />{bot}</button>
 }

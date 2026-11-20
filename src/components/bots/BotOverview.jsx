@@ -4,10 +4,12 @@ import { usePoll } from '../../api.js'
 import { platName } from '../settings/Bots.jsx'
 import Conversations from './Conversations.jsx'
 import { SessionRow, StartTest } from './SessionList.jsx'
-import { usePolled, noteTitle } from './sessions.js'
+import { usePolled, noteTitle, stateOf } from './sessions.js'
 import { chiefIdOf, filterSessions, openBots } from './bots.js'
 import { t } from '../../i18n/index.js'
 import './bots-home.css'
+
+const ORDER = { waiting: 0, working: 1, idle: 2, closed: 3 }
 
 // A bot's Overview (its page's first tab): what it's for, its folder, where it's reached and whether
 // it's a connection's Chief, whether it edits files, its latest sessions (All its sessions: Bots ›
@@ -19,7 +21,8 @@ export default function BotOverview({ d, onTab }) {
   const chiefOf = conns.filter((c) => chiefIdOf(c) === d.id)
   const via = Object.entries(d.connections || {}).filter(([, c]) => c)
   const folders = (d.folders || []).map((f) => f.shown)
-  const sessions = (r.data?.sessions || []).slice(0, 5)
+  // (What waits for you first, then the latest.)
+  const sessions = [...(r.data?.sessions || [])].sort((a, b) => (ORDER[stateOf(a)] - ORDER[stateOf(b)]) || (Date.parse(b.lastAt || 0) - Date.parse(a.lastAt || 0))).slice(0, 5)
   sessions.forEach(noteTitle)
   const edits = d.settings.changes === 'edit'
   const [convs, setConvs] = useState(false)
@@ -51,14 +54,13 @@ export default function BotOverview({ d, onTab }) {
       )}
       <section className="st-sec" data-setting="bot-test">
         <h4>{t('Start a Test Session')}</h4>
-        <p className="muted small">{t('Ask {bot} here as someone would in Slack: the same folders, instructions and memory. Nothing is posted anywhere.', { bot: d.name })}</p>
+        <p className="muted small">{t('Ask {bot} here as someone would in Slack.', { bot: d.name })}</p>
         <StartTest bots={[{ id: d.id, name: d.name }]} bot={d.id} askers={(d.settings.askers || []).filter((a) => a.id !== d.settings.owner?.id)} owner={d.settings.owner?.name || null} />
       </section>
       <details className="sb-how bo-convs" data-setting="bot-conversations" open={convs} onToggle={(e) => setConvs(e.currentTarget.open)}>
         <summary><Icon name="chevron" size={11} />{t('Conversations by Person and Place')}</summary>
         {convs && <Conversations d={d} />}
       </details>
-      {!r.missing && <p className="muted small"><Icon name="info" size={11} /> {t('Each thread or direct message with {bot} is a session: it remembers the thread, picks up where it left off, and you can watch it, step in or stop it.', { bot: d.name })}</p>}
     </div>
   )
 }
