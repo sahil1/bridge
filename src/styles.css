@@ -2698,14 +2698,30 @@ button.ue-row:hover { background: var(--pane-2); }
 .update-chip.loud { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--on-accent); }
 .update-chip.loud:hover { color: var(--on-accent); filter: brightness(1.05); }
 .update-wrap { position: relative; }
-.update-pop { position: absolute; right: 0; top: calc(100% + 8px); z-index: 60; width: min(340px, calc(100vw - 24px)); display: grid; gap: 8px; padding: 14px 16px; border-radius: 12px; background: var(--pane); border: 1px solid var(--line-2); box-shadow: var(--shadow-lg); animation: fade-in .1s ease; }
+.update-pop { position: absolute; right: 0; top: calc(100% + 8px); z-index: 60; width: min(380px, calc(100vw - 24px)); display: grid; gap: 12px; padding: 14px 16px 10px; border-radius: 12px; background: var(--pane); border: 1px solid var(--line-2); box-shadow: var(--shadow-lg); color: var(--ink); text-align: left; white-space: normal; line-height: 1.45; animation: fade-in .1s ease; }
 .update-pop p { margin: 0; }
-.update-head { display: flex; align-items: baseline; gap: 8px; }
-.update-list { margin: 0; padding-left: 18px; display: grid; gap: 3px; color: var(--ink-2); }
-.update-acts { display: flex; align-items: center; gap: 12px; }
+/* The update card (UpdateChip.jsx): the version on one line, when and what you have under it, then
+   a few highlights a line each, then what to do. Nothing in it wraps a long version or a long point
+   onto more lines: each is cut short, in full on hover. */
+.update-head { display: grid; gap: 1px; min-width: 0; }
+.update-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 650; letter-spacing: -.005em; }
+.update-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 12px; font-variant-numeric: tabular-nums; }
+.update-why, .update-summary { color: var(--ink-2); }
+.update-summary { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.update-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 5px; color: var(--ink-2); font-size: 12.5px; }
+.update-list li { position: relative; min-width: 0; padding-left: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.update-list li::before { content: ""; position: absolute; left: 1px; top: calc(.725em - 2px); width: 4px; height: 4px; border-radius: 50%; background: var(--ink-3); }
+.update-list b { color: var(--ink); font-weight: 600; }
+.update-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
 .update-acts.col { display: grid; gap: 6px; }
 .update-acts code { padding: 6px 8px; border-radius: 6px; background: var(--pane-2); word-break: break-all; }
-.update-pop .link-btn { justify-self: start; color: var(--ink-3); }
+/* Updating: its icon beside the words, not over them. */
+.update-pop .st-note { flex-wrap: nowrap; align-items: flex-start; margin: 0; }
+.update-pop .st-note > .icon { flex: none; margin-top: 2px; }
+/* Update settings: a quiet way to the rest, under a line. */
+.update-foot { display: flex; margin: 0 -16px; padding: 8px 16px 0; border-top: 1px solid var(--line); }
+.update-foot .link-btn { color: var(--ink-3); font-weight: 500; text-decoration: none; }
+.update-foot .link-btn:hover { color: var(--ink); text-decoration: underline; }
 /* Phone: the chips' row clips what spills out of it, so the window drops from the top bar instead. */
 .app.narrow .update-pop { position: fixed; top: calc(50px + var(--safe-top) + 6px); left: max(12px, env(safe-area-inset-left)); right: max(12px, env(safe-area-inset-right)); width: auto; }
 

@@ -2,6 +2,7 @@ import Icon from './Icon.jsx'
 import { Quiet } from './ErrorBoundary.jsx'
 import SetupChip from './SetupChip.jsx'
 import RestartChip from './RestartChip.jsx'
+import { versionName } from './UpdateChip.jsx'
 import { useShared } from './layout.jsx'
 import { usePoll } from '../api.js'
 import { ANDROID_PAGE } from '../fresh.js'
@@ -69,10 +70,10 @@ export default function TopNotes({ update, onUpdate, fleet, conf, fresh, app }) 
         <div className="top-note-row">
           {update.held
             ? <button type="button" className="top-note update-note" onClick={() => { note.seen(); onUpdate() }}>
-              <Icon name="info" size={14} /><span className="top-note-text">{t('Bridge AI {version} needs macOS {macos}', { version: update.latest, macos: update.held.macos })}</span><Icon name="chevron" size={13} className="top-note-go" />
+              <Icon name="info" size={14} /><span className="top-note-text">{t('Bridge AI {version} needs macOS {macos}', { version: versionName(update.latest), macos: update.held.macos })}</span><Icon name="chevron" size={13} className="top-note-go" />
             </button>
             : <button type="button" className="top-note update-note" onClick={() => { note.seen(); onUpdate() }} title={t('Bridge AI {latest} is available (you have {current})', { latest: update.latest, current: update.current })}>
-              <Icon name="download" size={14} /><span className="top-note-text">{t('Bridge AI {version} is available', { version: update.latest })}</span><Icon name="chevron" size={13} className="top-note-go" />
+              <Icon name="download" size={14} /><span className="top-note-text">{t('Bridge AI {version} is available', { version: versionName(update.latest) })}</span><Icon name="chevron" size={13} className="top-note-go" />
             </button>}
           <button type="button" className="win-btn top-note-x" onClick={note.hide} aria-label={t('Not now')} title={t('Not now')}><Icon name="x" size={14} /></button>
         </div>
