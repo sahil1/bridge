@@ -6990,6 +6990,7 @@
   "Your other devices weren't told: no notification channel is set up.": "ほかのデバイスには伝わりませんでした：通知チャネルが設定されていません。",
   "Your other {name} accounts are out of usage too.": "ほかの {name} アカウントも使用量を使い切っています。",
   "Your own Cloudflare": "自分の Cloudflare",
+  "Your own asks, with When You Ask: Full Access on, run any command, as your own Claude Code does.": "「あなたが頼むとき: フルアクセス」がオンなら、あなた自身の依頼はあなたの Claude Code と同じようにどんなコマンドでも実行します。",
   "Your own bots in Slack, Discord and Microsoft Teams, answering from folders on this computer. Off hides them; what you made stays.": "Slack、Discord、Microsoft Teams で、このコンピューターのフォルダーをもとに回答するあなた専用のボット。オフにすると非表示になりますが、作ったものは残ります。",
   "Your own bots in Slack, Discord and Microsoft Teams, each a Claude Code session in a folder you give it that remembers every thread, with a Chief that hands each question to the right one. People you choose ask them, a push waits for your OK, and everything they do is kept in their record. From this computer, never through Bold Bridge. To start: Bots in the sidebar.": "Slack、Discord、Microsoft Teams のあなた専用のボット。それぞれが、あなたが渡したフォルダーで動き、すべてのスレッドを覚えている Claude Code のセッションで、チーフが各質問を適切なボットに渡します。あなたが選んだ人が質問でき、push はあなたの承認を待ち、ボットの行動はすべて記録に残ります。このコンピューターから動き、Bold Bridge を経由することはありません。始めるには：サイドバーの「ボット」。",
   "Your own colours, fonts and logo: a design pack, made on Studio's home.": "独自の色、フォント、ロゴ: Studio のホームで作るデザインパックです。",

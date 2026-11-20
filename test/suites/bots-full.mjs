@@ -39,6 +39,7 @@ git(PROJ, 'config', 'user.email', 'tester@example.com')
 fs.writeFileSync(path.join(PROJ, 'faq.md'), 'Old answers.\n')
 fs.writeFileSync(path.join(PROJ, 'report.html'), '<!doctype html><title>Report</title><p>All good.</p>\n')
 fs.writeFileSync(path.join(PROJ, 'gone.txt'), 'Soon gone.\n')
+fs.writeFileSync(path.join(PROJ, 'gone2.txt'), 'Soon gone too.\n')
 fs.writeFileSync(path.join(PROJ, '.env'), 'NOTHING=here\n')
 fs.writeFileSync(path.join(PROJ, 'keys.txt'), 'aws AKIAIOSFODNN7EXAMPLE wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\n') // private-ok: AWS's own documented example key, to be refused
 fs.writeFileSync(path.join(kit.home, 'outside.txt'), 'Not the bot\'s.\n')
@@ -75,7 +76,7 @@ try {
   let q1 = null
   let sid = null
   await part('your session', async () => {
-    q1 = await slack.ask({ user: OWNER.id, text: `${M} Tidy up the notes. [run ls -la] [edit faq.md New answers.] [edit notes.md Hello there] [run-write made.txt hi] [share report.html] [answer Done.]` })
+    q1 = await slack.ask({ user: OWNER.id, text: `${M} Tidy up the notes. [run ls -la] [edit faq.md New answers.] [edit notes.md Hello there] [run-write made.txt hi] [run-rm gone.txt] [run-rm gone2.txt] [share report.html] [answer Done.]` })
     const s1 = await startOf('Tidy up the notes')
     const a = argsOf(s1)
     ok(fullArgs(a), 'its session: every tool allowed under dontAsk, Bash among them, no --tools limit, its own MCP config and your settings', s1?.args)
@@ -87,6 +88,8 @@ try {
     ok(fs.readFileSync(path.join(PROJ, 'faq.md'), 'utf8') === 'New answers.\n' && fs.readFileSync(path.join(PROJ, 'notes.md'), 'utf8') === 'Hello there\n' && fs.existsSync(path.join(PROJ, 'made.txt')), 'its edits and its command\'s file are in the real folder at once')
     ok(/Changed: .*faq\.md/.test(ans?.text || '') && /notes\.md \(new\)/.test(ans?.text || '') && JSON.stringify(ans?.blocks || []).includes('bb_undo'), 'the answer says what it changed, with Undo', ans && { text: ans.text })
     ok(/It ran commands: what they changed can't be undone here/.test(ans?.text || ''), 'and says plainly that what its commands did can\'t be undone', ans?.text)
+    const alert = await until(async () => (await posted()).find((x) => /^D/.test(x.channel || '') && /Builder has deleted 2 files in one session with Full Access/.test(x.text || '')), 20000)
+    ok(!!alert && !fs.existsSync(path.join(PROJ, 'gone.txt')), 'past its running total of deletions, you\'re told in your direct messages', alert?.text)
     ok(/couldn't share report\.html: Share Links go through a relay/.test(ans?.text || ''), 'no relay: its link isn\'t made, and it says why', ans?.text)
     const hooks = logOf('hooks.log')
     const said = (h) => [h.command, ...(h.args || [])].join(' ')

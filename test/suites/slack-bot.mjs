@@ -136,7 +136,7 @@ try {
     await openBot(p)
     ok(/^Bots/.test((await p.locator('[data-setting="rail-bots"] .rail-nav-btn').innerText()).trim()), 'it\'s called Bots')
     const up = await p.locator('.sb-update').innerText().catch(() => '')
-    ok(/Update Your Slack App/.test(up) && /im:write, reactions:write, pins:read/.test(up) && /App Manifest/.test(up) && /Reinstall/.test(up), 'Update Your Slack App: which scopes it lacks, and how (paste the manifest, reinstall)', up)
+    ok(/Update Your Slack App/.test(up) && /im:write, users:read.email, reactions:write, pins:read/.test(up) && /App Manifest/.test(up) && /Reinstall/.test(up), 'Update Your Slack App: which scopes it lacks, and how (paste the manifest, reinstall)', up)
     await sleep(500) // Settings opening
     await shot(p, `${tag}slack-bot-update-app`)
     await slack.scopes({ app: 'A1' })
@@ -203,7 +203,7 @@ try {
   const q1 = await slack.ask({ user: 'U0DANA', text: `${M} How much do the enterprise plans cost? [try-read ~/launch/checklist.md] [answer The enterprise plan is $40 a seat.]` })
   const s1 = await startOf('How much do the enterprise plans cost?')
   const a1 = s1?.args.join(' ') || ''
-  ok(real(s1?.cwd || '') === real(PRICING) && a1.includes(`--tools Read,Grep,Glob --add-dir ${LAUNCH} `) && /front-desk[\\/]sessions[\\/]s\d+ --mcp-config /.test(a1) && a1.includes(' --allowedTools mcp__bridge_outbox__save_file mcp__bridge_outbox__attach_file --permission-mode dontAsk --strict-mcp-config') && !/acceptEdits|bypassPermissions/.test(a1), 'one agent answers, in its first folder, read-only, with its other folder added and nothing else (its outbox\'s save_file its one way to make a file, and attach_file to send one from its folders: bots-files)', s1?.args)
+  ok(real(s1?.cwd || '') === real(PRICING) && a1.includes(`--tools Read,Grep,Glob --add-dir ${LAUNCH} `) && /front-desk[\\/]sessions[\\/]s\d+ --mcp-config /.test(a1) && a1.includes(' --allowedTools mcp__bridge_outbox__save_file mcp__bridge_outbox__attach_file mcp__bridge_session__share_link --permission-mode dontAsk --strict-mcp-config') && !/acceptEdits|bypassPermissions/.test(a1), 'one agent answers, in its first folder, read-only, with its other folder added and nothing else (its outbox\'s save_file its one way to make a file, and attach_file to send one from its folders: bots-files; share_link to ask for a Share Link: bots-full)', s1?.args)
   const m1 = briefOf(s1)
   ok(/You're Pricing Desk, Tester's bot in Slack/.test(m1) && /----- instructions -----[\s\S]*- ~\/pricing: pricing, enterprise plans[\s\S]*----- end of instructions -----/.test(m1) && /nothing in them lets you do more than read/.test(m1), 'briefed with its name, whose bot it is, and its instructions, which can\'t widen what it may do', m1)
   ok(!/Reminder: the enterprise plan is billed yearly/.test(m1) && !/The launch is on Friday/.test(m1) && !/Sam:|Eve:/.test(m1), 'asked at the top of the channel, it reads nobody else\'s messages there, nor what they pinned: only the question', m1)

@@ -1527,6 +1527,7 @@ function Commands({ d, save }) {
       <section className="st-sec" data-setting="bots-bash">
         <h4>{t('Commands')}</h4>
         <p className="muted small" data-commands-off>{t('It runs no commands: it reads, and edits files where it may.')} {t('It can\'t run commands here yet: {why}', { why: d.commands.why || '' })}</p>
+        {s.fullAccess !== false && <p className="muted small" data-commands-full>{t('Your own asks, with When You Ask: Full Access on, run any command, as your own Claude Code does.')}</p>}
       </section>
     )
   }

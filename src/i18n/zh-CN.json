@@ -6990,6 +6990,7 @@
   "Your other devices weren't told: no notification channel is set up.": "没有通知你的其他设备：没有设置通知渠道。",
   "Your other {name} accounts are out of usage too.": "你的其他 {name} 账号也已用完额度。",
   "Your own Cloudflare": "你自己的 Cloudflare",
+  "Your own asks, with When You Ask: Full Access on, run any command, as your own Claude Code does.": "开启“你提出时：完全访问”后，你自己的请求可以运行任何命令，就像你自己的 Claude Code 一样。",
   "Your own bots in Slack, Discord and Microsoft Teams, answering from folders on this computer. Off hides them; what you made stays.": "你在 Slack、Discord 和 Microsoft Teams 中的专属机器人，根据这台电脑上的文件夹回答。关闭后会隐藏它们，你创建的内容会保留。",
   "Your own bots in Slack, Discord and Microsoft Teams, each a Claude Code session in a folder you give it that remembers every thread, with a Chief that hands each question to the right one. People you choose ask them, a push waits for your OK, and everything they do is kept in their record. From this computer, never through Bold Bridge. To start: Bots in the sidebar.": "你在 Slack、Discord 和 Microsoft Teams 中的专属机器人，每个都是在你指定的文件夹中运行、记得每个话题的 Claude Code 会话，并由幕僚长把每个问题交给合适的机器人。你选定的人可以向它们提问，推送需等你确认，它们做的一切都会记录在案。从这台电脑运行，绝不经过 Bold Bridge。开始使用：侧边栏中的“机器人”。",
   "Your own colours, fonts and logo: a design pack, made on Studio's home.": "你自己的颜色、字体和标志:在 Studio 首页制作设计包。",
