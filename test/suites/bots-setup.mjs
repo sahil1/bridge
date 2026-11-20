@@ -207,8 +207,9 @@ try {
     await slack.ask({ user: 'U0EVE', text: '<@UBOT> what\'s open? [mcp tracker list_issues] [mcp tracker create_issue]' })
     const eve = await until(() => logOf('mcp-tries.log').filter((x) => x.tool === 'create_issue').length >= 1 && logOf('mcp-tries.log'), 25000)
     ok(eve && eve.find((x) => x.tool === 'list_issues')?.done === true && eve.find((x) => x.tool === 'create_issue')?.done === false, 'someone not named: the tool that only reads used, the other refused', eve)
-    const start = logOf('helpers-started.log').find((x) => /what's open/.test(x.message))
-    const args = logOf('claude-args.log').find((x) => /what's open/.test(x.message))?.args || []
+    // (Read again until both are there: a line being written as it's read reads as none.)
+    const start = await until(() => logOf('helpers-started.log').find((x) => /what's open/.test(x.message)), 10000)
+    const args = (await until(() => logOf('claude-args.log').find((x) => /what's open/.test(x.message)), 10000))?.args || []
     const cfg = args[args.indexOf('--mcp-config') + 1]
     ok(args.includes('--strict-mcp-config') && cfg && !(args.includes('--add-dir') && args.slice(args.indexOf('--add-dir')).includes(path.dirname(cfg))) && eve.every((x) => x.config && !x.read), 'its run: only its servers (--mcp-config, --strict-mcp-config), the config never a folder it may read', args)
     ok(args.includes('mcp__tracker__list_issues') && args.includes('mcp__tracker__search') && !args.includes('mcp__tracker') && args.slice(args.indexOf('--disallowedTools')).includes('mcp__tracker__create_issue'), 'allowed: the read-only tools; refused by name: the other', args)
