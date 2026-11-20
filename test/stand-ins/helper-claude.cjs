@@ -236,7 +236,7 @@ const denied = (p) => { const f = path.resolve(p).replace(/\\/g, '/').replace(/^
 const given = flagSettings ? loaded.findLast((x) => x.file === flagSettings)?.s || null : null
 // (The names in its environment that hold a key, or set its temporary folder, git's settings or the
 // credential scrub, with those values that aren't keys: what a bot's agent is started with.)
-const envSaid = Object.fromEntries(Object.keys(process.env).filter((k) => /KEY|TOKEN|SECRET|PASSWORD|SCRUB|TMPDIR|GIT_CONFIG/.test(k)).map((k) => [k, /KEY|TOKEN|SECRET|PASSWORD/.test(k) ? '(set)' : process.env[k]]))
+const envSaid = Object.fromEntries(Object.keys(process.env).filter((k) => /KEY|TOKEN|SECRET|PASSWORD|SCRUB|TMPDIR|GIT_CONFIG|SESSION_MARK/.test(k)).map((k) => [k, /KEY|TOKEN|SECRET|PASSWORD/.test(k) ? '(set)' : process.env[k]]))
 if (message) note('helpers-started.log', { args, cwd: process.cwd(), message, secrets, settings: loaded.map((x) => x.file), given, env: envSaid, ...(pointed ? { briefFile: pointed[1] } : {}) })
 // (On Windows, a run that changes files: whether it has Windows' backup and restore rights on, which
 // make a file past any folder's access list, in ~/rights.log, each as whoami says it, beside the
@@ -414,7 +414,9 @@ function answerTurn(text) {
   // Its sandbox, as the settings it loaded have it (the last that says).
   const sandbox = loaded.map((x) => x.s.sandbox).filter(Boolean).at(-1) || null
   const sandboxed = !!sandbox && sandbox.enabled === true && sandbox.failIfUnavailable === true && sandbox.allowUnsandboxedCommands === false
-  const mayRun = can('Bash') && sandboxed
+  // (Run, in dontAsk, only by the sandbox's auto-allow or a Bash allow rule: code.claude.com/docs/en/sandboxing.)
+  const allowedArg = (() => { const i = args.indexOf('--allowedTools'); return i >= 0 ? args.slice(i + 1).filter((x, k, a) => !a.slice(0, k + 1).some((y) => y.startsWith('--'))) : [] })()
+  const mayRun = can('Bash') && sandboxed && (sandbox.autoAllowBashIfSandboxed === true || allowedArg.some((x) => /^Bash(\(|$)/.test(x)))
   // One of its tools called, as Claude Code calls one: { ok, text }.
   const callOutbox = (name, input) => {
     const asks = [

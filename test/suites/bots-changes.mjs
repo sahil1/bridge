@@ -29,6 +29,9 @@ kit.program('gh', fs.readFileSync(path.join(TEST, 'stand-ins', 'gh.cjs'), 'utf8'
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 const part = async (name, fn) => { try { await fn() } catch (e) { ok(false, `${name}: crashed: ${e.stack}`) } }
+// (Dana's, in a thread of her own: only her words reach its agent. At the top of #launch, Eve's words
+// there, who may ask it but not for a change, would reach it too, and count: frontdesk.js voices.)
+const danaAsk = async (text) => { const top = await slack.ask({ user: 'U0DANA', text: 'A note for Code Bot.' }); const r = await slack.ask({ user: 'U0DANA', thread: top.ts, text }); return { ...r, top: top.ts } }
 const real = (p) => { try { return fs.realpathSync(p) } catch { return p } }
 const slashed = (p) => String(p || '').replace(/\\/g, '/')
 
@@ -114,35 +117,35 @@ try {
   await part('pr', async () => {
     await kit.api('/bots/b1/settings', { changes: 'pr' })
     ok((await botOf()).settings.changes === 'suggest', 'set to pr, it\'s kept as suggest: a pull request always waits for you')
-    const q = await slack.ask({ user: 'U0DANA', text: `${M} Add a changelog line [edit CHANGELOG.md Added a line] [answer Added it.]` })
+    const q = await danaAsk(`${M} Add a changelog line [edit CHANGELOG.md Added a line] [answer Added it.]`)
     const d = await draftOf('Add a changelog line')
     ok(d?.change && !d.change.pr && !branches().includes(d.change.branch) && !/pull request/i.test(d.draft), 'nothing opened at once: the change waits for you', d && { draft: d.draft, change: d.change })
     await kit.api(`/bots/questions/${d.id}`, { send: true, text: d.draft })
-    const sent = await until(async () => (await inThread(q.ts)).find((x) => /Draft pull request: (\S+)/.test(x.text)), 15000)
+    const sent = await until(async () => (await inThread(q.top)).find((x) => /Draft pull request: (\S+)/.test(x.text)), 15000)
     const url = /Draft pull request: (\S+)/.exec(sent?.text || '')?.[1]
     ok(!!url && branches().includes(d.change.branch), 'approved: its pull request opens, sent with its link', sent?.text)
     // A follow-up in its thread: the same session and copy, the same branch, the same pull request.
-    await slack.ask({ user: 'U0DANA', thread: q.ts, text: 'And one more line please [edit CHANGELOG.md Added two lines] [answer Added another.]' })
+    await slack.ask({ user: 'U0DANA', thread: q.top, text: 'And one more line please [edit CHANGELOG.md Added two lines] [answer Added another.]' })
     const f = await draftOf('one more line please')
     ok(f?.change?.branch === d.change.branch && f.session === d.session, 'a follow-up goes on in the same session, on the same branch', f && { change: f.change, session: f.session, was: d.session })
     await kit.api(`/bots/questions/${f.id}`, { send: true, text: f.draft })
-    const again = await until(async () => (await inThread(q.ts)).find((x) => /Added another\.[\s\S]*Draft pull request:/.test(x.text)), 15000)
+    const again = await until(async () => (await inThread(q.top)).find((x) => /Added another\.[\s\S]*Draft pull request:/.test(x.text)), 15000)
     ok(again?.text.includes(url) && git(ORIGIN, 'show', `${d.change.branch}:CHANGELOG.md`) === 'Added two lines' && git(ORIGIN, 'rev-list', '--count', `main..${d.change.branch}`) === '2', 'approved, it adds to the same branch and pull request', again?.text)
   })
 
   // ---------- gh signed out ----------
   await part('gh signed out', async () => {
     fs.writeFileSync(path.join(kit.home, 'gh-signed-out'), '')
-    const q = await slack.ask({ user: 'U0DANA', text: `${M} Bump the version [edit VERSION 1.1.0] [answer Bumped.]` })
+    const q = await danaAsk(`${M} Bump the version [edit VERSION 1.1.0] [answer Bumped.]`)
     const d0 = await draftOf('Bump the version')
     // (Approved while gh is signed out: its pull request can't open.)
     const r0 = await kit.api(`/bots/questions/${d0.id}`, { send: true, text: d0.draft })
     const d = r0.item
     ok(/gh isn't signed in to GitHub, so the pull request couldn't be opened \(the branch is pushed\)/.test(d?.problem || '') && d.state === 'draft' && !/pull request:/i.test(d.draft) && (await timelineOf('b1', 'Bump the version')).some((e) => e.type === 'change.failed' && e.step === 'pr'), 'gh signed out: said in the draft and the record, not hidden', d && { problem: d.problem, state: d.state })
-    ok(!(await inThread(q.ts)).some((x) => /Bumped/.test(x.text)), 'and nothing is sent')
+    ok(!(await inThread(q.top)).some((x) => /Bumped/.test(x.text)), 'and nothing is sent')
     fs.rmSync(path.join(kit.home, 'gh-signed-out'))
     const r = await kit.api(`/bots/questions/${d.id}`, { send: true, text: d.draft })
-    ok(!!(await until(async () => (await inThread(q.ts)).find((x) => /Bumped\.[\s\S]*Draft pull request: https:/.test(x.text)), 20000)), 'signed in again: Send opens it, and sends the link', r.item?.state)
+    ok(!!(await until(async () => (await inThread(q.top)).find((x) => /Bumped\.[\s\S]*Draft pull request: https:/.test(x.text)), 20000)), 'signed in again: Send opens it, and sends the link', r.item?.state)
   })
 
   // ---------- A Claude Code too old for its hook ----------
@@ -168,14 +171,14 @@ try {
     ok(errors.length === 0, 'no page errors', errors)
     await ctx.close()
     const before = startsOf('Fix the footer').length
-    await slack.ask({ user: 'U0DANA', text: `${M} Fix the footer [edit README.md Footer fixed] [answer Fixed.]` })
+    await danaAsk(`${M} Fix the footer [edit README.md Footer fixed] [answer Fixed.]`)
     const d = await until(async () => (await kit.api('/needs-you')).slack?.find((x) => /Fix the footer/.test(x.text || '') && x.needsOwner), 30000)
     ok(/Changing files on Windows needs Claude Code 2\.1\.257 or later, and this computer has 2\.1\.100: update it with claude update in a terminal/.test(d?.why || '') && startsOf('Fix the footer').length === before && !d.change, 'a change asked for: not started, and you\'re told why in Needs You', d?.why)
     ok((await timelineOf('b1', 'Fix the footer')).some((e) => e.type === 'changes.blocked' && e.why === 'claude-old' && e.need === '2.1.257' && e.have === '2.1.100'), 'and in its record')
     if (d) await kit.api(`/bots/questions/${d.id}`, { send: false })
     claudeIs(null)
     ok(!(await botOf()).changes?.hook, 'updated: nothing said')
-    await slack.ask({ user: 'U0DANA', text: `${M} Fix the header [edit README.md Header fixed] [answer Fixed.]` })
+    await danaAsk(`${M} Fix the header [edit README.md Header fixed] [answer Fixed.]`)
     const e = await draftOf('Fix the header')
     ok(!!e?.change?.branch && logOf('hooks.log').some((x) => x.status === 0 && Array.isArray(x.args) && /README\.md$/.test(x.path || '')), 'and a change goes through again, its hook run as a program and its arguments', e?.change)
     if (e) await kit.api(`/bots/questions/${e.id}`, { send: false })
@@ -193,7 +196,7 @@ try {
       `[force-write evil/config {{core}}\\n\\trepositoryformatversion = 0\\n\\tbare = false\\n\\tfsmonitor = "touch '${marker}'; false"\\n{{filter "x"}}\\n\\tclean = "touch '${marker}'; cat"]`,
       '[force-write .gitattributes * filter=x]', '[edit README.md Hello evil]', '[answer Done.]',
     ].join(' ')
-    await slack.ask({ user: 'U0DANA', text: `${M} Please tidy the readme ${evil}` })
+    await danaAsk(`${M} Please tidy the readme ${evil}`)
     const d = await draftOf('Please tidy the readme')
     const failed = (await timelineOf('b1', 'Please tidy the readme')).find((e) => e.type === 'change.failed')
     ok(!fs.existsSync(marker), 'nothing the agent wrote in git\'s own files ran', fs.existsSync(marker))
@@ -212,7 +215,7 @@ try {
   // files out so and reads the \r as nothing.
   await part('its .gitattributes', async () => {
     const tried = async (words, body) => {
-      await slack.ask({ user: 'U0DANA', text: `${M} ${words} [force-write .gitattributes ${body}] [edit README.md ${words}] [answer Done.]` })
+      await danaAsk(`${M} ${words} [force-write .gitattributes ${body}] [edit README.md ${words}] [answer Done.]`)
       const d = await draftOf(words)
       const failed = (await timelineOf('b1', words)).find((e) => e.type === 'change.failed')
       if (d) await kit.api(`/bots/questions/${d.id}`, { send: false })
@@ -226,7 +229,7 @@ try {
 
   // ---------- In Bridge AI ----------
   await kit.api('/bots/b1/settings', { changes: 'suggest' })
-  await slack.ask({ user: 'U0DANA', text: `${M} Fix the title [edit README.md Hello there] [answer Retitled.]` })
+  await danaAsk(`${M} Fix the title [edit README.md Hello there] [answer Retitled.]`)
   const waiting = await draftOf('Fix the title')
   for (const [mode, theme, phone] of [['light', 'sky', false], ['dark', 'midnight', false], ['light', 'sky', true]]) {
     await part(`Needs You and Settings, ${mode}${phone ? ', on a phone' : ''}`, async () => {
