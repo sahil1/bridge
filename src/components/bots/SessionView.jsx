@@ -4,7 +4,7 @@ import Console from '../Console.jsx'
 import { Menu } from '../Rail.jsx'
 import { ago } from '../Machines.jsx'
 import { SlackItem, PushItem } from '../NeedsYou.jsx'
-import { WriteRow } from '../settings/Bots.jsx'
+import { WriteRow, FilesOf } from '../settings/Bots.jsx'
 import { api } from '../../api.js'
 import { usePolled, SESSION_STATE, WAITING, stateOf, placeOf, sinceOf, noteTitle, sessionAct } from './sessions.js'
 import { openBot, openBots, refreshBots } from './bots.js'
@@ -23,8 +23,9 @@ import './bots-home.css'
 //     starts it again with what it remembers.
 // The same on a phone, through the relay.
 
-// (Your own step in's answer, a draft that never goes by itself, is a turn with Post to thread.)
-const isWaiting = (x) => (x.state === 'draft' && !x.steer) || x.state === 'screened' || x.limit?.phase === 'asking' || x.push?.state === 'waiting'
+// (Your own step in's answer, a draft that never goes by itself, is a turn with Post to thread. A
+// test session's answers go nowhere, so nothing of one waits for you: each is its answer.)
+const isWaiting = (x, s) => !s?.try && ((x.state === 'draft' && !x.steer) || x.state === 'screened' || x.limit?.phase === 'asking' || x.push?.state === 'waiting')
 const pushOnly = (x) => x.push?.state === 'waiting' && x.state !== 'draft' && x.state !== 'screened' && x.limit?.phase !== 'asking'
 const asItem = (x, s) => ({ ...x, id: x.q || x.id, bot: s.bot, place: s.place, session: s.id, inSession: true, draft: typeof x.draft === 'string' ? x.draft : '', ...(pushOnly(x) ? { kind: 'push' } : {}) })
 const viewKey = (sid) => `cc-session-view-${sid}`
@@ -107,8 +108,8 @@ function Thread({ s, turns, reload, setNote, pane }) {
       {!turns.length && <p className="muted small">{t('Nothing said yet.')}</p>}
       <ol className="bh-turns" aria-label={t('Thread')}>
         {turns.map((x, i) => (
-          <li key={x.q || i} className={`bh-turn${isWaiting(x) ? ' waiting' : ''}`} data-turn={x.q || i} data-state={x.state || ''}>
-            {isWaiting(x)
+          <li key={x.q || i} className={`bh-turn${isWaiting(x, s) ? ' waiting' : ''}`} data-turn={x.q || i} data-state={x.state || ''}>
+            {isWaiting(x, s)
               ? (pushOnly(x) ? <PushItem it={asItem(x, s)} onDone={done} setNote={setNote} /> : <SlackItem it={asItem(x, s)} onDone={done} setNote={setNote} />)
               : <TurnBody x={x} s={s} onDone={done} setNote={setNote} />}
           </li>
@@ -155,6 +156,8 @@ function TurnBody({ x, s, onDone, setNote }) {
         </div>
       )}
       {!reply && OUTCOME()[state] && <p className="muted small">{OUTCOME()[state]}</p>}
+      {/* (The files it made or attached to send with its answer.) */}
+      <FilesOf files={x.outFiles} />
       {x.steer && x.state === 'draft' && x.draft && <div className="st-row"><button type="button" className="btn small" disabled={busy} onClick={post} data-setting="session-post"><Icon name="send" size={12} /> {t('Post to thread')}</button><span className="muted small">{t('Its answer to you stays here until you post it.')}</span></div>}
       {x.consulting && <p className="muted small"><Icon name="working" size={11} /> {t('Waiting on {bot}, which it asked', { bot: nameOf(x.consulting) })}</p>}
       {x.handed && <p className="muted small"><Icon name="bot" size={11} /> {t('Handed to {bot}', { bot: nameOf(x.handed) })}</p>}

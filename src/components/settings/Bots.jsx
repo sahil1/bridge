@@ -1945,7 +1945,7 @@ function ChangeOf({ c }) {
     </div>
   )
 }
-const FilesOf = ({ files }) => (files?.length ? <p className="muted small sb-files"><Icon name="paperclip" size={12} /> {t('With {files}', { files: files.map((f) => `${f.name}${f.size != null ? ` (${sizeOf(f.size)})` : ''}${f.from ? ` ${t('from {path}', { path: f.from })}` : ''}`).join(', ') })}</p> : null)
+export const FilesOf = ({ files }) => (files?.length ? <p className="muted small sb-files"><Icon name="paperclip" size={12} /> {t('With {files}', { files: files.map((f) => `${f.name}${f.size != null ? ` (${sizeOf(f.size)})` : ''}${f.from ? ` ${t('from {path}', { path: f.from })}` : ''}`).join(', ') })}</p> : null)
 
 // ---------- Try It ----------
 // A question asked here as someone would in Slack: the same agent, folders, instructions and memory,

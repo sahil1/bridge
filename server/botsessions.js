@@ -141,7 +141,8 @@ export function makeBotSessions({ desk, rt, guard, wrap, connect = () => {}, res
       // Start a test session (or its next turn: sid), as you or someone who may ask.
       app.post('/api/bots/:id/sessions', guard, wrap(async (req) => {
         const r = await desk.tryIt(String(req.params.id), { text: req.body?.text, as: req.body?.as || null, sid: req.body?.sid ? String(req.body.sid) : null })
-        return { ...r, sid: r.sid || desk.sessions.ofQuestion(r.q)?.id || null }
+        // (Its session, once its first turn has started one: null when it's answered without one.)
+        return { ...r, sid: r.sid || (await desk.sessions.soon(String(req.params.id), r.q, r.conv))?.id || null }
       }))
       // A push it asked for: approve (named by the commit you were shown, hash) or deny.
       app.post('/api/bots/questions/:id/push', guard, wrap(async (req) => desk.pushAct(String(req.params.id), String(req.body?.act || ''), { hash: req.body?.hash ? String(req.body.hash) : null, by: you(), via: 'app' })))

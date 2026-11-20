@@ -3535,9 +3535,9 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   }
 
   // ---------- Sessions, for Bots' Sessions ----------
-  // (Your own step in's answer is yours already, kept for Post to thread: nothing waits on you, as
-  // it isn't in Needs You either.)
-  const waitingIn = (q) => (q.state === 'draft' && !sending(q) && !q.steer ? { kind: q.write?.state === 'waiting' ? 'write' : 'draft', q: q.id }
+  // (Your own step in's answer is yours already, kept for Post to thread, and a test session's goes
+  // nowhere: nothing waits on you for either, as neither is in Needs You.)
+  const waitingIn = (q) => (q.state === 'draft' && !sending(q) && !q.steer && !q.try ?{ kind: q.write?.state === 'waiting' ? 'write' : 'draft', q: q.id }
     : q.push?.state === 'waiting' ? { kind: 'push', q: q.id }
       : q.state === 'answering' && q.ask ? { kind: 'limit', q: q.id }
         : q.state === 'screened' ? { kind: 'screen', q: q.id } : null)
@@ -3591,7 +3591,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
         turns: questionsIn(s).map((q) => ({
           q: q.id, at: q.heardAt, from: fromOf(q.from), text: q.text, more: q.more.map((x) => ({ from: x.person, text: x.text, at: x.at })), files: (q.files || []).map((x) => ({ name: x.name, size: x.size })),
           state: sending(q) ? 'sending' : q.state === 'starting' ? 'queued' : q.state, draft: q.state === 'draft' ? q.draft ?? null : null, sent: q.sentText || null, auto: !!q.auto, steer: !!q.steer,
-          needsOwner: !!q.needsOwner, why: q.why || null, warn: q.warn || null, problem: q.problem || null, outFiles: (q.outFiles || []).map((x) => ({ name: x.name, size: x.size })),
+          needsOwner: !!q.needsOwner, why: q.why || null, warn: q.warn || null, problem: q.problem || null, outFiles: (q.outFiles || []).map((x) => ({ name: x.name, size: x.size, ...(x.from ? { from: x.from } : {}) })),
           write: writeView(q.write), push: pushView(q.push), limit: waitsAtLimit(q) ? limitView(q) : null, change: q.change ? { branch: q.change.branch, stat: q.change.stat, files: q.change.files, pr: q.change.pr, approved: !!q.change.approved } : null,
           consulting: q.consulting || null, handed: q.handed || null,
         })),
@@ -3655,6 +3655,19 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       return { ended: await endSession(s, { why: 'Ended', by: you() }) }
     },
     ofQuestion: (qid) => { const f = locate(qid); return f?.q.session ? sessions.get(f.q.session) : null },
+    // A test session's, for Start a test session to open: its first turn starts it a moment after the
+    // request that asked it has returned (next, answer). null once it's plain there won't be one (Codex
+    // or a model answering, one turned away or held), or after ms.
+    async soon(id, qid, conv, ms = 15000) {
+      const end = Date.now() + ms
+      for (;;) {
+        const f = locate(qid)
+        const s = (f?.q.session && sessions.get(f.q.session)) || (conv ? sessions.byConv(id, conv) : null)
+        if (s) return s
+        if (!f || !['received', 'queued', 'starting'].includes(f.q.state) || Date.now() > end) return null
+        await new Promise((r) => setTimeout(r, 150))
+      }
+    },
   }
 
   // ---------- What it shows ----------
