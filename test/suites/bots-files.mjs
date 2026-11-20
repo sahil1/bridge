@@ -51,7 +51,7 @@ import crypto from 'node:crypto'
 import zlib from 'node:zlib'
 import { spawnSync } from 'node:child_process'
 import { checks, until, browser, page, shot, startDiscord, startTeams, startModel, phoneFaults, IS_WIN, IS_MAC, TEST } from '../lib/harness.mjs'
-import { botKit, openSettings, M, OWNER } from '../lib/bots.mjs'
+import { botKit, M, OWNER, openBot, askOnce } from '../lib/bots.mjs'
 
 const { ok, skip, done } = checks('bots-files')
 const dc = await startDiscord('bots-files')
@@ -618,18 +618,14 @@ try {
     await kit.api('/bots/b1/settings', { answerers: [] })
   })
 
-  // ---------- Try It, on a phone ----------
-  await part('Try It on a phone', async () => {
+  // ---------- A test session, on a phone ----------
+  await part('a test session on a phone', async () => {
     const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky', phone: true })
-    await openSettings(p)
-    await p.locator('.sb-tabs [role="tab"]', { hasText: 'Try It' }).click()
-    const sec = p.locator('[data-setting="slack-try"]')
-    await sec.waitFor({ timeout: 10000 })
+    await openBot(p, { tab: 'overview' })
     const n0 = (await slack.state()).files.length
-    await sec.locator('textarea').fill('The CMU book, tried [attach ~/notes/hiring/CMU_All_Resumes.pdf] [answer Here it is.]')
-    await sec.getByRole('button', { name: /^Ask Reports/ }).click()
+    const sec = await askOnce(p, 'The CMU book, tried [attach ~/notes/hiring/CMU_All_Resumes.pdf] [answer Here it is.]')
     const files = await until(async () => (await sec.locator('.sb-files').innerText().catch(() => '')) || null, 30000)
-    ok(/With CMU_All_Resumes\.pdf \(300 KB\)/.test(files || ''), 'Try It: the attached PDF with its draft, as a made file shows', files)
+    ok(/With CMU_All_Resumes\.pdf \(300 KB\)/.test(files || ''), 'a test session, asked once: the attached PDF with its draft, as a made file shows', files)
     const record = await until(async () => { const t = await sec.innerText(); return /Attached CMU_All_Resumes\.pdf from/.test(t) ? t : null }, 10000)
     ok(/Attached CMU_All_Resumes\.pdf from ~[\\/]notes[\\/]hiring[\\/]CMU_All_Resumes\.pdf/.test(record || '') && await sec.locator('.bf-made [data-file="CMU_All_Resumes.pdf"] .bf-from').count() === 1, 'and its record: what it attached, from where, with Open and Send to…', record)
     ok((await slack.state()).files.length === n0, 'and nothing went to Slack')
@@ -762,7 +758,7 @@ try {
   // ---------- Its Activity ----------
   await part('Activity', async () => {
     const { ctx, p, errors } = await page(b, kit.url)
-    await openSettings(p)
+    await openBot(p)
     await p.locator('.sb-tabs [role="tab"]', { hasText: 'Activity' }).click()
     const files = p.locator('[data-setting="bots-files"]')
     await files.waitFor({ timeout: 15000 })

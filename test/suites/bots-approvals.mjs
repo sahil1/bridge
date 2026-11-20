@@ -33,7 +33,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { checks, until, sleep, browser, page, shot, phoneFaults, IS_WIN } from '../lib/harness.mjs'
-import { botKit, openSettings, M, OWNER } from '../lib/bots.mjs'
+import { botKit, M, OWNER, openBot } from '../lib/bots.mjs'
 
 const { ok, done } = checks('bots-approvals')
 const HOLD = 4000 // how long a draft waits before "I'm checking this" (BRIDGE_BOT_HOLD_MS)
@@ -352,7 +352,7 @@ try {
     ok(!!(await until(async () => (await inThread(q.ts)).find((x) => x.text === 'All consistent.'), 15000)), 'sent where it was asked')
     // The record's lines, in Activity.
     await p.keyboard.press('Escape')
-    await openSettings(p)
+    await openBot(p)
     await p.locator('.sb-tabs [role="tab"]', { hasText: 'Activity' }).click()
     await p.locator('.sb-conv', { hasText: 'Compare every FAQ answer' }).click()
     await p.locator('.sb-tl li').first().waitFor({ timeout: 10000 })
@@ -546,8 +546,8 @@ try {
   for (const [mode, theme, phone] of [['light', 'sky', false], ['dark', 'midnight', false], ['light', 'sky', true], ['dark', 'midnight', true]]) {
     await part(`Settings, ${mode}${phone ? ', on a phone' : ''}`, async () => {
       const { ctx, p, errors } = await page(b, kit.url, { mode, theme, phone })
-      await openSettings(p)
-      await p.locator('.sb-tabs [role="tab"]', { hasText: 'Set Up' }).click()
+      await openBot(p)
+      await p.locator('.sb-tabs [role="tab"]', { hasText: 'Settings' }).click()
       await p.locator('[data-setting="slack-owner"]').waitFor({ timeout: 10000 })
       ok(/Tester/.test(await p.locator('[data-setting="slack-owner"]').innerText()), 'You in Slack shows you')
       ok(/30/.test(await p.locator('[data-setting="slack-limits"] input').first().inputValue()), 'its limits: 30 a day')
@@ -573,7 +573,7 @@ try {
       const words = await box.innerText()
       ok(/Waiting for you/.test(words) && /printer is on floor 2/.test(words) && /Austin office closes at 4 on Fridays/.test(words) && /leads? the support team/.test(words), 'Memory: what waits for you, and what it keeps, each kind', words.slice(0, 600))
       if (phone) {
-        const faults = await phoneFaults(p, '.modal.settings .sb')
+        const faults = await phoneFaults(p, '.bp.phone .bp-main')
         ok(!Object.keys(faults).length, 'on a phone: nothing too small to tap, off the screen or cut short', faults)
       }
       await shot(p, `${tag}bots-approvals-memory-${mode}${phone ? '-phone' : ''}`)
@@ -594,7 +594,7 @@ try {
         await editing.press('Enter')
         ok(!!(await until(async () => (await mem()).some((x) => x.text === 'Sam leads the support team in Austin'), 8000)), 'edited from the page')
       }
-      await p.locator('.sb-tabs [role="tab"]', { hasText: 'Set Up' }).click()
+      await p.locator('.sb-tabs [role="tab"]', { hasText: 'Settings' }).click()
       ok(errors.length === 0, 'no page errors', errors)
       await ctx.close()
     })

@@ -33,7 +33,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { checks, until, sleep, browser, page, shot, phoneFaults, startModel, IS_WIN, ROOT } from '../lib/harness.mjs'
-import { botKit, openSettings, M, OWNER } from '../lib/bots.mjs'
+import { botKit, M, OWNER, openBot } from '../lib/bots.mjs'
 
 const { ok, done } = checks('bots-write')
 const model = await startModel('bots-write')
@@ -542,12 +542,12 @@ try {
       ok(!!(await until(() => read(H('offers', `pat-${mode}${phone ? '-phone' : ''}.md`)) === 'Offer for Pat\n', 15000)), `approved in Needs You${phone ? ' on a phone' : ''}: made`)
       void w
       await p.keyboard.press('Escape')
-      await openSettings(p)
+      await openBot(p, { name: 'Hiring' })
       const sec = p.locator('[data-setting="slack-changes"]').first()
       await sec.waitFor({ timeout: 15000 })
       await sec.scrollIntoViewIfNeeded()
       const changes = await sec.innerText()
-      ok(/Edits Files in Its Folders/.test(changes) && /Changes Files In/.test(changes) && new RegExp(HR).test(changes) &&/May Change Files Without Asking Me/.test(changes) && /Sam/.test(changes) && /Always Waits for You/.test(changes), 'Settings › Bots › Changes: its folders, who may change files without asking you, and what always waits', changes.slice(0, 600))
+      ok(/Edits Files in Its Folders/.test(changes) && /Changes Files In/.test(changes) && new RegExp(HR).test(changes) &&/May Change Files Without Asking Me/.test(changes) && /Sam/.test(changes) && /Always Waits for You/.test(changes), 'its Settings › Changes: its folders, who may change files without asking you, and what always waits', changes.slice(0, 600))
       const line = await p.locator('[data-setting="bots-access-line"]').first().innerText().catch(() => '')
       ok(new RegExp(`changes files in ${HR} for you and 1 named; asks you first for anyone else`, 'i').test(line),'its Access line says it in plain words', line)
       if (phone) { const faults = await phoneFaults(p, '[data-setting="slack-changes"]'); ok(!Object.keys(faults).length, 'Changes on a phone: nothing too small to tap, off the screen or cut short', faults) }

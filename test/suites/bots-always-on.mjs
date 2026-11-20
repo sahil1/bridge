@@ -16,7 +16,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync, spawn } from 'node:child_process'
 import { checks, until, sleep, browser, page, shot, phoneFaults, ROOT } from '../lib/harness.mjs'
-import { botKit, lookers, openSettings, M, M2, OWNER } from '../lib/bots.mjs'
+import { botKit, lookers, openBot, newBotChat, M, M2, OWNER } from '../lib/bots.mjs'
 
 const { ok, done } = checks('bots-always-on')
 const HANDBOOK = '# Handbook\n\nEveryone gets ten days of leave a year.\n'
@@ -169,8 +169,7 @@ try {
   for (const [mode, theme, phone] of [['light', 'sky', false], ['dark', 'midnight', false], ['dark', 'midnight', true]]) {
     await part(`Settings, ${mode}${phone ? ', on a phone' : ''}`, async () => {
       const { ctx, p, errors } = await page(b, kit.url, { mode, theme, phone })
-      await openSettings(p)
-      await p.locator('.sb-tabs [role="tab"]', { hasText: 'Set Up' }).click()
+      await openBot(p)
       const sched = p.locator('[data-setting="slack-scheduled"]')
       await sched.waitFor({ timeout: 10000 })
       await sched.scrollIntoViewIfNeeded()
@@ -179,16 +178,15 @@ try {
       const chans = p.locator('[data-setting="slack-channels"]')
       ok(/without a mention/i.test(await chans.innerText()), 'Channels: where it answers without a mention')
       ok(/Instructions, memory and settings; never its tokens/.test(await p.locator('[data-setting="slack-export"]').innerText().catch(() => '')) || /never its tokens/.test(await p.locator('[data-setting="slack-identity"]').innerText()), 'its export, said to leave its tokens out')
-      if (phone) { const faults = await phoneFaults(p, '.modal.settings .sb'); ok(!Object.keys(faults).length, 'on a phone: nothing too small to tap, off the screen or cut short', faults) }
+      if (phone) { const faults = await phoneFaults(p, '.bp.phone .bp-main'); ok(!Object.keys(faults).length, 'on a phone: nothing too small to tap, off the screen or cut short', faults) }
       await shot(p, `${tag}bots-always-on-scheduled-${mode}${phone ? '-phone' : ''}`)
       if (mode === 'light') {
-        // A bot imported from the page: Import a bot… in New Bot.
-        await p.locator('.sb-chip.add').click()
+        // A bot imported from the page: Import a bot… in a new bot's form.
+        await newBotChat(p, { form: true })
         await p.locator('[data-setting="slack-import"] input[type="file"]').setInputFiles(fileOut)
         const made = await until(async () => (await kit.api('/bots')).bots.find((x) => x.name === 'Atlas (2)'), 10000)
-        ok(!!made, 'Import a bot… in Settings: brought in, named so it doesn\'t clash', (await kit.api('/bots')).bots.map((x) => x.name))
-        await until(async () => /Connect its Slack app here/.test(await p.locator('.sb').innerText()), 8000)
-        ok(/Connect its Slack app here/.test(await p.locator('.sb').innerText()), 'and it says what\'s left to do')
+        ok(!!made, 'Import a bot…: brought in, named so it doesn\'t clash', (await kit.api('/bots')).bots.map((x) => x.name))
+        ok(!!(await until(async () => /Connect its Slack app here/.test(await p.locator('.bp [data-setting="bot-imported"]').innerText().catch(() => '')), 8000)), 'its page opens, saying what\'s left to do')
         await shot(p, `${tag}bots-always-on-imported`)
       }
       ok(errors.length === 0, 'no page errors', errors)

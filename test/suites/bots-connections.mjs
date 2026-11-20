@@ -23,9 +23,9 @@
 //   In the app: AI Assist's chat with a shared connection there (nothing to set up on the platform:
 //   the card says how people reach it, its command and a channel it's the default bot in; after
 //   Create, how to ask it, the people named found at once), and with none (it walks through making
-//   the shared one, once, named as you like); Settings › Bots › Connections and the sidebar's (a
-//   card each, which bot answered and why, no token in the page); a bot's Set Up saying how it's
-//   reached, with Give it its own connection; light and dark, on a computer and at a phone's width.
+//   the shared one, once, named as you like); Bots › Connections (a card each, which bot answered
+//   and why under Advanced, no token in the page); a bot's Settings saying how it's reached, with
+//   Give it its own connection; light and dark, on a computer and at a phone's width.
 import fs from 'node:fs'
 import path from 'node:path'
 import { startKit, startSlack, startDiscord, startTeams, startModel, checks, until, sleep, browser, page, shot, phoneFaults, TEST, IS_WIN } from '../lib/harness.mjs'
@@ -403,7 +403,8 @@ try {
     // are found at once.
     await part('the chat, with a shared connection', async () => {
       const { ctx, p, errors } = await page(b, kit.url, { mode: 'light' })
-      await p.locator('.rail-bots-head .rail-tool[aria-label="New bot"]').click()
+      await p.locator('[data-setting="rail-bots"] .rail-tool[aria-label="New bot"]').click()
+      await p.locator('[data-setting="bots-quick"] .ai-assist-link').click()
       await p.locator('.bc-say textarea').fill('A bot called Policy Desk that answers HR policy questions for Dana, from my docs folder, in Slack.')
       await p.locator('.bc-say button[type="submit"]').click()
       if (!ok(await shown(p, '.bc-proposal', 30000), 'a draft, its card', `${await textOf(p, '.bc')} | ${JSON.stringify((await kit.api('/bots')).bots.map((x) => [x.id, x.name, x.draft]))}`)) await shot(p, `${tag}bots-connections-no-proposal`)
@@ -440,7 +441,8 @@ try {
       const teams = (await kit.api('/connections')).connections.find((c) => c.shared && c.platform === 'teams')
       if (teams) await kit.api(`/connections/${teams.id}`, null, 'DELETE')
       const { ctx, p, errors } = await page(b, kit.url, { mode: 'dark', theme: 'midnight' })
-      await p.locator('.rail-bots-head .rail-tool[aria-label="New bot"]').click()
+      await p.locator('[data-setting="rail-bots"] .rail-tool[aria-label="New bot"]').click()
+      await p.locator('[data-setting="bots-quick"] .ai-assist-link').click()
       await p.locator('.bc-say textarea').fill('A bot called Leave Desk that answers leave questions for Dana in Teams.')
       await p.locator('.bc-say button[type="submit"]').click()
       ok(await shown(p, '.bc-proposal', 20000), 'a draft for Teams')
@@ -464,32 +466,32 @@ try {
       await ctx.close()
     })
 
-    // Settings › Bots › Connections, and the sidebar's: a card each; a bot's Set Up says how it's
-    // reached, with Give It Its Own Connection; light and dark.
+    // Bots › Connections, from the sidebar: a card each; a bot's Settings say how it's reached, with
+    // Give It Its Own Connection; light and dark.
     for (const mode of ['light', 'dark']) {
       await part(`Connections, ${mode}`, async () => {
         const { ctx, p, errors } = await page(b, kit.url, { mode, theme: mode === 'dark' ? 'midnight' : 'sky' })
-        await openSettings(p)
-        await p.locator('[data-setting="bots-connections-chip"]').click()
-        ok(await shown(p, '.modal.settings [data-setting="bots-connections"] .cn-card'), `${mode}: Settings › Bots › Connections`)
-        const cards = await p.locator('.modal.settings .cn-card').allInnerTexts()
+        await p.locator('[data-setting="rail-bots"] .rail-nav-btn').click()
+        await p.locator('.bh-tabs [data-tab="connections"]').click()
+        ok(await shown(p, '.bh [data-setting="bots-connections"] .cn-card'), `${mode}: Bots › Connections`)
+        const cards = await p.locator('.bh .cn-card').allInnerTexts()
         ok(cards.some((x) => /tester_bot/.test(x) && /Slack/.test(x) && /Pricing Desk/.test(x) && /Docs Helper/.test(x) && /Connected to Acme Test/.test(x)), `${mode}: the shared Slack connection's card: connected, its bots`, cards[0])
         ok(cards.some((x) => /Discord/.test(x) && /Shared/i.test(x)), `${mode}: and Discord's`)
-        await p.locator('.modal.settings .cn-card[data-platform="slack"] [data-setting="connection-activity"] summary').first().click()
-        ok(!!(await until(async () => /to Pricing Desk|to Docs Helper/.test(await textOf(p, '.modal.settings .cn-card[data-platform="slack"] [data-setting="connection-activity"]')), 8000)), `${mode}: which bot answered, and why`, await textOf(p, '.modal.settings [data-setting="connection-activity"]'))
+        const slackCard = p.locator('.bh .cn-card[data-platform="slack"]').first()
+        await slackCard.locator('[data-setting="connection-advanced"] > summary').click()
+        await slackCard.locator('[data-setting="connection-activity"] summary').first().click()
+        ok(!!(await until(async () => /to Pricing Desk|to Docs Helper/.test(await slackCard.locator('[data-setting="connection-activity"]').innerText().catch(() => '')), 8000)), `${mode}: which bot answered, and why (under Advanced)`, await slackCard.locator('[data-setting="connection-activity"]').innerText().catch(() => ''))
         ok(!(await p.content()).includes('xoxb-test'), `${mode}: no token in the page`)
         await p.waitForTimeout(400)
-        await shot(p, `${tag}bots-connections-settings-${mode}`)
-        await p.keyboard.press('Escape')
-        await p.locator('.rail-bot-list [data-bot="connections"]').click()
-        ok(await shown(p, '.bp-conns [data-setting="bots-connections"] .cn-card'), `${mode}: Connections from the sidebar, as a page`)
-        await p.waitForTimeout(300)
         await shot(p, `${tag}bots-connections-page-${mode}`)
         const pd = (await kit.api('/bots')).bots.find((x) => x.name === 'Pricing Desk')
-        await p.locator(`.rail-bot-list [data-bot="${pd.id}"]`).click()
-        await p.locator('.bp .sb-tabs button', { hasText: 'Set Up' }).click()
+        await p.locator('.bh-tabs [data-tab="bots"]').click()
+        await p.locator(`.bh .bo-card[data-bot="${pd.id}"]`).click()
+        await p.locator('.bp .sb-tabs [data-tab="settings"]').click()
+        const adv = p.locator('.bp [data-setting="bot-advanced"]')
+        if (!(await adv.evaluate((d) => d.open))) await adv.locator(':scope > summary').click()
         const reach = await until(async () => { const x = await textOf(p, '.bp [data-setting="bots-reach"]'); return /Reached through tester_bot/.test(x) ? x : null }, 10000)
-        ok(!!reach && /Give it its own connection/.test(reach), `${mode}: a bot's Set Up says it's reached through tester_bot, with Give it its own connection`, reach)
+        ok(!!reach && /Give it its own connection/.test(reach), `${mode}: a bot's Settings say it's reached through tester_bot, with Give it its own connection`, reach)
         ok(!(await p.locator('.bp [data-setting="slack-connect"]').count()), `${mode}: and no app of its own to make there`)
         await p.waitForTimeout(300)
         await shot(p, `${tag}bots-connections-bot-${mode}`)
@@ -504,18 +506,19 @@ try {
         const { ctx, p, errors } = await page(b, kit.url, { mode, theme: mode === 'dark' ? 'midnight' : 'sky', phone: true })
         await p.locator('.tabbar button', { hasText: 'More' }).click()
         await p.locator('.m-more-row[data-id="bots"]').click()
-        await p.locator('[data-setting="phone-bots"] .m-more-row[data-id="connections"]').click()
-        ok(await shown(p, '.bp-conns [data-setting="bots-connections"] .cn-card'), `${mode}, a phone: More › Bots › Connections`)
+        await p.locator('[data-setting="phone-bots"] .bh-tabs [data-tab="connections"]').click()
+        ok(await shown(p, '[data-setting="phone-bots"] [data-setting="bots-connections"] .cn-card'), `${mode}, a phone: More › Bots › Connections`)
         await sleep(400)
-        let faults = await phoneFaults(p, '.bp-conns')
+        let faults = await phoneFaults(p, '[data-setting="phone-bots"]')
         ok(!Object.keys(faults).length, `${mode}, a phone: Connections fits: nothing too small, off the screen or cut short`, faults)
         await shot(p, `${tag}bots-connections-phone-${mode}`)
-        // (Changed from the phone: a channel's bot, through the relay as from anywhere.)
-        await p.locator('.m-view-back', { hasText: 'Bots' }).click()
         const pd = (await kit.api('/bots')).bots.find((x) => x.name === 'Pricing Desk')
-        await p.locator(`[data-setting="phone-bots"] .m-more-row[data-id="${pd.id}"]`).click()
-        await p.locator('.bp.phone .sb-tabs button', { hasText: 'Set Up' }).click()
-        ok(!!(await until(async () => /Reached through tester_bot/.test(await textOf(p, '.bp.phone [data-setting="bots-reach"]')), 10000)), `${mode}, a phone: a bot's Set Up says how it's reached`)
+        await p.locator('[data-setting="phone-bots"] .bh-tabs [data-tab="bots"]').click()
+        await p.locator(`[data-setting="phone-bots"] .bo-card[data-bot="${pd.id}"]`).click()
+        await p.locator('.bp.phone .sb-tabs [data-tab="settings"]').click()
+        const adv = p.locator('.bp.phone [data-setting="bot-advanced"]')
+        if (!(await adv.evaluate((d) => d.open))) await adv.locator(':scope > summary').click()
+        ok(!!(await until(async () => /Reached through tester_bot/.test(await textOf(p, '.bp.phone [data-setting="bots-reach"]')), 10000)), `${mode}, a phone: a bot's Settings say how it's reached`)
         await sleep(300)
         faults = await phoneFaults(p, '.bp.phone [data-setting="bots-reach"]')
         ok(!Object.keys(faults).length, `${mode}, a phone: and it fits`, faults)

@@ -15,7 +15,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { checks, until, sleep, browser, page, shot, phoneFaults, IS_WIN } from '../lib/harness.mjs'
-import { botKit, openSettings, M, OWNER } from '../lib/bots.mjs'
+import { botKit, openBot, askOnce, newBotChat, M, OWNER } from '../lib/bots.mjs'
 
 const { ok, done } = checks('bots-native')
 const { slack, kit, draftOf, startOf, startsOf, briefOf, botOf, connected, convs, timelineOf, events, posted, postedLike } = await botKit('bots-native', {
@@ -46,9 +46,9 @@ try {
   ok(mf.features.app_home?.home_tab_enabled === true && mf.settings.interactivity?.is_enabled === true && mf.settings.socket_mode_enabled === true && !!mf.features.agent_view, 'the Home tab, interactivity (its buttons, modals and shortcut) over Socket Mode, declared as an agent', { home: mf.features.app_home, interactivity: mf.settings.interactivity, agent: mf.features.agent_view })
   ok(['files:read', 'files:write', 'commands', 'assistant:write'].every((x) => mf.oauth_config.scopes.bot.includes(x)) && ['app_home_opened', 'agent_session_stopped'].every((x) => mf.settings.event_subscriptions.bot_events.includes(x)), 'its new scopes and events', { scopes: mf.oauth_config.scopes.bot, events: mf.settings.event_subscriptions.bot_events })
   ok(v.updateApp.missing.join() === 'files:read,files:write,commands,assistant:write' && v.updateApp.needs.find((x) => x.scope === 'commands')?.for.includes('/pricing-desk'), 'an app made from the older manifest: what it lacks, and what each is for', v.updateApp)
-  await part('Update Your Slack App, in Settings', async () => {
+  await part('Update Your Slack App, in its Settings', async () => {
     const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
-    await openSettings(p)
+    await openBot(p)
     const up = await p.locator('.sb-update').innerText()
     ok(/Update Your Slack App/.test(up) && /files:read, files:write, commands, assistant:write/.test(up) && /\/pricing-desk/.test(up), 'Settings: Update Your Slack App names what it lacks and what for', up)
     const icon = await p.locator('[data-setting="slack-identity"] a', { hasText: 'Add an icon in Slack' }).getAttribute('href').catch(() => null)
@@ -188,24 +188,19 @@ try {
   for (const [mode, theme, phone] of [['light', 'sky', false], ['dark', 'midnight', false], ['light', 'sky', true], ['dark', 'midnight', true]]) {
     await part(`Try It, ${mode}${phone ? ', on a phone' : ''}`, async () => {
       const { ctx, p, errors } = await page(b, kit.url, { mode, theme, phone })
-      await openSettings(p)
-      await p.locator('.sb-tabs [role="tab"]', { hasText: 'Try It' }).click()
-      const sec = p.locator('[data-setting="slack-try"]')
-      await sec.waitFor({ timeout: 10000 })
+      await openBot(p, { tab: 'overview' })
       const n0 = (await posted()).length
-      await sec.locator('select').selectOption({ label: 'Dana' })
-      await sec.locator('textarea').fill(`How much is enterprise, ${mode}${phone ? ' phone' : ''}? [answer Forty a seat.]`)
-      await sec.getByRole('button', { name: /^Ask Pricing Desk/ }).click()
+      const sec = await askOnce(p, `How much is enterprise, ${mode}${phone ? ' phone' : ''}? [answer Forty a seat.]`, { as: 'Dana' })
       const out = await until(async () => (await sec.locator('.sb-try-draft').innerText().catch(() => '')) || null, 30000)
-      ok(out === 'Forty a seat.', 'Try It: asked as Dana, its draft shown', out)
+      ok(out === 'Forty a seat.', 'a test session, asked once: as Dana, its draft shown', out)
       ok(/Its record/.test(await sec.innerText()) && (await posted()).length === n0, 'with its record, and nothing went to Slack')
-      if (phone) { const faults = await phoneFaults(p, '.modal.settings .sb'); ok(!Object.keys(faults).length, 'on a phone: nothing too small to tap, off the screen or cut short', faults) }
+      if (phone) { const faults = await phoneFaults(p, '.bp.phone .bp-main'); ok(!Object.keys(faults).length, 'on a phone: nothing too small to tap, off the screen or cut short', faults) }
       await shot(p, `${tag}bots-native-try-${mode}${phone ? '-phone' : ''}`)
       if (mode === 'light' && !phone) {
         // A bot from a template.
-        await p.locator('.sb-chip.add').click()
+        await newBotChat(p, { form: true })
         await p.locator('.sb-tpl', { hasText: 'Code Expert' }).click()
-        ok(/Answer questions from Tester's colleagues about the code/.test(await p.locator('.sb-tpl-ins').evaluate((e) => e.textContent)), 'New Bot: the Code Expert template, its instructions to see first')
+        ok(/Answer questions from Tester's colleagues about the code/.test(await p.locator('.sb-tpl-ins').evaluate((e) => e.textContent)), 'a new bot\'s form: the Code Expert template, its instructions to see first')
         await p.locator('.sb-new input').fill('Code Helper')
         await shot(p, `${tag}bots-native-templates`)
         await p.locator('.sb-new button[type="submit"]').click()

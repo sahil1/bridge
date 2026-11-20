@@ -166,6 +166,9 @@ const PLACES = [
   { name: 'Studio', open: studioAt({ machine: null, root: 'shelf:recent', path: '' }), scope: '.cmd .sd-home-view', ready: '.sd-home-view .sd-shelf' },
   { name: 'Studio at a folder', open: studioAt({ machine: null, root: 'home', path: '' }), scope: '.cmd .sd-home-view', ready: '.sd-home-view .fx-body .fx-row' },
   { name: 'Meetings', open: view('view:meetings'), scope: '.cmd .mt-view', ready: '.mt-view' },
+  // Bots (a beta feature, on here): its three tabs, Connections, Bots and Sessions, with nothing made
+  // yet (a connection to make, a first bot's three questions, no sessions).
+  ...['connections', 'bots', 'sessions'].map((tab) => ({ name: `Bots at ${tab}`, open: view(`view:bots:${tab}`), scope: '.cmd .bh', ready: `.bh[data-tab="${tab}"] .bh-body > *` })),
   // The calendar reads macOS Calendar: elsewhere there's none to open.
   ...(process.platform === 'darwin' ? [{ name: 'Calendar', open: (p) => send(p, { date: today }, 'bridge-open-event'), scope: '.cmd .calv', ready: '.calv' }] : []),
   ...SECTIONS.map((s) => ({

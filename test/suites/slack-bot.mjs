@@ -25,6 +25,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { startKit, startSlack, checks, until, sleep, browser, page, shot, phoneFaults, TEST, ROOT, IS_WIN } from '../lib/harness.mjs'
+import { openBot, newBotChat } from '../lib/bots.mjs'
 import { ownFile } from '../lib/bots.mjs'
 
 const { ok, done } = checks('slack-bot')
@@ -129,11 +130,11 @@ try {
   ok(JSON.stringify(b1.scopes?.missing) === JSON.stringify(['im:write', 'reactions:write', 'pins:read', 'files:read', 'files:write', 'commands', 'assistant:write']), 'its app, made from the old manifest, lacks the new scopes, from what Slack says it has', b1.scopes)
   ok(b1.manifest.oauth_config.scopes.bot.includes('pins:read') && b1.manifest.settings.event_subscriptions.bot_events.join() === 'app_mention,message.channels,message.groups,message.im,message.mpim,app_home_opened,agent_session_stopped,channel_shared,channel_unshared', 'the new manifest asks for them, and for replies in channels and threads', b1.manifest)
 
-  // ---------- In Settings: updating the app, renaming it, a second bot ----------
-  await part('setting up in Settings', async () => {
+  // ---------- In its Settings: updating the app, renaming it, a second bot ----------
+  await part('setting up in its Settings', async () => {
     const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
-    await openSettings(p)
-    ok(await p.locator('.st-nav-item', { hasText: /^Bots$/ }).count() === 1, 'the section is called Bots')
+    await openBot(p)
+    ok(/^Bots/.test((await p.locator('[data-setting="rail-bots"] .rail-nav-btn').innerText()).trim()), 'it\'s called Bots')
     const up = await p.locator('.sb-update').innerText().catch(() => '')
     ok(/Update Your Slack App/.test(up) && /im:write, reactions:write, pins:read/.test(up) && /App Manifest/.test(up) && /Reinstall/.test(up), 'Update Your Slack App: which scopes it lacks, and how (paste the manifest, reinstall)', up)
     await sleep(500) // Settings opening
@@ -142,7 +143,7 @@ try {
     await p.locator('.sb-update button', { hasText: 'Connect again' }).click()
     ok(!!(await until(async () => !(await p.locator('.sb-update').count()), 15000)), 'updated in Slack and connected again: the notice goes')
     // Renamed: the manifest carries the new name.
-    const name = p.locator('.sb-ident input').first()
+    const name = p.locator('.bp [data-setting="bot-name"] input')
     await name.fill('Pricing Desk')
     await name.blur()
     ok(!!(await until(async () => (await botOf()).name === 'Pricing Desk', 8000)), 'renamed in Settings')
@@ -150,10 +151,18 @@ try {
     const mf = link ? JSON.parse(decodeURIComponent(link.split('manifest_json=')[1])) : null
     ok(mf?.display_information.name === 'Pricing Desk' && mf.features.bot_user.display_name === 'Pricing Desk', 'the manifest carries the new name, as its app name and its bot\'s', mf?.display_information)
     ok(/can't carry an icon/.test(await p.locator('[data-setting="slack-identity"]').innerText()), 'and Settings says where its icon is set')
-    // A second bot, by its name.
-    await p.locator('.sb-chip.add').click()
-    await p.locator('.sb-new input').fill('Atlas')
-    await p.locator('.sb-new button[type="submit"]').click()
+    // A second bot, by its name (a new bot's form, from AI Assist's chat).
+    await newBotChat(p, { form: true })
+    await p.locator('.bc .sb-new input').fill('Atlas')
+    await p.locator('.bc .sb-new button[type="submit"]').click()
+    await p.locator('.bp .sb-tabs [data-tab="settings"]').waitFor({ timeout: 10000 })
+    await sleep(400)
+    // (Its page opens with AI Assist's chat beside it, which walks through the same steps: closed, so
+    // they're its Settings' own here.)
+    if (await p.locator('.bp-chat .ai-head-close').count()) await p.locator('.bp-chat .ai-head-close').click()
+    await p.locator('.bp .sb-tabs [data-tab="settings"]').click({ timeout: 10000 })
+    const adv = p.locator('.bp [data-setting="bot-advanced"]')
+    if (!(await adv.evaluate((d) => d.open))) await adv.locator(':scope > summary').click()
     await p.locator('.sb-guide').first().waitFor({ timeout: 10000 })
     const steps = await p.locator('.sb-guide').first().innerText()
     const manifest = JSON.parse(await p.locator('.sb-manifest pre').evaluate((e) => e.textContent))
@@ -174,7 +183,8 @@ try {
     await p.locator('.sb-mode', { hasText: 'Everyone in channels it\'s invited to' }).click()
     await until(async () => (await kit.api('/bots/b2')).settings.who === 'channels', 8000)
     ok(/never answered/.test(await p.locator('[data-setting="slack-askers"]').innerText()), 'guests and other companies are never answered, it says')
-    const ins = p.locator('.sb-ins')
+    await p.locator('.bp [data-setting="bot-purpose"] .bs-more').click()
+    const ins = p.locator('.bp .sb-ins')
     await ins.fill('# Atlas\n\nAnswer general questions, briefly. [sign — Atlas]\n')
     await ins.blur()
     ok(!!(await until(async () => /\[sign — Atlas\]/.test((await kit.api('/bots/b2')).instructions.text), 8000)), 'its instructions, written in Settings, are saved')
@@ -397,20 +407,19 @@ try {
   for (const [mode, theme, phone] of [['light', 'sky', false], ['dark', 'midnight', false], ['light', 'sky', true], ['dark', 'midnight', true]]) {
     await part(`Settings, ${mode}${phone ? ', on a phone' : ''}`, async () => {
       const { ctx, p, errors } = await page(b, kit.url, { mode, theme, phone })
-      await openSettings(p)
-      await p.locator('.sb-chip', { hasText: 'Pricing Desk' }).click()
+      await openBot(p, { name: 'Pricing Desk' })
       await p.locator('.sb-status').waitFor({ timeout: 10000 })
       ok(/Connected to Acme Test as @bridge_ai/.test(await p.locator('.sb-status').innerText()), 'connected')
       const terms = await p.locator('.sb-terms').innerText().catch(() => '')
       ok(/Pricing Desk answers other people through your Claude account \(Max\)\. If that's a personal plan, check Anthropic's terms allow it; an API key is the usual choice for a shared bot\./.test(terms), 'its agent signed in with a personal plan: a note on its terms, not a block', terms)
       if (phone) {
         await sleep(300)
-        const faults = await phoneFaults(p, '.modal.settings .sb')
+        const faults = await phoneFaults(p, '.bp.phone .bp-main')
         ok(!Object.keys(faults).length, 'on a phone: nothing too small to tap, off the screen or cut short', faults)
       }
       await sleep(500)
       await shot(p, `${tag}slack-bot-settings-${mode}${phone ? '-phone' : ''}`)
-      await p.locator('.sb [data-setting="slack-replies"]').scrollIntoViewIfNeeded()
+      await p.locator('.bp [data-setting="slack-replies"]').scrollIntoViewIfNeeded()
       await sleep(200)
       await shot(p, `${tag}slack-bot-settings-${mode}${phone ? '-phone' : ''}-more`)
       // Its activity.
@@ -420,14 +429,14 @@ try {
       // (Each conversation's outcome is its latest question's: the first one's is its discarded reply.)
       ok(/\nSent · /.test(log) && /Discarded/.test(log) && /Refused: not someone it answers/.test(log) && /Sent without asking/.test(log) && /Waiting for you/.test(log) && /Dana in #launch · 2 messages/.test(log), 'its activity: each conversation, who asked where, and what came of it', log)
       if (phone) {
-        const faults = await phoneFaults(p, '.modal.settings .sb')
+        const faults = await phoneFaults(p, '.bp.phone .bp-main')
         ok(!Object.keys(faults).length, 'its activity on a phone: nothing too small, off the screen or cut short', faults)
       }
       await shot(p, `${tag}slack-bot-activity-${mode}${phone ? '-phone' : ''}`)
-      await p.locator('.sb-tabs [role="tab"]', { hasText: 'Set Up' }).click()
+      await p.locator('.sb-tabs [role="tab"]', { hasText: 'Settings' }).click()
       if (phone) {
-        // ‹ Settings: the list of sections has it, with what's in it, while the beta feature is on.
-        await p.locator('.st-back').click()
+        // Settings' list of sections has it, with what's in it, while the beta feature is on.
+        await openSettings(p, 'all', '.modal.settings .st-list')
         const row = p.locator('.st-list-row', { hasText: 'Bots' })
         ok(/Your own named bots in Slack/.test(await row.innerText().catch(() => '')), 'on a phone, Settings\' list of sections has it', await p.locator('.st-list').innerText().catch(() => ''))
       }
