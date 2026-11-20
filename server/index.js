@@ -108,7 +108,7 @@ import { make as makeOutside } from './outside.js'
 import { makeFrontDesk, SPACE as BOT_RUNS } from './frontdesk.js'
 import { manifest as slackManifest, connectionManifest, SCOPES as SLACK_SCOPES, SHARED_SCOPES, SCOPE_FOR as SLACK_SCOPE_FOR, commandOf as slackCommand, shortcutOf as slackShortcut } from './slackbot.js'
 import { PORT as TEAMS_PORT } from './teamsbot.js'
-import { combine, platformOf, PLATFORMS, COMING, makeConnector as connectorFor } from './connector.js'
+import { combine, platformOf, PLATFORMS, makeConnector as connectorFor } from './connector.js'
 import { makeBotSessions } from './botsessions.js'
 import { listTemplates, templateOf } from './bottemplates.js'
 import * as botsStore from './bots.js'
@@ -5187,6 +5187,7 @@ app.delete('/api/bots/:id/teams', botsGuard, wrapBot(async (req) => {
 // you, on this computer or another of your devices), never by anything a question says.
 const connOr404 = (id) => { const c = conns.get(id); if (!c) throw Object.assign(new Error('No such connection'), { status: 404 }); return c }
 const connRecord = (c, what, req) => conns.note(c.id, { event: 'settings', what, ...changedBy(req) })
+const connChannels = new Map() // connection id -> { at, n }
 async function connView(c) {
   const con = hubs.connectorOf(c.id)
   const s = con?.state() || { state: 'off' }
@@ -5196,10 +5197,21 @@ async function connView(c) {
   const reached = { asked: false, answered: false }
   for (const b of on) { const r = (await desk.view(b.id))?.reached?.[c.platform]; if (r?.asked) reached.asked = true; if (r?.answered) reached.answered = true }
   const slack = c.platform === 'slack'
+  // (How many channels its Slack app is in, for its checklist's "invited to one": asked of Slack once
+  // a minute at most.)
+  let channels = null
+  if (slack && s.state === 'connected' && con?.channels) {
+    const hit = connChannels.get(c.id)
+    if (!hit || Date.now() - hit.at > 60000) connChannels.set(c.id, { at: Date.now(), n: hit?.n ?? null, p: con.channels().then((l) => { connChannels.set(c.id, { at: Date.now(), n: l.length }) }, () => {}) })
+    channels = connChannels.get(c.id)?.n ?? null
+  }
+  // (You there: the connection's, else, on a bot's own, the one that bot has, as its answers take it.)
+  const mine = c.bot ? botsStore.get(c.bot) : null
+  const owner = c.owner || (mine ? (slack ? mine.owner : mine.owners?.[c.platform]) || null : null)
   // (Someone there with your name, to offer as you, from the people listed already.)
   const me = String(cfg.name || '').trim().toLowerCase()
   let ownerGuess = null
-  if (!c.owner && me && s.state === 'connected') {
+  if (!owner && me && s.state === 'connected') {
     const people = await con.people().catch(() => [])
     const hit = people.find((p) => [p.name, p.detail].some((x) => String(x || '').toLowerCase().split(' · ')[0] === me)) || people.find((p) => String(p.name || '').toLowerCase() === me.split(' ')[0])
     if (hit) ownerGuess = { id: idThere(c, hit.id), name: hit.name }
@@ -5208,7 +5220,7 @@ async function connView(c) {
     ownerGuess,
     id: c.id, name: c.name, platform: c.platform, shared: c.shared, own: c.bot ? { id: c.bot, name: botsStore.get(c.bot)?.name || c.bot } : null,
     bots: on.map((b) => ({ id: b.id, name: b.name, description: b.description || '', paused: b.paused, command: slack && c.perBot ? slackCommand(b.name) : null })),
-    owner: c.owner, defaults: c.defaults, perBot: c.perBot, createdAt: c.createdAt || null,
+    owner, ownerFrom: owner && !c.owner ? 'bot' : null, defaults: c.defaults, perBot: c.perBot, createdAt: c.createdAt || null,
     // (Its Chief, while that bot's on it; a code to link you waiting to be sent, until when; its last
     // Test this connection, conncheck.js.)
     chief: conns.chiefOf(c, live) ? { id: c.chief, name: botsStore.get(c.chief)?.name || c.chief } : null,
@@ -5221,7 +5233,7 @@ async function connView(c) {
     numConnections: s.numConnections ?? null, others: s.others || null, limited: s.limited || null, catchingUp: s.catchingUp || null,
     // (Discord's server, intents and invite; Teams' endpoint, port and app: as each says them.)
     status: slack ? null : s,
-    reached, you: String(cfg.name || '').trim() || null,
+    reached, channels, you: String(cfg.name || '').trim() || null,
     ...(slack ? {
       manifest: c.shared ? connectionManifest(c, on, cfg.name) : slackManifest(botsStore.get(c.bot) || { name: c.name }, cfg.name),
       command: slackCommand(c.name), shortcut: slackShortcut(c.name),
@@ -5232,8 +5244,6 @@ async function connView(c) {
 app.get('/api/connections', botsGuard, wrapBot(async () => ({
   connections: await Promise.all(conns.list().map(connView)),
   suggested: conns.suggestName(cfg.name), you: String(cfg.name || '').trim() || null,
-  // (The platforms on their way, listed as coming: connector.js COMING.)
-  coming: Object.entries(COMING).map(([id, name]) => ({ id, name })),
 })))
 // A platform's shared connection, by the name you give it.
 app.post('/api/connections', botsGuard, wrapBot(async (req) => {
@@ -5346,7 +5356,7 @@ app.post('/api/connections/:cid/teams/endpoint', botsGuard, wrapBot(async (req) 
   if (c.platform !== 'teams') throw new Error('That\'s for a Microsoft Teams connection')
   await hubs.connectorOf(c.id).setEndpoint({ ...(req.body?.publicUrl !== undefined ? { publicUrl: req.body.publicUrl } : {}), ...(req.body?.port !== undefined ? { port: req.body.port } : {}) })
   connRecord(c, 'teams.endpoint', req)
-  hubs.restart(c.id)
+  // (Not connected again: a new port is listened on by the connector itself, and a new address needs nothing.)
   return connView(c)
 }))
 app.post('/api/connections/:cid/teams/check', botsGuard, wrapBot(async (req) => {
@@ -5395,6 +5405,43 @@ app.delete('/api/connections/:cid', botsGuard, wrapBot(async (req) => {
   desk.sync()
   pushFleet()
   return { ok: true }
+}))
+// A bot's own app made the shared one for its platform, in place (Use it for all your bots): its
+// tokens stay where they were, and every bot without an app of its own is reached through it, each
+// by its name, the Chief that bot unless the shared one it takes over from had one. A shared one
+// already there that isn't working (no tokens, or not connected) is removed once you've said so
+// (replace: its id), its bots, Chief and channels' bots coming here; one that's connected isn't: the
+// bot moves onto it instead (/bots/:id/move). In each bot's record and the connection's.
+app.post('/api/connections/:cid/share', botsGuard, wrapBot(async (req) => {
+  const c = connOr404(req.params.cid)
+  const p = c.platform
+  const label = PLATFORMS[p]
+  if (c.shared) throw Object.assign(new Error(`${c.name} is your shared ${label} connection already`), { status: 409 })
+  if (c.paused) throw Object.assign(new Error(`${c.name} is paused on this computer: start it first, in Settings › Back Up & Move`), { status: 409 })
+  const st = hubs.connectorOf(c.id)?.state() || {}
+  if (!st.tokens) throw Object.assign(new Error(`Set ${c.name} up first: its tokens aren't here yet`), { status: 409 })
+  const mine = botsStore.get(c.bot)
+  const s = conns.sharedOf(p)
+  const was = s ? hubs.connectorOf(s.id)?.state() || {} : null
+  if (s && !s.paused && was.state === 'connected') throw Object.assign(new Error(`${s.name}, your shared ${label} connection, is connected: move ${mine?.name || c.name} onto it instead`), { status: 409 })
+  if (s && String(req.body?.replace || '') !== s.id) throw Object.assign(new Error(`${s.name} is your shared ${label} connection now: say to replace it`), { status: 409 })
+  const live = botsStore.live()
+  const moved = s ? conns.botsOn(s, live) : []
+  // (What the one it takes over from had: its Chief while that bot's still on it, the channels' bots,
+  // a command for each bot. You there: its own, else its bot's, else that one's in the same workspace.)
+  const chief = s && conns.chiefOf(s, live) ? s.chief : c.bot
+  const sameTeam = !!(was?.team?.id && st.team?.id && was.team.id === st.team.id)
+  const owner = c.owner || (p === 'slack' ? mine?.owner : mine?.owners?.[p]) || (sameTeam ? s.owner : null)
+  if (s) { hubs.drop(s.id); conns.remove(s.id) }
+  const { after } = conns.share(c.id, { chief, defaults: s?.defaults || [], perBot: !!s?.perBot, owner })
+  // (Slack's and Discord's connectors ask for more as a shared one: made again, with the same tokens.)
+  if (p === 'teams') hubs.sync(); else hubs.renew(c.id)
+  desk.sync()
+  const now = conns.botsOn(after, botsStore.live())
+  conns.note(c.id, { event: 'settings', what: 'shared', old: s?.name || null, new: after.name, bots: now.length, chief: botsStore.get(chief)?.name || null, ...changedBy(req) })
+  for (const b of now) desk.record(b.id, 'settings.changed', { setting: 'connection', old: b.id === c.bot ? { [p]: c.name, own: true } : moved.some((x) => x.id === b.id) ? { [p]: s.name, shared: true } : null, new: { [p]: after.name, shared: true }, ...changedBy(req) })
+  pushFleet()
+  return { ...(await connView(after)), took: { from: s ? { name: s.name, bots: moved.map((b) => b.name) } : null, chief: botsStore.get(chief)?.name || null } }
 }))
 // ---------- Back Up & Move (backup.js) ----------
 // This computer's setup as one file sealed with a passphrase, or straight to another of your
@@ -5620,8 +5667,8 @@ app.post('/api/bots/import', botsGuard, wrapBot(async (req) => {
   const problems = [
     ...r.problems,
     ...(r.renamed ? [`There's a bot called ${r.bot.name.replace(/ \(\d+\)$/, '')} here already, so this one is ${r.bot.name}`] : []),
-    'Connect its Slack app here: paste its two tokens under Your Slack App. (A bot\'s tokens never go in its file.)',
-    'If it answered in Discord or Teams too, connect those here under Where It Answers.',
+    'Connect its Slack app here: in Bots › Connections, it\'s reached through your shared connection, or give it an app of its own there. (A bot\'s tokens never go in its file.)',
+    'If it answered in Discord or Teams too, the same goes for those.',
   ]
   pushFleet()
   return { ...v, problems }

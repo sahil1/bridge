@@ -51,6 +51,15 @@ export function botPlace(id) {
 export const openBot = (id) => window.dispatchEvent(new CustomEvent('bridge-open-bot', { detail: { id } }))
 export const openBots = (tab = 'bots', o = {}) => window.dispatchEvent(new CustomEvent('bridge-open-bots', { detail: { tab, ...o } }))
 export const openSession = (sid) => window.dispatchEvent(new CustomEvent('bridge-open-bots', { detail: { session: sid } }))
+// Bots › Connections at one connection's card (a bot's page's Open in Connections): the card is
+// scrolled to once the list has it, whether the list is there already or opens now.
+let focusWanted = null
+export const takeFocus = () => { const x = focusWanted; focusWanted = null; return x }
+export function openConnection(id = null) {
+  focusWanted = id
+  openBots('connections')
+  if (id) window.dispatchEvent(new CustomEvent('bridge-focus-connection', { detail: { id } }))
+}
 
 // The Sessions tab's filter, kept on this device: a bot's page's "All its sessions" sets it first.
 export const FILTER_KEY = 'cc-bots-sessions-filter'

@@ -5,7 +5,7 @@ import { platName } from '../settings/Bots.jsx'
 import Conversations from './Conversations.jsx'
 import { SessionRow, StartTest } from './SessionList.jsx'
 import { usePolled, noteTitle, stateOf } from './sessions.js'
-import { chiefIdOf, filterSessions, openBots } from './bots.js'
+import { chiefIdOf, filterSessions, openBots, openConnection } from './bots.js'
 import { t } from '../../i18n/index.js'
 import './bots-home.css'
 
@@ -33,7 +33,7 @@ export default function BotOverview({ d, onTab }) {
         <p className={d.description ? 'bo-for' : 'muted small'}>{d.description || t('No line on what it\'s for yet: the Chief has only its name to go by.')}{!d.description && <> <button type="button" className="link-btn small" onClick={() => onTab('settings')}>{t('Add one')}</button></>}</p>
         <dl className="bo-dl">
           <div><dt>{t('Folder')}</dt><dd>{folders.length ? folders.map((f) => <code key={f}>{f}</code>) : <span className="muted">{t('None: it answers from what it knows')}</span>}</dd></div>
-          <div><dt>{t('Reached Through')}</dt><dd>{via.length ? via.map(([p, c]) => <span key={p} className="bo-via"><span className={`sb-plat p-${p}`}>{platName(p)}</span> {p === 'teams' ? c.name : `@${c.name}`}{c.shared ? '' : ` (${t('its own')})`}</span>) : <button type="button" className="link-btn" onClick={() => openBots('connections')}>{t('No connection yet: make one')}</button>}</dd></div>
+          <div><dt>{t('Reached Through')}</dt><dd>{via.length ? via.map(([p, c]) => { const s = p === 'slack' ? d.state : d.where?.[p]?.state; return <button key={p} type="button" className="link-btn bo-via" onClick={() => openConnection(c.id)} title={t('Open in Connections')}><span className={`sb-dot ${s === 'connected' ? 'ok' : s === 'error' ? 'bad' : 'warn'}`} aria-hidden="true" /><span className={`sb-plat p-${p}`}>{platName(p)}</span> {p === 'teams' ? c.name : `@${c.name}`}{c.shared ? '' : ` (${t('its own')})`}</button> }) : <button type="button" className="link-btn" onClick={() => openBots('connections')}>{t('No connection yet: make one')}</button>}</dd></div>
           {chiefOf.length > 0 && <div><dt>{t('Chief Of')}</dt><dd>{chiefOf.map((c) => <span key={c.id} className="bo-via">{c.platform === 'teams' ? c.name : `@${c.name}`}</span>)}</dd></div>}
           <div><dt>{t('Edits Files')}</dt><dd>{edits ? t('Yes, in its folder; a push waits for you') : t('No, it only answers')}</dd></div>
         </dl>

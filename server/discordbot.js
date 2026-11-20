@@ -413,7 +413,7 @@ export function makeDiscord({ id = 'discord', file, say = () => {}, threads = ()
     kept.guilds = Object.values(guilds).map((g) => ({ id: g.id, name: g.name }))
     if (kept.guild && guilds[kept.guild.id]) kept.guild.name = guilds[kept.guild.id].name
     if (!kept.guild && kept.guilds.length === 1) kept.guild = { ...kept.guilds[0] }
-    if (!kept.guilds.length) say({ what: 'no-server', ok: false, why: 'The bot isn\'t in a server yet: add it to yours with the invite link in Settings' })
+    if (!kept.guilds.length) say({ what: 'no-server', ok: false, why: 'The bot isn\'t in a server yet: add it to yours with the invite link on its card in Bots › Connections' })
     else if (!kept.guild) say({ what: 'no-server', ok: false, why: 'The bot is in more than one server: pick the one it answers in, in Settings' })
     try { save() } catch { /* next time */ }
   }

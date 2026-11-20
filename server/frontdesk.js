@@ -3294,7 +3294,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     }
     // (A change to files, or a request held before it started: writeAct.)
     if (['wok', 'wview', 'wno', 'sok', 'sno', 'undo'].includes(a.act)) return writeAct(id, a)
-    if (!bot.owner?.id) return { ok: false, error: `Set "You in Slack" in Bridge AI first (Settings › Bots › ${bot.name})` }
+    if (!bot.owner?.id) return { ok: false, error: 'Link yourself under You Here in Bridge AI first (Bots › Connections)' }
     if (a.user?.id !== bot.owner.id) return { ok: false, error: `Only ${you()} can decide this` }
     const by = `${bot.owner.name || you()}`
     try {

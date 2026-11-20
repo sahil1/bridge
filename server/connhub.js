@@ -159,6 +159,13 @@ export function makeHubs({ bots, desk, make, you = () => 'the owner', enabled = 
     if (h.started) { h.started = false; h.connector.stop({ quiet: true }) }
     sync()
   }
+  // Made again as the connection is now (a bot's own made the shared one: its connector asks the
+  // platform for more), its tokens where they were.
+  function renew(cid) {
+    const h = hubs.get(cid)
+    if (h) { if (h.started) { h.started = false; h.connector.stop({ quiet: true }) } hubs.delete(cid) }
+    sync()
+  }
   // Gone: its connector stopped and its tokens forgotten.
   function drop(cid) {
     const h = hubs.get(cid)
@@ -497,5 +504,5 @@ export function makeHubs({ bots, desk, make, you = () => 'the owner', enabled = 
 
   // Bridge AI closing: every connector stopped (a Slack app's Home tab says it's offline).
   const stopAll = () => { for (const h of hubs.values()) if (h.started) { h.started = false; try { h.connector.stop() } catch { /* going anyway */ } } }
-  return { view, sync, restart, drop, stopAll, connectorOf: (cid) => { const c = conns.get(cid); return c ? hubOf(c).connector : null }, infoOf, started: (cid) => !!hubs.get(cid)?.started, onNow: (c) => on(c), dry }
+  return { view, sync, restart, renew, drop, stopAll, connectorOf: (cid) => { const c = conns.get(cid); return c ? hubOf(c).connector : null }, infoOf, started: (cid) => !!hubs.get(cid)?.started, onNow: (c) => on(c), dry }
 }
