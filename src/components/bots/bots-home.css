@@ -73,7 +73,8 @@
 .bh-reach { gap: 6px; }
 .bh-chief { max-width: 420px; }
 .bh-adv > summary { font-weight: 600; }
-.cn-card > .bh-adv[open] { gap: 14px; }
+/* (A details element's own gap doesn't reach its contents: each part spaced by its margin.) */
+.cn-card > .bh-adv[open] > :not(summary, .st-sec) { margin-top: 12px; }
 .bh-adv .st-sec { padding-left: 0; padding-right: 0; }
 
 /* ---------- Bots › Sessions ---------- */

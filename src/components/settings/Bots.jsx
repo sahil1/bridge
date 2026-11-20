@@ -682,8 +682,10 @@ function stepsFor(d, p) {
 }
 // Whether every step there is done (a connection's card shows the checklist until it is).
 export const guideDone = (d, platform) => stepsFor(d, platform).every((s) => s.done)
-// (where: "chat" for the copy in AI Assist's chat, so each on a page has a data-setting of its own.)
-export function Guide({ d, platform, where = null }) {
+// (where: "chat" for the copy in AI Assist's chat, so each on a page has a data-setting of its own.
+// compact: the steps done in a row of ticks, the rest each on a line, as a connection's card has it
+// once it's set up.)
+export function Guide({ d, platform, where = null, compact = false }) {
   const ds = `${platform}-guide${where ? `-${where}` : ''}`
   const steps = stepsFor(d, platform)
   const n = steps.filter((s) => s.done).length
@@ -701,7 +703,7 @@ export function Guide({ d, platform, where = null }) {
     )
   }
   return (
-    <section className="st-sec sb-guide" data-setting={ds}>
+    <section className={`st-sec sb-guide${compact ? ' compact' : ''}`} data-setting={ds}>
       <h4>{t('Set Up in {platform}', { platform: label })}</h4>
       <p className="muted small">{t('{n} of {total} done. Each step ticks itself once it\'s done.', { n, total: steps.length })}</p>
       <ol className="sb-guide-list">

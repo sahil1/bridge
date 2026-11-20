@@ -91,7 +91,7 @@ export function ConnectionCard({ c, reload, open = null, where = null, all = nul
       {lacks && <UpdateApp d={d} onAgain={again} />}
       {fixHere && <div className="bh-setup" data-setting="connection-fix">{tokens}</div>}
       {/* (Its checklist on the card until every step's done: then a line under Advanced.) */}
-      {guided && <Guide key={`${c.id}-guide`} d={d} platform={c.platform} where={where} />}
+      {guided && <Guide key={`${c.id}-guide`} d={d} platform={c.platform} where={where} compact />}
       {setUp && <YouHere c={c} reload={reload} patch={patch} again={again} />}
       <Reach c={c} patch={patch} />
       {!c.shared && setUp && all && <UseForAll own={c} shared={shared} reload={reload} onDone={finished} from="own" />}
