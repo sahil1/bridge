@@ -79,9 +79,6 @@ const { slack, kit, home, startOf, startsOf, briefOf, logOf, events, posted, nee
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 const part = async (name, fn) => { try { await fn() } catch (e) { ok(false, `${name}: crashed: ${e.stack}`) } }
-// (Yours, in a thread of your own: only your words reach its agent there, so what you ask is made as
-// yours. Asked at the top of #launch, others' words there reach it too, and count: frontdesk.js voices.)
-const ownerAsk = async (text) => { const top = await slack.ask({ user: OWNER.id, text: 'A note for the bots.' }); const r = await slack.ask({ user: OWNER.id, thread: top.ts, text }); return { ...r, top: top.ts } }
 const H = (...p) => path.join(home, 'Hiring', ...p)
 // A folder from your home folder as Bridge AI shows it (~\Hiring on Windows), and that as a pattern;
 // a path with / between its parts, wherever it's from.
@@ -500,7 +497,7 @@ try {
     ok(d?.bot?.id === HI && d.write.by?.id === 'U0DANA' && !fs.existsSync(H('offers', 'dana2.md')), 'Dana\'s, handed on: Hiring makes it in its copy, and it waits for you', d && { bot: d.bot, by: d.write.by })
     await kit.api(`/bots/questions/${d.id}`, { send: false })
     // You: made.
-    await ownerAsk(`${M} Chief: add an offer for the team [hand Hiring] [edit Hiring/offers/team.md Team offer] [answer Done.]`)
+    await slack.ask({ user: OWNER.id, text: `${M} Chief: add an offer for the team [hand Hiring] [edit Hiring/offers/team.md Team offer] [answer Done.]` })
     ok(!!(await until(() => read(H('offers', 'team.md')) === 'Team offer\n', 40000)), 'yours, handed on: made without asking you')
     const chiefRun = startsOf('add an offer for the team').find((s) => /reply with HAND TO/.test(briefOf(s)))
     ok(!!chiefRun && chiefRun.args.join(' ').includes('--tools Read,Grep,Glob ') && !chiefRun.args.join(' ').includes('Edit(./**)'), 'Chief\'s own agent only reads', chiefRun?.args)
@@ -593,7 +590,7 @@ try {
       ok(write ? !!hook && g.disableAllHooks === false : !g?.hooks, write ? `${label}: and the hook that checks each path it writes` : `${label}: and no hook, as it changes nothing`, g?.hooks || null)
     }
     // A change to files in its folders, from you: in its copy, which it reads (but what's hidden there).
-    await ownerAsk(`${M} Hiring: settings-check-write [try-read Hiring/roles.md] [try-read Hiring/.notes.md] [edit Hiring/offers/zz-kept.md Kept] [answer Checked.]`)
+    await slack.ask({ user: OWNER.id, text: `${M} Hiring: settings-check-write [try-read Hiring/roles.md] [try-read Hiring/.notes.md] [edit Hiring/offers/zz-kept.md Kept] [answer Checked.]` })
     let s = await startOf('settings-check-write')
     check('a change to files', s, { folders: [s?.cwd].filter(Boolean), write: true })
     ok(!!(await until(() => triesOf(s?.cwd).filter((x) => /Hiring\//.test(x.path || '')).length >= 2, 30000)) && triesOf(s?.cwd).some((x) => x.path === 'Hiring/roles.md' && x.done) && triesOf(s?.cwd).some((x) => x.path === 'Hiring/.notes.md' && !x.done && x.rule),
@@ -617,7 +614,7 @@ try {
     check('Try It of an answer', await startOf('settings-check-try-read'), { folders: [H()], write: false })
     // A change in a copy of a repository (Suggest): Chief, for now, on ~/Docs.
     await kit.api(`/bots/${CH}/settings`, { readsFrom: ['~/Docs'], handsTo: [], changes: 'suggest' })
-    await ownerAsk(`${M} Chief: settings-check-change [try-read README.md] [try-read .gitignore] [edit README.md Tidied docs] [answer Tidied.]`)
+    await slack.ask({ user: OWNER.id, text: `${M} Chief: settings-check-change [try-read README.md] [try-read .gitignore] [edit README.md Tidied docs] [answer Tidied.]` })
     s = await startOf('settings-check-change')
     check('a change in a copy of a repository', s, { folders: [s?.cwd].filter(Boolean), write: true })
     ok(real(s?.cwd || '').startsWith(real(path.join(kit.data, 'front-desk', 'changes'))) && !!(await until(() => triesOf(s.cwd).length >= 2, 30000)) && triesOf(s.cwd).some((x) => x.path === 'README.md' && x.done) && triesOf(s.cwd).some((x) => x.path === '.gitignore' && !x.done && x.rule),
@@ -656,7 +653,7 @@ try {
   // past its running total (4 files in this test) a change waits for you, whoever asked, and denied,
   // the copy is put back.
   await part('a session\'s copy', async () => {
-    const q = await ownerAsk(`${M} Hiring: two notes [edit Hiring/s1.md One] [edit Hiring/s2.md Two] [answer Two notes.]`)
+    const q = await slack.ask({ user: OWNER.id, text: `${M} Hiring: two notes [edit Hiring/s1.md One] [edit Hiring/s2.md Two] [answer Two notes.]` })
     await until(() => read(H('s2.md')) === 'Two\n', 40000)
     const p1 = events(HI).filter((e) => e.type === 'write.proposed' && e.ts === q.ts).at(-1)
     ok(p1?.direct && p1.files.length === 2, 'your change is made at once', p1 && { direct: p1.direct, files: p1.files })
@@ -665,19 +662,19 @@ try {
     const sid = events(HI).find((e) => e.type === 'session.started' && e.ts === q.ts)?.sid
     if (process.platform !== 'win32') ok(!!sid && !!(await until(() => fs.existsSync(path.join(kit.data, 'front-desk', 'held', sid)) && !fs.existsSync(s1.cwd), 15000)), 'its turn over, its copy is put aside, out of where its agent and its commands work', { sid, cwd: s1?.cwd })
     fs.writeFileSync(H('roles.md'), '# Roles\n\nDesign\nSales\nOps\n')
-    await slack.ask({ user: OWNER.id, thread: q.top, text: `${M} Hiring: one more [try-read Hiring/roles.md] [edit Hiring/s3.md Three] [answer One more.]` })
+    await slack.ask({ user: OWNER.id, thread: q.ts, text: `${M} Hiring: one more [try-read Hiring/roles.md] [edit Hiring/s3.md Three] [answer One more.]` })
     const t = await until(() => logOf('turns.log').find((x) => x.text.includes('one more')), 40000)
     ok(!!t && fs.realpathSync(t.cwd) === fs.realpathSync(s1.cwd) && /changed in the real folders and are in your copy now: ~\/Hiring\/roles\.md/.test(t.text), 'its next turn is typed into the same session, in the same copy, told ~/Hiring/roles.md changed and is in its copy now', t && { cwd: t.cwd, was: s1?.cwd, text: t.text.slice(0, 600) })
     await until(() => read(H('s3.md')) === 'Three\n', 40000)
     const r = tries().filter((x) => x.try === 'read' && x.path === 'Hiring/roles.md').at(-1)
     const p2 = events(HI).filter((e) => e.type === 'write.proposed' && (e.files || []).some((f) => /s3\.md$/.test(f.path))).at(-1)
     ok(r?.done && p2?.direct && p2.files.length === 1, 'it read the change in its copy, and its next change is only what\'s new (s3.md), made at once', { read: r, files: p2?.files })
-    await slack.ask({ user: OWNER.id, thread: q.top, text: `${M} Hiring: a batch [edit-many 3 Hiring/batch] [answer A batch.]` })
-    const held = await until(() => events(HI).find((e) => e.type === 'session.held' && e.conv === `C0LAUNCH:${q.top}`), 40000)
+    await slack.ask({ user: OWNER.id, thread: q.ts, text: `${M} Hiring: a batch [edit-many 3 Hiring/batch] [answer A batch.]` })
+    const held = await until(() => events(HI).find((e) => e.type === 'session.held' && e.conv === `C0LAUNCH:${q.ts}`), 40000)
     const it = await until(async () => (await needs()).find((x) => x.write?.held?.some((h) => h.why === 'total')), 20000)
     ok(!!held && held.files === 6 && !!it && it.write.state === 'waiting' && !fs.existsSync(H('batch')), 'past its running total (6 files in this session), the change waits for you, even yours, and you\'re told', { held, write: it?.write?.held })
     await kit.api(`/bots/questions/${it.id}`, { send: false })
-    await slack.ask({ user: OWNER.id, thread: q.top, text: `${M} Hiring: last one [edit Hiring/s4.md Four] [answer Last.]` })
+    await slack.ask({ user: OWNER.id, thread: q.ts, text: `${M} Hiring: last one [edit Hiring/s4.md Four] [answer Last.]` })
     const p4 = await until(() => events(HI).filter((e) => e.type === 'write.proposed' && (e.files || []).some((f) => /s4\.md$/.test(f.path))).at(-1), 40000)
     ok(p4 && p4.files.length === 1 && !p4.files.some((f) => /batch/.test(f.path)), 'denied, its copy is put back: the next change has none of it', p4?.files)
   })

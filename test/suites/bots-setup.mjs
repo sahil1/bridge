@@ -245,10 +245,8 @@ try {
     ok(fs.existsSync(cfg) && !!sess, 'its MCP folder stays with its session, for its next turn', sess)
     await kit.api(`/bots/sessions/${sess.id}/end`, {})
     ok(await until(() => fs.existsSync(cfg) ? null : true, 20000), 'and is gone once the session ends')
-    // Dana, named: every tool. (In a thread of her own: at the top of #launch Eve's words reach it too,
-    // and its session would be hers as well: frontdesk.js voices.)
-    const dtop = await slack.ask({ user: 'U0DANA', text: 'A note about the tracker.' })
-    await slack.ask({ user: 'U0DANA', thread: dtop.ts, text: '<@UBOT> file it please [mcp tracker create_issue]' })
+    // Dana, named: every tool.
+    await slack.ask({ user: 'U0DANA', text: '<@UBOT> file it please [mcp tracker create_issue]' })
     const dana = await until(() => logOf('mcp-tries.log').filter((x) => x.tool === 'create_issue').length >= 2 && logOf('mcp-tries.log').filter((x) => x.tool === 'create_issue').at(-1), 25000)
     ok(dana?.done === true, 'someone you named: the tool that does more than read too', dana)
     const dargs = logOf('claude-args.log').find((x) => /file it please/.test(x.message))?.args || []
