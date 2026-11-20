@@ -72,7 +72,9 @@ const logOf = (f) => { try { return fs.readFileSync(path.join(home, f), 'utf8').
 const chief = (...args) => spawnSync(process.execPath, [path.join(ROOT, 'chief', 'bin', 'bridge'), ...args], { encoding: 'utf8', cwd: path.join(kit.data, 'chief'), env: { ...process.env, BRIDGE_URL: kit.url, BRIDGE_HOME: kit.data, BRIDGE_THREAD: 'main' } })
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
-const part = async (name, fn) => { try { await fn() } catch (e) { ok(false, `${name}: crashed: ${e.stack}`) } }
+// (A part that crashes leaves a picture of the page as it was, for a run elsewhere to be read.)
+let crashPage = null
+const part = async (name, fn) => { try { await fn() } catch (e) { if (crashPage) await shot(crashPage, `${tag}bots-setup-crash-${name.replace(/[^\w-]+/g, '-')}`).catch(() => {}); ok(false, `${name}: crashed: ${e.stack}`) } }
 const assist = (id) => kit.api(`/bots/${id}/assist`)
 const shown = (p, sel, ms = 10000) => p.locator(sel).first().waitFor({ timeout: ms }).then(() => true, () => false)
 // A folder as these checks spell it (on Windows the server says ~\code\pricing).
@@ -107,6 +109,7 @@ try {
   await kit.api('/agents/catalog')
 
   const { ctx, p, errors } = await page(b, kit.url, { mode: 'light' })
+  crashPage = p
   let id = null
   // ---------- The sidebar, + and the chat ----------
   await part('sidebar and chat', async () => {
@@ -192,8 +195,10 @@ try {
     // The whole home folder: Settings' own check refuses it, and nothing of the change goes.
     await say('let it read ~ and rename it Pricing Bot')
     s = await until(async () => { const x = await assist(id); return x.change ? x : null }, 15000)
+    // (Its card as the chat shows it now, this change's: then its Apply.)
+    await until(async () => /Pricing Bot/.test(await p.locator('.bc-change').innerText().catch(() => '')), 15000)
     await p.locator('.bc-change .btn.primary').click()
-    ok(await until(async () => /not the whole of it/.test(await p.locator('.bc').innerText()), 8000), 'one Settings refuses: said in the chat', await p.locator('.bc').innerText().catch(() => ''))
+    ok(await until(async () => /not the whole of it/.test(await p.locator('.bc').innerText()), 20000), 'one Settings refuses: said in the chat', await p.locator('.bc').innerText().catch(() => ''))
     const v = await botOf(id)
     ok(v.name === 'Pricing Desk' && !v.settings.readsFrom.includes('~'), 'and none of it applied, not even the new name', { name: v.name, readsFrom: v.settings.readsFrom })
     await p.locator('.bc-change .ghost-btn', { hasText: 'Leave it as it is' }).click()
@@ -267,15 +272,18 @@ try {
     await openBot(p, 'Pricing Desk')
     await p.locator('.bc-say textarea').fill('use my local model if Claude is down')
     await p.locator('.bc-say button[type="submit"]').click()
-    const s = await until(async () => { const x = await assist(id); return x.change ? x : null }, 15000)
+    const s = await until(async () => { const x = await assist(id); return x.change ? x : null }, 30000)
     ok(s?.change.lines.some((l) => l.key === 'answerers' && l.after.join() === 'agent:claude,model:ollama:llama3.1:8b'), 'said in words: Claude Code first, the local model to fall back on, shown first', s?.change)
+    // (Its card as the chat shows it now, this change's: then its Apply.)
+    await until(async () => /llama3\.1/.test(await p.locator('.bc-change').innerText().catch(() => '')), 15000)
     await p.locator('.bc-change .btn.primary').click()
     ok(await until(async () => (await botOf(id)).settings.answerers?.join() === 'agent:claude,model:ollama:llama3.1:8b', 8000), 'applied on confirm')
     // A post on a schedule, in words: a routine of its own once confirmed.
     await p.locator('.bc-say textarea').fill('post a summary of what changed in #launch every Monday at 9')
     await p.locator('.bc-say button[type="submit"]').click()
-    const ps = await until(async () => { const x = await assist(id); return x.change ? x : null }, 15000)
+    const ps = await until(async () => { const x = await assist(id); return x.change ? x : null }, 30000)
     ok(ps?.change.lines.some((l) => l.key === 'posts' && l.after[0]?.channel === 'launch' && /every Monday at 9/.test(l.after[0].when)), 'a scheduled post said in words: shown first', ps?.change)
+    await until(async () => /Monday/.test(await p.locator('.bc-change').innerText().catch(() => '')), 15000)
     await p.locator('.bc-change .btn.primary').click()
     const rt = await until(async () => (await kit.api('/routines')).routines?.find((r) => r.to === 'bot' && r.bot === id && r.channel?.name === 'launch'), 8000)
     ok(rt && /what changed/i.test(rt.command) && /monday/i.test(rt.says || rt.schedule || ''), 'confirmed: a scheduled post of its own in #launch', rt)

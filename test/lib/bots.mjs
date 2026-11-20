@@ -89,12 +89,15 @@ export async function openBots(p, tab = 'bots') {
   await p.locator(`.bh[data-tab="${tab}"] .bh-body > *`).first().waitFor({ timeout: 10000 })
 }
 
-// A bot's page, from its card in Bots: by its name (the first bot when none is said), at one of its
-// tabs (overview, settings, memory, activity). Its Settings open with Advanced open too, where most
-// of a bot's settings are, unless basic.
-export async function openBot(p, { name = null, tab = 'settings', basic = false } = {}) {
+// A bot's page, from its card in Bots: by its name (the first bot when none is said; a name alone may
+// be given in place of the options), at one of its tabs (overview, settings, memory, activity). Its
+// Settings open with Advanced open too, where most of a bot's settings are, unless basic.
+export async function openBot(p, o = {}) {
+  const { name = null, tab = 'settings', basic = false } = typeof o === 'string' ? { name: o } : o || {}
   await openBots(p, 'bots')
   await (name ? p.locator('.bh .bo-card', { hasText: name }) : p.locator('.bh .bo-card')).first().click()
+  // (Its page, not another bot's: the cards' order isn't the test's to count on.)
+  if (name) await p.locator('.bp', { hasText: name }).first().waitFor({ timeout: 10000 })
   await p.locator('.bp .sb-tabs').first().waitFor({ state: 'attached', timeout: 10000 })
   await p.waitForTimeout(300)
   // (A bot not connected anywhere opens with AI Assist's chat beside it: on a phone, over the page.)

@@ -339,7 +339,12 @@ export default function BotChat({ id = null, draft = false, phone = false, d = n
   const [mine, setMine] = useState([]) // a new chat's words, before there's a draft to keep them
   const end = useRef(null)
   const path = id ? `/bots/${id}/assist` : '/bots/assist'
-  const load = () => api(path).then((r) => { setS((x) => (id ? r : { ...r, messages: x?.messages || [] })); setError(null) }, (e) => setError(e.message))
+  // (Which state is newest: a poll that set out before something was said or applied, and comes back
+  // after it, is older than what that said, so it's dropped rather than taking the change, or what
+  // the chat just said, off the screen until the next one.)
+  const seq = useRef(0)
+  const fresh = (r) => { seq.current += 1; setS(r) }
+  const load = () => { const n = seq.current; return api(path).then((r) => { if (n !== seq.current) return; setS((x) => (id ? r : { ...r, messages: x?.messages || [] })); setError(null) }, (e) => { if (n === seq.current) setError(e.message) }) }
   useEffect(() => {
     load()
     if (!id) return undefined
@@ -355,6 +360,7 @@ export default function BotChat({ id = null, draft = false, phone = false, d = n
     setBusy('ask')
     setError(null)
     setText('')
+    seq.current += 1
     try {
       if (!id) {
         setMine((x) => [...x, w])
@@ -362,13 +368,14 @@ export default function BotChat({ id = null, draft = false, phone = false, d = n
         if (r.bot) { onMade?.(r.bot.id); return }
         setMine([])
         setS((x) => ({ ...(x || {}), ...r.setup, messages: [...(x?.messages || []), ...r.setup.messages] }))
-      } else setS(await api(path, { method: 'POST', body: { text: w } }))
+      } else fresh(await api(path, { method: 'POST', body: { text: w } }))
     } catch (e) { setError(e.message); if (!id) setMine([]); setText(w) }
     setBusy(null)
   }
   const edit = async (fields) => {
     setBusy('edit')
-    try { setS(await api(path, { method: 'PATCH', body: { proposal: fields } })); setError(null) } catch (e) { setError(e.message) }
+    seq.current += 1
+    try { fresh(await api(path, { method: 'PATCH', body: { proposal: fields } })); setError(null) } catch (e) { setError(e.message) }
     setBusy(null)
   }
   const create = async () => {
@@ -385,8 +392,9 @@ export default function BotChat({ id = null, draft = false, phone = false, d = n
   const apply = async (yes) => {
     setBusy('apply')
     setError(null)
+    seq.current += 1
     try {
-      if (yes) { const r = await api(`/bots/${id}/assist/apply`, { method: 'POST', body: { change: s.change.id } }); setS(r.setup); reload?.() } else setS(await api(`/bots/${id}/assist/discard`, { method: 'POST' }))
+      if (yes) { const r = await api(`/bots/${id}/assist/apply`, { method: 'POST', body: { change: s.change.id } }); fresh(r.setup); reload?.() } else fresh(await api(`/bots/${id}/assist/discard`, { method: 'POST' }))
     } catch (e) { setError(e.message) }
     setBusy(null)
   }
