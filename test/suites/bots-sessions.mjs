@@ -206,6 +206,27 @@ try {
     await kit.api('/bots/b1/settings', { who: 'named', bash: 'off', domains: [] })
   })
 
+  // ---------- No commands where your settings would widen its sandbox ----------
+  await part('commands held back', async () => {
+    await kit.api('/bots/b1/settings', { bash: 'sandboxed' })
+    const f = path.join(kit.home, '.claude', 'settings.json')
+    const was = fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : null
+    fs.mkdirSync(path.dirname(f), { recursive: true })
+    fs.writeFileSync(f, JSON.stringify({ ...(was ? JSON.parse(was) : {}), sandbox: { excludedCommands: ['docker *'] } }))
+    try {
+      const cv = (await botOf()).commands
+      ok(/excludedCommands/.test(cv?.problem || ''), 'your own Claude Code settings running some commands outside its sandbox: a bot runs none, saying why', cv)
+      await slack.ask({ user: OWNER.id, text: `${M} Run it anyway. [run ls -l] [answer Tried.]` })
+      const s = await startOf('Run it anyway')
+      ok(!!s && !s.args.join(' ').includes('Bash') && !s.given?.sandbox && /You can't run commands here: Your Claude Code settings run some commands outside the sandbox/.test(s.message), 'its session starts without Bash or a sandbox, and is told why', s && { args: s.args, sandbox: s.given?.sandbox })
+      const tried = await until(() => logOf('answer-tries.log').find((x) => x.try === 'run' && x.command === 'ls -l'), 20000)
+      ok(tried && !tried.done, 'and runs nothing', tried)
+    } finally {
+      if (was == null) fs.rmSync(f, { force: true }); else fs.writeFileSync(f, was)
+      await kit.api('/bots/b1/settings', { bash: 'off' })
+    }
+  })
+
   // ---------- Idle sessions hold no place; at most so many panes ----------
   await part('slots and the pane cap', async () => {
     await kit.api('/bots/b1/settings', { max: 1, limits: { atOnce: 1 } })
