@@ -36,6 +36,7 @@ import crypto from 'node:crypto'
 import { dataFile, writeFileAtomic, HOME } from './paths.js'
 import { keepOf } from './trace.js'
 import { templateOf } from './bottemplates.js'
+import { REGISTRY, PERSON_ID, CHANNEL_ID } from './connector.js'
 
 export const DIR = dataFile('bots')
 const OLD_TOKENS = dataFile('slack-bot.json')
@@ -113,10 +114,9 @@ export const MCP_NAME = /^[A-Za-z0-9_.-]{1,64}$/
 // What may answer: an agent (agent:claude, agent:claude:opus) or a model (model:ollama:qwen3).
 const answererId = (x) => /^(agent:(claude|codex)(:[\w.-]{1,60})?|model:[a-z][\w-]*:[^\s]{1,200})$/.test(x) && !/^model:cli:/.test(x)
 // People and places by their ids: Slack's as Slack gives them; Discord's and Teams' with their
-// platform before them (connector.js combine).
-const SLACK_ID = /^[UW][A-Z0-9]{2,20}$/
-export const PERSON_ID = /^([UW][A-Z0-9]{2,20}|discord:\d{1,25}|teams:[\w-]{6,64})$/
-export const CHANNEL_ID = /^([CGD][A-Z0-9]{2,20}|discord:\d{1,25}|teams:[^\s"<>]{3,300})$/
+// platform before them (connector.js combine), each platform's as its registry there has them.
+const SLACK_ID = REGISTRY.slack.person
+export { PERSON_ID, CHANNEL_ID }
 const person = (p) => (p && SLACK_ID.test(String(p.id || '')) ? { id: String(p.id), name: clean(p.name, 80) || null } : null)
 const someone = (p, platform) => (p && PERSON_ID.test(String(p.id || '')) && String(p.id).startsWith(`${platform}:`) ? { id: String(p.id), name: clean(p.name, 80) || null } : null)
 const place = (c) => (c && CHANNEL_ID.test(String(c.id || '')) ? { id: String(c.id), name: clean(c.name, 80) || null } : null)

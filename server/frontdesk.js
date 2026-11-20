@@ -164,7 +164,9 @@ import * as store from './bots.js'
 import * as botmcp from './botmcp.js'
 import * as botanswer from './botanswer.js'
 import { isLimit } from './consult.js'
-import { platformOf, PLATFORMS, CAPS, laterTs } from './connector.js'
+// (isPublic: a channel everyone there can read, by its platform's registry: a Discord or Teams
+// channel is public to its server or team unless it says it's private.)
+import { platformOf, PLATFORMS, CAPS, laterTs, isPublic } from './connector.js'
 import * as botfiles from './botfiles.js'
 import * as botattach from './botattach.js'
 import * as botsessions from './botsessions.js'
@@ -248,8 +250,6 @@ const safeName = (s) => String(s || '').replace(/[\\/:*?"<>|\x00-\x1f]+/g, '-').
 const keyOf = (s) => crypto.createHash('sha256').update(String(s)).digest('hex').slice(0, 12)
 // Someone else's words in a brief: a line of dashes in them can't pass for the end of their block.
 const fence = (s) => String(s || '').replace(/-{4,}/g, '—')
-// (A channel in Discord or Teams is public to its server or team unless it says it's private.)
-const isPublic = (place) => place?.kind === 'channel' && place.private !== true && /^(C|discord:|teams:)/.test(String(place.id || ''))
 // The platform a question, a place or a conversation is in, and what it can do there.
 const platOf = (x) => (typeof x === 'string' ? platformOf(x) : platformOf(x?.channel || x?.id || ''))
 const capsOf = (q) => CAPS[platOf(q)] || CAPS.slack
@@ -3200,19 +3200,18 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     const why = await bashProblem('claude').catch((e) => e.message)
     return why ? { on: false, why } : { on: true, why: null }
   }
-  // A connection's Chief (connections.js chief, which B3's Connections sets): the bots on its
-  // connection it hands to or asks, each with what it's for and its Access line. null when this bot
-  // isn't the Chief where it was asked.
+  // A connection's Chief (connections.js chief, set on its card in Bots › Connections): the bots on
+  // its connection it hands to or asks, each with what it's for and its Access line. null when this
+  // bot isn't the Chief where it was asked (conns.chiefOf: a chief moved to a connection of its own,
+  // or deleted, is no chief there), however the question reached it (route() why 'chief', or by name).
   const accessLine = (x) => [x.readsFrom.length ? `reads ${x.readsFrom.slice(0, 3).join(', ')}` : 'reads no folders', x.changes === 'edit' && x.writesTo.length ? `changes files in ${x.writesTo.slice(0, 3).join(', ')}` : x.changes === 'suggest' ? 'proposes changes to code' : null, x.who === 'channels' ? 'anyone in its channels may ask it' : 'only the people named may ask it'].filter(Boolean).join('; ')
   function chiefRoster(id, q) {
     const plat = q.try ? 'slack' : platOf(q)
     let c = null
     try { c = conns.of(id, plat) } catch { c = null }
-    // (Read as it's kept, whether or not the connections there know it yet.) TODO(B3 integration): a
-    // connection's chief, set in Connections; nothing here makes one.
-    const chief = /^b\d{1,4}$/.test(String(c?.chief || '')) ? String(c.chief) : null
-    if (!c || chief !== id) return null
-    return conns.botsOn(c, store.live()).filter((x) => x.id !== id && bots.has(x.id)).slice(0, 30).map((x) => ({ id: x.id, name: x.name, description: x.description, access: accessLine(x) }))
+    const live = store.live()
+    if (!c || conns.chiefOf(c, live) !== id) return null
+    return conns.botsOn(c, live).filter((x) => x.id !== id && bots.has(x.id)).slice(0, 30).map((x) => ({ id: x.id, name: x.name, description: x.description, access: accessLine(x) }))
   }
   // What it was started with, so a turn is typed only into a session started as it may be now.
   const sigOf = (bot, tier, { bash, roster }) => keyOf(JSON.stringify([!!tier.all, !!tier.change, bot.readsFrom, bot.writesTo, bot.changes, bot.mcp, bot.agentCopies, !!bash, bash ? bot.domains : null, (roster || []).map((x) => x.id)]))
@@ -3545,6 +3544,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     const bot = keptOf(s.bot)
     const qs = questionsIn(s)
     const working = qs.some((q) => q.state === 'answering' || q.state === 'consulting')
+    const turn = [...qs].reverse().find((q) => q.state === 'answering') || null
     const waiting = [...qs].reverse().map(waitingIn).find(Boolean) || null
     let c = null
     try { c = s.channel && s.channel !== 'TRY' ? conns.of(s.bot, platOf(s.channel)) : null } catch { c = null }
@@ -3554,7 +3554,9 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       place: s.try ? { kind: 'try', id: 'TRY', name: null } : { kind: s.place?.kind || (s.dm ? 'dm' : 'channel'), id: s.place?.id || s.channel || null, name: s.place?.name || null },
       thread: s.thread || null, people: s.people || [], state: s.state === 'closed' ? 'closed' : working ? 'working' : waiting ? 'waiting' : 'idle', waiting,
       paneId: s.paneId || null, live: !!(s.paneId && up?.has(s.paneId)), agent: { kind: 'claude', label: adapter('claude').label, model: s.model || null },
-      startedAt: s.startedAt, lastAt: s.lastAt, turns: s.turns || 0, title: oneLine(first?.text || s.title || '', 120), ran: Math.round((s.ran || 0) / MINUTE_MS), longest: bot?.limits?.longest ?? store.LIMITS.longest,
+      // (ran: the minutes of the turn under way, against its Longest Run, while it's working; else
+      // the session's minutes at work, all told.)
+      startedAt: s.startedAt, lastAt: s.lastAt, turns: s.turns || 0, title: oneLine(first?.text || s.title || '', 120), ran: turn ? ranOf(turn) : Math.round((s.ran || 0) / MINUTE_MS), longest: bot?.limits?.longest ?? store.LIMITS.longest,
       try: !!s.try, bash: s.bash || { on: false, why: null }, tier: s.tier || null, ended: s.ended || null,
     }
   }
@@ -3579,10 +3581,13 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       const a = s.paneId ? (f?.agents || []).find((x) => x.paneId === s.paneId) : null
       const h = s.helper ? delegate.get(s.helper) : null
       const n = a && h ? await nowOf({ ...h, paneId: a.paneId }).catch(() => null) : null
+      // (Who asked each, and whether that's you: you there, as the connection has you linked.)
+      const bot = botOf(s.bot)
+      const fromOf = (p) => (p ? { ...p, ...(bot && isOwner(bot, p) ? { owner: true } : {}) } : null)
       return {
         session: await sessionItem(s, up),
         turns: questionsIn(s).map((q) => ({
-          q: q.id, at: q.heardAt, from: q.from, text: q.text, more: q.more.map((x) => ({ from: x.person, text: x.text, at: x.at })), files: (q.files || []).map((x) => ({ name: x.name, size: x.size })),
+          q: q.id, at: q.heardAt, from: fromOf(q.from), text: q.text, more: q.more.map((x) => ({ from: x.person, text: x.text, at: x.at })), files: (q.files || []).map((x) => ({ name: x.name, size: x.size })),
           state: sending(q) ? 'sending' : q.state === 'starting' ? 'queued' : q.state, draft: q.state === 'draft' ? q.draft ?? null : null, sent: q.sentText || null, auto: !!q.auto, steer: !!q.steer,
           needsOwner: !!q.needsOwner, why: q.why || null, warn: q.warn || null, problem: q.problem || null, outFiles: (q.outFiles || []).map((x) => ({ name: x.name, size: x.size })),
           write: writeView(q.write), push: pushView(q.push), limit: waitsAtLimit(q) ? limitView(q) : null, change: q.change ? { branch: q.change.branch, stat: q.change.stat, files: q.change.files, pr: q.change.pr, approved: !!q.change.approved } : null,
