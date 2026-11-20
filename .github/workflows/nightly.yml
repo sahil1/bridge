@@ -45,9 +45,10 @@ jobs:
       # the first one.
       since: ${{ needs.plan.outputs.since }}
     secrets: inherit
-    # What the release workflow's publishing job asks for: writing the release, and signing where
-    # each download was built.
+    # What the release workflow's publishing job asks for: writing the release, signing where each
+    # download was built, and reading the pull requests its notes are made from.
     permissions:
       contents: write
       id-token: write
       attestations: write
+      pull-requests: read

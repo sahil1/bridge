@@ -1,0 +1,75 @@
+{
+  "log": [
+    { "subject": "Merge pull request #258 from sahil1/nightly-next-4", "commits": [
+      { "subject": "Tests: bots-write checks on Windows that its agent has neither backup nor restore right at all", "files": ["test/suites/bots-write.mjs"] },
+      { "subject": "Bots on Windows: only a bot's agent's own terminal gives up the backup rights, and the lock is tried with a plain open", "files": ["server/winpriv.js", "server/botwrite.js"] },
+      { "subject": "Reapply \"Merge remote-tracking branch 'origin/bots-write' into nightly-next-3\"", "files": ["server/botwrite.js", "server/frontdesk.js", "test/suites/bots-write.mjs"] },
+      { "subject": "Bots: a file in a bot's folders goes with its answer as it is, PDFs and documents too", "files": ["server/botattach.js", "server/botanswer.js"] },
+      { "subject": "Bots: a change's hook runs on Windows, started with no shell", "files": ["server/botguard.mjs", "server/botwrite.js"] },
+      { "subject": "Bots: git runs a bot's copies with an empty hooks folder of Bridge AI's own, and Windows' copy is closed to anything new", "files": ["server/gitready.js", "server/botwrite.js"] }
+    ] },
+    { "subject": "Phone: Scan QR code reads a pairing link from a picture too", "files": ["src/scan.js", "mobile/ios/BridgeAI/WebViewController.swift"] },
+    { "subject": "Merge pull request #262 from sahil1/remote-screen-pace", "commits": [
+      { "subject": "remote-screen: the pictures' pace checked on average", "files": ["test/suites/remote-screen.mjs", "test/lib/viewer.mjs"] }
+    ] },
+    { "subject": "Merge pull request #261 from sahil1/ci-windows-cache", "commits": [
+      { "subject": "CI: PowerShell's module cache made once as a suite starts", "files": [".github/workflows/test.yml"] }
+    ] },
+    { "subject": "Merge pull request #260 from sahil1/meetings-titles", "commits": [
+      { "subject": "Meetings: a meeting set by hand to later on doesn't stop carrying on one Bridge AI closed", "files": ["server/meetings.js"] },
+      { "subject": "Meetings: a title for each one from its calendar event", "files": ["server/meetings.js", "src/components/meetings/Meetings.jsx"] }
+    ] },
+    { "subject": "Merge pull request #259 from sahil1/update-notes", "commits": [
+      { "subject": "Update card: each highlight on at most two lines, its label on the first", "files": ["src/components/UpdateChip.jsx", "src/styles.css", "test/suites/update-channel.mjs"] },
+      { "subject": "Update card: the version short on one line, a few highlights, then what to do", "files": ["src/components/UpdateChip.jsx", "src/components/TopNotes.jsx", "src/i18n/de.json"] },
+      { "subject": "Nightly notes: what a person using Bridge AI would notice, a line for each part of it", "files": ["scripts/nightly.js", "test/suites/nightly.mjs", "CONTRIBUTING.md"] }
+    ] },
+    { "subject": "Merge pull request #251 from sahil1/remote-screen-steady", "commits": [
+      { "subject": "Remote Screen: starts every time, or says why with the fix", "files": ["desktop/remote.js", "server/remote.js"] },
+      { "subject": "Remote Access: two steps, the password then who may connect", "files": ["src/components/remote/Settings.jsx"] }
+    ] }
+  ],
+  "pulls": {
+    "258": {
+      "title": "Next nightly: bots that change files and attach files, and bot runs kept to your own Claude Code settings",
+      "branch": "nightly-next-4",
+      "body": "Combines these for the next nightly, so they go through CI once:\n\n- #252 Bots that change files: Edits Files in Its Folders, approvals bound to the exact change, held kinds, Undo, the request screen, chief → specialist hand-off; with three rounds of security review fixes, and its Linux and Windows fixes (empty folders in the plain copy, exec-form hooks on Windows, an empty hooks folder and attributes file for git instead of /dev/null, the copy's top folder locked on Windows, a Claude Code version check)\n- #255 Bots attach files from their folders (PDFs, documents, pictures), waiting for you unless Send Files From Its Folders Without Asking says otherwise; a content scan for keys and tokens; folders that now lead elsewhere shown in Needs You (Folders Not Read)\n- #257 Bot runs load only your own Claude Code settings (--setting-sources user), never a folder's own, with reads outside their folders blocked; bots need Claude Code 2.1.257 or later and say so\n- #250 Tests: the two suites that failed tonight's nightly, bots-always-on and chat-account\n- #256 Watch a screen waits for the floating card before it starts\n- (#253, Models for Each Task, follows in the next one.)\n- Tests: bots-write on Windows says what rights its agent ran with\n\nEvery Claude Code bot run gets one settings file: the read block, the deny rules for hidden and secret files, and the guard hook for runs that change files.\n\n## Tests\n\nOn the combined branch: bots-write 150 (WebKit 150), bots-files 132 (WebKit 132), settings-ui 137 (WebKit 137), all passing.\n",
+      "files": ["PRIVACY.md", "server/botattach.js", "server/botwrite.js", "server/frontdesk.js", "server/index.js", "src/components/NeedsYou.jsx", "src/components/settings/Bots.jsx", "test/suites/bots-write.mjs"]
+    },
+    "252": { "files": ["server/botwrite.js", "server/botguard.mjs", "server/frontdesk.js", "src/components/settings/Bots.jsx", "test/suites/bots-write.mjs"] },
+    "255": { "files": ["PRIVACY.md", "server/botattach.js", "server/botanswer.js", "src/components/NeedsYou.jsx", "test/suites/bots-files.mjs"] },
+    "257": { "files": ["server/agents.js", "server/botanswer.js", "server/frontdesk.js", "test/suites/bots-setup.mjs"] },
+    "250": { "files": ["test/suites/bots-always-on.mjs", "test/suites/chat-account.mjs"] },
+    "256": { "files": ["test/stand-ins/screen.mjs", "test/suites/screen-watch.mjs"] },
+    "262": {
+      "title": "Remote Screen's pace checked on average, so one picture held up on the way isn't a failure",
+      "branch": "remote-screen-pace",
+      "body": "remote-screen failed on the Windows nightly when one picture came late.",
+      "files": ["test/suites/remote-screen.mjs", "test/lib/viewer.mjs"]
+    },
+    "261": {
+      "title": "CI: PowerShell's module cache made once for every kit",
+      "branch": "ci-windows-cache",
+      "body": "",
+      "files": [".github/workflows/test.yml"]
+    },
+    "260": {
+      "title": "Meetings titles",
+      "branch": "meetings-titles",
+      "body": "- Meetings: a meeting set by hand to later on doesn't stop carrying on one Bridge AI closed\n- Meetings: a title for each one from its calendar event\n",
+      "files": ["server/meetings.js", "src/components/meetings/Meetings.jsx"]
+    },
+    "259": {
+      "title": "Nightly notes a person would notice, and a calmer update card",
+      "branch": "update-notes",
+      "body": "The update card for nightly 3.21.1-nightly.20261119.16 showed the whole version in bold over two lines.\n\n## Nightly notes (`scripts/nightly.js`)\n\n- Each commit is read with its files (`git log --name-only`).\n",
+      "files": ["CONTRIBUTING.md", "scripts/nightly.js", "src/components/TopNotes.jsx", "src/components/UpdateChip.jsx", "src/i18n/de.json", "src/styles.css", "test/suites/nightly.mjs"]
+    },
+    "251": {
+      "title": "Remote Screen starts every time, or says why with the fix; Remote Access as two steps",
+      "branch": "remote-screen-steady",
+      "body": "Remote Screen didn't start on some Macs and said nothing.",
+      "files": ["desktop/remote.js", "server/remote.js", "src/components/remote/Settings.jsx"]
+    }
+  }
+}

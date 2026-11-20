@@ -69,7 +69,7 @@ const SUITES = [
   { name: 'test-scope', build: null, covers: [/^\.github\/workflows\/(test|release|nightly)\.yml$/, /^scripts\/nightly\.js$/] },
   // Releases started and moved on from GitHub itself (the admin view's buttons only start these).
   { name: 'release-controls', build: null, covers: [/^\.github\/workflows\/(rollout|release-start|release|docker|fresh-install|test)\.yml$/, /^scripts\/(release|rollout)\.js$/, /^shared\/rollout\.js$/] },
-  { name: 'nightly', build: 'dist', browser: true, covers: [/^scripts\/nightly\.js$/, /^shared\/(version|autoupdate)\.js$/, /^server\/updates\.js$/, /^src\/components\/settings\/About\.jsx$/, /^counts\/worker\.js$/, /^\.github\/workflows\/(nightly|release)\.yml$/, /^test\/fixtures\/nightly-commits\.json$/] },
+  { name: 'nightly', build: 'dist', browser: true, covers: [/^scripts\/nightly\.js$/, /^shared\/(version|autoupdate)\.js$/, /^server\/updates\.js$/, /^src\/components\/settings\/About\.jsx$/, /^counts\/worker\.js$/, /^\.github\/workflows\/(nightly|release)\.yml$/, /^test\/fixtures\/nightly-(commits|pulls)\.json$/] },
   // With the update card in the top bar (UpdateChip.jsx), made from each channel's notes.
   { name: 'update-channel', build: 'dist', browser: true, covers: [/^server\/(updates|earlyaccess|settings)\.js$/, /^src\/components\/settings\/(About|search)\.jsx?$/, /^src\/earlyLink\.js$/, /^scripts\/(cli|nightly|release)\.js$/, /^src\/components\/(UpdateChip|TopNotes)\.jsx$/, /^src\/components\/status\.css$/, /^src\/styles\.css$/, /^test\/fixtures\/nightly-commits\.json$/] },
   { name: 'model-names', build: null, covers: [/^server\/(models|transcripts)\.js$/, /^src\/components\/ModelChip\.jsx$/] },
