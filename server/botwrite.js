@@ -355,15 +355,40 @@ async function sweep(root) {
 // without Windows' backup and restore rights, which pass any (Node opens every file so): the agent
 // never has them, its terminal taking them out first (winpriv.js), and the lock is tried as it meets
 // one without them, a file made there with a plain open: one that's made, or a try that can't say,
-// means no copy, saying why.
+// means no copy, saying why. On a Mac and Linux it's tried too, as this process (its agent runs as
+// the same user): read-only doesn't stop root (Bridge AI in a Docker container, say), nor a file
+// system that ignores it, so a file made there means no copy, and as root it says Bridge AI mustn't
+// run so.
 const ICACLS = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'icacls.exe')
 const EVERYONE = '*S-1-1-0'
 async function lockTop(dir) {
-  if (process.platform !== 'win32') return fs.promises.chmod(dir, 0o555).catch(() => {})
+  if (process.platform !== 'win32') {
+    if (process.env.BRIDGE_TEST_ROOT !== '1') await fs.promises.chmod(dir, 0o555).catch(() => {})
+    const made = await ownProbe(dir)
+    if (made === false) return
+    throw fail(made && isRoot() ? 'Changing files needs Bridge AI not to run as root: a read-only folder doesn\'t stop root, so its agent could make files beside its copy'
+      : made ? 'Its copy\'s folder couldn\'t be closed to anything new: a program running as you can still make files in it'
+        : 'Its copy\'s folder couldn\'t be checked to be closed to anything new', 'stage')
+  }
   const r = await run(ICACLS, [dir, '/deny', `${EVERYONE}:(WD,AD)`], { timeout: 30000 })
   if (!r.ok) throw fail(`Its copy's folder couldn't be set so nothing new can be made in it: ${firstLine(r.err || r.out) || 'icacls said no'}`, 'stage')
   const made = await plainProbe(dir)
   if (made !== false) throw fail(made ? 'Its copy\'s folder couldn\'t be closed to anything new: a program running as you can still make files in it' : 'Its copy\'s folder couldn\'t be checked to be closed to anything new (Windows PowerShell didn\'t say)', 'stage')
+}
+// Whether this process can make a file in dir: true made (and taken away again), false refused (as
+// a read-only folder refuses), null when it couldn't be told. BRIDGE_TEST_ROOT (tests): as root, which
+// a read-only folder doesn't stop, stood in for by not marking it so (lockTop): the try then makes
+// its file, and no copy is made.
+const isRoot = () => process.env.BRIDGE_TEST_ROOT === '1' || process.getuid?.() === 0
+async function ownProbe(dir) {
+  const p = path.join(dir, `.bridge-probe-${crypto.randomBytes(6).toString('hex')}`)
+  try {
+    await (await fs.promises.open(p, 'wx')).close()
+  } catch (e) {
+    return ['EACCES', 'EPERM', 'EROFS'].includes(e.code) ? false : null
+  }
+  await fs.promises.rm(p, { force: true }).catch(() => {})
+  return true
 }
 async function unlockTop(dir) {
   if (process.platform !== 'win32') return fs.promises.chmod(dir, 0o700).catch(() => {})
@@ -1125,6 +1150,55 @@ export async function close(into, id, state) {
   return update(into, id, { state, nonce: null, closedAt: new Date().toISOString() })
 }
 // Undone: each file back as it was, only while each is still as the change left it. { files }.
+// What a session with Full Access changed with its edits in a turn (frontdesk.js): made already, in
+// your folders, by its agent, as your own Claude Code would; kept as a change made, so Activity and its
+// reply can Undo it as any other. undo: its hook's folder (botundo.mjs: each file as it was before
+// its first edit this turn, index.jsonl and blobs/), emptied once read; folders: [{ path (real),
+// shown }]. Each file as it was then and as it is now: one made, changed or taken away; one its hook
+// couldn't keep (over 50 MB, outside its folders, not a plain file) said as one that can't be undone
+// (notKept). null when nothing it edited changed.
+export async function made({ undo: dir, folders, into, by = null }) {
+  const index = path.join(dir, 'index.jsonl')
+  let lines = []
+  try { lines = fs.readFileSync(index, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) } catch { lines = [] }
+  if (!lines.length) return null
+  const roots = await Promise.all(folders.map((f) => fs.promises.realpath(f.path).catch(() => f.path)))
+  const blobs = new Map()
+  const keep = (buf) => { const h = sha(buf); blobs.set(h, buf); return h }
+  const entries = []
+  const notKept = []
+  for (const x of lines) {
+    const part = roots.findIndex((r) => x.path === r || String(x.path).startsWith(r + path.sep))
+    if (part < 0 || x.outside || x.kept === false) { notKept.push(x.path); continue }
+    const rel = relOf(roots[part], x.path)
+    if (!okRel(rel)) { notKept.push(x.path); continue }
+    let before = null
+    if (x.existed) {
+      const buf = await fs.promises.readFile(path.join(dir, 'blobs', String(x.hash || ''))).catch(() => null)
+      if (!buf || sha(buf) !== x.hash) { notKept.push(x.path); continue }
+      before = { hash: keep(buf), size: buf.length, mode: x.mode ?? 0o644 }
+    }
+    const st = await fs.promises.lstat(x.path).catch(() => null)
+    let after = null
+    if (st?.isFile() && st.size <= FILE_MAX) { const buf = await fs.promises.readFile(x.path); after = { hash: keep(buf), size: buf.length } } else if (st) { notKept.push(x.path); continue }
+    if (before?.hash === after?.hash) continue
+    if (!before && !after) continue
+    const text = [before, after].every((v) => !v || isText(blobs.get(v.hash)))
+    entries.push({ part, rel, op: !before ? 'add' : !after ? 'remove' : 'change', before, after, text })
+  }
+  await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {})
+  if (!entries.length && !notKept.length) return null
+  entries.sort((a, b) => a.part - b.part || a.rel.localeCompare(b.rel))
+  const f = folders.map((x, i) => ({ path: roots[i], shown: x.shown }))
+  const id = newId()
+  const change = { id, v: 1, at: new Date().toISOString(), by, folders: f, entries, held: [], refused: [], hash: hashOf(f, entries), nonce: crypto.randomBytes(16).toString('hex'), undoNonce: crypto.randomBytes(16).toString('hex'), state: 'applied', appliedAt: new Date().toISOString(), full: true, notKept: notKept.slice(0, 50) }
+  change.diff = diffOf(change, (h) => blobs.get(h), [])
+  change.files = filesOf(change)
+  await fs.promises.mkdir(path.join(into, id, 'blobs'), { recursive: true, mode: 0o700 })
+  for (const [h, buf] of blobs) await fs.promises.writeFile(path.join(into, id, 'blobs', h), buf, { mode: 0o600 })
+  await save(into, change)
+  return change
+}
 export async function undo(into, id, { roots, nonce = null }) {
   if (busy.has(id)) throw fail('It\'s being changed already', 'busy')
   busy.add(id)

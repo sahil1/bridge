@@ -12,7 +12,10 @@
 //   ask_bot       for a Chief too: one of those bots answers a question, as whoever asked (with their
 //                 rights, under that bot's own rules), and its answer comes back here as your next
 //                 message.
-// node sessionmcp.js <requests.jsonl> <requests.key> [--push] [--chief <roster.json>]
+//   share_link    (--share): a Share Link to a file or folder in its folders, or a file it made, for
+//                 the people in the conversation to open: made by Bridge AI once the turn ends, at once
+//                 for the owner, after the owner's OK for anyone else (frontdesk.js).
+// node sessionmcp.js <requests.jsonl> <requests.key> [--push] [--share] [--chief <roster.json>]
 //
 // The Model Context Protocol over stdin and stdout, a JSON-RPC message a line, as outboxmcp.js.
 import fs from 'node:fs'
@@ -25,6 +28,7 @@ const argv = process.argv.slice(2)
 const file = argv[0] ? path.resolve(argv[0]) : null
 const keyFile = argv[1] ? path.resolve(argv[1]) : null
 const push = argv.includes('--push')
+const share = argv.includes('--share')
 const rosterAt = argv.indexOf('--chief')
 const roster = (() => {
   if (rosterAt < 0 || !argv[rosterAt + 1]) return []
@@ -56,7 +60,14 @@ const ASK = {
   inputSchema: { type: 'object', properties: { bot: { type: 'string', description: 'Its name, as above' }, question: { type: 'string', description: 'What to ask it' } }, required: ['bot', 'question'] },
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false },
 }
-const TOOLS = [...(push ? [PUSH] : []), ...(roster.length ? [HAND, ASK] : [])]
+const SHARE = {
+  name: 'share_link',
+  title: 'Share a file or folder with a link',
+  description: 'Make a Share Link to a file or a folder in your folders, or a file you made (a report, an HTML page), so the people in this conversation can open it in their browser: an end-to-end encrypted link through the owner\'s relay, for those people only (or with a password), for a day unless you say otherwise. It\'s made once this turn ends: at once when it\'s for the owner alone and only they are here, else once they\'ve said OK. Give its path; say in your reply that a link is on its way.',
+  inputSchema: { type: 'object', properties: { path: { type: 'string', description: 'The file or folder, as a path in your folders (or one you made in your outbox)' }, lasts: { type: 'string', enum: ['hour', 'day', 'week'], description: 'How long the link lasts: hour, day (the default) or week' }, who: { description: 'Who may open it: "me" (whoever asked you; the default when only the owner is in this conversation), "conversation" (the people in this conversation who may ask you; the default otherwise), "channel" (everyone in this channel who may ask you), or a list of email addresses. Anyone but the owner alone waits for the owner\'s OK.', anyOf: [{ type: 'string', enum: ['me', 'conversation', 'channel'] }, { type: 'array', items: { type: 'string' }, maxItems: 30 }] }, title: { type: 'string', description: 'What it is, in a few words' } }, required: ['path'] },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+}
+const TOOLS = [...(push ? [PUSH] : []), ...(share ? [SHARE] : []), ...(roster.length ? [HAND, ASK] : [])]
 
 // (At most 20 asks a turn: counted in the file, which Bridge AI takes and empties as each turn ends
 // (botsessions.js takeRequests), so the count is this turn's, however long this server runs.)
@@ -84,6 +95,14 @@ async function call(name, a) {
     if (!title) throw new Error('Give it a title')
     note({ t: 'push', title, summary: clip(a?.summary, 4000) })
     return 'Asked: the owner decides once this turn ends. Say in your reply that it waits for them.'
+  }
+  if (name === 'share_link' && share) {
+    const p = clip(a?.path, 1000).trim()
+    if (!p) throw new Error('Give the path of the file or folder to share')
+    const lasts = ['hour', 'day', 'week'].includes(a?.lasts) ? a.lasts : 'day'
+    const who = Array.isArray(a?.who) ? a.who.slice(0, 30).map((x) => one(x, 200)).filter(Boolean) : ['me', 'channel', 'conversation'].includes(a?.who) ? a.who : null
+    note({ t: 'share', path: p, lasts, who, title: one(a?.title, 120) })
+    return 'Asked: the link is made once this turn ends (at once for the owner, after their OK for anyone else), and posted in this conversation. Say in your reply that a link is on its way.'
   }
   if ((name === 'hand_to' || name === 'ask_bot') && roster.length) {
     const b = botNamed(a?.bot)

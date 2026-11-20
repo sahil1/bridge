@@ -21,7 +21,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { K, json } from '../../relay/web/link.js'
-import { ROOT, TEST, startKit, startRelay, startHostedRelay, startAccounts, checks, until, browser, shot } from '../lib/harness.mjs'
+import { ROOT, TEST, startKit, startRelay, startHostedRelay, startAccounts, checks, until, browser, shot, withoutLinkDrop } from '../lib/harness.mjs'
 import { linkAs } from '../lib/linkclient.mjs'
 
 const { ok, done } = checks('relay-move')
@@ -254,8 +254,9 @@ try {
   await shot(dp, `${tag}relay-forgot-phone`)
 
   // (WebKit reports what the phone page was waiting on when its link dropped, as a computer moving
-  // away from an address drops it, as errors: phone-fresh.mjs says so too.)
-  const errs = pages.flatMap((x) => x.errors).filter((e) => !/\/api\/\S+ due to access control checks|^Error: (Your computer is offline|Reconnecting to your computer|Connection lost)/.test(e))
+  // away from an address drops it, as errors, with "Cannot load ." after each file cut off:
+  // withoutLinkDrop. phone-fresh.mjs says so too.)
+  const errs = pages.flatMap((x) => withoutLinkDrop(x.errors))
   ok(!errs.length, 'no page errors', errs)
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)

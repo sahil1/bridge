@@ -239,6 +239,75 @@ export async function publish(c, { title, body, sha = null }) {
   return { url, number: Number(/\/pull\/(\d+)/.exec(url)?.[1]) || null, again: !x.ok }
 }
 
+// ---------- A session with Full Access, in your repository itself (frontdesk.js) ----------
+// Where a folder's repository is: { top, head, branch (null when detached), remote, base, untracked
+// (its files git doesn't track, at most 500) }, or null when it isn't one. At a session's start, so
+// what its commands changed since can be said; at a push it asks for, what it pushes.
+export async function stateOf(dir) {
+  const r = await repoOf(dir)
+  if (!r.top) return null
+  const head = (await git(r.top, ['rev-parse', 'HEAD'])).out || null
+  const branch = (await git(r.top, ['symbolic-ref', '--quiet', '--short', 'HEAD'])).out || null
+  const untracked = (await git(r.top, ['ls-files', '--others', '--exclude-standard', '-z'], { raw: true })).out.split('\0').filter(Boolean).slice(0, 500)
+  return { top: r.top, head: /^[0-9a-f]{40,64}$/.test(head || '') ? head : null, branch, remote: r.remote, base: r.base, untracked }
+}
+// What changed in it since a session's start (was: stateOf then), commits, its files and files git
+// doesn't track alike: { files: [{ path, op }], stat, commits }. Nothing of it can be undone by
+// Bridge AI: said as it is.
+export async function changedSince(was) {
+  if (!was?.top || !/^[0-9a-f]{40,64}$/.test(String(was.head || ''))) return null
+  const ns = await git(was.top, ['diff', '--no-ext-diff', '--no-textconv', '--name-status', '-z', was.head], { raw: true })
+  if (!ns.ok) return null
+  const parts = ns.out.split('\0').filter(Boolean)
+  const files = []
+  for (let i = 0; i < parts.length && files.length < 500;) {
+    const s = parts[i++]
+    const op = s[0] === 'A' ? 'add' : s[0] === 'D' ? 'remove' : s[0] === 'R' ? 'move' : 'change'
+    if (op === 'move') { i++; files.push({ path: parts[i++], op }) } else files.push({ path: parts[i++], op })
+  }
+  const before = new Set(was.untracked || [])
+  for (const p of (await git(was.top, ['ls-files', '--others', '--exclude-standard', '-z'], { raw: true })).out.split('\0').filter(Boolean)) if (!before.has(p) && files.length < 500) files.push({ path: p, op: 'add' })
+  const stat = (await git(was.top, ['diff', '--no-ext-diff', '--no-textconv', '--shortstat', was.head])).out
+  const commits = Number((await git(was.top, ['rev-list', '--count', `${was.head}..HEAD`])).out) || 0
+  return { files: files.filter((f) => f.path), stat, commits }
+}
+// What a push from your repository would send: its branch's commits past what its remote has of it
+// (or of the default branch, for a branch it hasn't): { head, branch, files, stat, ahead }, or why not.
+export async function pushPlan(top) {
+  const r = await repoOf(top)
+  if (!r.top) return { problem: r.problem }
+  if (!r.remote) return { problem: 'the repository has no remote to push to' }
+  const branch = (await git(r.top, ['symbolic-ref', '--quiet', '--short', 'HEAD'])).out
+  if (!branch) return { problem: 'it isn\'t on a branch' }
+  const head = (await git(r.top, ['rev-parse', 'HEAD'])).out
+  const theirs = (await git(r.top, ['rev-parse', '--verify', '--quiet', `refs/remotes/${r.remote}/${branch}`])).ok ? `${r.remote}/${branch}` : `${r.remote}/${r.base}`
+  const ahead = Number((await git(r.top, ['rev-list', '--count', `${theirs}..HEAD`])).out) || 0
+  const files = (await git(r.top, ['diff', '--no-ext-diff', '--no-textconv', '--name-only', `${theirs}...HEAD`])).out.split('\n').filter(Boolean)
+  const stat = (await git(r.top, ['diff', '--no-ext-diff', '--no-textconv', '--shortstat', `${theirs}...HEAD`])).out
+  return { top: r.top, remote: r.remote, base: r.base, branch, head, ahead, files, stat }
+}
+// A push you approved from a session with Full Access: its branch, at the commit you were shown
+// (sha), to its remote, never forced; then a draft pull request with your gh, for a branch that isn't
+// the default one (the one it has already, if so). { url, number } (url null: pushed, no pull
+// request), or throws, saying why.
+export async function publishHere(top, { sha, title, body }) {
+  const p = await pushPlan(top)
+  if (p.problem) throw Object.assign(new Error(`Couldn't push: ${p.problem}`), { step: 'push' })
+  if (!/^[0-9a-f]{40,64}$/.test(String(sha || '')) || sha !== p.head) throw Object.assign(new Error('Its branch has moved on since: look at it again'), { step: 'push' })
+  const pushed = await git(p.top, ['push', '--quiet', p.remote, `${sha}:refs/heads/${p.branch}`], { timeout: 120000 })
+  if (!pushed.ok) throw Object.assign(new Error(`Couldn't push ${p.branch}: ${firstLine(pushed.err)}`), { step: 'push' })
+  if (p.branch === p.base) return { url: null, number: null, branch: p.branch }
+  const PATH = await loginPath()
+  const gh = await which('gh', PATH)
+  if (!gh) return { url: null, number: null, branch: p.branch, problem: 'GitHub\'s gh isn\'t installed, so no pull request was opened' }
+  const env = { ...process.env, PATH, GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1', NO_COLOR: '1' }
+  const x = await run(gh, ['pr', 'create', '--draft', `--title=${String(title).slice(0, 200)}`, '--body-file=-', `--base=${p.base}`, `--head=${p.branch}`], { cwd: p.top, input: String(body || ''), env, timeout: 120000 })
+  const urlIn = (s) => String(s || '').split(/\s+/).find((w) => /^https?:\/\/\S+\/pull\/\d+/.test(w)) || null
+  let url = x.ok ? urlIn(x.out) : /already exists/i.test(x.err) ? urlIn(x.err) : null
+  if (!url && /already exists/i.test(x.err)) { const v = await run(gh, ['pr', 'view', p.branch, '--json', 'url', '-q', '.url'], { cwd: p.top, env }); url = v.ok ? urlIn(v.out) : null }
+  return { url, number: Number(/\/pull\/(\d+)/.exec(url || '')?.[1]) || null, branch: p.branch, ...(url ? {} : { problem: `the branch is pushed, but no pull request was opened: ${firstLine(x.err) || 'gh said nothing'}` }) }
+}
+
 // Its copy gone (the branch stays, for a follow-up and for its pull request).
 // Never fails: a folder still in use (on Windows, while its agent's tab is still open, or for a
 // moment after it's closed: wait, tried again for a few seconds then) is tried again in a minute,

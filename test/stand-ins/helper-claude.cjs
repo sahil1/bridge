@@ -416,7 +416,10 @@ function answerTurn(text) {
   const sandboxed = !!sandbox && sandbox.enabled === true && sandbox.failIfUnavailable === true && sandbox.allowUnsandboxedCommands === false
   // (Run, in dontAsk, only by the sandbox's auto-allow or a Bash allow rule: code.claude.com/docs/en/sandboxing.)
   const allowedArg = (() => { const i = args.indexOf('--allowedTools'); return i >= 0 ? args.slice(i + 1).filter((x, k, a) => !a.slice(0, k + 1).some((y) => y.startsWith('--'))) : [] })()
-  const mayRun = can('Bash') && sandboxed && (sandbox.autoAllowBashIfSandboxed === true || allowedArg.some((x) => /^Bash(\(|$)/.test(x)))
+  // (Or, with no sandbox at all, under dontAsk, a bare Bash allow rule: every command runs, as a
+  // session with Full Access has it.)
+  const unsandboxed = !sandboxed && dontAsk && allowedArg.includes('Bash')
+  const mayRun = can('Bash') && ((sandboxed && (sandbox.autoAllowBashIfSandboxed === true || allowedArg.some((x) => /^Bash(\(|$)/.test(x)))) || unsandboxed)
   // One of its tools called, as Claude Code calls one: { ok, text }.
   const callOutbox = (name, input) => {
     const asks = [
@@ -453,6 +456,8 @@ function answerTurn(text) {
     timer = null
     const out = [...early]
     if (answered) out.push(`${answered[1]} says: ${answered[2].replace(/\n| · /g, ' ').trim()}`)
+    // ([share <path>] or [share <path> channel|<email,email>]: a Share Link asked for.)
+    for (const m of q.matchAll(/\[share ([^\s\]]+)(?: ([^\]]+))?\]/g)) { const who = !m[2] ? undefined : m[2] === 'channel' ? 'channel' : m[2].split(','); const r = callSession('share_link', { path: m[1], ...(who ? { who } : {}) }); tried('share', r.ok, { path: m[1] }); out.push(r.ok ? `I asked to share ${m[1]}.` : `I couldn't share ${m[1]}: ${r.text}`) }
     for (const m of q.matchAll(/\[push ([^\]]+)\]/g)) { const r = callSession('request_push', { title: m[1].trim(), summary: 'What I changed.' }); tried('push', r.ok); out.push(r.ok ? `I asked to push "${m[1].trim()}".` : `I couldn't ask to push: ${r.text}.`) }
     for (const m of q.matchAll(/\[hand-to ([\w-]+)(?: ([^\]]+))?\]/g)) { const r = callSession('hand_to', { bot: m[1].replace(/-/g, ' '), note: m[2] || '' }); tried('hand', r.ok); out.push(r.ok ? `I've handed this to ${m[1].replace(/-/g, ' ')}.` : `I couldn't hand it on: ${r.text}.`) }
     if (!answered) for (const m of q.matchAll(/\[ask-bot ([\w-]+) ([^\]]+)\]/g)) { const r = callSession('ask_bot', { bot: m[1].replace(/-/g, ' '), question: m[2] }); tried('ask', r.ok); out.push(r.ok ? `I've asked ${m[1].replace(/-/g, ' ')}.` : `I couldn't ask it: ${r.text}.`) }
@@ -460,20 +465,27 @@ function answerTurn(text) {
     const runs = [...q.matchAll(/\[run ([^\]]+)\]/g)].map((m) => ({ cmd: m[1], kind: 'run' }))
       .concat([...q.matchAll(/\[run-write ([\w./-]+) ([^\]]+)\]/g)].map((m) => ({ cmd: `printf '%s\\n' '${m[2]}' > ${m[1]}`, kind: 'run-write', name: m[1], body: m[2] })))
       .concat([...q.matchAll(/\[fetch ([\w.-]+)\]/g)].map((m) => ({ cmd: `curl -s https://${m[1]}/`, kind: 'fetch', host: m[1] })))
+      .concat([...q.matchAll(/\[run-rm ([\w./-]+)\]/g)].map((m) => ({ cmd: `rm ${m[1]}`, kind: 'run-rm', name: m[1] })))
     for (const r of runs) {
       if (!mayRun) { tried(r.kind, false, { command: r.cmd, why: can('Bash') ? 'no sandbox' : 'no Bash' }); out.push(`I can't run commands here.`); continue }
       const h = preTool('Bash', { command: r.cmd })
       if (!h.ok) { tried(r.kind, false, { command: r.cmd, why: h.why.slice(0, 300) }); out.push(`I couldn't run it: ${h.why.split('\n')[0]}`); continue }
       tool('Bash', { command: r.cmd })
+      if (r.kind === 'run-rm') {
+        try { fs.rmSync(path.resolve(process.cwd(), r.name)) } catch (e) { tried('run-rm', false, { command: r.cmd, why: e.code }); out.push(`I couldn't remove ${r.name}: ${e.code}.`); continue }
+        tried('run-rm', true, { command: r.cmd })
+        out.push(`I removed ${r.name}.`)
+        continue
+      }
       if (r.kind === 'fetch') {
-        const ok = (sandbox.network?.allowedDomains || []).some((d) => d === r.host || (d.startsWith('*.') && r.host.endsWith(d.slice(1))))
+        const ok = !sandbox || (sandbox.network?.allowedDomains || []).some((d) => d === r.host || (d.startsWith('*.') && r.host.endsWith(d.slice(1))))
         tried('fetch', ok, { command: r.cmd, host: r.host })
         out.push(ok ? `I reached ${r.host}.` : `I couldn't reach ${r.host}: the sandbox refused it.`)
         continue
       }
       if (r.kind === 'run-write') {
         const f = path.resolve(process.cwd(), r.name)
-        const deny = (sandbox.filesystem?.denyWrite || []).some((d) => f === d || f.startsWith(d + path.sep))
+        const deny = (sandbox?.filesystem?.denyWrite || []).some((d) => f === d || f.startsWith(d + path.sep))
         if (deny) { tried('run-write', false, { command: r.cmd, why: 'sandbox' }); out.push(`I couldn't write ${r.name}: the sandbox refused it.`); continue }
         try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, `${r.body}\n`) } catch (e) { tried('run-write', false, { command: r.cmd, why: e.code }); out.push(`I couldn't write ${r.name}: ${e.code}.`); continue }
         tried('run-write', true, { command: r.cmd })
@@ -504,7 +516,8 @@ function answerTurn(text) {
     }
     // Edits: only in its folder, and only when it was started able to (a bot's change), and only
     // what its hooks let through.
-    const editsHere = can('Edit') && can('Write') && allowed.some((x) => /^Edit\(\.\/\*\*\)$/.test(x))
+    // (Or a bare Edit allow rule under dontAsk: edits anywhere, as a session with Full Access has it.)
+    const editsHere = can('Edit') && can('Write') && (allowed.some((x) => /^Edit\(\.\/\*\*\)$/.test(x)) || (dontAsk && allowed.includes('Edit') && allowed.includes('Write')))
     const write = (f, body, label, kind) => {
       const h = preTool('Write', { file_path: f, content: body })
       if (!h.ok) { tried(kind, false); out.push(`I couldn't write ${label}: ${h.why.split('\n')[0]}`); return }

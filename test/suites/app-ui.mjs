@@ -424,7 +424,10 @@ try {
     await c.addInitScript(() => document.addEventListener('DOMContentLoaded', () => document.documentElement.classList.add('in-bridge-app', 'platform-darwin')))
     await c.route(/\/api\/calendar(\?|$)/, (r) => r.fulfill({ json: deskFakes.calendar }))
     await c.route(/\/api\/quota(\?|$)/, (r) => r.fulfill({ json: deskFakes.quota }))
-    await changeAnswer(c, /\/api\/config(\?|$)/, (real) => ({ ...real, runtime: { ...real.runtime, liveView: true } }))
+    // The calendar stood in for is there, as on a Mac: elsewhere the server says there's none
+    // (calendar: false), and the bar's meeting showed only when its first look at the calendar
+    // came back before the page heard that (Windows, now and then).
+    await changeAnswer(c, /\/api\/config(\?|$)/, (real) => ({ ...real, calendar: true, runtime: { ...real.runtime, liveView: true } }))
   }
   // What's wrong with the bar: past its edge, narrower than what it says, a line of words broken in
   // two; and what's in it, as each news chip and the meeting are there or not. And each pinned chip
@@ -520,10 +523,10 @@ try {
     ok(bar.filled.length === 1 && /need/.test(bar.filled[0]), `${t}: one chip is filled, what needs you; the rest are quiet until the pointer is on them`, bar.filled)
     ok(bar.pins.every((x) => x.hover), `${t}: each pinned chip says what it is on hover`, bar.pins)
     const rows = await statusRows(p)
-    // The meeting from the calendar, which reads macOS Calendar: a Mac's only.
-    const want = { setup: /Setting up · 1 of 3/, restart: /Restart Bridge AI to apply it/, update: /Bridge AI 3\.7\.0 is available/, ...(IS_MAC ? { meeting: /Now APM Platform/ } : {}) }
+    // The meeting from the calendar (stood in for, and there on every system: deskBusy).
+    const want = { setup: /Setting up · 1 of 3/, restart: /Restart Bridge AI to apply it/, update: /Bridge AI 3\.7\.0 is available/, meeting: /Now APM Platform/ }
     const missing = Object.entries(want).filter(([k, re]) => !bar.has[k] && !re.test(rows)).map(([k]) => k)
-    ok(!missing.length && (IS_MAC || !/Now APM Platform/.test(rows)) && /Claude/.test(rows) && /new agents start on Work Primary/.test(rows) && /Notification sounds/.test(rows) && /Springfield/.test(rows) && /°F/.test(rows), `${t}: what isn't in the bar is in the Status menu, with usage, sounds, the weather and the time`, { missing, rows: rows.slice(0, 400) })
+    ok(!missing.length && /Claude/.test(rows) && /new agents start on Work Primary/.test(rows) && /Notification sounds/.test(rows) && /Springfield/.test(rows) && /°F/.test(rows), `${t}: what isn't in the bar is in the Status menu, with usage, sounds, the weather and the time`, { missing, rows: rows.slice(0, 400) })
     return bar
   }
   {

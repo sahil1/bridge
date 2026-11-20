@@ -4,7 +4,8 @@
 // every two seconds: a Meet gallery like one where 171 pictures were kept in 25 minutes, and a
 // presentation with the faces in a strip beside it. And the desktop app's answer when a page asks
 // for a screen (desktop/screenpick.js): every no said with null and why kept for the page, which
-// says it (meetings-ui).
+// says it (meetings-ui); and which answers one: macOS's own picker on macOS 15 and later (Electron 45
+// then never asks the app), given up for the run once Remote Screen has taken the screen.
 import fs from 'node:fs'
 import { createRequire } from 'node:module'
 import { judge, W, H } from '../../src/components/meetings/changes.js'
@@ -190,11 +191,52 @@ function run(frames) {
   try { await x.pick.handler({ frame: { url: OWN, parent: null }, videoRequested: true }, () => { throw new Error('Object has been destroyed') }, 9) } catch (e) { threw = e.message }
   ok(threw === null, 'answering a page that went away throws nothing', threw)
 
-  // The app uses it so, and the page can ask why.
+  // ---------- Which answers a screen asked for: macOS's own picker, or the app's (install) ----------
+  // Electron 45.1.0's own setDisplayMediaRequestHandler (lib/browser/api/session.ts), stood in for:
+  // with useSystemPicker and macOS's picker there (macOS 15 and later), the handler is never asked:
+  // the page is answered with the picker's source (window:-4:-n, Electron's patched ScreenCaptureKit
+  // device, which opens macOS's picker as the capture starts), and what's picked comes back only as
+  // getDisplayMedia's answer, or as Chromium's 10 s timeout for a capture to start while the picker
+  // is still up (recording.jsx asks again: meetings-ui). Without it, the handler is asked.
+  const { install } = require('../../desktop/screenpick.js')
+  const electron45 = (available) => {
+    let set = null
+    let fake = -1
+    const sets = []
+    return {
+      sets,
+      setDisplayMediaRequestHandler(handler, opts) { sets.push(opts); set = (req, cb) => (opts?.useSystemPicker && available ? cb({ video: { id: `window:-4:${fake--}`, name: '' } }) : handler(req, cb)) },
+      ask: (req) => new Promise((resolve) => { set(req, resolve) }),
+    }
+  }
+  const req = { frame: { url: OWN, parent: null }, videoRequested: true, audioRequested: false, userGesture: true }
+  {
+    const ses = electron45(true)
+    const pick = make()
+    let asked = 0
+    const way = install({ session: ses, picker: true, handler: (q, cb) => { asked++; return pick.pick.handler(q, cb, 1) } })
+    const a = await ses.ask(req)
+    ok(asked === 0 && /^window:-4:-\d+$/.test(a?.video?.id || '') && way.how().picker === true && way.how().off === null, "macOS 15 and later: macOS's own picker, the app's handler never asked (so it has no why to give)", { asked, a, how: way.how() })
+    // Remote Screen took the screen in this run (main.js noPicker): from then on the app's own answer.
+    ok(way.off('remote') === true && way.off('remote') === false && ses.sets.length === 2 && ses.sets[1].useSystemPicker === false, 'once Remote Screen has taken the screen: macOS\'s picker given up, once, for the next screen asked for', ses.sets)
+    const b = await ses.ask(req)
+    ok(asked === 1 && b?.video?.id === 'screen:1:0' && way.how().picker === false && way.how().off === 'remote', 'and the app answers itself: the whole main screen, and it says why macOS\'s picker isn\'t used', { asked, b, how: way.how() })
+  }
+  {
+    // Before macOS 15, Windows and Linux: no picker of macOS's, the handler asked every time.
+    const ses = electron45(false)
+    let asked = 0
+    const way = install({ session: ses, picker: false, handler: (q, cb) => { asked++; return make({ platform: 'win32' }).pick.handler(q, cb, 1) } })
+    const a = await ses.ask(req)
+    ok(asked === 1 && a?.video?.id === 'screen:1:0' && way.how().picker === false && way.off('remote') === false && ses.sets.length === 1, 'no picker of macOS\'s: the app\'s handler every time, and nothing to give up', { asked, a, sets: ses.sets })
+  }
+
+  // The app uses it so, and the page can ask why, and how.
   const desktop = (f) => fs.readFileSync(new URL(`../../desktop/${f}`, import.meta.url), 'utf8')
   const main = desktop('main.js')
-  ok(/setDisplayMediaRequestHandler\(\(req, cb\) => screenPick\.handler\(req, cb, askedBy\(req\.frame\)\), \{ useSystemPicker: true \}\)/.test(main) && !/cb\(\{\}\)/.test(main), "the app's handler is screenpick's, macOS's own picker kept, and no cb({}) left", main.match(/setDisplayMediaRequestHandler[^\n]*/)?.[0])
-  ok(/ipc\.handle\('bridge:screen-why'/.test(main) && /screenWhy: \(\) => ipcRenderer\.invoke\('bridge:screen-why'\)/.test(desktop('preload.js')) && JSON.parse(desktop('package.json')).build.files.includes('screenpick.js'), 'the page asks why (bridgeApp.screenWhy), and screenpick.js is in the built app')
+  ok(/screenWay = screenpick\.install\(\{ session: session\.defaultSession, handler: \(req, cb\) => screenPick\.handler\(req, cb, askedBy\(req\.frame\)\), picker: MAC_PICKER \}\)/.test(main) && /useSystemPicker: !off/.test(desktop('screenpick.js')) && !/cb\(\{\}\)/.test(main), "the app's handler is screenpick's, macOS's own picker kept where it's there, and no cb({}) left", main.match(/screenpick\.install[^\n]*/)?.[0])
+  ok(/taken: \(\) => noPicker\('remote'\)/.test(main) && /screenWay\?\.off\(why\)/.test(main), "Remote Screen taking the screen gives macOS's picker up for the run", main.match(/taken: [^\n]*/)?.[0])
+  ok(/ipc\.handle\('bridge:screen-why'/.test(main) && /ipc\.handle\('bridge:screen-how'/.test(main) && /screenWhy: \(\) => ipcRenderer\.invoke\('bridge:screen-why'\)/.test(desktop('preload.js')) && /screenHow: \(\) => ipcRenderer\.invoke\('bridge:screen-how'\)/.test(desktop('preload.js')) && JSON.parse(desktop('package.json')).build.files.includes('screenpick.js'), 'the page asks why (bridgeApp.screenWhy) and how (screenHow), and screenpick.js is in the built app')
 }
 
 process.exit(done().fail ? 1 : 0)

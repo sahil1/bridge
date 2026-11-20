@@ -339,7 +339,7 @@ try {
   const costCell = async (a1) => { const x = new ExcelJS.Workbook(); await x.xlsx.readFile(path.join(dir, 'costs.xlsx')); return x.getWorksheet('Costs').getCell(a1).value }
   await goTo('A1:C6')
   await assist('Write a formula')
-  const noModel = await until(async () => /No model to answer with yet: sign in to an agent \(Claude Code, Codex…\) or add a key in Settings › Model Providers/.test(await askAi.innerText()), 8000)
+  const noModel = await until(async () => /No model to answer with yet: sign in to an agent \(Claude Code, Codex…\) or add a key in Settings › Agents & Models › Model Providers/.test(await askAi.innerText()), 8000)
   ok(!!noModel && await askAi.locator('.sh-send').isDisabled() && (await askAi.locator('.sh-goes button', { hasText: 'Model Providers' }).count()) === 1 && (await askAi.locator('.sh-hand-toggle', { hasText: 'Hand to an agent' }).count()) === 1, 'with no model, AI Assist on a sheet says how to add one, with Model Providers a click away, and Hand to an agent still there', await askAi.innerText())
   await shot(p, `${tag}studio-sheets-ai-no-model`)
   await askAi.locator('button[aria-label="Close AI Assist"]').click()

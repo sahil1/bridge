@@ -1,7 +1,8 @@
 // History: search every agent conversation on this computer, and the agents you closed. A
 // running agent opens; a closed or old one resumes with its full history (in its old space
-// when that's still open). With Scheduled Routines on, a second tab, Commands: what you asked in
-// Bridge AI's boxes (CommandHistory.jsx).
+// when that's still open). One closed before it got as far as a conversation has none to resume:
+// its row says so, and it starts fresh under its name. With Scheduled Routines on, a second tab,
+// Commands: what you asked in Bridge AI's boxes (CommandHistory.jsx).
 import { useEffect, useRef, useState } from 'react'
 import Icon from './Icon.jsx'
 import AgentMark from './settings/agentMark.jsx'
@@ -61,10 +62,11 @@ export default function History({ onClose, onOpen, commands = false }) {
       onClose()
     } catch (e) { setErr(e.message) } finally { setBusy(null) }
   }
+  const neverSaid = (name) => t('{name} never got as far as a conversation, so it starts fresh.', { name })
   const forget = async (x) => { try { await api(`/archive/${x.id}`, { method: 'DELETE' }); loadClosed() } catch (e) { setErr(e.message) } }
   const Act = ({ r, k }) => (r.paneId
     ? <button className="btn small" onClick={() => { onOpen(r.paneId); onClose() }}>{t('Open')}</button>
-    : <button className="btn small primary" onClick={() => resume(r, k)} disabled={!!busy}>{busy === k ? t('Resuming…') : t('Resume')}</button>)
+    : <button className="btn small primary" onClick={() => resume(r, k)} disabled={!!busy}>{busy === k ? (r.never ? t('Starting…') : t('Resuming…')) : r.never ? t('Start fresh') : t('Resume')}</button>)
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
@@ -114,7 +116,7 @@ export default function History({ onClose, onOpen, commands = false }) {
                   <div className="hist-body">
                     <div className="hist-title">{x.label || t('Agent')}{x.paneId && <span className="hist-live">{t('running')}</span>}</div>
                     <div className="muted small mono hist-where">{[x.workspace, x.cwd].filter(Boolean).join(' › ')} · {t('closed {when}', { when: ago(x.closedAt) })}</div>
-                    {x.preview && <div className="hist-hit muted">{x.preview}</div>}
+                    {x.never ? <div className="hist-hit hist-never muted">{neverSaid(x.label || t('Agent'))}</div> : x.preview && <div className="hist-hit muted">{x.preview}</div>}
                   </div>
                   <Act r={x} k={x.id} />
                   <button className="win-btn" onClick={() => forget(x)} title={t('Remove from this list (the conversation stays on disk)')} aria-label={t('Remove from list')}><Icon name="x" size={12} /></button>

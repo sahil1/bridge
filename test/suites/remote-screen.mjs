@@ -1389,9 +1389,10 @@ try {
     const blocks = []
     let woke = 0
     let allowed = 0
+    let taken = 0
     const power = { start: (kind) => { blocks.push({ kind, on: true }); return blocks.length - 1 }, stop: (id) => { blocks[id].on = false } }
     const blocked = (kind) => blocks.some((x) => x.kind === kind && x.on)
-    const d2 = create({ BrowserWindow: Win, desktopCapturer: { getSources: () => new Promise(() => {}) }, screen: { getAllDisplays: () => [main, ext], getPrimaryDisplay: () => main }, systemPreferences: { getMediaAccessStatus: () => 'granted' }, session: { fromPartition: () => ({ setPermissionRequestHandler: () => {} }) }, nativeTheme: { shouldUseDarkColors: false }, URL_BASE: 'http://127.0.0.1:1', preload: '/preload.js', platform: 'darwin', keyFor, fetch: async () => ({ status: 200 }), power, wake: () => { woke++ }, allowScreen: () => { allowed++ }, listMs: 200 })
+    const d2 = create({ BrowserWindow: Win, desktopCapturer: { getSources: () => new Promise(() => {}) }, screen: { getAllDisplays: () => [main, ext], getPrimaryDisplay: () => main }, systemPreferences: { getMediaAccessStatus: () => 'granted' }, session: { fromPartition: () => ({ setPermissionRequestHandler: () => {} }) }, nativeTheme: { shouldUseDarkColors: false }, URL_BASE: 'http://127.0.0.1:1', preload: '/preload.js', platform: 'darwin', keyFor, fetch: async () => ({ status: 200 }), power, wake: () => { woke++ }, allowScreen: () => { allowed++ }, taken: () => { taken++ }, listMs: 200 })
     const hung = await d2.sources()
     ok(hung.sources.length === 0 && hung.none === 'none' && /macOS didn't list the screens within/.test(hung.problem || ''), 'macOS never listing the screens: said within a moment, with why', hung)
     const caps = () => wins.filter((w) => /remote=capture/.test(w.url || ''))
@@ -1419,8 +1420,10 @@ try {
     ok(caps().at(-1) === c4 && !c4.gone && c4.loads === loads + 1 && /[?&]token=tok-b(&|$)/.test(c4.url), 'asked with a new token while its window is open (its own spent: the server restarted): its page loads again with it, at once', c4.url)
     d2.onEvent({ t: 'need-capture', token: 'tok-b' })
     ok(c4.loads === loads + 1, 'the same token again: left as it is', c4.loads - loads)
+    ok(taken === 0, 'a capture window and its list of screens alone: the screen not taken yet')
     d2.onEvent({ t: 'sessions', list: [{ id: 'a', kind: 'screen' }] })
     ok(woke === 1 && blocked('prevent-display-sleep'), 'someone viewing: the display woken, and kept awake')
+    ok(taken >= 1, 'and the app told the screen is taken (main.js: macOS\'s picker for Watch a screen given up until it restarts)', taken)
     d2.onEvent({ t: 'sessions', list: [{ id: 'a', kind: 'screen' }, { id: 'b', kind: 'screen' }] })
     d2.onEvent({ t: 'sessions', list: [] })
     ok(woke === 1 && !blocked('prevent-display-sleep'), 'and let sleep once nobody is')

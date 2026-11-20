@@ -221,9 +221,9 @@ try {
   // ---------- moved to a new relay ----------
   const ra2 = await startRelay('devices-studio-new')
   relays.push(ra2)
-  const conf = relayJson(a)
-  fs.writeFileSync(path.join(a.data, 'relay.json'), JSON.stringify({ ...conf, ...ra2.relayFile }))
-  await a.restart()
+  // (relay.json changed while Studio is closed, restart's between: Studio writes it as it goes, a
+  // device's hello saving when it was last seen, and could put back what it had over this.)
+  await a.restart(() => fs.writeFileSync(path.join(a.data, 'relay.json'), JSON.stringify({ ...relayJson(a), ...ra2.relayFile })))
   ok(!!(await until(async () => (await a.api('/relay')).online && (await a.api('/relay')).url === ra2.url, 20000)), 'Studio is on its new relay')
   ok(!!(await until(async () => (await other(b, 'Studio'))?.relay === ra2.url && (await other(b, 'Studio'))?.online, 30000, 300)), 'Laptop follows Studio to its new relay by itself', await other(b, 'Studio'))
 
@@ -240,15 +240,13 @@ try {
   ok(gone.steps.find((s) => s.step === 'relay')?.ok === false && /Can't reach Studio's relay/.test(gone.steps.find((s) => s.step === 'relay').text), 'Fix with its relay gone: says it can\'t reach it', gone.steps)
 
   // Back on the first relay, for what's next.
-  fs.writeFileSync(path.join(a.data, 'relay.json'), JSON.stringify({ ...relayJson(a), ...ra.relayFile }))
-  await a.restart()
+  await a.restart(() => fs.writeFileSync(path.join(a.data, 'relay.json'), JSON.stringify({ ...relayJson(a), ...ra.relayFile })))
   ok(!!(await until(async () => (await other(b, 'Studio'))?.relay === ra.url && (await other(b, 'Studio'))?.online, 40000, 300)), 'Studio back on its first relay, and Laptop with it')
 
   // ---------- its key changed ----------
-  const { key: _old, ...noKey } = relayJson(a)
-  a.stop()
-  fs.writeFileSync(path.join(a.data, 'relay.json'), JSON.stringify(noKey))
-  await a.restart()
+  // (Taken out once Studio has quit: written while it was quitting, its own save of a device's last
+  // hello could put the old key back, and Laptop then found Studio as before, online, no error.)
+  await a.restart(() => { const { key: _old, ...noKey } = relayJson(a); fs.writeFileSync(path.join(a.data, 'relay.json'), JSON.stringify(noKey)) })
   // (A key that isn't the one it was linked with could be the relay's, so nothing kept changes on
   // it: it says so, and keeps trying.)
   const changed = await until(async () => { const m = await other(b, 'Studio'); return m?.state === 'linked' && !m.online && /couldn't be checked/.test(m.error || '') ? m : null }, 30000, 300)

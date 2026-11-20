@@ -96,6 +96,9 @@ const MCP_RUNS = dataFile('front-desk', 'mcp')
 // turn them on in a real install; Bridge AI never sets either.
 export const COMMANDS = process.env.BRIDGE_TEST_BOT_COMMANDS === '1' && process.env.BRIDGE_FIX_DRYRUN === '1'
 export const COMMANDS_OFF = 'Commands in bot sessions come in a later version'
+// The tools a session with Full Access may use without asking: all of Claude Code's own (an unknown
+// name here is one this version hasn't got).
+export const FULL_TOOLS = ['Bash', 'BashOutput', 'KillShell', 'PowerShell', 'Read', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'TodoWrite', 'Task', 'Agent']
 export const sandboxClosed = (s) => {
   if (!COMMANDS) return false
   const x = s?.sandbox
@@ -116,7 +119,7 @@ export function mcpOf(dirs = []) {
       const settings = r.settings && path.resolve(String(r.settings)) === path.join(d, 'settings.json') && fs.existsSync(path.join(d, 'settings.json')) ? path.join(d, 'settings.json') : null
       let bash = false
       if (r.bash === true && settings) { try { bash = sandboxClosed(JSON.parse(fs.readFileSync(settings, 'utf8'))) } catch { bash = false } }
-      if (fs.existsSync(path.join(d, 'config.json'))) mcp = { config: path.join(d, 'config.json'), allow: (r.allow || []).map(String), deny: (r.deny || []).map(String), settings, bash }
+      if (fs.existsSync(path.join(d, 'config.json'))) mcp = { config: path.join(d, 'config.json'), allow: (r.allow || []).map(String), deny: (r.deny || []).map(String), settings, bash, full: r.full === true && !!settings }
     } catch { /* gone: none */ }
   }
   return { dirs: (dirs || []).filter((d) => !runs.includes(d)), mcp }
@@ -181,9 +184,20 @@ export const AGENTS = [
     // your own settings and Bridge AI's for it, never its folders' own, Bridge AI's in one file given
     // once (keptFlags above: its run's own, else KEPT_FILE).
     access: (lvl, o = {}) => {
-      if (lvl !== 'read' && lvl !== 'change') return lvl === 'edits' ? ['--permission-mode', 'acceptEdits'] : lvl === 'full' ? ['--permission-mode', 'bypassPermissions'] : []
+      if (lvl !== 'read' && lvl !== 'change' && lvl !== 'owner') return lvl === 'edits' ? ['--permission-mode', 'acceptEdits'] : lvl === 'full' ? ['--permission-mode', 'bypassPermissions'] : []
       const { dirs, mcp } = mcpOf(o.dirs)
       const add = dirs.length ? ['--add-dir', ...dirs] : []
+      // A bot's session for you alone, its When You Ask: Full Access on (frontdesk.js): as your own
+      // Claude Code in its folders, every tool of its own allowed (FULL_TOOLS, Bash among them, no
+      // sandbox) and nothing asked (dontAsk: what isn't allowed, an ask rule of yours, a protected path,
+      // a removal of a critical path, a question for you, is refused rather than waiting on a prompt
+      // nobody sees), with its MCP servers and Bridge AI's tools for it, your own settings and its run's
+      // file (its hooks: a push held for you, a copy of each file before an edit for Undo). Only for a
+      // run whose file Bridge AI wrote for it so (rules.json full); else it only reads.
+      if (lvl === 'owner') {
+        if (!mcp?.full) return ['--tools', 'Read,Grep,Glob', ...add, ...mcpFlags(mcp), '--permission-mode', 'dontAsk', '--strict-mcp-config', ...keptFlags(mcp)]
+        return ['--allowedTools', ...FULL_TOOLS, ...mcp.allow, ...add, ...mcpFlags(mcp, { allowed: false }), '--permission-mode', 'dontAsk', '--strict-mcp-config', ...keptFlags(mcp)]
+      }
       // (A session's commands: Bash, only while its settings file keeps it in Claude Code's sandbox,
       // closed, sandboxClosed. Never allowed by a rule of ours: run by the sandbox's auto-allow, so
       // one it doesn't hold is refused (dontAsk).)

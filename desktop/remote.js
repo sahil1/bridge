@@ -68,8 +68,10 @@ function displayFor(screens, displays, primary) {
 // restart(): reopen this app (main.js), asked for by a device that found no screens to share.
 // allowScreen(): System Settings at Screen & System Audio Recording, with the tile beside it, asked for
 // by a device macOS doesn't let see this screen. power: Electron's powerSaveBlocker (none in tests);
-// wake(): the display woken if it's asleep (main.js), as someone starts viewing it.
-function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, session, nativeTheme, URL_BASE, preload, fetch, platform = process.platform, keyFor, sizes = null, restart = () => {}, allowScreen = () => {}, power = null, wake = () => {}, listMs = LIST_MS }) {
+// wake(): the display woken if it's asleep (main.js), as someone starts viewing it. taken(): someone
+// views this screen, so the capture page takes it (main.js: macOS's picker for Watch a screen isn't
+// used after that, until the app restarts).
+function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, session, nativeTheme, URL_BASE, preload, fetch, platform = process.platform, keyFor, sizes = null, restart = () => {}, allowScreen = () => {}, power = null, wake = () => {}, taken = () => {}, listMs = LIST_MS }) {
   const MAC = platform === 'darwin'
   let capture = null
   let badge = null
@@ -191,6 +193,7 @@ function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, ses
   // as it is), and kept awake while they do.
   let awake = null
   function viewing(on) {
+    if (on) { try { taken() } catch { /* only said */ } }
     if (on && awake == null) { try { wake() } catch { /* not here */ } awake = power ? power.start('prevent-display-sleep') : -1 }
     else if (!on && awake != null) { if (awake >= 0) try { power.stop(awake) } catch { /* stopped */ } awake = null }
   }

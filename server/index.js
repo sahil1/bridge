@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { randomInt, randomUUID } from 'node:crypto'
-import { transcript, earlier, replyDiffs, markUndone, preview, locate, imageFrom } from './transcripts.js'
+import { transcript, earlier, replyDiffs, markUndone, preview, locate, imageFrom, written } from './transcripts.js'
 import { listSubagents, runningFor, forgetExcept } from './subagents.js'
 import { ttyHandler } from './tty.js'
 import { attachHandler } from './attach.js'
@@ -1187,18 +1187,21 @@ async function launchHelper({ kind, cwd, own, label, space, prompt, access, dirs
   const where = ws ? { workspaceId: ws.id } : { newSpace: space }
   if (access === 'read' && !readOnly(kind)) throw new Error(`${adapter(kind).label} can't be started read-only: answer with Claude Code or Codex`)
   if (access === 'change' && !canChange(kind)) throw new Error(`${adapter(kind).label} can't make a bot's change held to its folder: changes need Claude Code`)
+  // (A bot's session for you alone with Full Access: Claude Code only, agents.js access 'owner'.)
+  if (access === 'owner' && kind !== 'claude') throw new Error(`${adapter(kind).label} can't have a bot's Full Access: that needs Claude Code`)
+  const botRun = access === 'read' || access === 'change' || access === 'owner'
   // (Kept to its folders: only on a CLI that loads none of their own settings, with Bridge AI's for
   // it in their file: agents.js keptFlags.)
-  if (access === 'read' || access === 'change') {
+  if (botRun) {
     const old = await keptProblem(kind)
     if (old) throw new Error(old)
     writeKeptSettings()
   }
   // (A read-only one, a bot's answer, is started as it is: its folders were checked, and it isn't
   // work of yours to remember the folder for.)
-  if (!own && !fork && access !== 'read' && access !== 'change') return { ...(await launchFrom({ kind, cwd, label, ...where, prompt, effort: 'suggest', access })), session: f.session || '' }
+  if (!own && !fork && !botRun) return { ...(await launchFrom({ kind, cwd, label, ...where, prompt, effort: 'suggest', access })), session: f.session || '' }
   if (!(await installed()).some((k) => k.kind === kind)) throw notInstalled(kind)
-  const out = await launchAgent({ kind, cwd, label, workspaceId: ws?.id || null, newSpace: ws ? undefined : space, prompt, access, dirs: access === 'read' || access === 'change' ? dirs : undefined, fork, ...(resume && (access === 'read' || access === 'change') ? { resume } : {}), effort: 'suggest', ...(model ? { model, pinModel: true } : {}), ...((access === 'read' || access === 'change') && env ? { env } : {}) })
+  const out = await launchAgent({ kind, cwd, label, workspaceId: ws?.id || null, newSpace: ws ? undefined : space, prompt, access, dirs: botRun ? dirs : undefined, fork, ...(resume && botRun ? { resume } : {}), effort: 'suggest', ...(model ? { model, pinModel: true } : {}), ...(botRun && env ? { env } : {}) })
   pushFleet()
   return { ...out, session: f.session || '' }
 }
@@ -1451,12 +1454,16 @@ app.get('/api/search', wrap(async (req) => {
   if (fromCloud.length) { out.results = [...fromCloud, ...out.results]; out.total = (out.total || 0) + fromCloud.length }
   return out
 }))
+// never: an agent closed before it got as far as a conversation (its log was never written), which
+// Resume starts fresh, as History says.
 app.get('/api/archive', wrap(async () => {
   const live = await liveBySession()
-  return { items: archive.all().map((x) => ({ ...x, paneId: live[x.sessionId] || null, cwd: x.cwd?.replace(os.homedir(), '~'), fullCwd: x.cwd })) }
+  return { items: archive.all().map((x) => ({ ...x, paneId: live[x.sessionId] || null, cwd: x.cwd?.replace(os.homedir(), '~'), fullCwd: x.cwd, ...(!live[x.sessionId] && written(x) === false ? { never: true } : {}) })) }
 }))
 app.delete('/api/archive/:id', wrap((req) => { archive.remove(req.params.id); return { ok: true } }))
-// Open a past conversation again, with its history: in its old space if that's still open.
+// Open a past conversation again, with its history: in its old space if that's still open. One
+// that never got as far as a conversation has none to resume (an agent closed before its first
+// message): it starts fresh under its name, and says so (fresh).
 app.post('/api/sessions/resume', wrap(async (req) => {
   const { kind, sessionId, cwd, label, workspace } = req.body || {}
   if (!adapter(kind).resume || !/^[\w-]{8,64}$/.test(String(sessionId || ''))) throw new Error("That conversation can't be resumed")
@@ -1472,10 +1479,11 @@ app.post('/api/sessions/resume', wrap(async (req) => {
   if (!(await exists(dir))) throw new Error(`Its folder is gone: ${cwd}`)
   const ws = workspace ? (await rt.fleet()).workspaces.find((w) => w.label === workspace) : null
   const model = forLaunch(kind, sessionId) // the model you last picked for it, if any
-  const out = await launchAgent({ kind, cwd: dir, label: String(label || path.basename(dir)).slice(0, 60), workspaceId: ws?.id || null, newSpace: ws ? undefined : (workspace || 'Resumed'), resume: sessionId, setup: back?.setup || undefined, model, pinModel: !!model })
+  const fresh = written({ kind, sessionId, cwd: dir }) === false
+  const out = await launchAgent({ kind, cwd: dir, label: String(label || path.basename(dir)).slice(0, 60), workspaceId: ws?.id || null, newSpace: ws ? undefined : (workspace || 'Resumed'), ...(fresh ? {} : { resume: sessionId }), setup: back?.setup || undefined, model, pinModel: !!model })
   archive.removeSession(sessionId)
   pushFleet()
-  return out
+  return fresh ? { ...out, fresh: true } : out
 }))
 // A copy of an agent's conversation in a new tab next to it, to try another way.
 app.post('/api/agents/:pane/fork', wrap(async (req) => {
@@ -2128,6 +2136,8 @@ app.post('/api/meetings', wrap(async (req) => { prompt = null; const m = await m
 // Before a recording starts: the meeting it would carry on, one that stopped when Bridge AI closed
 // (meetings.js carryOn), for the app to offer Resume recording first. event: the one it's for.
 app.post('/api/meetings/carry-on', wrap((req) => ({ meeting: meetings.carryOn({ event: req.body?.event || null }) })))
+// Watch a screen: how each try went, a line in this log (meetings.js screenLine).
+app.post('/api/meetings/screen-log', wrap((req) => { console.log(meetings.screenLine(req.body || {})); return { ok: true } }))
 // Several meetings as one (meetings.js combine): a combined meeting with an overview across them;
 // they stay as they are.
 app.post('/api/meetings/combine', wrap((req) => meetings.combine([].concat(req.body?.ids || []).map(String).slice(0, 100), { title: req.body?.title })))
@@ -4462,7 +4472,7 @@ async function signInKind(kind) {
 // What a bot may do, in brief, for the line that sums up its Access and the Bots overview's cards
 // (src/components/bots/access.js says it): who may ask (how many named), its folders, its memory,
 // what it may change, how many MCP servers, what answers, its limits. Never who the people are.
-const accessOf = (b) => ({ who: b.who, askers: b.askers.length, readsFrom: b.readsFrom, memory: b.memory, changes: b.changes, writesTo: b.writesTo, trusted: b.trusted.length, trustYou: b.trustYou, handsTo: b.handsTo.length, mcp: b.mcp.length, answerers: b.answerers, limits: b.limits })
+const accessOf = (b) => ({ fullAccess: b.fullAccess !== false, who: b.who, askers: b.askers.length, readsFrom: b.readsFrom, memory: b.memory, changes: b.changes, writesTo: b.writesTo, trusted: b.trusted.length, trustYou: b.trustYou, handsTo: b.handsTo.length, mcp: b.mcp.length, answerers: b.answerers, limits: b.limits })
 // A bot as Settings shows it: how it's connected and why not (and the scopes its app lacks), its
 // settings and instructions, its folders as they stand, which agent answers and how it's signed in,
 // the manifest to make or update its app with, and how many questions wait. Brief (the list): how
@@ -4512,7 +4522,7 @@ async function botView(b, { brief = false } = {}) {
   const routinesNow = await routines.list().catch(() => ({ routines: [] }))
   return {
     ...base, ...v,
-    settings: { who: b.who, askers: b.askers, others: b.others, readsFrom: b.readsFrom, instructionsFile: b.instructionsFile, agent: b.agent, auto: b.auto, agentCopies: b.agentCopies, retention: b.retention, max: b.max, owner: b.owner, owners: b.owners, changes: b.changes, repo: b.repo, writesTo: b.writesTo, trustYou: b.trustYou, trusted: b.trusted, handsTo: b.handsTo, limits: b.limits, memory: b.memory, paused: b.paused, muted: b.muted, listen: b.listen, agentsStatus: b.agentsStatus, mcp: b.mcp, answerers: b.answerers, fallback: b.fallback, answerIn: b.answerIn, attachAuto: b.attachAuto, attachConfig: b.attachConfig },
+    settings: { fullAccess: b.fullAccess !== false, who: b.who, askers: b.askers, others: b.others, readsFrom: b.readsFrom, instructionsFile: b.instructionsFile, agent: b.agent, auto: b.auto, agentCopies: b.agentCopies, retention: b.retention, max: b.max, owner: b.owner, owners: b.owners, changes: b.changes, repo: b.repo, writesTo: b.writesTo, trustYou: b.trustYou, trusted: b.trusted, handsTo: b.handsTo, limits: b.limits, memory: b.memory, paused: b.paused, muted: b.muted, listen: b.listen, agentsStatus: b.agentsStatus, mcp: b.mcp, answerers: b.answerers, fallback: b.fallback, answerIn: b.answerIn, attachAuto: b.attachAuto, attachConfig: b.attachConfig },
     // (Its other bots, to hand a change to files to: each, and whether it changes files.)
     otherBots: botsStore.live().filter((x) => x.id !== b.id).map((x) => ({ id: x.id, name: x.name, description: x.description, edits: x.changes === 'edit', writesTo: x.writesTo })),
     carryOn: botsStore.CARRY_ON_MIN,

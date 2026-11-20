@@ -25,7 +25,9 @@ async function still(src, w0, h0, max = 1920) {
 }
 
 // stream: from getDisplayMedia. onPicture(blob, kind): 'auto' when it changed, 'screen' for Capture.
-export function watch(stream, { onPicture, onEnd, glance, onGlance }) {
+// onLook({ w, h, blank }): once, at the first look at it (a screen that never sends a frame never
+// has one: recording.jsx says so).
+export function watch(stream, { onPicture, onEnd, glance, onGlance, onLook }) {
   const track = stream.getVideoTracks()[0]
   const grabber = typeof ImageCapture === 'function' ? new ImageCapture(track) : null
   // A screen that doesn't change sends no new frames, and grabFrame waits for one: then the
@@ -47,6 +49,7 @@ export function watch(stream, { onPicture, onEnd, glance, onGlance }) {
   const changes = judge()
   let busy = false
   let stopped = false
+  let looked = false
 
   const frame = async () => {
     if (grabber) { try { const b = await grab(); return { src: b, w: b.width, h: b.height, done: () => b.close?.() } } catch { /* nothing new: what's showing */ } }
@@ -68,6 +71,7 @@ export function watch(stream, { onPicture, onEnd, glance, onGlance }) {
     try {
       f = await frame()
       const g = tiny(f)
+      if (!looked) { looked = true; try { onLook?.({ w: f.w, h: f.h, blank: blank(g) }) } catch { /* only said */ } }
       if (changes.look(g, Date.now())) await onPicture(await still(f.src, f.w, f.h), 'auto')
       if (onGlance && !blank(g) && glance?.()) onGlance(await still(f.src, f.w, f.h))
     } catch { /* a frame missed: next tick */ } finally { f?.done(); busy = false }

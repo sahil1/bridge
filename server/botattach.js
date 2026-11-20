@@ -359,6 +359,38 @@ function namesSay(names, { config = false } = {}) {
   return null
 }
 
+// A file or a folder a bot may make a Share Link to (frontdesk.js shareFor): in one of its folders (or
+// its outbox, given among them), checked as a file it attaches is (nothing hidden, nothing whose name
+// says keys, passwords or credentials, nothing reached through a link, never a folder where apps keep
+// settings and keys, nor one that holds keys), any kind of file (a page it made, a report), and
+// never one of its folders itself whole when that's a home folder or a drive (shares.js checks again).
+// { real, kind: 'file' | 'folder', name } or an Error with refused: true and why.
+export async function checkShare(raw, ctx = {}) {
+  const { root, names } = await locate(raw, ctx)
+  const where = rootSays(root)
+  if (where) throw no(`the folder it reads from is ${where}, where apps keep their settings and keys`)
+  if (names.some((n) => n.startsWith('.'))) throw no(names[names.length - 1].startsWith('.') ? 'it\'s hidden' : 'it\'s in a hidden folder')
+  if (names.length && secretLike(names[names.length - 1])) throw no('its name says it holds keys, passwords or credentials')
+  if (names.slice(0, -1).some((n) => secretLike(n, { folder: true }))) throw no('it\'s in a folder whose name says it holds keys, passwords or credentials')
+  let at = root
+  let st = null
+  for (const [i, name] of names.entries()) {
+    at = path.join(at, name)
+    try { st = await fsp.lstat(at) } catch { throw no('there\'s no such file or folder in the bot\'s folders') }
+    if (st.isSymbolicLink()) throw no(i === names.length - 1 ? 'it\'s a link to somewhere else' : 'it\'s reached through a link to somewhere else')
+    if (i < names.length - 1 && !st.isDirectory()) throw no('there\'s no such file or folder in the bot\'s folders')
+  }
+  if (!names.length) st = await fsp.lstat(root).catch(() => null)
+  if (!st || (!st.isFile() && !st.isDirectory())) throw no('it isn\'t a file or a folder')
+  const real = await fsp.realpath(at).catch(() => null)
+  if (!real || !within(real, root)) throw no('it\'s reached through a link to somewhere else')
+  const kept = await Promise.all((ctx.keptOut || keptOut()).map((d) => fsp.realpath(d).catch(() => path.resolve(d))))
+  if (kept.some((d) => within(real, d) || (st.isDirectory() && within(d, real)))) throw no('it\'s in a folder that holds keys, or holds one')
+  if (st.isFile() && st.nlink > 1) throw no('it\'s a hard link to a file that\'s kept elsewhere too')
+  const marks = await marked(names.map((_, i) => path.join(root, ...names.slice(0, i + 1))))
+  if (marks.includes(true)) throw no('it\'s hidden, or in a hidden folder')
+  return { real, kind: st.isDirectory() ? 'folder' : 'file', name: names[names.length - 1] || path.basename(real) }
+}
 // A file in the bot's folders, checked and read: { name, file, from, size, type, body }, or an Error
 // with refused: true and why, in words for the reply (never the folders it's in). ctx: { folders, cwd,
 // keptOut (real paths; this computer's, keptOut(), if not given), config (data and config files may

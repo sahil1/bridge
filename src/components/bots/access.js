@@ -29,7 +29,9 @@ export function accessParts(a, { start = false } = {}) {
     : count(a?.handsTo) ? t('changes nothing; hands changes to files on') : t('changes nothing')
   const servers = mcp === 1 ? t('1 MCP server') : mcp > 1 ? t('{n} MCP servers', { n: mcp }) : null
   const limits = start && a?.limits?.day ? t('{n} questions a day each', { n: a.limits.day }) : null
-  return [who, reads, memory, changes, servers, limits].filter(Boolean)
+  // (When You Ask: Full Access, server/frontdesk.js: your own asks run as your own Claude Code.)
+  const full = a?.fullAccess === true ? t('Full Access when you ask') : null
+  return [who, reads, memory, changes, servers, limits, full].filter(Boolean)
 }
 const cap = (s) => (s ? s.charAt(0).toLocaleUpperCase() + s.slice(1) : s)
 export const accessSaid = (a, o) => cap(accessParts(a, o).join(' · '))

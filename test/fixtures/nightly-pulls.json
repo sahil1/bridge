@@ -9,13 +9,16 @@
       { "subject": "Bots: git runs a bot's copies with an empty hooks folder of Bridge AI's own, and Windows' copy is closed to anything new", "files": ["server/gitready.js", "server/botwrite.js"] }
     ] },
     { "subject": "Phone: Scan QR code reads a pairing link from a picture too", "files": ["src/scan.js", "mobile/ios/BridgeAI/WebViewController.swift"] },
-    { "subject": "Merge pull request #262 from sahil1/remote-screen-pace", "commits": [
+    { "subject": "Merge pull request #902 from sahil1/remote-screen-pace", "commits": [
       { "subject": "remote-screen: the pictures' pace checked on average", "files": ["test/suites/remote-screen.mjs", "test/lib/viewer.mjs"] }
     ] },
-    { "subject": "Merge pull request #261 from sahil1/ci-windows-cache", "commits": [
+    { "subject": "Merge pull request #901 from sahil1/ci-windows-cache", "commits": [
       { "subject": "CI: PowerShell's module cache made once as a suite starts", "files": [".github/workflows/test.yml"] }
     ] },
-    { "subject": "Merge pull request #260 from sahil1/meetings-titles", "commits": [
+    { "subject": "Merge pull request #905 from sahil1/top-bar-card", "commits": [
+      { "subject": "Update card: what to do comes after the highlights", "files": ["src/components/UpdateChip.jsx"] }
+    ] },
+    { "subject": "Merge pull request #903 from sahil1/meetings-titles", "commits": [
       { "subject": "Meetings: a meeting set by hand to later on doesn't stop carrying on one Bridge AI closed", "files": ["server/meetings.js"] },
       { "subject": "Meetings: a title for each one from its calendar event", "files": ["server/meetings.js", "src/components/meetings/Meetings.jsx"] }
     ] },
@@ -33,43 +36,105 @@
     "258": {
       "title": "Next nightly: bots that change files and attach files, and bot runs kept to your own Claude Code settings",
       "branch": "nightly-next-4",
-      "body": "Combines these for the next nightly, so they go through CI once:\n\n- #252 Bots that change files: Edits Files in Its Folders, approvals bound to the exact change, held kinds, Undo, the request screen, chief → specialist hand-off; with three rounds of security review fixes, and its Linux and Windows fixes (empty folders in the plain copy, exec-form hooks on Windows, an empty hooks folder and attributes file for git instead of /dev/null, the copy's top folder locked on Windows, a Claude Code version check)\n- #255 Bots attach files from their folders (PDFs, documents, pictures), waiting for you unless Send Files From Its Folders Without Asking says otherwise; a content scan for keys and tokens; folders that now lead elsewhere shown in Needs You (Folders Not Read)\n- #257 Bot runs load only your own Claude Code settings (--setting-sources user), never a folder's own, with reads outside their folders blocked; bots need Claude Code 2.1.257 or later and say so\n- #250 Tests: the two suites that failed tonight's nightly, bots-always-on and chat-account\n- #256 Watch a screen waits for the floating card before it starts\n- (#253, Models for Each Task, follows in the next one.)\n- Tests: bots-write on Windows says what rights its agent ran with\n\nEvery Claude Code bot run gets one settings file: the read block, the deny rules for hidden and secret files, and the guard hook for runs that change files.\n\n## Tests\n\nOn the combined branch: bots-write 150 (WebKit 150), bots-files 132 (WebKit 132), settings-ui 137 (WebKit 137), all passing.\n",
+      "merged": true,
+      "body": "Combines these for the next nightly, so they go through CI once:\n\n- #252 Bots that change files: Edits Files in Its Folders, approvals bound to the exact change, held kinds, Undo, the request screen, chief → specialist hand-off; with three rounds of security review fixes, and its Linux and Windows fixes (empty folders in the plain copy, exec-form hooks on Windows, an empty hooks folder and attributes file for git instead of /dev/null, the copy's top folder locked on Windows, a Claude Code version check)\n- #255 Bots attach files from their folders (PDFs, documents, pictures), waiting for you unless Send Files From Its Folders Without Asking says otherwise; a content scan for keys and tokens; folders that now lead elsewhere shown in Needs You (Folders Not Read)\n- #257 Bot runs load only your own Claude Code settings (--setting-sources user), never a folder's own, with reads outside their folders blocked; bots need Claude Code 2.1.257 or later and say so\n- #250 Tests: the two suites that failed tonight's nightly, bots-always-on and chat-account\n- #256 Watch a screen waits for the floating card before it starts\n- #904 Remote Screen keeps its window's size between sessions\n- #906 Studio: a sheet opens at the last cell you were in\n- #909: Calendar: the week starts on the day your region starts it\n- #910: Remote Screen remembers which screen you picked\n- #911:Phone: a pairing link opens the app\n  - #907 Mail drafts keep their signature\n- #908, Calendar's week starts on Monday where you live\n- (#253, Models for Each Task, follows in the next one.)\n- Tests: bots-write on Windows says what rights its agent ran with\n\nEvery Claude Code bot run gets one settings file: the read block, the deny rules for hidden and secret files, and the guard hook for runs that change files.\n\n## Tests\n\nOn the combined branch: bots-write 150 (WebKit 150), bots-files 132 (WebKit 132), settings-ui 137 (WebKit 137), all passing.\n",
       "files": ["PRIVACY.md", "server/botattach.js", "server/botwrite.js", "server/frontdesk.js", "server/index.js", "src/components/NeedsYou.jsx", "src/components/settings/Bots.jsx", "test/suites/bots-write.mjs"]
     },
-    "252": { "files": ["server/botwrite.js", "server/botguard.mjs", "server/frontdesk.js", "src/components/settings/Bots.jsx", "test/suites/bots-write.mjs"] },
-    "255": { "files": ["PRIVACY.md", "server/botattach.js", "server/botanswer.js", "src/components/NeedsYou.jsx", "test/suites/bots-files.mjs"] },
-    "257": { "files": ["server/agents.js", "server/botanswer.js", "server/frontdesk.js", "test/suites/bots-setup.mjs"] },
-    "250": { "files": ["test/suites/bots-always-on.mjs", "test/suites/chat-account.mjs"] },
-    "256": { "files": ["test/stand-ins/screen.mjs", "test/suites/screen-watch.mjs"] },
-    "262": {
+    "252": { "title": "Bots: Edits Files in Its Folders, made safely by Bridge AI, with approval and Undo", "branch": "bots-write", "merged": true, "body": "", "files": ["server/botwrite.js", "server/botguard.mjs", "server/frontdesk.js", "src/components/settings/Bots.jsx", "test/suites/bots-write.mjs"] },
+    "255": { "title": "Bots: a file in a bot's folders goes with its answer as it is, PDFs and documents too", "branch": "bots-attach", "merged": true, "body": "", "files": ["PRIVACY.md", "server/botattach.js", "server/botanswer.js", "src/components/NeedsYou.jsx", "test/suites/bots-files.mjs"] },
+    "257": { "title": "Bots: a bot's run loads only your own Claude Code settings and Bridge AI's", "branch": "bots-no-project-settings", "merged": true, "body": "", "files": ["server/agents.js", "server/botanswer.js", "server/frontdesk.js", "test/suites/bots-setup.mjs"] },
+    "250": { "title": "Tests: the two suites that failed tonight's nightly, bots-always-on and chat-account", "branch": "flakes-nightly", "merged": true, "body": "", "files": ["test/suites/bots-always-on.mjs", "test/suites/chat-account.mjs"] },
+    "256": { "title": "Watch a screen waits for the floating card", "branch": "screen-watch-card", "merged": true, "body": "", "files": ["test/stand-ins/screen.mjs", "test/suites/screen-watch.mjs"] },
+    "904": { "title": "Remote Screen keeps its window's size between sessions", "branch": "remote-screen-size", "merged": false, "body": "", "files": ["desktop/remote.js"] },
+    "906": { "title": "Studio's sheets open at the last cell you were in", "branch": "sheet-last-cell", "merged": true, "body": "", "files": ["src/components/studio/xlsx.js"] },
+    "907": { "title": "Mail drafts keep their signature", "branch": "mail-signature", "merged": true, "body": "", "files": ["server/mail.js"] },
+    "908": { "title": "Calendar's week starts on Monday where you live", "branch": "calendar-monday", "merged": true, "body": "", "files": ["src/components/CalendarView.jsx"] },
+    "909": { "title": "Calendar: the week starts on the day your region starts it", "branch": "calendar-week-start", "merged": true, "body": "", "files": ["src/components/CalendarView.jsx"] },
+    "910": { "title": "Remote Screen remembers which screen you picked", "branch": "remote-screen-pick", "merged": false, "body": "", "files": ["desktop/remote.js"] },
+    "911": { "title": "Phone: a pairing link opens the app", "branch": "phone-link-opens", "merged": true, "body": "", "files": ["src/scan.js"] },
+    "902": {
       "title": "Remote Screen's pace checked on average, so one picture held up on the way isn't a failure",
       "branch": "remote-screen-pace",
+      "merged": true,
       "body": "remote-screen failed on the Windows nightly when one picture came late.",
       "files": ["test/suites/remote-screen.mjs", "test/lib/viewer.mjs"]
     },
-    "261": {
+    "901": {
       "title": "CI: PowerShell's module cache made once for every kit",
       "branch": "ci-windows-cache",
+      "merged": true,
       "body": "",
       "files": [".github/workflows/test.yml"]
     },
-    "260": {
+    "905": {
+      "title": "A calmer card in the top bar, what to do after what's new",
+      "branch": "top-bar-card",
+      "merged": true,
+      "body": "",
+      "files": ["src/components/UpdateChip.jsx"]
+    },
+    "903": {
       "title": "Meetings titles",
       "branch": "meetings-titles",
+      "merged": true,
       "body": "- Meetings: a meeting set by hand to later on doesn't stop carrying on one Bridge AI closed\n- Meetings: a title for each one from its calendar event\n",
       "files": ["server/meetings.js", "src/components/meetings/Meetings.jsx"]
     },
     "259": {
       "title": "Nightly notes a person would notice, and a calmer update card",
       "branch": "update-notes",
+      "merged": true,
       "body": "The update card for nightly 3.21.1-nightly.20261119.16 showed the whole version in bold over two lines.\n\n## Nightly notes (`scripts/nightly.js`)\n\n- Each commit is read with its files (`git log --name-only`).\n",
       "files": ["CONTRIBUTING.md", "scripts/nightly.js", "src/components/TopNotes.jsx", "src/components/UpdateChip.jsx", "src/i18n/de.json", "src/styles.css", "test/suites/nightly.mjs"]
     },
     "251": {
       "title": "Remote Screen starts every time, or says why with the fix; Remote Access as two steps",
       "branch": "remote-screen-steady",
+      "merged": true,
       "body": "Remote Screen didn't start on some Macs and said nothing.",
       "files": ["desktop/remote.js", "server/remote.js", "src/components/remote/Settings.jsx"]
+    }
+  },
+  "later": {
+    "log": [
+      { "subject": "Merge pull request #267 from sahil1/flakes-and-fixes", "commits": [
+        { "subject": "Tests: three flakes that couldn't be reproduced here say what happened next time", "files": ["test/suites/new-install.mjs", "test/suites/tab-strip.mjs"] },
+        { "subject": "Bots: a bot that changes files doesn't start a write run when Bridge AI runs as root", "files": ["server/botwrite.js", "test/suites/bots-write.mjs"] },
+        { "subject": "History: an agent closed before it got as far as a conversation says so in Closed agents, and starts fresh", "files": ["server/transcripts.js", "src/components/History.jsx", "src/i18n/de.json"] },
+        { "subject": "CI: WebKit's tests on two Macs, and a change to test/run.mjs runs the suites whose entry changed", "files": [".github/workflows/test.yml", "test/run.mjs", "test/lib/scope.mjs"] }
+      ] },
+      { "subject": "Merge pull request #260 from sahil1/nightly-next-5", "commits": [
+        { "subject": "Bots: a question at the top of a channel reads nobody else's messages there, only the asker's own and the bot's own posts, so nobody else's words reach it and yours goes at once", "files": ["server/frontdesk.js", "server/slackbot.js"] },
+        { "subject": "Tests: a copy put aside, leftover commands ended (detached too), no allow rule for commands", "files": ["test/suites/bots-sessions.mjs"] }
+      ] },
+      { "subject": "Merge pull request #261 from sahil1/notes-from-prs", "commits": [
+        { "subject": "Nightly notes from the pull requests merged since the last nightly", "files": [".github/workflows/nightly.yml", ".github/workflows/release.yml", "CONTRIBUTING.md", "scripts/nightly.js", "test/fixtures/nightly-pulls.json", "test/suites/nightly.mjs"] }
+      ] }
+    ],
+    "pulls": {
+      "267": {
+        "title": "Flaky tests fixed at their cause, WebKit's tests on two Macs, and Closed agents and bots-as-root fixes",
+        "branch": "flakes-and-fixes",
+        "merged": true,
+        "body": "Flaky tests fixed at their cause, the WebKit job split in two, and two small bugs.\n\n## Bugs\n\n- **Closed agents:** one closed before it got as far as a conversation (its log never written) says \"<name> never got as far as a conversation, so it starts fresh.\" with Start fresh.\n- **Bots that change files as root:** where the read-only top of a bot's staging copy doesn't stop a file being made there (root), no copy and no run.\n",
+        "files": [".github/workflows/test.yml", "server/botwrite.js", "server/transcripts.js", "src/components/History.jsx", "src/i18n/de.json", "test/lib/harness.mjs", "test/run.mjs"]
+      },
+      "260": {
+        "title": "Bots: Connections, Bots and live Sessions",
+        "branch": "nightly-next-5",
+        "merged": true,
+        "body": "Bots, rebuilt around three things: **Connections**, **Bots** and **Sessions**.\n\n## What changes\n\n- **Bots** in the sidebar opens one place with three tabs.\n  - **Connections:** each Slack, Discord or Teams app, how it stands, **Test this connection**.\n- **Time limit:** at the limit you're asked; if you don't answer, it carries on.\n",
+        "files": ["server/frontdesk.js", "server/slackbot.js", "src/components/bots/Sessions.jsx", "test/suites/bots-sessions.mjs"]
+      },
+      "261": {
+        "title": "Nightly notes from the pull requests merged since the last nightly",
+        "branch": "notes-from-prs",
+        "merged": true,
+        "body": "Nightly notes now come from the pull requests merged into main since the last nightly.\n\n- **Integration pull requests:** when a body lists others, one per line (`- #252 Bots that change files: …`), those lines are the items.\n- #252 Bots that change files: Edits Files in Its Folders\n\n## Tests\n\n- `nightly` uses a new fixture:\n  - integration pull request #258, listing #252, #255, #257 and two test-only pull requests;\n  - feature pull request #251;\n  - #259, whose title names no part;\n",
+        "files": [".github/workflows/nightly.yml", ".github/workflows/release.yml", "CONTRIBUTING.md", "scripts/nightly.js", "test/README.md", "test/fixtures/nightly-pulls.json", "test/run.mjs", "test/suites/nightly.mjs"]
+      },
+      "252": { "title": "Bots: Edits Files in Its Folders, made safely by Bridge AI, with approval and Undo", "branch": "bots-write", "merged": true, "body": "", "files": ["server/botwrite.js"] },
+      "259": { "title": "Nightly notes a person would notice, and a calmer update card", "branch": "update-notes", "merged": true, "body": "", "files": ["scripts/nightly.js", "src/components/UpdateChip.jsx"] }
     }
   }
 }

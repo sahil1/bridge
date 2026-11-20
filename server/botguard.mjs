@@ -29,6 +29,11 @@
 // written to the log as well ('b'), so a file a command changed in the copy, which no edit tool wrote
 // and so isn't in the log, is held for you rather than refused (botwrite.js collect).
 // node botguard.mjs --bash-only --log <file> --key <file> [--who <name>] [--push]
+//
+// A session with Full Access (frontdesk.js, your own asks alone) has it on commands only, with
+// --full: a push, a change to where it pushes, its settings or credentials, and GitHub's command line
+// are refused (a push waits for you: request_push); everything else runs, as in your own Claude
+// Code. Advice only: nothing else holds there.
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
@@ -41,12 +46,14 @@ let log = null
 let keyFile = null
 let who = 'the owner'
 let push = false
+let full = false
 for (let i = 1; i < argv.length; i++) {
   if (argv[i] === '--part' && argv[i + 1]) parts.push(argv[++i])
   else if (argv[i] === '--log' && argv[i + 1]) log = argv[++i]
   else if (argv[i] === '--key' && argv[i + 1]) keyFile = argv[++i]
   else if (argv[i] === '--who' && argv[i + 1]) who = argv[++i]
   else if (argv[i] === '--push') push = true
+  else if (argv[i] === '--full') full = true
 }
 const no = (why) => { process.stderr.write(`Refused: ${why}. ${root ? `You can only change files in your own copy, ${root}.` : 'You can only read here.'}\n`); process.exit(2) }
 // A command that would push or reach GitHub, or change where git sends things: refused, by its words
@@ -69,7 +76,7 @@ function command(cmd) {
   if (cmd.length > 100000) no('that command is too long to check')
   // (Line breaks, a backslash at a line's end, and quotes don't hide a word: read without them too.)
   const plain = cmd.replace(/\\\r?\n/g, ' ').replace(/['"]/g, '')
-  for (const [re, why] of PUSHES) {
+  for (const [re, why] of full ? [PUSHES[0], PUSHES[2], PUSHES[3]] : PUSHES) {
     if (re.test(cmd) || re.test(plain)) {
       process.stderr.write(`Refused: ${why}. Pushing, pull requests and GitHub wait for ${who}: ${push ? 'call your request_push tool with a title and a short summary, and they\'re asked once this turn ends' : 'nothing here can push'}.\n`)
       process.exit(2)

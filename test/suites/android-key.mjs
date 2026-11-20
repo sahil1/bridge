@@ -11,6 +11,7 @@
 // apksigner, the release never waits on it, and pull requests build it with a throwaway key. Not on
 // Windows, which has no bash (the workflow checks still run there).
 import fs from 'node:fs'
+import { placeEn } from '../../shared/places.js'
 import os from 'node:os'
 import path from 'node:path'
 import crypto from 'node:crypto'
@@ -242,7 +243,9 @@ ok(/`Bridge-AI-android\.apk`: open it on your phone to install it, or to update 
 const play = read('mobile', 'android', 'PLAY.md')
 const listing = read('mobile', 'android', 'play', 'full-description.txt') + read('mobile', 'android', 'play', 'console.md')
 const relay = read('src', 'components', 'settings', 'Relay.jsx')
-ok(/t\('Pair a device'\)/.test(relay) && /Settings › Devices › Pair a device/.test(listing) && /Settings > Devices > Pair a device/.test(listing) && !/Phone & notifications/.test(listing), 'the Play listing\'s pairing steps name the Settings section and button the computer has')
+// (The way there from the table every message takes it from, shared/places.js.)
+const way = placeEn('phone')
+ok(/t\('Pair a device'\)/.test(relay) && listing.includes(`${way} › Pair a device`) && listing.includes(`${way.replace(/ › /g, ' > ')} > Pair a device`) && !/Settings [›>] Devices [›>] Pair/.test(listing) && !/Phone & notifications/.test(listing), 'the Play listing\'s pairing steps name the Settings section and button the computer has', way)
 ok(/android-release\.p12/.test(play) && /--alias=bridge-ai/.test(play) && /Don't accept the key Google offers/.test(play) && !/accept\s+the Google-generated key/.test(play), 'PLAY.md has Play sign with the release key, so the APK and Play\'s app update each other')
 
 process.exit(done().fail ? 1 : 0)

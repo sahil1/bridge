@@ -43,7 +43,7 @@ sign-in. Real use pairs with Bridge AI on the user's computer, by QR code. Instr
 >
 > In real use, Bridge AI is the phone app for Bridge AI, a free, open-source desktop app (macOS,
 > Windows, Linux) that runs AI coding agents on the user's own computer. The phone app pairs with
-> that computer by QR code: in Bridge AI on the computer, Settings > Devices > Pair a device. Then
+> that computer by QR code: in Bridge AI on the computer, Settings > Devices & Access > Phone > Pair a device. Then
 > it shows the agents running there, and lists the ones at work on the lock screen.
 >
 > A video of pairing and the lock-screen notification: <link to an unlisted YouTube video>

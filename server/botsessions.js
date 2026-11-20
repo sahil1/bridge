@@ -227,7 +227,7 @@ export async function takeRequests(dir) {
     try { j = JSON.parse(l) } catch { continue }
     const { mac, ...rest } = j || {}
     const want = crypto.createHmac('sha256', key).update(JSON.stringify(rest)).digest('hex')
-    if (typeof mac === 'string' && mac.length === want.length && crypto.timingSafeEqual(Buffer.from(mac), Buffer.from(want)) && ['push', 'hand', 'ask'].includes(rest.t)) out.push(rest)
+    if (typeof mac === 'string' && mac.length === want.length && crypto.timingSafeEqual(Buffer.from(mac), Buffer.from(want)) && ['push', 'hand', 'ask', 'share'].includes(rest.t)) out.push(rest)
   }
   return out
 }
@@ -267,6 +267,8 @@ export function makeBotSessions({ desk, rt, guard, wrap, connect = () => {}, res
         // (Its session, once its first turn has started one: null when it's answered without one.)
         return { ...r, sid: r.sid || (await desk.sessions.soon(String(req.params.id), r.q, r.conv))?.id || null }
       }))
+      // A Share Link it asked for someone else: approve (named by its own code) or deny.
+      app.post('/api/bots/questions/:id/share', guard, wrap(async (req) => desk.shareAct(String(req.params.id), String(req.body?.act || ''), { code: req.body?.code ? String(req.body.code) : null, by: you(), via: 'app' })))
       // A push it asked for: approve (named by the commit you were shown, hash) or deny.
       app.post('/api/bots/questions/:id/push', guard, wrap(async (req) => desk.pushAct(String(req.params.id), String(req.body?.act || ''), { hash: req.body?.hash ? String(req.body.hash) : null, by: you(), via: 'app' })))
       // A new bot from what it's for and a folder: on the shared connection, reading and changing
@@ -301,11 +303,12 @@ export function makeBotSessions({ desk, rt, guard, wrap, connect = () => {}, res
         changed()
         return view(store.get(b.id))
       }))
-      // Its commands (bash: off or sandboxed) and the domains they may reach, checked, kept and in its
-      // record; then the rest of its settings, as they always were.
+      // Its commands (bash: off or sandboxed) and the domains they may reach, and When You Ask: Full
+      // Access (fullAccess, true or false), checked, kept and in its record; then the rest of its
+      // settings, as they always were.
       app.post('/api/bots/:id/settings', guard, (req, res, next) => {
         const x = req.body || {}
-        if (x.bash === undefined && x.domains === undefined) return next()
+        if (x.bash === undefined && x.domains === undefined && x.fullAccess === undefined) return next()
         try {
           const b = store.get(String(req.params.id))
           if (!b) throw bad('No such bot', 404)
@@ -328,10 +331,15 @@ export function makeBotSessions({ desk, rt, guard, wrap, connect = () => {}, res
             if (out.length > store.DOMAINS_MAX) throw bad(`At most ${store.DOMAINS_MAX} domains`)
             patch.domains = [...new Set(out)]
           }
+          if (x.fullAccess !== undefined) {
+            if (typeof x.fullAccess !== 'boolean') throw bad('Full Access is on or off')
+            patch.fullAccess = x.fullAccess
+          }
           const { before, after } = store.save(b.id, patch)
           for (const k of Object.keys(patch)) if (JSON.stringify(before[k]) !== JSON.stringify(after[k])) desk.record(b.id, 'settings.changed', { setting: k, old: before[k], new: after[k], by: you() })
           delete x.bash
           delete x.domains
+          delete x.fullAccess
           next()
         } catch (e) { res.status(e.status || 400).json({ error: e.message }) }
       })

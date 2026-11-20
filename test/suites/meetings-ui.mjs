@@ -1089,7 +1089,10 @@ process.exit(1)`)
   if (which === 'chromium') {
     await cp.locator('.mt-view .mt-resume').first().click()
     const back = await until(async () => { const m = await api(`/meetings/${Y.id}`); return m.status === 'recording' && m }, 10000)
-    ok(!!back && back.resumedFrom === 6 && await cp.locator('.mt-recbar').isVisible().catch(() => false), 'Resume recording: the same meeting records again, with its recording bar', back && [back.status, back.resumedFrom])
+    // (The server says it records as soon as it's reopened; the page shows its bar once its own
+    // recorder is going, a moment later on a slow computer.)
+    const bar = await until(() => cp.locator('.mt-recbar').isVisible().catch(() => false), 10000, 200)
+    ok(!!back && back.resumedFrom === 6 && !!bar, 'Resume recording: the same meeting records again, with its recording bar', back && [back.status, back.resumedFrom, !!bar])
     const shownTime = (await cp.locator('.mt-recbar .mt-rectime').innerText().catch(() => '')).trim()
     ok(/^0:(0[6-9]|[1-5]\d)$/.test(shownTime) && (await cp.locator('.mt-view .mt-resume').count()) === 0, 'its time carries on from where it stopped', shownTime)
     await sleep(2500)
@@ -1183,7 +1186,9 @@ process.exit(1)`)
   if (which === 'chromium') {
     await carry.locator('button', { hasText: 'Resume recording' }).click()
     const back = await until(async () => { const m = await api(`/meetings/${K.id}`); return m.status === 'recording' && m }, 10000)
-    ok(!!back && back.resumedFrom >= 5 && !back.interrupted && (await api('/meetings')).meetings.filter((x) => x.title === 'Design sync').length === 1 && await cp.locator('.mt-recbar').isVisible().catch(() => false), 'Resume recording carries on in the same meeting: no second one', back && [back.status, back.resumedFrom])
+    const bar = await until(() => cp.locator('.mt-recbar').isVisible().catch(() => false), 10000, 200)
+    const designSyncs = (await api('/meetings')).meetings.filter((x) => x.title === 'Design sync').length
+    ok(!!back && back.resumedFrom >= 5 && !back.interrupted && designSyncs === 1 && !!bar, 'Resume recording carries on in the same meeting: no second one', back && [back.status, back.resumedFrom, { interrupted: back.interrupted || null, designSyncs, bar: !!bar }])
     await sleep(2000)
     await cp.locator('.mt-recbar button', { hasText: 'Stop' }).click()
     await until(async () => (await api(`/meetings/${K.id}`)).status === 'done', 15000)
@@ -1264,9 +1269,32 @@ process.exit(1)`)
           setInterval(draw, 500)
           return cv.captureStream(4)
         }
+        // A screen that never sends a frame (frames only when asked for, and none is).
+        const dead = () => document.createElement('canvas').captureStream(0)
+        // macOS's own picker as Electron 45 has it on macOS 15 and later (window.__picker: on): the
+        // app's handler isn't asked, so it has no why to give; each ask waits on the picker, a pick
+        // (__pickerPick) answers every ask still waiting (Electron's picker devices all hear it), and
+        // closing it (__pickerClose) answers none. __pickerDead: the screen picked sends nothing.
+        // __pickerTimeout (ms, 0: none): Chromium's 10 seconds for a capture to start
+        // (VideoCaptureImpl::kCaptureStartTimeout), which Electron 45's picker spends waiting for the
+        // pick: an ask still waiting then is turned down as AbortError "Timeout starting video
+        // source" (__pickerTimedOut counts them), and a pick made while no ask waits goes nowhere.
+        window.__pickerAsks = []
+        window.__pickerGiven = []
+        window.__pickerTimeout = 0
+        window.__pickerTimedOut = 0
+        window.__pickerPick = () => { const asks = window.__pickerAsks.splice(0); for (const x of asks) { const s = window.__pickerDead ? dead() : canvas(); window.__pickerGiven.push(s); x.resolve(s) } return asks.length }
+        window.__pickerClose = () => {}
         // A no as the browser gives it ({ name, message }), or { hang }: the picker up until __screenGive().
         md.getDisplayMedia = async () => {
           window.__screenAsks++
+          if (window.__picker) {
+            return new Promise((resolve, reject) => {
+              const x = { resolve }
+              window.__pickerAsks.push(x)
+              if (window.__pickerTimeout) setTimeout(() => { const i = window.__pickerAsks.indexOf(x); if (i < 0) return; window.__pickerAsks.splice(i, 1); window.__pickerTimedOut++; reject(new DOMException('Timeout starting video source', 'AbortError')) }, window.__pickerTimeout)
+            })
+          }
           const f = window.__screenFail.shift()
           if (f?.hang) return new Promise((resolve) => { window.__screenGive = () => { window.__given = canvas(); resolve(window.__given) } })
           if (f) throw new DOMException(f.message, f.name)
@@ -1383,6 +1411,90 @@ process.exit(1)`)
     await q.evaluate(() => window.__screenGive())
     await card3
     ok(!!(await until(() => card.locator('.fc-modes .fc-chip', { hasText: 'Watching' }).isVisible(), 6000)) && (await cardErr.count()) === 0, 'and once a screen is picked, Watching', await card.locator('.float-card').innerText({ timeout: 1000 }).catch(() => ''))
+
+    // ---------- macOS's own picker, as Electron 45 has it on macOS 15 and later ----------
+    // The app's handler isn't asked there (desktop/screenpick.js install: screen-watch), so it has
+    // no why to give: the screen comes back only as getDisplayMedia's answer, a picker closed with
+    // nothing picked says nothing, and Chromium times the capture out while the picker is up (the
+    // owner's case, below). From the card: Picking…, with Cancel there too, not Picking
+    // for ever (the card had no way out); asked again and picked, it's watched and its pictures
+    // come, and the first ask, which hears the same pick, is let go. A picker that never answers is
+    // said on the meeting and the card after a while, with Watch a screen there again, and a pick
+    // that comes after is still watched; a screen picked that sends nothing is said. Each try is a
+    // line in the server's log: from where, how, and how it went.
+    const lines = () => kit.log().split('\n').filter((l) => /^Watch a screen #/.test(l))
+    const logged = (re, ms = 8000) => until(() => lines().find((l) => re.test(l)), ms)
+    // Pictures sent to the meeting (kept or not: the server keeps one only when its words are new).
+    let sent = 0
+    q.on('request', (r) => { if (r.method() === 'POST' && /\/api\/meetings\/[^/]+\/captures/.test(r.url())) sent++ })
+    await bar.locator('button', { hasText: 'Stop watching the screen' }).click()
+    await q.evaluate(() => {
+      window.__picker = true
+      window.__pickerDead = false
+      window.__bridgePickWait = 3000
+      window.__bridgeLookWait = 20000
+      window.bridgeApp = { desktop: true, platform: 'darwin', screenWhy: async () => null, screenHow: async () => ({ picker: true, off: null }), restart: async () => true }
+    })
+    const picking = card.locator('.fc-modes .fc-chip', { hasText: 'Picking…' })
+    const cardCancel = card.locator('.fc-modes .fc-chip', { hasText: 'Cancel' })
+    await until(() => chip.isVisible(), 5000)
+    await chip.click()
+    const p1 = fromCard()
+    ok(!!(await until(() => picking.isVisible(), 5000)) && await cardCancel.isVisible().catch(() => false), "macOS's picker up, from the card: Picking…, and Cancel beside it", await card.locator('.fc-modes').innerText().catch(() => ''))
+    await shot(card, `${tag}watch-screen-card-picking`)
+    await q.evaluate(() => window.__pickerClose())
+    await cardCancel.click()
+    ok(!!(await until(() => chip.isVisible(), 5000)) && !!(await until(() => bar.locator('button', { hasText: 'Watch a screen' }).isVisible(), 5000)), 'the picker closed with nothing picked (it never answers): Cancel on the card, and Watch screen there and on the meeting again', await card.locator('.fc-modes').innerText().catch(() => ''))
+    ok(!!(await logged(/from the floating card via macOS's picker: cancelled after [\d.]+ s, nothing picked$/)), "the try's line in the server's log: cancelled", lines().slice(-3))
+    await chip.click()
+    const p2 = fromCard()
+    ok(!!(await until(() => picking.isVisible(), 5000)), 'asked again from the card: Picking…')
+    const sentBefore = sent
+    const answered = await q.evaluate(() => window.__pickerPick())
+    await Promise.all([p1, p2])
+    ok(answered === 2 && !!(await until(() => card.locator('.fc-modes .fc-chip', { hasText: 'Watching' }).isVisible(), 6000)) && !!(await until(() => q.evaluate(() => window.__pickerGiven[0].getVideoTracks()[0].readyState === 'ended' && window.__pickerGiven[1].getVideoTracks()[0].readyState === 'live'), 4000)), 'picked: watched, and the cancelled ask, given the same pick, let go', await q.evaluate(() => window.__pickerGiven.map((s) => s.getVideoTracks()[0].readyState)))
+    // (The first picture waits for a few looks, two seconds apart: changes.js WARM.)
+    const first = await logged(/from the floating card via macOS's picker: picked a [^;]* after [\d.]+ s; first look [\d.]+ s later, first picture [\d.]+ s later$/, 25000)
+    ok(!!first && !!(await until(() => sent > sentBefore, 5000)), 'its pictures come, sent to the meeting, and its line says when its first look and first picture came', { line: first, sent, lines: lines().slice(-3) })
+    ok(!!(await logged(/via macOS's picker \(a later line\): picked a .* let go: it was cancelled or asked for again meanwhile$/)), "and the cancelled one's pick, let go, a line of its own", lines().slice(-3))
+    // The owner's case (20 Nov, a Teams call): a screen picked after Chromium's 10 seconds for a
+    // capture to start (1.5 s here). Electron 45's picker is up while the capture starts, so the ask
+    // is turned down as AbortError "Timeout starting video source" before the pick: it was said as
+    // "Nothing was picked in macOS's picker", and the pick went nowhere. Now it's asked again, and
+    // the pick is watched.
+    await bar.locator('button', { hasText: 'Stop watching the screen' }).click()
+    await q.evaluate(() => { window.__pickerTimeout = 1500; window.__pickerTimedOut = 0; window.__bridgeReaskMs = 300; window.__bridgePickWait = 8000 })
+    await bar.locator('button', { hasText: 'Watch a screen' }).click()
+    ok(!!(await until(() => q.evaluate(() => window.__pickerTimedOut >= 1 && window.__pickerAsks.length === 1), 6000)) && !/Nothing was picked/.test(await bar.innerText().catch(() => '')) && await bar.locator('button', { hasText: 'Picking a screen…' }).isVisible(), "the pick slower than a capture's time to start: the ask that timed out isn't said as nothing picked, and the screen is asked for again, the picker up", { bar: await text(bar), timedOut: await q.evaluate(() => window.__pickerTimedOut) })
+    await q.evaluate(() => window.__pickerPick())
+    ok(!!(await until(() => bar.locator('button', { hasText: 'Capture' }).isVisible(), 6000)) && !/Nothing was picked/.test(await bar.innerText().catch(() => '')), 'picked after it: watched, not "Nothing was picked in macOS\'s picker"', await text(bar))
+    await bar.locator('button', { hasText: 'Stop watching the screen' }).click()
+    ok(!!(await logged(/from the recording bar via macOS's picker: picked a [^;]* after [\d.]+ s, asked again [1-9]\d* times? as Chromium's 10 s to start ran out; stopped/)), 'and in the log: picked, asked again as the time to start ran out', lines().slice(-2))
+    await q.evaluate(() => { window.__pickerTimeout = 0; window.__bridgePickWait = 3000 })
+    // Nothing from the picker for a while (closed, or out of sight): said, Watch a screen again.
+    await bar.locator('button', { hasText: 'Watch a screen' }).click()
+    ok(!!(await until(() => bar.locator('button', { hasText: 'Picking a screen…' }).isVisible(), 2500)), 'Watch a screen on the meeting: Picking a screen…')
+    ok(await shows(/^macOS's picker hasn't given a screen\. If it closed or you can't see it, click Watch a screen to open it again\./, note) && await bar.locator('button', { hasText: 'Watch a screen' }).isVisible() && !!(await until(async () => /^macOS's picker hasn't given a screen\./.test(await cardErr.innerText().catch(() => '')), 5000)), "a picker that doesn't answer: said on the meeting and the card, with Watch a screen there again, not Picking for ever", await text(bar))
+    ok(!!(await logged(/from the recording bar via macOS's picker: no answer from the picker after [\d.]+ s/)), 'and in the log: no answer', lines().slice(-2))
+    // A pick that comes after: still watched, and what was said goes.
+    await q.evaluate(() => window.__pickerPick())
+    ok(!!(await until(() => bar.locator('button', { hasText: 'Capture' }).isVisible(), 6000)) && !!(await until(async () => (await note.count()) === 0 && (await cardErr.count()) === 0, 4000)), 'picked after all: watched, and what the meeting and the card said gone', await text(bar))
+    // A screen picked that sends nothing at all: said, with what to do.
+    await bar.locator('button', { hasText: 'Stop watching the screen' }).click()
+    ok(!!(await logged(/from the recording bar via macOS's picker \(a later line\): picked a [^;]* after [\d.]+ s; stopped/)), 'and in the log: picked, after its no-answer line (stopped before its first picture)', lines().slice(-2))
+    // (WebKit's canvas stream sends a first frame even when asked for none: Chromium's stands in.)
+    if (which === 'webkit') skip('a screen picked that sends nothing: said on the meeting, with what to do, and in the log', "WebKit's canvas stream always sends a first frame")
+    else {
+      await q.evaluate(() => { window.__pickerDead = true; window.__bridgeLookWait = 3000 })
+      await bar.locator('button', { hasText: 'Watch a screen' }).click()
+      await until(() => q.evaluate(() => window.__pickerAsks.length === 1), 4000)
+      await q.evaluate(() => window.__pickerPick())
+      ok(await shows(/^Nothing has come from .+ since it was picked\. Click Stop watching the screen, then Watch a screen to pick it again\./, note) && !!(await logged(/via macOS's picker: picked a [^;]* after [\d.]+ s; no look at it in [\d.]+ s: nothing came from it$/)), 'a screen picked that sends nothing: said on the meeting, with what to do, and in the log', { note: await text(note), lines: lines().slice(-2) })
+      await bar.locator('button', { hasText: 'Stop watching the screen' }).click()
+    }
+    await q.evaluate(() => { window.__picker = false; window.__pickerDead = false })
+    await click(null, mac(null))
+    await until(() => bar.locator('button', { hasText: 'Stop watching the screen' }).isVisible(), 6000)
     await card.close()
 
     // Picked: watched, and nothing left saying why not.

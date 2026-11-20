@@ -89,7 +89,8 @@ try {
   const section = /Settings › ([^<]+)<\/b>/.exec(pair)?.[1]
   const button = /click <b>([^<]+)<\/b>/.exec(pair)?.[1]
   const sections = [...read(ROOT, 'src', 'components', 'Settings.jsx').matchAll(/label: tx\('([^']+)'\)/g)].map((x) => x[1])
-  ok(!!section && sections.includes(section.replace(/&amp;/g, '&')), `its pairing steps name a Settings section the computer has (${section})`, sections)
+  // (Its way there, section › tab, each as Settings names it: the page says "&", as Settings does.)
+  ok(!!section && !/&amp;/.test(section) && section.split(' › ').every((x) => sections.includes(x)), `its pairing steps name a Settings section the computer has (${section})`, sections)
   ok(!!button && read(ROOT, 'src', 'components', 'settings', 'Relay.jsx').includes(`t('${button}')`), `and the button there (${button})`)
 
   // ---------- Sending it to the App Store (npm run mobile:ios:release) ----------

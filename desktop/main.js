@@ -65,6 +65,10 @@ let startedServer = false
 let recording = false
 let recorder = null // the webContents of the window recording a meeting (bridge:recording)
 let screenPick = null // what the app answers a page asking for a screen (screenpick.js)
+// Watch a screen on macOS 15 and later: macOS's own picker, until a screen has been taken here
+// another way (screenWay: screenpick.js install, which gives it up for the rest of this run).
+const MAC_PICKER = IS_MAC && Number(String(process.getSystemVersion?.() || '0').split('.')[0]) >= 15
+let screenWay = null
 let quitting = false
 let reopened = 0 // when the window was last opened again after its page went away
 
@@ -1148,6 +1152,13 @@ ipc.handle('bridge:recording', (e, on) => {
 })
 // Why the app just said no to a screen this page asked for (screenpick.js), for it to say.
 ipc.handle('bridge:screen-why', (e) => (fromApp(e) && screenPick ? screenPick.why(e.sender.id) : null))
+// How a screen this page asks for is answered, for what it says and its line in the log: macOS's own
+// picker, or the app's own answer (off: why macOS's picker isn't used for the rest of this run).
+ipc.handle('bridge:screen-how', (e) => (fromApp(e) && screenWay ? screenWay.how() : null))
+// macOS's picker given up until Bridge AI restarts (why: 'remote'), from the next screen asked for.
+function noPicker(why) {
+  if (screenWay?.off(why)) console.log(`Watch a screen: macOS's picker isn't used until Bridge AI restarts (${why}): the app gives the whole main screen instead`)
+}
 
 // Quit because you quit it (the menu, ⌘Q, the Dock), not to reopen nor as the computer shuts down:
 // the server is told first (a moment at most), so none of your devices opens Bridge AI here again
@@ -1192,13 +1203,26 @@ app.whenReady().then(async () => {
     cb(pages.permits(perm, { url: d.requestingUrl || wc.getURL(), mainFrame: d.isMainFrame !== false }))
   })
   // Watching a screen in a meeting: macOS's own picker (macOS 15 and later), where you pick the
-  // window being shared. Before macOS 15: the whole main screen, which macOS asks to allow (Screen
-  // Recording) the first time. Recording the screen too, on Windows: with what the computer plays
-  // (the call's sound), which the page asks for there (src/components/meetings/recording.jsx).
-  // A no says why to the page that asked (screenpick.js, bridge:screen-why).
+  // window or screen being shared, and which needs no Screen Recording. Electron 45 shows it itself
+  // and doesn't ask the handler then (lib/browser/api/session.ts answers with the picker's own
+  // source), so the page hears only getDisplayMedia's answer: the screen, or Chromium's timeout
+  // while the picker is still up, when it asks again (src/components/meetings/recording.jsx).
+  // Before macOS 15: the whole main screen, which macOS asks to allow (Screen Recording) the first
+  // time. Recording the screen too, on Windows: with what the computer plays (the call's sound),
+  // which the page asks for there (src/components/meetings/recording.jsx). A no says why to the
+  // page that asked (screenpick.js, bridge:screen-why).
+  // Electron 45's picker is a patch of its own to Chromium (feat_allow_usage_of_sccontentsharingpicker_
+  // on_supported_platforms.patch) that counts the screens taken in the whole app, and every
+  // ScreenCaptureKit capture there joins it: each one's end counts one down and leaves it listening
+  // to the picker, while only a picker's start counts one up. So once a screen has been taken here
+  // another way (Remote Screen's capture page: chromeMediaSource 'desktop'), macOS's picker can take
+  // a pick and start nothing, or stop a screen it gave (electron/electron#45306 and #51571, and the
+  // repro of #51243, which replaced the patch in Electron 46 and later). From then until Bridge AI
+  // restarts, a screen asked for is the app's own answer (screenpick.js: the whole main screen, with
+  // Screen Recording, which Remote Screen needed already): remote.js says when (taken).
   screenPick = screenpick.create({ desktopCapturer, systemPreferences, permits: pages.permits })
   const askedBy = (f) => { try { return f ? electron.webContents.fromFrame(f)?.id ?? null : null } catch { return null } }
-  session.defaultSession.setDisplayMediaRequestHandler((req, cb) => screenPick.handler(req, cb, askedBy(req.frame)), { useSystemPicker: true })
+  screenWay = screenpick.install({ session: session.defaultSession, handler: (req, cb) => screenPick.handler(req, cb, askedBy(req.frame)), picker: MAC_PICKER })
   // Right-click: spelling suggestions, Cut, Copy and Paste, in every window from here on.
   contextMenu.attach({ app, Menu, clipboard: electron.clipboard, session })
   buildMenu()
@@ -1216,6 +1240,7 @@ app.whenReady().then(async () => {
     allowScreen: () => { shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture').catch(() => {}); showTile('screen').catch(() => {}) },
     power: powerSaveBlocker,
     wake: () => { if (IS_MAC) execFile('/usr/bin/caffeinate', ['-u', '-t', '2'], { timeout: 5000 }, () => {}) },
+    taken: () => noPicker('remote'),
   })
   watchFleet()
   watchCalls()
