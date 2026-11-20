@@ -156,6 +156,8 @@ const SUITES = [
   // heard, replies, rate limits, reconnecting and resuming (Discord), every token checked (Teams).
   { name: 'discord-client', build: null, covers: [/^server\/(discordbot|connector)\.js$/, /^test\/stand-ins\/discord\.mjs$/] },
   { name: 'teams-client', build: null, covers: [/^server\/(teamsbot|teamsapp|connector)\.js$/, /^test\/stand-ins\/teams\.mjs$/] },
+  // Test this connection and linking you there by a code (server/conncheck.js).
+  { name: 'conn-check', build: null, covers: [/^server\/(conncheck|connections|connhub|connector|slackbot|discordbot|teamsbot|frontdesk|bots|index)\.js$/, /^test\/stand-ins\/(slack|discord|helper-claude)\.(mjs|cjs)$/] },
   // Bots in Discord and Teams, end to end: set up in Settings › Bots › Where It Answers, questions
   // answered, who's refused, commands, memory, limits, pause, a change, the record naming each.
   { name: 'discord-bot', build: 'dist', browser: true, minutes: 8, covers: [/^server\/(frontdesk|discordbot|connector|bots|botmemory|botchanges|trace|index)\.js$/, /^src\/components\/settings\/(Bots\.jsx|bots\.css)$/, /^test\/stand-ins\/(discord\.mjs|helper-claude\.cjs|gh\.cjs)$/, /^test\/lib\/bots\.mjs$/] },

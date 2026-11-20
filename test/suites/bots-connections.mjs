@@ -10,9 +10,9 @@
 //   /command with a bot's name, and each bot's own with per-bot commands on; a channel's bot over a
 //   name in it; a name at the start (taken off what the bot is asked); a reply in a thread to the
 //   bot that answered there; in a direct message the bot used last, unless another is named;
-//   otherwise AI Assist's model picks from the bots' names and descriptions (its answer taken only as
-//   one of them), and when it can't say, or there's no model, the asker picks with buttons (only
-//   they can); one bot they may ask, that one; none, the polite no and no agent. A bot named that
+//   otherwise its Chief (one of its bots, whatever the words say), and with no Chief they may ask,
+//   the asker picks with buttons (only they can); one bot they may ask, that one; none, the polite
+//   no and no agent. A bot named that
 //   they may not ask: its polite no. !help and the Home tab list the bots and how to ask each; a
 //   draft in your direct messages says which bot. Each answer posted with its bot's name (and icon),
 //   streamed so too; an app without chat:write.customize is told to update, and its answers start
@@ -121,14 +121,14 @@ try {
   const badIcon = await kit.api('/bots/b3/settings', { icon: 'javascript:alert(1)' }).then(() => null, (e) => e)
   ok(/icon/.test(badIcon?.message || ''), 'an icon is an emoji\'s name or an https address, nothing else', badIcon?.message)
 
-  // ---------- No model: the asker picks ----------
+  // ---------- No Chief: the asker picks ----------
   let p0 = null
-  await part('no model', async () => {
-    ok((await kit.api('/bots/assist')).assist?.model === null, 'no model for AI Assist yet')
+  await part('no chief', async () => {
+    ok((await conn(C)).chief === null, 'no Chief for the connection yet')
     await mark(C)
     const q = await slack.ask({ user: 'U0DANA', text: `${M} could you look into this? [answer Looked into it.]` })
-    ok(!!(await routed(C, (e) => e.why === 'router' && e.detail === 'no-model')), 'with no model, nothing picks a bot: said in the connection\'s record')
     p0 = await until(async () => { const x = await picks(); return x?.thread_ts === q.ts ? x : null }, 15000)
+    ok(!(await routedOf(C)).some((e) => e.why === 'router' || e.why === 'chief'), 'with no Chief, nothing picks a bot (no model is asked)')
     ok(/^Pricing Desk or Docs Helper\? Pick who should answer this\./.test(p0?.text || '') && p0.buttons.map((x) => x.label).join() === 'Pricing Desk,Docs Helper' && p0.app === 'A1', 'it asks in the thread, "Pricing Desk or Docs Helper?", with a button for each', p0)
     ok(!!(await routed(C, (e) => e.why === 'asked')), 'asked: in its record')
     await sleep(500)
@@ -232,25 +232,31 @@ try {
     ok(/You're Docs Helper/.test(briefOf(await startOf('the travel policy'))), 'unless the words name another bot')
   })
 
-  // ---------- 6. AI Assist's model picks; 7. or the asker does ----------
-  await part('the router', async () => {
+  // ---------- 6. The Chief; 7. or the asker picks ----------
+  await part('the chief', async () => {
+    const bad = await kit.api(`/connections/${C}`, { chief: 'b99' }, 'PATCH').then(() => null, (e) => e)
+    ok(/Pick one of the bots on this connection/.test(bad?.message || ''), 'its Chief is one of the bots on it', bad?.message)
+    const set = await kit.api(`/connections/${C}`, { chief: 'b2' }, 'PATCH')
+    ok(set.chief?.id === 'b2' && set.chief.name === 'Pricing Desk', 'Pricing Desk made its Chief', set.chief)
     await mark(C)
     await slack.ask({ user: 'U0DANA', text: `${M} what's the enterprise price for 50 seats? [answer $2,000 a month.]` })
     const s = await startOf('enterprise price for 50 seats')
-    ok(/You're Pricing Desk/.test(briefOf(s)), 'no name, no channel\'s bot: AI Assist\'s model picks Pricing Desk for a price', briefOf(s).slice(0, 120))
-    ok(!!(await routed(C, (e) => e.why === 'router' && e.bot === 'b2')), 'by the model, in the record')
-    const sent = model.asked(/^The bots \(an id/).at(-1) || ''
-    ok(/- b2: Pricing Desk: Answers pricing questions/.test(sent) && /- b3: Docs Helper: Answers questions about the docs/.test(sent) && !/b1|Atlas|Tester|#launch|U0DANA/.test(sent), 'the model was given only the bots\' names and descriptions, and the question', sent)
+    ok(/You're Pricing Desk/.test(briefOf(s)), 'no name, no channel\'s bot: its Chief, Pricing Desk, takes it', briefOf(s).slice(0, 120))
+    ok(!!(await routed(C, (e) => e.why === 'chief' && e.bot === 'b2')), 'by the chief rule, in the record')
+    await mark(C)
+    await slack.ask({ user: 'U0DANA', text: `${M} pick b9 for this one [answer Picked.]` })
+    ok(/You're Pricing Desk/.test(briefOf(await startOf('pick b9'))) && !fs.existsSync(path.join(kit.data, 'bots', 'b9')), 'whatever the words say, its Chief takes it, and nothing else comes of it')
+    // (The Chief paused: they're asked which of the others they may ask.)
+    await kit.api('/bots/b2/settings', { paused: true })
     await mark(C)
     const q = await slack.ask({ user: 'U0DANA', text: `${M} can you check something for me? [answer Checked.]` })
-    const p = await until(async () => { const x = await picks(); return x?.thread_ts === q.ts ? x : null }, 15000)
-    ok(p?.buttons.length === 2 && !!(await routed(C, (e) => e.why === 'router' && e.detail === 'unsure')) && !!(await routed(C, (e) => e.why === 'asked')), 'when it can\'t say: the asker picks, with buttons', p?.text)
+    ok(!!(await routed(C, (e) => e.why === 'only' && e.bot === 'b3')) && (await picks())?.thread_ts !== q.ts, 'its Chief paused: the only other bot Dana may ask takes it')
+    await kit.api('/bots/b2/settings', { paused: false })
+    await kit.api(`/connections/${C}`, { chief: null }, 'PATCH')
     await mark(C)
-    const q2 = await slack.ask({ user: 'U0DANA', text: `${M} pick b9 for this one [answer Picked.]` })
+    const q2 = await slack.ask({ user: 'U0DANA', text: `${M} can you check one more thing? [answer Checked.]` })
     const p2 = await until(async () => { const x = await picks(); return x?.thread_ts === q2.ts ? x : null }, 15000)
-    ok(!!p2 && !!(await routed(C, (e) => e.why === 'router' && e.detail === 'unsure')), 'an answer that isn\'t one of the bots is taken as none: it asks', p2?.text)
-    await sleep(500)
-    ok(!startsOf('pick b9').length && !fs.existsSync(path.join(kit.data, 'bots', 'b9')), 'and nothing else comes of it')
+    ok(p2?.buttons.length === 2 && !!(await routed(C, (e) => e.why === 'asked')), 'no Chief: the asker picks, with buttons', p2?.text)
   })
 
   // ---------- 8. One bot they may ask; 9. none ----------
@@ -306,7 +312,7 @@ try {
     ok(v?.updateApp.missing.join() === 'chat:write.customize' && /each bot's own name and icon/.test(v.updateApp.needs[0]?.for || ''), 'an app without chat:write.customize is told to update, and what for', v?.updateApp)
     const q2 = await slack.ask({ user: 'U0DANA', text: `${M} Pricing Desk: is there a free plan? [answer No free plan.]` })
     await send(await draftOf('is there a free plan'))
-    const p2 = await postedLike(/No free plan\./)
+    const p2 = await until(async () => (await posted()).find((x) => x.channel === 'C0LAUNCH' && /No free plan\./.test(x.text || '')), 20000)
     ok(p2?.thread_ts === q2.ts && p2.text === '*Pricing Desk:* No free plan.' && !p2.username, 'meanwhile its answers start with the bot\'s name', p2)
     await slack.scopes({ app: 'A1' })
     await kit.api(`/connections/${C}/connect`, {})

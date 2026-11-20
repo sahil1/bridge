@@ -372,6 +372,42 @@ try {
   await kit.api(`/bots/questions/${d10.id}`, { send: false })
   await kit.api('/bots/b1/settings', { auto: false, agentCopies: false })
 
+  // ---------- Slack's limits, and what's looked up ----------
+  await part('lookups only for what it answers', async () => {
+    const looked = () => slack.calls().filter((c) => ['users.info', 'users.list', 'conversations.info'].includes(c.method)).length
+    const top = await slack.ask({ user: 'U0DANA', text: 'Lunch at noon, anyone?' })
+    await sleep(300)
+    const n0 = looked()
+    await slack.ask({ user: 'U0EVE', thread: top.ts, text: 'Count me in.' })
+    await slack.ask({ user: 'U0SAM', thread: top.ts, text: 'Me too.' })
+    await sleep(1500)
+    ok(looked() === n0, 'replies in a thread it isn\'t answering in: nobody and no channel looked up for them', slack.calls().slice(-6).map((c) => c.method))
+    const lists = slack.calls().filter((c) => c.method === 'users.list').length
+    await slack.ask({ user: 'U0XENA', text: `${M} hi from a partner company` })
+    ok(!!(await until(async () => (await convs('b1', 'partner company'))[0]?.outcome === 'refused', 10000)), 'someone not seen before, from another company: refused')
+    ok(slack.calls().some((c) => c.method === 'users.info' && c.params.user === 'U0XENA') && slack.calls().filter((c) => c.method === 'users.list').length === lists, 'looked up on their own (users.info), not by listing the whole workspace')
+  })
+  await part('a 429 in one channel holds no other', async () => {
+    await kit.api('/bots/b1/settings', { auto: true })
+    await slack.limit({ method: 'chat.postMessage', n: 1, wait: 15, channel: 'D0DANA' })
+    await slack.ask({ user: 'U0DANA', dm: true, text: 'Secret project price? [answer Not public yet.]' })
+    await until(() => slack.calls().some((c) => c.method === 'chat.postMessage' && c.params.channel === 'D0DANA'), 30000)
+    const at = Date.now()
+    const free = await slack.ask({ user: 'U0DANA', text: `${M} Launch-day price? [answer Same as always.]` })
+    const p = await postedLike(/Same as always/, 30000)
+    ok(p?.channel === 'C0LAUNCH' && p.thread_ts === free.ts && Date.now() - at < 14000 && !(await posted()).some((x) => /Not public yet/.test(x.text)), 'held up in Dana\'s direct messages (Slack asked it to wait there), its answer in #launch goes at once', { took: Date.now() - at, p })
+    const q = await postedLike(/Not public yet/, 60000)
+    ok(q?.channel === 'D0DANA', 'and the held one goes once Slack lets it', q)
+    await kit.api('/bots/b1/settings', { auto: false })
+  })
+  await part('you there, by a code', async () => {
+    const cid = (await botOf('b2')).connections?.slack?.id
+    const r = await kit.api(`/connections/${cid}/link`, {})
+    await slack.ask({ user: 'U0OWNER', dm: true, app: 'A2', text: r.code })
+    const c = await until(async () => { const x = await kit.api(`/connections/${cid}`); return x.owner?.id === 'U0OWNER' && !x.linking ? x : null }, 10000)
+    ok(!!c && !!(await until(async () => (await posted()).find((x) => x.channel === 'D2OWNER' && x.app === 'A2' && /Linked: you're Tester here now/.test(x.text)), 10000)), 'Atlas\'s app: a code made in Bridge AI, sent to it in your direct messages, links you there', c?.owner)
+  })
+
   // ---------- Connections ----------
   const h0 = (await slack.state()).hellos
   await slack.drop()

@@ -733,10 +733,34 @@ export function makeTeams({ id = 'teams', file, say = () => {}, threads = () => 
     set({ state: 'no-tokens', why: null, endpoint: null })
   }
 
+  // Test this connection's Teams part (conncheck.js): its credentials (a token for the bot from
+  // Microsoft Entra ID), and you there, with whether Teams has told the bot how to reach you on your
+  // own (it can only once you've messaged it). Each { id, label, state, detail, fix }.
+  async function check({ owner = null } = {}) {
+    const out = []
+    if (!has()) {
+      out.push({ id: 'tokens', label: 'Tokens', state: 'fail', detail: 'No app ID, client secret and tenant yet', fix: 'Paste them from the Azure Bot\'s Configuration page and its app registration' })
+      out.push({ id: 'owner', label: 'You here', state: 'skip', detail: 'Needs the credentials first', fix: null })
+      return out
+    }
+    try {
+      tok = await signIn()
+      out.push({ id: 'tokens', label: 'Tokens', state: 'ok', detail: 'Microsoft Entra ID gave the bot a token', fix: null })
+    } catch (e) {
+      out.push({ id: 'tokens', label: 'Tokens', state: 'fail', detail: e.message, fix: 'Check the app ID, tenant ID and client secret\'s Value on the Azure Bot and its app registration' })
+      out.push({ id: 'owner', label: 'You here', state: 'skip', detail: 'Needs working credentials first', fix: null })
+      return out
+    }
+    if (!owner?.id) out.push({ id: 'owner', label: 'You here', state: 'warn', detail: 'Nobody is linked as you here: your bots don\'t know it\'s you', fix: 'Make a code under You Here, then send it to the bot in a chat of its own' })
+    else if (!users.get(String(owner.id))?.user) out.push({ id: 'owner', label: 'You here', state: 'warn', detail: `${owner.name || owner.id} is linked, but Teams hasn't told the bot how to reach you on your own yet`, fix: 'Send the bot a message in Teams once, in a chat of its own' })
+    else out.push({ id: 'owner', label: 'You here', state: 'ok', detail: `${owner.name || owner.id}, and the bot can reach you on your own`, fix: null })
+    return out
+  }
+
   return {
     id, label: 'Microsoft Teams', platform: 'teams',
     caps: { react: false, edit: true, typing: true, threads: true, history: false },
-    start, stop, state, post, edit, react, typing, whisper, context, people, channels, person, setCredentials, setEndpoint, checkEndpoint, teamsApp, forget,
+    start, stop, state, post, edit, react, typing, whisper, context, people, channels, person, setCredentials, setEndpoint, checkEndpoint, teamsApp, forget, check,
     // (For tests: how often the signing keys were read.)
     keyFetches: () => keys.fetches(),
   }

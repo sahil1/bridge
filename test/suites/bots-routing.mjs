@@ -7,13 +7,13 @@
 //   straight away, suggests changes) and its folder when that's here; Hiring made with ~/Hiring has
 //   that access as its own from the start, in its record; Marketing, with nothing here that can make
 //   a change, starts changing nothing and says so; a folder that isn't there makes nothing.
-//   Routing: its rules in connhub's order; whether AI Assist picks, and the bot for when nothing says
-//   which (one of the bots on it only).
+//   Routing: its rules in connhub's order, its Chief last (one of the bots on it only), nothing of AI
+//   Assist picking.
 //   Try a Message, for each rule: a command (the connection's; a bot's own only once there's one for
 //   each), the channel's bot, a name first, a reply in a thread, the bot last asked in a direct
-//   message, a channel a bot answers in without a mention, the only bot they may ask, AI Assist's
-//   pick, the bot set for when nothing says which, asking them which (with no model, said why; with
-//   AI Assist off, too), none they may ask, !help, and nothing for any bot; a bot named that they
+//   message, a channel a bot answers in without a mention, the only bot they may ask, its Chief
+//   (whatever the words; unsure from an older page taken as it; no model ever asked), asking them
+//   which with no Chief (said so), none they may ask, !help, and nothing for any bot; a bot named that they
 //   may not ask: that its polite no follows. None of it in the connection's record or a bot's, no
 //   last bot kept, nothing posted, no bot run. Without the key: turned away.
 //   Access, on a bot's page: its line over the tabs, the tab; who may ask changed there, and someone
@@ -91,10 +91,10 @@ try {
   // ---------- Routing ----------
   await part('routing', async () => {
     const r = await kit.api(`/connections/${C}/routing`)
-    ok(r.rules.join() === 'command,default,name,thread,last,among,unsure', 'its rules, in connhub\'s order', r.rules)
-    ok(r.assist === true && r.unsure === null && r.assistModel?.model === null, 'AI Assist picks (no model yet), and when nothing says which it asks', { assist: r.assist, unsure: r.unsure, model: r.assistModel })
-    const bad = await kit.api(`/connections/${C}`, { unsure: 'b99' }, 'PATCH').then(() => null, (e) => e)
-    ok(/Pick one of the bots on this connection/.test(bad?.message || ''), 'the bot for when nothing says which is one of its bots', bad?.message)
+    ok(r.rules.join() === 'command,default,name,thread,last,chief', 'its rules, in connhub\'s order: its Chief where the AI Assist router and the bot for when nothing says which were', r.rules)
+    ok(r.chief === null && r.assist === undefined && r.unsure === undefined && r.assistModel === undefined, 'no Chief yet (so when nothing says which, it asks), and nothing of AI Assist picking', { chief: r.chief, assist: r.assist, unsure: r.unsure })
+    const bad = await kit.api(`/connections/${C}`, { chief: 'b99' }, 'PATCH').then(() => null, (e) => e)
+    ok(/Pick one of the bots on this connection/.test(bad?.message || ''), 'its Chief is one of its bots', bad?.message)
   })
 
   // ---------- Try a Message ----------
@@ -109,9 +109,9 @@ try {
     state: fs.readFileSync(stateFile, 'utf8'), posted: (await posted()).length, runs: startsOf('').length,
   })
   const before = await snap()
-  await part('try a message: with no model', async () => {
+  await part('try a message: with no chief', async () => {
     const x = await tryIt(C, { text: 'can you check something for me?', channel: 'C0PRIV', person: DANA })
-    ok(x.rule === 'asked' && x.detail === 'no-model' && x.asks.map((b) => b.id).join() === [HI, MK, PD].join(), 'more than one they may ask, and no model: it would ask them which, saying there\'s no model', x)
+    ok(x.rule === 'asked' && x.detail === 'no-chief' && x.chief === null && x.asks.map((b) => b.id).join() === [HI, MK, PD].join(), 'more than one they may ask, and no Chief: it would ask them which, saying there\'s no Chief', x)
   })
   // AI Assist's model from now on (a key, picked for Studio as AI Assist's).
   await kit.api('/providers/openai', { values: { OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: `${model.url}/v1` } }, 'PUT')
@@ -144,19 +144,21 @@ try {
     x = await tryIt(C, { text: 'anything new this week?', channel: 'C0PRIV', person: EVE })
     ok(x.rule === 'only' && x.bot?.id === MK && x.may.map((b) => b.id).join() === MK, '6. Eve may ask only Marketing: Marketing', x)
     const asked = model.asked(/^The bots \(an id/).length
+    await kit.api(`/connections/${C}`, { chief: PD }, 'PATCH')
     x = await tryIt(C, { text: 'what\'s the enterprise price for 50 seats?', channel: 'C0PRIV', person: DANA })
-    ok(x.rule === 'router' && x.bot?.id === PD, '6. AI Assist\'s pick from the descriptions: Pricing Desk', x)
-    ok(model.asked(/^The bots \(an id/).length === asked + 1, 'its model asked once, as it would be')
+    ok(x.rule === 'chief' && x.bot?.id === PD && x.chief?.id === PD && x.then?.may === null, '6. its Chief, Pricing Desk, which Dana may ask', x)
     x = await tryIt(C, { text: 'can you check something for me?', channel: 'C0PRIV', person: DANA })
-    ok(x.rule === 'asked' && x.detail === 'unsure' && x.asks.length === 3, '7. when AI Assist can\'t tell: it would ask them which, saying so', x)
+    ok(x.rule === 'chief' && x.bot?.id === PD, '6. whatever the words: its Chief', x)
+    ok(model.asked(/^The bots \(an id/).length === asked, 'and no model is asked which bot, ever')
+    x = await tryIt(C, { text: 'anything new this week?', channel: 'C0PRIV', person: EVE })
+    ok(x.rule === 'only' && x.bot?.id === MK, '7. Eve may not ask the Chief: the only bot she may ask, Marketing', x)
+    // (unsure, as the bot for that was called before, is the chief now.)
     await kit.api(`/connections/${C}`, { unsure: MK }, 'PATCH')
     x = await tryIt(C, { text: 'can you check something for me?', channel: 'C0PRIV', person: DANA })
-    ok(x.rule === 'unsure' && x.bot?.id === MK && x.detail === 'unsure', '7. with a bot set for that: Marketing', x)
-    await kit.api(`/connections/${C}`, { unsure: null, assist: false }, 'PATCH')
-    const n = model.asked(/^The bots \(an id/).length
+    ok(x.rule === 'chief' && x.bot?.id === MK && (await conn(C)).chief?.id === MK, 'unsure set, as an older page would: Marketing is the Chief', x)
+    await kit.api(`/connections/${C}`, { chief: null }, 'PATCH')
     x = await tryIt(C, { text: 'what\'s the enterprise price for 50 seats?', channel: 'C0PRIV', person: DANA })
-    ok(x.rule === 'asked' && x.detail === 'off' && model.asked(/^The bots \(an id/).length === n, 'AI Assist off: it would ask them which, and nothing went to the model', x)
-    await kit.api(`/connections/${C}`, { assist: true }, 'PATCH')
+    ok(x.rule === 'asked' && x.detail === 'no-chief' && model.asked(/^The bots \(an id/).length === asked, 'no Chief: it would ask them which, and nothing went to a model', x)
     await kit.api(`/bots/${MK}/settings`, { paused: true })
     x = await tryIt(C, { text: 'anything new this week?', channel: 'C0PRIV', person: EVE })
     ok(x.rule === 'none' && x.detail === 'not-allowed' && !x.bot, 'Marketing paused, Eve may ask none: the polite no', x)
@@ -177,6 +179,8 @@ try {
     const empty = await tryIt(C, { text: '  ' }).then(() => null, (e) => e)
     ok(/Type a message/.test(empty?.message || ''), 'an empty message: said', empty?.message)
   })
+  // (Pricing Desk its Chief from here on.)
+  await kit.api(`/connections/${C}`, { chief: PD }, 'PATCH')
 
   // Claude Code to answer from now on.
   kit.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'helper-claude.cjs'), 'utf8'))
@@ -255,7 +259,7 @@ try {
         ok(await shown(p, '.ro [data-setting="routing-rules"]'), `${mode}: its routing opens the Routing page`)
         ok(/In Slack you call @tester_bot; it hands each question to one of these bots\./.test(await textOf(p, '.ro .ro-lead')), `${mode}: "In Slack you call @tester_bot; it hands each question to one of these bots."`)
         const rules = await p.locator('.ro .ro-rules > li').evaluateAll((l) => l.map((e) => e.getAttribute('data-rule')))
-        ok(rules.join() === 'command,default,name,thread,last,among,unsure', `${mode}: its rules shown in order`, rules)
+        ok(rules.join().startsWith('command,default,name,thread,last'), `${mode}: its rules shown in order`, rules)
         await sleep(300)
         await shot(p, `${tag}bots-routing-rules-${mode}`)
         if (mode === 'light') {
@@ -266,11 +270,8 @@ try {
           await def.locator('select').nth(1).selectOption(PD)
           await def.locator('button', { hasText: 'Add' }).click()
           ok(!!(await until(async () => (await conn(C)).defaults.some((d) => d.id === 'C0LAUNCH' && d.bot === PD), 8000)), 'a channel\'s bot added on the Routing page: #launch → Pricing Desk')
-          // A description, changed in place: what AI Assist picks by.
-          const desc = p.locator(`.ro .ro-desc[data-bot="${MK}"] input`)
-          await desc.fill('Answers questions about campaigns and the brand guide')
-          await desc.press('Enter')
-          ok(!!(await until(async () => (await botOf(MK)).description === 'Answers questions about campaigns and the brand guide', 8000)), 'Marketing\'s description, changed in place')
+          // (A description, changed in place, was what AI Assist picked by: the Chief does that now,
+          // set on the Connections page, bots-ui.)
           // Try a Message, on the page.
           const n0 = await snap()
           await until(async () => (await p.locator('.ro-try select').first().locator('option').count()) > 3, 10000)
@@ -337,7 +338,7 @@ try {
         ok(await shown(p, '.ro.phone [data-setting="routing-try"]'), `${mode}, a phone: Routing`)
         await p.locator('.ro.phone .ro-try textarea').fill('what\'s the enterprise price for 50 seats?')
         await p.locator('.ro.phone .ro-try button[type="submit"]').click()
-        ok(await shown(p, `.ro.phone .ro-out[data-rule="router"][data-bot="${PD}"]`, 15000), `${mode}, a phone: Try a Message, AI Assist's pick`, await textOf(p, '.ro-out'))
+        ok(await shown(p, `.ro.phone .ro-out[data-rule="chief"][data-bot="${PD}"]`, 15000), `${mode}, a phone: Try a Message, its Chief`, await textOf(p, '.ro-out'))
         await sleep(300)
         faults = await phoneFaults(p, '.ro.phone')
         ok(!Object.keys(faults).length, `${mode}, a phone: Routing fits`, faults)

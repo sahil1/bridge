@@ -38,12 +38,60 @@
 // screening, someone not in its server; Teams: a guest account, another organization's tenant), and
 // person() below makes sure what it gives can't be read as more than it is.
 
-export const PLATFORMS = { slack: 'Slack', discord: 'Discord', teams: 'Microsoft Teams' }
+import { makeSlack, SCOPES as SLACK_SCOPES, SHARED_SCOPES } from './slackbot.js'
+import { makeDiscord } from './discordbot.js'
+import { makeTeams } from './teamsbot.js'
+
+// ---------- The platforms, in one place ----------
+// Each platform a connection can be on, and everything about it that isn't its connector's own: its
+// name, the prefix its ids carry in the desk's records (Slack's none, so a bot's record from before
+// is as it was), what a person's and a place's id look like there (bare, as the platform gives
+// them), which of its places are public by their id alone (a Discord or Teams channel is public to
+// its server or team unless it says it's private), what it can do besides answering in place, and
+// how its connector is made (make(c, cb, o): c the connection, cb the hub's callbacks, o.file where
+// its tokens are kept, o.port a Teams listener's). A new platform (Telegram, next) is an entry here
+// and its connector: the ids, names and checks elsewhere come from this. COMING: one listed as on its
+// way, with nothing to set up yet.
+export const REGISTRY = {
+  slack: {
+    label: 'Slack', prefix: '', person: /^[UW][A-Z0-9]{2,20}$/, place: /^[CGD][A-Z0-9]{2,20}$/,
+    publicId: (id) => /^C/.test(id), dmId: (id) => /^D/.test(id),
+    caps: { files: true, stream: true, status: true, owner: true, react: true, link: true },
+    make: (c, cb, o) => makeSlack({ id: c.id, file: o.file, ...cb, wanted: c.shared ? SHARED_SCOPES : SLACK_SCOPES }),
+  },
+  discord: {
+    label: 'Discord', prefix: 'discord:', person: /^\d{1,25}$/, place: /^\d{1,25}$/,
+    publicId: () => true, dmId: () => false,
+    caps: { files: true, stream: false, status: false, owner: false, react: true, link: true },
+    make: (c, cb, o) => makeDiscord({ id: c.id, file: o.file, ...cb, webhooks: c.shared }),
+  },
+  teams: {
+    label: 'Microsoft Teams', prefix: 'teams:', person: /^[\w-]{6,64}$/, place: /^[^\s"<>]{3,300}$/,
+    publicId: () => true, dmId: () => false,
+    caps: { files: false, stream: false, status: false, owner: false, react: false, link: true },
+    make: (c, cb, o) => makeTeams({ id: c.id, file: o.file, ...cb, defaultPort: o.port }),
+  },
+}
+export const COMING = { telegram: 'Telegram' }
+const KINDS = Object.keys(REGISTRY)
+export const PLATFORMS = Object.fromEntries(KINDS.map((p) => [p, REGISTRY[p].label]))
 // What each can do besides answering in place: Slack's own features are Slack's only.
-export const CAPS = {
-  slack: { files: true, stream: true, status: true, owner: true, react: true },
-  discord: { files: true, stream: false, status: false, owner: false, react: true },
-  teams: { files: false, stream: false, status: false, owner: false, react: false },
+export const CAPS = Object.fromEntries(KINDS.map((p) => [p, REGISTRY[p].caps]))
+// A person's or a place's id as the desk keeps it, on any platform: its prefix, then its own id.
+const body = (re) => re.source.replace(/^\^/, '').replace(/\$$/, '')
+const anyOf = (k) => new RegExp(`^(${KINDS.map((p) => `${REGISTRY[p].prefix}${body(REGISTRY[p][k])}`).join('|')})$`)
+export const PERSON_ID = anyOf('person')
+export const CHANNEL_ID = anyOf('place')
+// Whether an id kept by the desk is a person's or a place's (platform: on that one only).
+export const personOk = (id, platform = null) => PERSON_ID.test(String(id ?? '')) && (!platform || platformOf(id) === platform)
+export const placeOk = (id, platform = null) => CHANNEL_ID.test(String(id ?? '')) && (!platform || platformOf(id) === platform)
+// A place everyone there can read: a channel not said to be private, of a kind public by its id.
+export const isPublic = (place) => place?.kind === 'channel' && place.private !== true && !!REGISTRY[platformOf(place.id)]?.publicId(bare(place.id))
+// A connection's connector, as its platform makes it (connections.js has the connection).
+export function makeConnector(c, cb, o = {}) {
+  const r = REGISTRY[c?.platform]
+  if (!r) throw failure(`Bridge AI can't connect to ${COMING[c?.platform] || c?.platform || 'that'} yet`, 'not_supported')
+  return r.make(c, cb, o)
 }
 // The errors the desk tries again, later (frontdesk.js TRY_AGAIN has the same).
 export const TRY_AGAIN = new Set(['ratelimited', 'offline', 'http_500', 'http_502', 'http_503', 'http_504', 'internal_error', 'fatal_error', 'service_unavailable', 'request_timeout'])
@@ -149,16 +197,17 @@ export function laterTs(a, b) {
 // cb: { id, say, threads, follows, listens }, the desk's (with ids as the desk keeps them).
 // make: { slack: (cb) => connector, discord: …, teams: … }, each given its own callbacks, with its
 // own ids.
-const OWN = (p) => (p === 'slack' ? null : `${p}:`)
+const OWN = (p) => REGISTRY[p]?.prefix || null
+const PREFIX = new RegExp(`^(${KINDS.filter((p) => REGISTRY[p].prefix).join('|')}):`)
 export const idOf = (platform, id) => (id == null ? id : OWN(platform) && !String(id).startsWith(OWN(platform)) ? `${OWN(platform)}${id}` : String(id))
-export const platformOf = (id) => { const m = /^(discord|teams):/.exec(String(id ?? '')); return m ? m[1] : 'slack' }
-export const bare = (id) => String(id ?? '').replace(/^(discord|teams):/, '')
+export const platformOf = (id) => { const m = PREFIX.exec(String(id ?? '')); return m ? m[1] : 'slack' }
+export const bare = (id) => String(id ?? '').replace(PREFIX, '')
 // The platform of a person or place kept by the desk, as words.
 export const platformName = (id) => PLATFORMS[platformOf(id)]
 
 export function combine({ id = 'bot', say = () => {}, threads = () => [], follows = () => false, listens = () => false } = {}, make = {}) {
   const parts = {}
-  for (const p of ['slack', 'discord', 'teams']) {
+  for (const p of KINDS) {
     const mk = make[p]
     if (typeof mk !== 'function') continue
     parts[p] = mk({
