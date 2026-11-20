@@ -101,7 +101,7 @@ export const githubLike = (d) => /(^|\.)(github|githubusercontent)\.com$/.test(S
 const DEFAULTS = {
   name: 'Bridge AI', description: '', who: 'named', askers: [], others: 'polite', readsFrom: [], instructionsFile: null, agent: null, auto: false, agentCopies: false, retention: '1y', max: 2,
   owner: null, owners: {}, changes: 'none', repo: null, writesTo: [], trustYou: true, trusted: [], handsTo: [], limits: LIMITS, memory: 'approve', paused: false, muted: [], listen: [], agentsStatus: false, template: null, mcp: [], answerers: null, fallback: true, draft: false, icon: null,
-  attachAuto: 'no', attachConfig: false, folderIds: {}, bash: 'off', domains: [],
+  attachAuto: 'no', attachConfig: false, folderIds: {}, bash: 'off', domains: [], fullAccess: process.env.BRIDGE_TEST_BOT_FULL_OFF !== '1',
 }
 // What it may change: nothing; a suggested change in a repository, its draft pull request opened once
 // you say so (botchanges.js); or files in its write folders (botwrite.js), at most WRITES_MAX of
@@ -175,6 +175,8 @@ function shape(id, j) {
   b.answerIn = b.answerIn === 'channel' ? 'channel' : 'thread'
   b.attachAuto = ATTACH_AUTO.includes(b.attachAuto) ? b.attachAuto : 'no'
   b.attachConfig = b.attachConfig === true
+  // (When you ask: Full Access, like your own Claude Code, unless you turned it off: frontdesk.js.)
+  b.fullAccess = typeof b.fullAccess === 'boolean' ? b.fullAccess : DEFAULTS.fullAccess
   b.bash = BASH.includes(b.bash) ? b.bash : 'off'
   b.domains = [...new Set((Array.isArray(b.domains) ? b.domains : []).map(domainOf).filter((d) => d && !githubLike(d)))].slice(0, DOMAINS_MAX)
   b.folderIds = Object.fromEntries(Object.entries(b.folderIds && typeof b.folderIds === 'object' ? b.folderIds : {}).filter(([k, v]) => b.readsFrom.includes(k) && typeof v?.real === 'string' && v.real).map(([k, v]) => [k, { real: v.real }]))

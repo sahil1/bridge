@@ -55,6 +55,7 @@ import path from 'node:path'
 import WebSocket from 'ws'
 import { writeFileAtomic, ROOT } from './paths.js'
 import { failure, masked, sleep, split, REACTIONS } from './connector.js'
+import { safeName } from './safename.js'
 
 const API = () => `${String(process.env.BRIDGE_DISCORD_URL || 'https://discord.com').replace(/\/+$/, '')}/api/v10`
 const VERSION = (() => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version } catch { return '0' } })()
@@ -130,12 +131,17 @@ function discordError(status, j) {
 
 // Discord's markup in a message, as plain words: mentions by name (the bot's own taken out),
 // channels by name, custom emoji by name, timestamps as times.
+// The people a message mentions (never this bot), as the desk weighs them: { id, name (made safe),
+// bot }.
+const mentionsOf = (list, me) => (list || []).filter((u) => u?.id && u.id !== me).slice(0, 20).map((u) => ({ id: String(u.id), name: safeName(nameOf(u, u.member)) || 'someone', ...(u.bot ? { bot: true } : {}) }))
 export function plainText(text, { me = null, mentions = [], channels = {} } = {}) {
+  // (A nickname as anyone may choose it, made safe: safename.js. The desk says "@someone" for whoever
+  // may not ask a bot: frontdesk.js mentionsSaid.)
   const names = Object.fromEntries((mentions || []).map((u) => [u.id, nameOf(u, u.member)]))
   return String(text || '')
-    .replace(/<@!?(\d+)>/g, (_, id) => (id === me ? '' : `@${names[id] || id}`))
+    .replace(/<@!?(\d+)>/g, (_, id) => (id === me ? '' : `@${safeName(names[id] || id) || 'someone'}`))
     .replace(/<@&(\d+)>/g, '@role')
-    .replace(/<#(\d+)>/g, (_, id) => `#${channels[id]?.name || id}`)
+    .replace(/<#(\d+)>/g, (_, id) => `#${safeName(channels[id]?.name || id, 80) || 'channel'}`)
     .replace(/<a?:(\w+):\d+>/g, ':$1:')
     .replace(/<t:(\d+)(?::[tTdDfFR])?>/g, (_, s) => new Date(Number(s) * 1000).toISOString())
     .replace(/[ \t]+/g, ' ').trim()
@@ -486,7 +492,7 @@ export function makeDiscord({ id = 'discord', file, say = () => {}, threads = ()
     const text = plainText(d.content, { me, mentions: d.mentions, channels: chans })
     const top = !dm && !inThread
     await hear({
-      ts: d.id, channel: parent, thread, mention, dm, from, text, ...(listen ? { via: 'listen' } : {}),
+      ts: d.id, channel: parent, thread, mention, dm, from, text, mentions: mentionsOf(d.mentions, me), ...(listen ? { via: 'listen' } : {}),
       place: dm ? { kind: 'dm', id: d.channel_id, name: null } : { kind: 'channel', id: parent, name: chans[parent]?.name || null, within: guilds[d.guild_id]?.name || null, ...(ch?.type === 12 ? { private: true } : {}) },
       at: d.timestamp || new Date().toISOString(),
       late,
@@ -522,7 +528,7 @@ export function makeDiscord({ id = 'discord', file, say = () => {}, threads = ()
     // only its own as its own words; another bot's or a webhook's: bot, its words anyone's.)
     const said = (m) => {
       const own = mine(m)
-      return { ts: m.id, person: { id: m.author?.id || null, name: nameOf(m.author, m.member) }, text: clip(plainText(m.content, { me: kept.bot?.id, mentions: m.mentions, channels: chans }), LONGEST_SAID), you: own, ...(own ? { as: m.webhook_id ? m.author?.username || null : null } : (m.author?.bot || m.webhook_id) ? { bot: true } : {}) }
+      return { ts: m.id, person: { id: m.author?.id || null, name: nameOf(m.author, m.member) }, text: clip(plainText(m.content, { me: kept.bot?.id, mentions: m.mentions, channels: chans }), LONGEST_SAID), mentions: mentionsOf(m.mentions, kept.bot?.id), you: own, ...(own ? { as: m.webhook_id ? m.author?.username || null : null } : (m.author?.bot || m.webhook_id) ? { bot: true } : {}) }
     }
     // (A post you scheduled has no message of Discord's to read back from: the latest, then.)
     const own = /^\d+$/.test(String(ts))

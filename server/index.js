@@ -1186,18 +1186,21 @@ async function launchHelper({ kind, cwd, own, label, space, prompt, access, dirs
   const where = ws ? { workspaceId: ws.id } : { newSpace: space }
   if (access === 'read' && !readOnly(kind)) throw new Error(`${adapter(kind).label} can't be started read-only: answer with Claude Code or Codex`)
   if (access === 'change' && !canChange(kind)) throw new Error(`${adapter(kind).label} can't make a bot's change held to its folder: changes need Claude Code`)
+  // (A bot's session for you alone with Full Access: Claude Code only, agents.js access 'owner'.)
+  if (access === 'owner' && kind !== 'claude') throw new Error(`${adapter(kind).label} can't have a bot's Full Access: that needs Claude Code`)
+  const botRun = access === 'read' || access === 'change' || access === 'owner'
   // (Kept to its folders: only on a CLI that loads none of their own settings, with Bridge AI's for
   // it in their file: agents.js keptFlags.)
-  if (access === 'read' || access === 'change') {
+  if (botRun) {
     const old = await keptProblem(kind)
     if (old) throw new Error(old)
     writeKeptSettings()
   }
   // (A read-only one, a bot's answer, is started as it is: its folders were checked, and it isn't
   // work of yours to remember the folder for.)
-  if (!own && !fork && access !== 'read' && access !== 'change') return { ...(await launchFrom({ kind, cwd, label, ...where, prompt, effort: 'suggest', access })), session: f.session || '' }
+  if (!own && !fork && !botRun) return { ...(await launchFrom({ kind, cwd, label, ...where, prompt, effort: 'suggest', access })), session: f.session || '' }
   if (!(await installed()).some((k) => k.kind === kind)) throw notInstalled(kind)
-  const out = await launchAgent({ kind, cwd, label, workspaceId: ws?.id || null, newSpace: ws ? undefined : space, prompt, access, dirs: access === 'read' || access === 'change' ? dirs : undefined, fork, ...(resume && (access === 'read' || access === 'change') ? { resume } : {}), effort: 'suggest', ...(model ? { model, pinModel: true } : {}), ...((access === 'read' || access === 'change') && env ? { env } : {}) })
+  const out = await launchAgent({ kind, cwd, label, workspaceId: ws?.id || null, newSpace: ws ? undefined : space, prompt, access, dirs: botRun ? dirs : undefined, fork, ...(resume && botRun ? { resume } : {}), effort: 'suggest', ...(model ? { model, pinModel: true } : {}), ...(botRun && env ? { env } : {}) })
   pushFleet()
   return { ...out, session: f.session || '' }
 }
@@ -4466,7 +4469,7 @@ async function signInKind(kind) {
 // What a bot may do, in brief, for the line that sums up its Access and the Bots overview's cards
 // (src/components/bots/access.js says it): who may ask (how many named), its folders, its memory,
 // what it may change, how many MCP servers, what answers, its limits. Never who the people are.
-const accessOf = (b) => ({ who: b.who, askers: b.askers.length, readsFrom: b.readsFrom, memory: b.memory, changes: b.changes, writesTo: b.writesTo, trusted: b.trusted.length, trustYou: b.trustYou, handsTo: b.handsTo.length, mcp: b.mcp.length, answerers: b.answerers, limits: b.limits })
+const accessOf = (b) => ({ fullAccess: b.fullAccess !== false, who: b.who, askers: b.askers.length, readsFrom: b.readsFrom, memory: b.memory, changes: b.changes, writesTo: b.writesTo, trusted: b.trusted.length, trustYou: b.trustYou, handsTo: b.handsTo.length, mcp: b.mcp.length, answerers: b.answerers, limits: b.limits })
 // A bot as Settings shows it: how it's connected and why not (and the scopes its app lacks), its
 // settings and instructions, its folders as they stand, which agent answers and how it's signed in,
 // the manifest to make or update its app with, and how many questions wait. Brief (the list): how
@@ -4516,7 +4519,7 @@ async function botView(b, { brief = false } = {}) {
   const routinesNow = await routines.list().catch(() => ({ routines: [] }))
   return {
     ...base, ...v,
-    settings: { who: b.who, askers: b.askers, others: b.others, readsFrom: b.readsFrom, instructionsFile: b.instructionsFile, agent: b.agent, auto: b.auto, agentCopies: b.agentCopies, retention: b.retention, max: b.max, owner: b.owner, owners: b.owners, changes: b.changes, repo: b.repo, writesTo: b.writesTo, trustYou: b.trustYou, trusted: b.trusted, handsTo: b.handsTo, limits: b.limits, memory: b.memory, paused: b.paused, muted: b.muted, listen: b.listen, agentsStatus: b.agentsStatus, mcp: b.mcp, answerers: b.answerers, fallback: b.fallback, answerIn: b.answerIn, attachAuto: b.attachAuto, attachConfig: b.attachConfig },
+    settings: { fullAccess: b.fullAccess !== false, who: b.who, askers: b.askers, others: b.others, readsFrom: b.readsFrom, instructionsFile: b.instructionsFile, agent: b.agent, auto: b.auto, agentCopies: b.agentCopies, retention: b.retention, max: b.max, owner: b.owner, owners: b.owners, changes: b.changes, repo: b.repo, writesTo: b.writesTo, trustYou: b.trustYou, trusted: b.trusted, handsTo: b.handsTo, limits: b.limits, memory: b.memory, paused: b.paused, muted: b.muted, listen: b.listen, agentsStatus: b.agentsStatus, mcp: b.mcp, answerers: b.answerers, fallback: b.fallback, answerIn: b.answerIn, attachAuto: b.attachAuto, attachConfig: b.attachConfig },
     // (Its other bots, to hand a change to files to: each, and whether it changes files.)
     otherBots: botsStore.live().filter((x) => x.id !== b.id).map((x) => ({ id: x.id, name: x.name, description: x.description, edits: x.changes === 'edit', writesTo: x.writesTo })),
     carryOn: botsStore.CARRY_ON_MIN,

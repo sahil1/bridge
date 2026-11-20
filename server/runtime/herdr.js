@@ -307,7 +307,7 @@ async function launchNow({ kind = 'claude', cwd, label, workspaceId, newSpace, p
   }
   if (space) { try { await cli.renameTabOfPane(out.paneId, label) } catch { /* default tab name */ } }
   notePane(out.paneId, kind, account)
-  if (access === 'read' || access === 'change') { kept[paneKey(out.paneId)] = { access, at: Date.now() }; saveKept() }
+  if (access === 'read' || access === 'change' || access === 'owner') { kept[paneKey(out.paneId)] = { access, at: Date.now() }; saveKept() }
   return setupError ? { ...out, setupError } : out
 }
 

@@ -200,7 +200,9 @@ async function keptOut(real, folder) {
   const within = (p, dir) => p === dir || p.startsWith(dir.endsWith(path.sep) ? dir : dir + path.sep)
   const keys = await Promise.all([DATA, ...['.ssh', '.gnupg', path.join('Library', 'Keychains')].map((d) => path.join(HOME, d))].map(realOf))
   const studio = await realOf(path.join(DATA, 'studio', 'files')) // Studio's own folder (decks from meetings) is yours to share
-  if (!within(real, studio) && keys.some((k) => within(real, k) || (folder && within(k, real)))) return 'Bridge AI keeps this out of links: it holds keys, or holds a folder that does. Share what\'s in it instead.'
+  // (And a copy of a file a bot made, for a link it asked for: frontdesk.js shareFor.)
+  const botShares = await realOf(path.join(DATA, 'bot-shares'))
+  if (!within(real, studio) && !within(real, botShares) && keys.some((k) => within(real, k) || (folder && within(k, real)))) return 'Bridge AI keeps this out of links: it holds keys, or holds a folder that does. Share what\'s in it instead.'
   if (folder && (real === await realOf(HOME) || path.parse(real).root === real)) return 'A whole home folder or drive can\'t be shared. Share a folder in it instead.'
   if (path.basename(real).startsWith('.')) return 'Names starting with a dot are hidden files, and aren\'t shared.'
   return null

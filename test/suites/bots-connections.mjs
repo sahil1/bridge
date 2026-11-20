@@ -37,7 +37,7 @@ const dc = await startDiscord('bots-connections')
 const tm = await startTeams('bots-connections')
 const model = await startModel('bots-connections')
 // The stand-in Slack's scopes for an app made from the shared manifest, and one made before it.
-const ALL = ['app_mentions:read', 'chat:write', 'im:history', 'im:read', 'im:write', 'users:read', 'channels:history', 'channels:read', 'groups:history', 'groups:read', 'mpim:history', 'mpim:read', 'reactions:write', 'pins:read', 'files:read', 'files:write', 'commands', 'assistant:write', 'chat:write.customize']
+const ALL = ['app_mentions:read', 'chat:write', 'im:history', 'im:read', 'im:write', 'users:read', 'users:read.email', 'channels:history', 'channels:read', 'groups:history', 'groups:read', 'mpim:history', 'mpim:read', 'reactions:write', 'pins:read', 'files:read', 'files:write', 'commands', 'assistant:write', 'chat:write.customize']
 const OLDER = ALL.filter((x) => x !== 'chat:write.customize')
 const kit = await startKit('bots-connections', {
   config: { name: 'Tester', trials: { 'slack-bot': true } },

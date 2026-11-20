@@ -378,7 +378,7 @@ const timeOf = (iso) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', 
 // a change to files with a draft shows in it, with Approve and Send or Deny while it waits, and Undo
 // once it's made.
 export function SlackItem(props) {
-  return props.it.kind === 'push' ? <PushItem {...props} /> : props.it.state === 'screened' ? <ScreenItem {...props} /> : props.it.limit?.phase === 'asking' ? <LimitItem {...props} /> : <DraftItem {...props} />
+  return props.it.kind === 'push' ? <PushItem {...props} /> : props.it.kind === 'share' ? <ShareItem {...props} /> : props.it.state === 'screened' ? <ScreenItem {...props} /> : props.it.limit?.phase === 'asking' ? <LimitItem {...props} /> : <DraftItem {...props} />
 }
 
 // The bot a card is from, which opens its session (Bots › Sessions) or, with none, its page; in the
@@ -440,6 +440,57 @@ function PushOf({ it, onDone, setNote }) {
       {problem && <p className="ny-problem" role="alert"><Icon name="alert" size={12} />{problem}</p>}
       <div className="ny-acts">
         <button type="button" className="btn small primary" disabled={busy} onClick={() => go(true)}><Icon name="check" size={12} /> {t('Approve the push')}</button>
+        <button type="button" className="btn small" disabled={busy} onClick={() => go(false)}><Icon name="x" size={12} /> {t('Deny')}</button>
+      </div>
+    </div>
+  )
+}
+
+// A bot's session asking to share a file or folder with a Share Link for someone else
+// (server/sessionmcp.js share_link, frontdesk.js shareAct): what, from where, for whom and for how
+// long, and Approve (the link is made and posted where it was asked) or Deny (they're told).
+export function ShareItem({ it, onDone, setNote }) {
+  const who = it.from?.name || t('Someone')
+  const bot = it.bot?.name || t('Your bot')
+  const sh = it.share || {}
+  return (
+    <article className="ny-item t-slack t-share yours" aria-label={t('{bot} asks to share a link {where}', { bot, where: whereOf(it) })} data-setting="ny-share">
+      <div className="ny-top">
+        <Icon name="link" size={12} />
+        <span className="ny-kind">{t('A link to approve')}</span>
+        <span className="ny-age" title={new Date(sh.at || it.at).toLocaleString()}>{ago(sh.at || it.at)}</span>
+        <span className="ny-grow" />
+        <BotLink it={it} bot={bot} />
+      </div>
+      <p className="ny-text">{t('{bot} asks to share a link for {name} {where}:', { bot, name: who, where: whereOf(it) })}</p>
+      <ShareOf it={it} onDone={onDone} setNote={setNote} />
+    </article>
+  )
+}
+function ShareOf({ it, onDone, setNote }) {
+  const [busy, setBusy] = useState(false)
+  const [problem, setProblem] = useState(null)
+  const sh = it.share || {}
+  const bot = it.bot?.name || t('Your bot')
+  const lasts = sh.lasts === 'hour' ? t('an hour') : sh.lasts === 'week' ? t('a week') : t('a day')
+  const go = async (approve) => {
+    setBusy(true)
+    setProblem(null)
+    try {
+      const out = await onDevice(null, `/bots/questions/${encodeURIComponent(it.id)}/share`, approve ? { act: 'approve', code: sh.code || null } : { act: 'deny' })
+      onDone(it)
+      setNote({ text: out.already ? t('That isn\'t waiting any more') : approve ? t('Shared: the link is posted where it was asked.') : t('Denied: nothing is shared, and {bot} is told.', { bot }) })
+    } catch (e) { setProblem(e.message) } finally { setBusy(false) }
+  }
+  return (
+    <div className="ny-push" data-setting="ny-share-of">
+      <p className="ny-said">“{sh.title}”</p>
+      <p className="muted small ny-from mono"><Icon name={sh.kind === 'folder' ? 'folder' : 'file'} size={11} /> {sh.from}</p>
+      <p className="muted small ny-from">{t('For {who}, for {lasts}', { who: sh.whoSaid || '', lasts })}{sh.mode === 'link' ? ` ${t('(with a password, sent to each of them)')}` : ''}</p>
+      <p className="muted small ny-from"><Icon name="info" size={11} /> {t('Approve, and Bridge AI makes an end-to-end encrypted link through your relay and posts it where it was asked. Stop it any time in Settings › Sharing.')}</p>
+      {problem && <p className="ny-problem" role="alert"><Icon name="alert" size={12} />{problem}</p>}
+      <div className="ny-acts">
+        <button type="button" className="btn small primary" disabled={busy} onClick={() => go(true)}><Icon name="check" size={12} /> {t('Approve the link')}</button>
         <button type="button" className="btn small" disabled={busy} onClick={() => go(false)}><Icon name="x" size={12} /> {t('Deny')}</button>
       </div>
     </div>
@@ -631,6 +682,7 @@ function DraftItem({ it, onDone, setNote }) {
       )}
       <WriteOf it={it} onUndo={undo} busy={busy} whole={whole} onMore={more} />
       {it.push?.state === 'waiting' && <PushOf it={it} onDone={onDone} setNote={setNote} />}
+      {it.share?.state === 'waiting' && <ShareOf it={it} onDone={onDone} setNote={setNote} />}
       {it.ownerAsked && <p className="muted small ny-from"><Icon name="chat" size={11} /> {t('Also in your Slack direct messages: answer it there or here.')}</p>}
       <textarea className="ny-draft" value={text} onChange={(e) => setText(e.target.value)} rows={Math.min(8, Math.max(3, text.split('\n').length + 1))} placeholder={t('Write the reply…')} aria-label={t('Reply to {name}', { name: who })} disabled={busy || limit.busy} />
       {(problem || limit.problem) && <p className="ny-problem" role="alert"><Icon name="alert" size={12} />{problem || limit.problem}</p>}

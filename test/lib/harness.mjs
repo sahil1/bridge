@@ -242,6 +242,10 @@ export async function startKit(name, { env = {}, config = {}, node = process.exe
     BRIDGE_RELEASES_API: await releasesStandIn(),
     BRIDGE_TEST_GITHUB_LOG: path.join(dir, 'github.log'),
     BRIDGE_FIX_DRYRUN: '1', LANG: 'en_US.UTF-8', TMPDIR: os.tmpdir(), USER: os.userInfo().username,
+    // A new bot starts with When You Ask: Full Access off here (on for everyone else: bots.js), so
+    // a test of what your own asks may do as anyone's are tests that; a test of Full Access turns it
+    // on (its settings, or this '0').
+    BRIDGE_TEST_BOT_FULL_OFF: '1',
     BRIDGE_SUMMARY_RETRY_MS: '4000', BRIDGE_MODEL_RETRY_MS: '200',
     // No test ever runs a real installer or downloads Node.js: a stand-in installer runs instead
     // (stand-ins/installer.cjs, its commands in bin/installs.log), and nodejs.org is nowhere unless
@@ -459,7 +463,7 @@ export async function startSlack(name) {
   const calls = () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean)
   return {
     url, port, calls,
-    ask: (o) => ctl('ask', o), edit: (o) => ctl('edit', o), remove: (o) => ctl('delete', o), pin: (o) => ctl('pin', o), scopes: (o) => ctl('scopes', o), channel: (o) => ctl('channel', o),
+    ask: (o) => ctl('ask', o), edit: (o) => ctl('edit', o), remove: (o) => ctl('delete', o), pin: (o) => ctl('pin', o), scopes: (o) => ctl('scopes', o), name: (o) => ctl('name', o), channel: (o) => ctl('channel', o),
     drop: () => ctl('drop'), away: () => ctl('away'), back: () => ctl('back'), refresh: () => ctl('refresh'),
     limit: (o) => ctl('limit', o), fail: (o) => ctl('fail', o), state: () => ctl('state'), deaf: (o) => ctl('deaf', o || {}), linkoff: (o) => ctl('linkoff', o || {}),
     // Interactivity, /<name>, the shortcut, the Home tab and Slack's Stop button (stand-ins/slack.mjs

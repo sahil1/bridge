@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import Icon from '../Icon.jsx'
 import { accessParts } from './access.js'
 import { t } from '../../i18n/index.js'
@@ -15,6 +16,27 @@ export function AccessLine({ d, onOpen = null }) {
   return onOpen
     ? <button type="button" className="ba-line" data-setting="bots-access-line" onClick={onOpen} title={t('Its settings: what it may do')}>{body}<Icon name="chevron" size={11} className="ba-go" /></button>
     : <p className="ba-line" data-setting="bots-access-line">{body}</p>
+}
+
+// When You Ask: Full Access, said plainly the first time its page is opened with it on (on for every
+// bot unless you turn it off, those made before it too): what it means, Got It, or Turn Off. Kept
+// as seen in this browser.
+const SEEN = (id) => `cc-full-note-${id}`
+const seen = (id) => { try { return localStorage.getItem(SEEN(id)) === '1' } catch { return false } }
+export function FullAccessNote({ d, save }) {
+  const [hide, setHide] = useState(() => seen(d.id))
+  if (hide || d.settings?.fullAccess !== true) return null
+  const done = () => { try { localStorage.setItem(SEEN(d.id), '1') } catch { /* private window */ } setHide(true) }
+  return (
+    <div className="st-note warn" role="note" data-setting="bot-full-note">
+      <Icon name="alert" size={13} />
+      <span>
+        {t('{bot} has When You Ask: Full Access on: when only you are in the conversation, your asks run as your own Claude Code in its folders, commands too, with no sandbox. Anyone using your Slack account can run anything on this computer through this bot.', { bot: d.name })}
+        {' '}<button type="button" className="link-btn" onClick={done}>{t('Got it')}</button>
+        {' · '}<button type="button" className="link-btn" onClick={() => { save({ fullAccess: false }); done() }}>{t('Turn off')}</button>
+      </span>
+    </div>
+  )
 }
 
 // Its memory, as part of what it may do: its own, apart from every other bot's, and used only in

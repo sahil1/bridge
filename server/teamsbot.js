@@ -52,6 +52,7 @@ import http from 'node:http'
 import crypto from 'node:crypto'
 import { writeFileAtomic } from './paths.js'
 import { failure, masked, sleep, split } from './connector.js'
+import { safeName } from './safename.js'
 import { appPackage, SHORT_MAX } from './teamsapp.js'
 
 const STANDIN = () => String(process.env.BRIDGE_TEAMS_URL || '').replace(/\/+$/, '')
@@ -103,10 +104,12 @@ export function plainText(text, { me = null, mentions = [] } = {}) {
   let t = String(text || '').replace(/\r\n?/g, '\n')
   for (const e of mentions || []) {
     if (!e?.text) continue
-    const label = String(e.text).replace(/<\/?at>/g, '')
+    // (A display name as anyone may choose it, made safe: safename.js; the desk says "@someone" for
+    // whoever may not ask a bot: frontdesk.js mentionsSaid.)
+    const label = safeName(String(e.text).replace(/<\/?at>/g, '')) || 'someone'
     t = t.split(e.text).join(e.mentioned?.id === me ? '' : `@${label}`)
   }
-  return t.replace(/<at>([^<]*)<\/at>/g, '@$1').replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div)>/gi, '\n').replace(/<[^>]+>/g, '')
+  return t.replace(/<at>([^<]*)<\/at>/g, (_, n) => `@${safeName(n) || 'someone'}`).replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div)>/gi, '\n').replace(/<[^>]+>/g, '')
     .replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, '\'').replace(/&amp;/g, '&')
     .replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim()
 }
@@ -445,10 +448,12 @@ export function makeTeams({ id = 'teams', file, say = () => {}, threads = () => 
     if (a.from?.id && a.from.id === me) return
     const mention = (a.entities || []).some((e) => e?.type === 'mention' && e.mentioned?.id === me)
     const text = plainText(a.text, { me, mentions: (a.entities || []).filter((e) => e?.type === 'mention') })
+    // (The people it mentions, never this bot: { id, name (made safe) }, as the desk weighs them.)
+    const mentions = (a.entities || []).filter((e) => e?.type === 'mention' && e.mentioned?.id && e.mentioned.id !== me).slice(0, 20).map((e) => ({ id: String(e.mentioned.aadObjectId || e.mentioned.id), name: safeName(String(e.text || '').replace(/<\/?at>/g, '') || e.mentioned.name) || 'someone' }))
     const { files, quote } = extras(a)
     const thread = p.kind === 'channel' && p.root !== String(a.id) ? p.root : null
     const at = Number.isFinite(Date.parse(a.timestamp)) ? new Date(a.timestamp).toISOString() : now()
-    const said = { ts: String(a.id), at, person: { id: a.from?.aadObjectId || a.from?.id || null, name: a.from?.name || null }, text: clip(text, LONGEST_SAID), you: false }
+    const said = { ts: String(a.id), at, person: { id: a.from?.aadObjectId || a.from?.id || null, name: a.from?.name || null }, text: clip(text, LONGEST_SAID), mentions, you: false }
     keep(`${p.base}:${p.kind === 'channel' ? p.root : ''}`, said)
     if (p.kind === 'channel' && !thread) keep(`${p.base}:`, said) // (a channel's own posts, for a question at its top)
     if (quote) remember(quotes, String(a.id), quote, 500)
@@ -459,7 +464,7 @@ export function makeTeams({ id = 'teams', file, say = () => {}, threads = () => 
     if (!p.dm && !mention && !listen && !(thread && follows(p.base, thread))) return
     const from = await personOf(a, p)
     await hear({
-      ts: String(a.id), channel: p.base, thread, mention, dm: p.dm, from, text, ...(listen ? { via: 'listen' } : {}),
+      ts: String(a.id), channel: p.base, thread, mention, dm: p.dm, from, text, mentions, ...(listen ? { via: 'listen' } : {}),
       place: p.dm ? { kind: 'dm', id: p.base, name: null } : { kind: 'channel', id: p.base, name: nameOfPlace(a, p), within: p.kind === 'channel' ? a.channelData?.team?.name || null : null, ...(p.kind !== 'channel' ? { private: true } : {}) },
       at, late: false, attachments: files, reply,
       // (A post at the top of a channel, answered with a post of its own there instead of in its
