@@ -103,6 +103,9 @@ if (!own) {
   watching: (on) => ipcRenderer.invoke('bridge:watching', !!on),
   // Why the app just said no to a screen asked for here ({ why, problem } or null: desktop/screenpick.js).
   screenWhy: () => ipcRenderer.invoke('bridge:screen-why'),
+  // How a screen asked for here is answered: { picker } (macOS's own picker, or the app's own
+  // answer), and off: why macOS's isn't used for the rest of this run (desktop/main.js).
+  screenHow: () => ipcRenderer.invoke('bridge:screen-how'),
   // Studio's Focus: this window full screen (true) or back (false), or whether it is (nothing).
   fullScreen: (on) => ipcRenderer.invoke('bridge:full-screen', typeof on === 'boolean' ? on : null),
   // Dictation's key from other apps (Settings › Voice & Meetings), and its window (?dictate=1): what was

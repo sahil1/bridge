@@ -2135,6 +2135,8 @@ app.post('/api/meetings', wrap(async (req) => { prompt = null; const m = await m
 // Before a recording starts: the meeting it would carry on, one that stopped when Bridge AI closed
 // (meetings.js carryOn), for the app to offer Resume recording first. event: the one it's for.
 app.post('/api/meetings/carry-on', wrap((req) => ({ meeting: meetings.carryOn({ event: req.body?.event || null }) })))
+// Watch a screen: how each try went, a line in this log (meetings.js screenLine).
+app.post('/api/meetings/screen-log', wrap((req) => { console.log(meetings.screenLine(req.body || {})); return { ok: true } }))
 // Several meetings as one (meetings.js combine): a combined meeting with an overview across them;
 // they stay as they are.
 app.post('/api/meetings/combine', wrap((req) => meetings.combine([].concat(req.body?.ids || []).map(String).slice(0, 100), { title: req.body?.title })))

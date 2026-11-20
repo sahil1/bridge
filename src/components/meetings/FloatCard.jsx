@@ -179,6 +179,8 @@ export default function FloatCard() {
       const d = e.data || {}
       if (d.type === 'state') setLive(d)
       if (d.type === 'error') setErr(d.text)
+      // Said, then over (a picker's wait, once a screen came after all).
+      if (d.type === 'unsaid') setErr((x) => (x === d.text ? null : x))
     }
     ch.postMessage({ type: 'hello' })
     return () => ch.close()
@@ -385,7 +387,10 @@ export default function FloatCard() {
                   {toBar && <button type="button" className="fc-chip" onClick={() => app().floatHide()} title={t('Move to the menu bar, out of the way of a screen you share')}><Icon name="minimize" size={12} /> {t('To the menu bar')}</button>}
                 </>
                 : live.picking
-                  ? <button type="button" className="fc-chip fc-picking" aria-disabled="true" aria-busy="true" title={t("Pick the window or screen to watch in the picker. It may be behind other windows.")}><Icon name="screen" size={12} /> {t('Picking…')}</button>
+                  // While the picker is up, Cancel here too: a picker that doesn't answer (macOS's
+                  // says nothing when it's closed with nothing picked) doesn't keep the card from
+                  // watching another.
+                  ? <><button type="button" className="fc-chip fc-picking" aria-disabled="true" aria-busy="true" title={t("Pick the window or screen to watch in the picker. It may be behind other windows.")}><Icon name="screen" size={12} /> {t('Picking…')}</button><button type="button" className="fc-chip" onClick={() => { setErr(null); chan.current?.postMessage({ type: 'op', op: 'cancelPick' }) }} title={t('Stop waiting for the picker')}>{t('Cancel')}</button></>
                   : live.canWatch && app().floatWatch && <button type="button" className="fc-chip" onClick={watch} title={t('Pick the window or screen being shared. A picture is kept each time it changes.')}><Icon name="screen" size={12} /> {t('Watch screen')}</button>)}
             </div>
             {/* AI Assist's live board (a beta feature): how much is on it, a click from opening it. */}

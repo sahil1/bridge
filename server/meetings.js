@@ -1784,6 +1784,56 @@ const brings = (text, before) => {
   const fresh = [...now].filter((w) => !was.has(w)).length
   return fresh >= NEW_WORDS && fresh >= now.size / 3
 }
+// Watch a screen, a line in the server's log for each try (src/components/meetings/recording.jsx
+// says how it went), so a report of one that did nothing can be traced: its number in that window,
+// where it was clicked, how the screen was asked for (macOS's own picker, the desktop app's own
+// answer, a browser's picker; off: why macOS's picker isn't used for the rest of the app's run),
+// and how it ended: picked (its kind and size, after how long, then its first look and first
+// picture, or nothing from it), refused (the browser's error, the app's reason, what the meeting
+// said), cancelled, no answer from the picker, a pick let go (after Cancel or another ask) or not
+// needed, or stopped before its first picture. A try's later line (a pick after its no answer, or
+// after Cancel) says so. Only these fields, each made one short line.
+const SCREEN_FROM = { bar: 'the recording bar', menu: "the top bar's menu", card: 'the floating card', start: 'the start of the recording (Record the screen too)', other: 'elsewhere' }
+const SCREEN_KIND = { monitor: 'a screen', window: 'a window', browser: 'a tab' }
+const SCREEN_VIA = { 'macos-picker': "macOS's picker", app: "the app's own answer", browser: "the browser's picker" }
+const oneLine = (v, n = 160) => String(v ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, n)
+const secs = (ms) => (Number.isFinite(Number(ms)) && ms != null ? `${(Math.max(0, Number(ms)) / 1000).toFixed(1)} s` : null)
+export function screenLine(b = {}) {
+  const n = Number.isInteger(b.n) && b.n > 0 && b.n < 1e6 ? b.n : '?'
+  const from = SCREEN_FROM[b.from] || SCREEN_FROM.other
+  const via = SCREEN_VIA[b.via] || 'an unknown way'
+  const off = b.off ? ` (macOS's picker off for this run: ${oneLine(b.off, 40)})` : ''
+  const meeting = typeof b.meeting === 'string' && /^[\w-]{1,80}$/.test(b.meeting) ? ` for meeting ${b.meeting}` : ''
+  // (again: asked again, its capture not started in Chromium's 10 seconds while the picker was up.)
+  const again = Number.isInteger(b.again) && b.again > 0 ? `, asked again ${b.again} time${b.again === 1 ? '' : 's'} as Chromium's 10 s to start ran out` : ''
+  const after = secs(b.ms) ? ` after ${secs(b.ms)}${again}` : again
+  // What was picked: its kind as the browser says it (Electron 45's picker says window for a screen
+  // too) and its size; not its name, which can be any window's title.
+  const what = () => {
+    const size = Number.isInteger(b.w) && Number.isInteger(b.h) ? ` (${b.w}x${b.h})` : ''
+    return `${SCREEN_KIND[b.surface] || 'a screen or window'}${size}`
+  }
+  // Its first look at the screen and first picture, after it was picked; stopped: watching it ended
+  // first (Stop watching, or the screen went).
+  const firsts = (stopped = false) => {
+    const wait = secs(b.waited) || 'its wait'
+    if (!secs(b.look)) return stopped ? 'before its first look at it' : `no look at it in ${wait}: nothing came from it`
+    const pic = secs(b.picture) ? `first picture ${secs(b.picture)} later` : stopped ? 'before its first picture' : `no picture yet in ${wait}`
+    return `first look ${secs(b.look)} later${b.blank ? ' (blank)' : ''}, ${pic}`
+  }
+  const ends = {
+    picked: () => `picked ${what()}${after}; ${firsts()}`,
+    stopped: () => `picked ${what()}${after}; stopped ${secs(b.waited) || ''} later, ${firsts(true)}`,
+    refused: () => `refused${after}: ${[b.why && oneLine(b.why), b.app && `the app's reason: ${oneLine(b.app, 20)}`, b.said && `said "${oneLine(b.said)}"`].filter(Boolean).join('; ') || 'no reason given'}`,
+    cancelled: () => `cancelled${after}, nothing picked`,
+    unanswered: () => `no answer from the picker${after}: said on the meeting, and its pick still taken if it comes`,
+    released: () => `picked ${what()}${after}, let go: it was cancelled or asked for again meanwhile`,
+    dropped: () => `picked ${what()}${after}, not watched: ${oneLine(b.why, 80) || 'not needed'}`,
+  }
+  const end = (ends[b.end] || (() => `ended as "${oneLine(b.end, 20)}"`))()
+  return `Watch a screen #${n}${meeting} from ${from} via ${via}${off}${b.more ? ' (a later line)' : ''}: ${end}`
+}
+
 // kind: 'screen' (Capture), 'auto' (the watched screen changed, screen.js) or 'paste'. An 'auto' one is
 // read straight away on a Mac and kept only when its words aren't the last picture's; else
 // { kept: false } and nothing is kept.

@@ -1,8 +1,9 @@
 // Watch a screen, in a meeting (src/components/meetings/recording.jsx): the app's answer when a page
 // asks for a screen (getDisplayMedia), and why it said no, for the page to say (bridgeApp.screenWhy).
-// macOS 15 and later never get here: Electron shows macOS's own picker instead (useSystemPicker),
-// which needs no Screen Recording. Before macOS 15, on Windows and on Linux, it's the whole main
-// screen (on Linux, the screen picked in the system's own dialog), which on a Mac needs Screen
+// macOS 15 and later get here only once Remote Screen has taken the screen in this run (main.js
+// noPicker): until then Electron shows macOS's own picker instead (useSystemPicker), which needs no
+// Screen Recording, and doesn't ask this. Before macOS 15, on Windows and on Linux, it's the whole
+// main screen (on Linux, the screen picked in the system's own dialog), which on a Mac needs Screen
 // Recording: without it, getSources fails (the first time, macOS asks in a window of its own).
 //
 // No is said with null: Electron 45 throws at {} for a video that was asked for (and the page hears
@@ -66,4 +67,20 @@ function create({ desktopCapturer, systemPreferences, permits, platform = proces
   return { handler, why, access }
 }
 
-module.exports = { create }
+// The handler set on a session (main.js): with macOS's own picker where it's there (picker: macOS 15
+// and later), until off(why) gives it up for the rest of this run, from the next screen asked for.
+// With the picker, Electron 45 never asks the handler (lib/browser/api/session.ts answers with the
+// picker's own source), so a no from the picker has no why here; where there's none,
+// useSystemPicker changes nothing. how(): which answers a
+// screen asked for now, for the page (bridgeApp.screenHow) and its line in the log.
+function install({ session, handler, picker = false }) {
+  let off = null
+  const set = () => session.setDisplayMediaRequestHandler(handler, { useSystemPicker: !off })
+  set()
+  return {
+    how: () => ({ picker: !!picker && !off, off }),
+    off: (why) => { if (!picker || off) return false; off = String(why || 'off').slice(0, 40); set(); return true },
+  }
+}
+
+module.exports = { create, install }
