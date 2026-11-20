@@ -2032,7 +2032,9 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   }
   // Whether an answer goes without asking you, where nothing holds it: everyone whose words it
   // answers is you; or it's a direct message or a private channel; or you said it may (auto).
+  // (A post a routine scheduled isn't an answer to anyone: it waits for you unless you said it may go.)
   function goesNow(bot, q) {
+    if (q.how === 'scheduled' || q.routine) return bot?.auto === true
     const people = [q.from, ...q.more.map((x) => x.person)].filter(Boolean)
     if (people.length && people.every((p) => isOwner(bot, p))) return true
     const place = q.place || {}
