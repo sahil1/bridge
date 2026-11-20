@@ -7,7 +7,7 @@ import { useFolder } from '../files/fsapi.js'
 import { ago } from '../Machines.jsx'
 import AiAssist from '../AiAssist.jsx'
 import { BotReach } from '../bots/Connections.jsx'
-import { AccessLine, MemoryAccess } from '../bots/Access.jsx'
+import { AccessLine, MemoryAccess, FullAccessNote } from '../bots/Access.jsx'
 import { accessSaid, guardWhy } from '../bots/access.js'
 import { AnswerIn } from '../bots/Conversations.jsx'
 import BotFiles, { MadeFiles } from '../bots/BotFiles.jsx'
@@ -2338,6 +2338,7 @@ export function Bot({ id, onGone, onChanged, phone = false, status = null, assis
         {notice?.length > 0 && <div className="st-note warn" role="status" data-setting="bot-imported"><Icon name="info" size={13} /><span>{t('Imported. Check these here:')} {notice.join(' · ')}</span></div>}
         {note && <p className="st-note bad" role="alert"><Icon name="alert" size={13} /> {note}</p>}
         {(tab === 'overview' || tab === 'settings') && <AccessLine d={d} onOpen={tab === 'settings' ? null : () => pickTab('settings')} />}
+        <FullAccessNote key={d.id} d={d} save={save} />
         {tab === 'overview' && overview?.({ d, save, reload: load, onTab: pickTab })}
         {tab === 'settings' && <BotSettings d={d} save={save} reload={load} onDelete={remove} again={again} onTab={pickTab} />}
         {tab === 'memory' && <Memory d={d} save={save} reload={load} />}

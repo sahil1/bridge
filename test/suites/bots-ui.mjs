@@ -285,6 +285,13 @@ try {
     ok(!!(await until(async () => (await kit.api(`/bots/${HI}`)).settings.fullAccess === !was, 8000)), 'When You Ask: Full Access: switched, saved', was)
     const fullText = await textOf(p, '.bp [data-setting="bot-full-access"]')
     ok(!was ? /Like your own Claude Code/.test(fullText) && /Anyone using your Slack account can run anything on this computer through this bot/.test(fullText) : /Off: your asks are limited/.test(fullText), 'it says what it means, and warns while it\'s on', fullText)
+    // (Its page says it plainly once, the first time it's on: Got it hides it for good.)
+    const note = p.locator('.bp [data-setting="bot-full-note"]')
+    if (!was) {
+      ok(!!(await until(async () => (await note.count()) === 1, 8000)) && /has When You Ask: Full Access on/.test(await note.innerText()), 'the bot\'s page says once that Full Access is on, plainly')
+      await note.locator('button', { hasText: 'Got it' }).click()
+      ok(!!(await until(async () => (await note.count()) === 0, 5000)), 'Got it: the note goes')
+    }
     await full.click()
     await until(async () => (await kit.api(`/bots/${HI}`)).settings.fullAccess === was, 8000)
     await shot(p, `${tag}bots-ui-bot-settings-light`)

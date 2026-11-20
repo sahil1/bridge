@@ -63,8 +63,8 @@ const ASK = {
 const SHARE = {
   name: 'share_link',
   title: 'Share a file or folder with a link',
-  description: 'Make a Share Link to a file or a folder in your folders, or a file you made (a report, an HTML page), so the people in this conversation can open it in their browser: an end-to-end encrypted link through the owner\'s relay, for those people only (or with a password), for a day unless you say otherwise. It\'s made once this turn ends: at once when the owner asked, after their OK for anyone else. Give its path; say in your reply that a link is on its way.',
-  inputSchema: { type: 'object', properties: { path: { type: 'string', description: 'The file or folder, as a path in your folders (or one you made in your outbox)' }, lasts: { type: 'string', enum: ['hour', 'day', 'week'], description: 'How long the link lasts: hour, day (the default) or week' }, who: { description: 'Who may open it: "conversation" (the default: the people in this conversation), "channel" (everyone in this channel), or a list of email addresses', anyOf: [{ type: 'string', enum: ['conversation', 'channel'] }, { type: 'array', items: { type: 'string' }, maxItems: 30 }] }, title: { type: 'string', description: 'What it is, in a few words' } }, required: ['path'] },
+  description: 'Make a Share Link to a file or a folder in your folders, or a file you made (a report, an HTML page), so the people in this conversation can open it in their browser: an end-to-end encrypted link through the owner\'s relay, for those people only (or with a password), for a day unless you say otherwise. It\'s made once this turn ends: at once when it\'s for the owner alone and only they are here, else once they\'ve said OK. Give its path; say in your reply that a link is on its way.',
+  inputSchema: { type: 'object', properties: { path: { type: 'string', description: 'The file or folder, as a path in your folders (or one you made in your outbox)' }, lasts: { type: 'string', enum: ['hour', 'day', 'week'], description: 'How long the link lasts: hour, day (the default) or week' }, who: { description: 'Who may open it: "me" (whoever asked you; the default when only the owner is in this conversation), "conversation" (the people in this conversation who may ask you; the default otherwise), "channel" (everyone in this channel who may ask you), or a list of email addresses. Anyone but the owner alone waits for the owner\'s OK.', anyOf: [{ type: 'string', enum: ['me', 'conversation', 'channel'] }, { type: 'array', items: { type: 'string' }, maxItems: 30 }] }, title: { type: 'string', description: 'What it is, in a few words' } }, required: ['path'] },
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
 }
 const TOOLS = [...(push ? [PUSH] : []), ...(share ? [SHARE] : []), ...(roster.length ? [HAND, ASK] : [])]
@@ -100,7 +100,7 @@ async function call(name, a) {
     const p = clip(a?.path, 1000).trim()
     if (!p) throw new Error('Give the path of the file or folder to share')
     const lasts = ['hour', 'day', 'week'].includes(a?.lasts) ? a.lasts : 'day'
-    const who = Array.isArray(a?.who) ? a.who.slice(0, 30).map((x) => one(x, 200)).filter(Boolean) : a?.who === 'channel' ? 'channel' : 'conversation'
+    const who = Array.isArray(a?.who) ? a.who.slice(0, 30).map((x) => one(x, 200)).filter(Boolean) : ['me', 'channel', 'conversation'].includes(a?.who) ? a.who : null
     note({ t: 'share', path: p, lasts, who, title: one(a?.title, 120) })
     return 'Asked: the link is made once this turn ends (at once for the owner, after their OK for anyone else), and posted in this conversation. Say in your reply that a link is on its way.'
   }

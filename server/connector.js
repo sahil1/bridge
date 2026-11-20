@@ -227,7 +227,7 @@ export function combine({ id = 'bot', say = () => {}, threads = () => [], follow
     if (!x) return null
     const { attachments, ...rest } = x // (files are Slack's only: named in the record, never read)
     return {
-      ...rest, channel: idOf(p, x.channel), from: { ...x.from, id: idOf(p, x.from.id) },
+      ...rest, channel: idOf(p, x.channel), from: { ...x.from, id: idOf(p, x.from.id) }, ...(Array.isArray(x.mentions) ? { mentions: x.mentions.map((u) => ({ ...u, id: idOf(p, u.id) })) } : {}),
       place: { ...x.place, id: idOf(p, x.place.id), platform: p }, reply: x.reply ? { ...x.reply, platform: p } : null, ...(x.top ? { top: { ...x.top, platform: p } } : {}),
       ...(attachments.length ? { attached: attachments.map((a) => a.name) } : {}),
     }
@@ -272,7 +272,14 @@ export function combine({ id = 'bot', say = () => {}, threads = () => [], follow
     status: async (reply, onOff) => { const p = where(reply); return p === 'slack' && parts.slack?.status ? parts.slack.status(own(reply), onOff) : null },
     whisper: (reply, user, text) => { const p = where(reply); const c = of(p); if (!c.whisper) throw failure(`${PLATFORMS[p]} has no way to tell one person only`, 'not_supported'); return c.whisper(own(reply), bare(user), text) },
     typing: (reply) => of(where(reply)).typing?.(own(reply)),
-    context: ({ channel, ...rest }) => of(platformOf(channel)).context({ channel: bare(channel), ...rest }),
+    // (The people its messages mention, by the desk's ids, as a question's are.)
+    context: async ({ channel, ...rest }) => {
+      const p = platformOf(channel)
+      const r = await of(p).context({ channel: bare(channel), ...rest })
+      if (p === 'slack' || !r) return r
+      const ids = (m) => (Array.isArray(m?.mentions) ? { ...m, mentions: m.mentions.map((u) => ({ ...u, id: idOf(p, u.id) })) } : m)
+      return { ...r, messages: (r.messages || []).map(ids), pins: (r.pins || []).map(ids) }
+    },
     // Who's in a channel, where the platform says ([{ id, guest, external, unknown, bot }]); null
     // where it can't (only Slack's say).
     members: async (channel) => { const p = platformOf(channel); const c = parts[p]; if (!c?.members) return null; const list = await c.members(bare(channel)); return list ? list.map((m) => ({ ...m, id: idOf(p, m.id) })) : null },

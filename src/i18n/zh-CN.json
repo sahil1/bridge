@@ -7772,6 +7772,7 @@
   "{bot} changes nothing itself. Asked to change files one of these bots looks after, it hands the request on, and that bot takes it from there under its own rules for whoever asked: handed on, nobody may do more.": "{bot} 自己不做任何更改。被要求更改这些机器人负责的文件时，它会转交请求，由那个机器人按自己的规则为提问的人继续处理：转交之后，谁也不会因此获得更多权限。",
   "{bot} doesn't read {folder} any more": "{bot} 不再读取 {folder}",
   "{bot} goes ahead with it, once": "{bot} 继续处理，仅此一次",
+  "{bot} has When You Ask: Full Access on: when only you are in the conversation, your asks run as your own Claude Code in its folders, commands too, with no sandbox. Anyone using your Slack account can run anything on this computer through this bot.": "{bot} 已开启“你提出时：完全访问”：当对话中只有你时，你的请求会像你自己的 Claude Code 一样在它的文件夹中运行，包括命令，没有沙箱。任何使用你的 Slack 账号的人都可以通过这个机器人在这台电脑上运行任何东西。",
   "{bot} is made, and reached through {name} in {platform}: nothing to set up there.": "{bot} 已创建，在 {platform} 中通过 {name} 联系：无需在那里设置。",
   "{bot} is made, with an app of its own on {platform}: the steps are below, each ticked as it's done.": "{bot} 已创建，使用它在 {platform} 上的专属应用：步骤在下面，每完成一步就会打勾。",
   "{bot} is made. Next, connect it to {platform}: the steps are below, each ticked as it's done.": "{bot} 已创建。接下来把它连接到 {platform}：步骤在下面，每完成一步就会打勾。",

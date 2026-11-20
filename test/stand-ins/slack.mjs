@@ -41,6 +41,7 @@
 //   POST /_test/pin { channel, ts }    a message pinned
 //   POST /_test/channel { channel, members?, shared? }   a channel's members set; shared with another company
 //                      (or no longer), told to the apps in it (channel_shared, channel_unshared)
+//   POST /_test/name { user, name }  a person sets their own display name, as anyone may
 //   POST /_test/scopes { app, scopes } the scopes an app's token has (an app made from an older
 //                      manifest); without scopes, every one again
 //   POST /_test/drop   every connection closes at once (a network that changed)
@@ -197,7 +198,8 @@ const server = http.createServer(async (req, res) => {
         const href = `http://127.0.0.1:${port}/files/${id}/${encodeURIComponent(f.name)}`
         return { id, name: f.name, title: f.name, mimetype: f.type || 'text/plain', filetype: String(f.name).split('.').pop(), size: b.length, url_private: href, url_private_download: `${href}?download=1`, mode: 'hosted' }
       })
-      const m = { type: 'message', user: j.user, text: j.text || '', ts: ts(), ...(j.thread ? { thread_ts: j.thread } : {}), ...(who?.team_id && who.team_id !== 'T0TEST' ? { user_team: who.team_id } : {}), ...(att.length ? { subtype: 'file_share', files: att } : {}) }
+      // (Typed in Slack: a client's own id; posted by an app as the person, with their token: an app_id (asApp), or neither (untyped).)
+      const m = { type: 'message', user: j.user, text: j.text || '', ts: ts(), ...(j.asApp ? { app_id: 'A0ZAPIER' } : j.untyped ? {} : { client_msg_id: `c-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}` }), ...(j.thread ? { thread_ts: j.thread } : {}), ...(who?.team_id && who.team_id !== 'T0TEST' ? { user_team: who.team_id } : {}), ...(att.length ? { subtype: 'file_share', files: att } : {}) }
       put(channel, m)
       const c = CHANNELS[channel]
       const dm = !!c?.is_im
@@ -287,6 +289,8 @@ const server = http.createServer(async (req, res) => {
       return answer(res, 200, { ok: true })
     }
     if (what === 'pin') { const m = find(j.channel, j.ts); if (m) pins[j.channel].push({ type: 'message', channel: j.channel, message: m }); return answer(res, 200, { ok: !!m }) }
+    // (A person's display name, as anyone may set their own.)
+    if (what === 'name') { const p = personOf(j.user); if (p.profile) p.profile.display_name = String(j.name); return answer(res, 200, { ok: !!p.profile }) }
     if (what === 'scopes') { APPS[j.app || 'A1'].scopes = Array.isArray(j.scopes) ? j.scopes : ALL; return answer(res, 200, { ok: true }) }
     if (what === 'drop') { for (const s of sockets) s.terminate(); return answer(res, 200, { ok: true }) }
     if (what === 'away') { away = true; for (const s of sockets) s.dead = true; return answer(res, 200, { ok: true }) }
