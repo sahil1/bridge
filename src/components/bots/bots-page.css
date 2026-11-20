@@ -1,6 +1,6 @@
 /* Bots in the sidebar (RailBots.jsx), a bot's page (BotPage.jsx) and AI Assist's chat for it
-   (BotChat.jsx), its Access (Access.jsx), the Bots overview (Overview.jsx) and a connection's
-   Routing (Routing.jsx). The app's tokens, so it follows light and dark mode; on a phone nothing wider than
+   (BotChat.jsx), its Access line (Access.jsx), a bot as a card and Try a message (bots-home.css has
+   the rest of Bots' tabs and a session). The app's tokens, so it follows light and dark mode; on a phone nothing wider than
    the screen, every control a whole 40 px target and fields at 16 px. */
 
 /* ---------- How a bot stands, as a dot ---------- */
@@ -13,15 +13,9 @@
 .bt-tag { flex: none; white-space: nowrap; font: 600 10px var(--font); text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; border-radius: 5px; color: var(--ai); background: var(--ai-soft); }
 .bt-count { flex: none; margin-left: auto; min-width: 16px; padding: 0 5px; border-radius: 999px; font: 700 10px/16px var(--font); text-align: center; color: #fff; background: var(--needs-fill); }
 
-/* ---------- The sidebar ---------- */
-.rail-bots { padding-bottom: 4px; }
-.rail-bots-head { position: static; }
-.rail-bot-list { display: grid; }
-.rail-bot-list .bt-row { margin-left: 16px; }
-.bt-row .rm-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bt-row .bt-tag { margin-left: auto; }
-.bt-row.bt-first { color: var(--ink-3); }
-.bt-row.bt-conns { color: var(--ink-2); }
+/* ---------- The sidebar: one row, Bots, with what waits for you, and + ---------- */
+.rail-bots { padding-top: 0; }
+.rail-bots .mc-needs { margin-left: auto; }
 
 /* ---------- A bot's page ---------- */
 .bp { height: 100%; min-height: 0; min-width: 0; display: flex; flex-direction: column; background: var(--pane); }
@@ -103,12 +97,12 @@
 .bp.phone .bp-draft > .bp-head, .bp-draft.phone > .bp-head { padding: 12px 12px 0; }
 .bp.phone .bc-msgs { padding: 12px 12px 6px; }
 .bp.phone .bc-say { padding: 8px 12px 10px; }
-.bp.phone :is(.btn, .ghost-btn, .seg button, .link-btn, summary, .bc-example, .icon-btn, .win-btn) { min-height: 40px; min-width: 40px; }
-.bp.phone :is(.st-input, .sb-search input, .bc-say textarea) { font-size: 16px; }
-.bp.phone .st-input { height: 42px; }
-.bp.phone textarea.st-input { height: auto; }
+:is(.bp, .bh).phone :is(.btn, .ghost-btn, .seg button, .link-btn, summary, .bc-example, .icon-btn, .win-btn) { min-height: 40px; min-width: 40px; }
+:is(.bp, .bh).phone :is(.st-input, .sb-search input, .bc-say textarea) { font-size: 16px; }
+:is(.bp, .bh).phone .st-input { height: 42px; }
+:is(.bp, .bh).phone textarea.st-input { height: auto; }
 .bp.phone .sb-askers .icon-btn { min-width: 40px; min-height: 40px; }
-.bp.phone .st-check input { width: 20px; height: 20px; }
+:is(.bp, .bh).phone .st-check input { width: 20px; height: 20px; }
 .bp.phone .bc-card { padding: 10px; }
 .bp.phone .bp-said { white-space: normal; }
 .bt-phone .bt-dot { margin: 0 auto; }
@@ -131,21 +125,7 @@ button.ba-line:hover, button.ba-line:focus-visible { border-color: var(--line-2)
 .bc-example.bc-start { border-style: solid; }
 .bc-example.bc-start.on { border-color: var(--accent); background: var(--accent-soft); color: var(--ink); }
 
-/* ---------- The Bots overview (Overview.jsx): each connection → its routing → its bots ---------- */
-.bo { container-type: inline-size; display: grid; gap: 12px; align-content: start; min-width: 0; }
-.bo-head { padding: 0; }
-.bo-about { margin: -4px 0 0; }
-.bo-lane { display: grid; grid-template-columns: minmax(140px, 190px) auto minmax(140px, 200px) auto minmax(0, 1fr); align-items: start; gap: 8px; min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--pane); }
-.bo-arrow { align-self: start; margin-top: 26px; color: var(--ink-3); }
-.bo-node { display: grid; gap: 4px; min-width: 0; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line-2); background: var(--pane-2); color: var(--ink); font: 12.5px var(--font); text-align: left; overflow-wrap: anywhere; }
-button.bo-node { cursor: pointer; }
-button.bo-node:hover, button.bo-node:focus-visible { border-color: var(--accent); }
-.bo-node-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.bo-node-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bo-route { border-style: dashed; }
-.bo-none { color: var(--ink-3); }
-.bo-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; min-width: 0; }
-.bo-cards > .sb-none { align-self: center; }
+/* ---------- A bot as a card (BotsHome.jsx's Bots) ---------- */
 .bo-card { display: grid; gap: 5px; align-content: start; min-width: 0; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line-2); background: var(--pane); color: var(--ink); font: 12.5px var(--font); text-align: left; cursor: pointer; box-shadow: var(--shadow); }
 .bo-card:hover, .bo-card:focus-visible { border-color: var(--accent); }
 .bo-card.bo-needs { border-color: color-mix(in srgb, var(--needs) 45%, var(--line-2)); }
@@ -157,40 +137,13 @@ button.bo-node:hover, button.bo-node:focus-visible { border-color: var(--accent)
 .bo-access > .icon { flex: none; margin-top: 2px; color: var(--ink-3); }
 .bo-stats { display: flex; flex-wrap: wrap; gap: 2px 10px; }
 .bo-wait { color: var(--needs); font-weight: 600; }
-.bo-drafts { display: grid; gap: 6px; }
-.bo-empty { min-height: 200px; }
-/* Narrow: each lane top to bottom, its arrows pointing down. */
-@container (max-width: 720px) {
-  .bo-lane { grid-template-columns: minmax(0, 1fr); }
-  .bo-arrow { justify-self: start; margin: 0 0 0 18px; transform: rotate(90deg); }
-}
-.bo.phone .bo-lane { grid-template-columns: minmax(0, 1fr); padding: 10px; }
-.bo.phone .bo-arrow { justify-self: start; margin: 0 0 0 18px; transform: rotate(90deg); }
-.bo.phone .bo-cards { grid-template-columns: minmax(0, 1fr); }
-.bo.phone :is(.bo-node, .bo-card, .btn, .sb-chip) { min-height: 40px; }
 
-/* ---------- Routing (Routing.jsx): the rules in order, and Try a Message ---------- */
-.ro { display: grid; gap: 12px; align-content: start; min-width: 0; }
-.ro-lead { margin: 0; font-size: 13.5px; color: var(--ink); }
-.ro-bots { display: flex; flex-wrap: wrap; gap: 6px; }
-.ro-rules { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 8px; }
-.ro-rules > li { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 8px; align-items: start; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--pane-2); }
-.ro-n { width: 22px; height: 22px; border-radius: 999px; display: grid; place-items: center; font: 600 11.5px var(--font); color: var(--ink-2); background: var(--pane); border: 1px solid var(--line-2); }
-.ro-rule { display: grid; gap: 6px; min-width: 0; }
-.ro-rule > p { margin: 0; overflow-wrap: anywhere; }
-.ro-rule .cn-part { padding-top: 0; border-top: 0; }
-.ro-descs { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.ro-desc { display: grid; gap: 3px; min-width: 0; }
-.ro-try-form { display: grid; gap: 8px; min-width: 0; }
+/* ---------- Try a message (TestConnection.jsx) ---------- */
+.ro-try-form { display: grid; gap: 8px; min-width: 0; margin-top: 6px; }
 .ro-try-form textarea { width: 100%; height: auto; min-height: 44px; padding: 8px 11px; resize: vertical; font: 13px/1.45 var(--font); }
-.ro-out { display: grid; gap: 4px; min-width: 0; padding: 10px 12px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--good) 40%, var(--line)); background: color-mix(in srgb, var(--good) 6%, var(--pane)); }
+.ro-out { display: grid; gap: 4px; min-width: 0; margin-top: 8px; padding: 10px 12px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--good) 40%, var(--line)); background: color-mix(in srgb, var(--good) 6%, var(--pane)); }
 .ro-out.warn { border-color: color-mix(in srgb, var(--warning) 45%, var(--line)); background: color-mix(in srgb, var(--warning) 6%, var(--pane)); }
 .ro-out > p { margin: 0; overflow-wrap: anywhere; }
 .ro-to { display: flex; align-items: center; gap: 7px; font-size: 14px; }
-.ro.phone :is(.btn, .ghost-btn, .link-btn, .sb-chip, .icon-btn) { min-height: 40px; min-width: 40px; }
-.ro.phone :is(.st-input, textarea) { font-size: 16px; }
-.ro.phone .st-input { height: 42px; }
-.ro.phone textarea.st-input { height: auto; }
-.ro.phone .st-check input { width: 20px; height: 20px; }
 .bp.phone .ba-line { font-size: 13px; min-height: 40px; }
 .bp.phone :is(.sb-start .btn, .bc-start) { min-height: 40px; }

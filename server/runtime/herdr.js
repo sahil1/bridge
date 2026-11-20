@@ -13,6 +13,8 @@ import { quoteCommand, runSetup } from './spawn.js'
 import { envFor, notePane, movePane, keepPanes, accountOf, startedOn, labelOf } from '../accounts.js'
 import { paneKey, inView } from '../scope.js'
 import { DATA, dataFile, writeFileAtomic } from '../paths.js'
+import { blanked } from '../botenv.js'
+import { providerEnv } from '../providers.js'
 
 export const name = 'herdr'
 export const caps = { liveView: true, reorder: true, splits: true }
@@ -91,6 +93,14 @@ function ownAgents(snap, have) {
 }
 const isOwn = (paneId) => !!own[paneKey(paneId)]
 
+// The panes Bridge AI started kept to their folders (a bot's answer or session: agents.js access
+// 'read' or 'change'), by pane, kept across Bridge AI starting again: herdr runs them, so what they
+// were started with is said here (fleet: access) for a bot's session to be looked at before a turn is
+// typed into it (frontdesk.js). A pane herdr gives back by another id isn't one of them.
+const KEPT = dataFile('herdr-kept.json')
+let kept = (() => { try { return JSON.parse(fs.readFileSync(KEPT, 'utf8')) } catch { return {} } })() // pane key -> { access, at }
+const saveKept = () => { try { writeFileAtomic(KEPT, JSON.stringify(kept), { mode: 0o600 }) } catch { /* read-only disk */ } }
+
 // session: the herdr session in view (the sidebar's session menu). When it isn't running, an
 // empty fleet that says so (down), so the last session's agents don't linger on screen.
 // Each read runs herdr once, and the server asks for the fleet from many places at once (each
@@ -126,7 +136,12 @@ async function readFleet() {
     const ids = new Set(mine.map((a) => a.paneId))
     for (const t of f.tabs || []) for (const p of t.panes || []) if (ids.has(p.paneId)) p.agent = true
   }
+  const live = new Set((snap.panes || []).map((p) => paneKey(p.pane_id)))
+  let gone = false
+  for (const k of Object.keys(kept)) if (inView(k) && !live.has(k)) { delete kept[k]; gone = true }
+  if (gone) saveKept()
   for (const a of f.agents || []) {
+    a.access = kept[paneKey(a.paneId)]?.access || null
     if (followed.has(paneKey(a.paneId))) a.sessionId = followed.get(paneKey(a.paneId))
     // herdr doesn't know which account an agent uses: the one it was started on from here.
     a.accountId = accountOf(a.kind, a.paneId, a.sessionId)
@@ -255,7 +270,10 @@ async function moveTabToSpaceNow(tabId, { workspaceId, newSpace, index } = {}) {
 // effort: how hard it thinks (agents.js effort()), for herdr's agents and the others alike.
 export const launch = after(launchNow)
 async function launchNow({ kind = 'claude', cwd, label, workspaceId, newSpace, prompt: opening, model, pinModel, effort, access, dirs, account, resume, fork, setup, env: extraEnv }) {
-  const env = { ...envFor(kind, account), ...extraEnv } // a second account's config folder, if one was picked
+  // (A bot's agent, kept to its folders: herdr starts it with its shell's environment, so every
+  // variable there that holds a key, and isn't this agent's own sign-in, is set empty for it: botenv.js.)
+  const kept = access === 'read' || access === 'change'
+  const env = { ...(kept ? blanked(kind, { ...process.env, ...providerEnv() }) : {}), ...envFor(kind, account), ...extraEnv } // a second account's config folder, if one was picked
   const a = adapter(kind)
   const resumed = fork && a.fork ? a.fork(fork, a.sessionId === 'assign' ? newSessionId() : undefined) : resume && a.resume ? a.resume(resume) : []
   const allowed = [...(access && a.access ? a.access(access, { dirs }) : []), ...(effort && a.effort ? a.effort(effort) : [])] // how much it may do without asking, and how hard it thinks
@@ -289,6 +307,7 @@ async function launchNow({ kind = 'claude', cwd, label, workspaceId, newSpace, p
   }
   if (space) { try { await cli.renameTabOfPane(out.paneId, label) } catch { /* default tab name */ } }
   notePane(out.paneId, kind, account)
+  if (access === 'read' || access === 'change') { kept[paneKey(out.paneId)] = { access, at: Date.now() }; saveKept() }
   return setupError ? { ...out, setupError } : out
 }
 

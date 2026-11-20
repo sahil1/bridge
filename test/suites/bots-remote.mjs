@@ -24,7 +24,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { startKit, startRelay, startDiscord, startTeams, checks, until, sleep, browser, page, shot, phoneFaults, phoneNotes, phoneSaw, browserNotice, ROOT, IS_WIN } from '../lib/harness.mjs'
-import { botKit, openSettings } from '../lib/bots.mjs'
+import { botKit, openBot, askOnce, answerIn, newBotChat } from '../lib/bots.mjs'
 import { linkAs } from '../lib/linkclient.mjs'
 
 const { ok, done } = checks('bots-remote')
@@ -100,57 +100,69 @@ try {
   }
   // The phone paired last, by its name on Desk (the page names it: "Mac, browser").
   const newestPhone = async () => [...((await desk.api('/relay')).devices || [])].filter((d) => d.kind !== 'computer').sort((x, y) => String(x.addedAt).localeCompare(String(y.addedAt))).pop()?.name || null
-  // Every section of Settings › Bots, each brought into view, then each tab and each place it answers
-  // in: anything too small, off the screen or cut short, by where it was.
+  // Every section of a bot's Settings (Advanced open), each brought into view, then each tab and
+  // each place it answers in: anything too small, off the screen or cut short, by where it was.
   const allFaults = async (f) => {
     const out = {}
-    const look = async (where) => { await sleep(150); const x = await phoneFaults(f, '.modal.settings .sb'); if (Object.keys(x).length) out[where] = x }
-    const tab = (name) => f.locator('.sb-tabs button', { hasText: name }).click()
-    await tab('Set Up')
+    const look = async (where) => { await sleep(150); const x = await phoneFaults(f, '.bp.phone .bp-main'); if (Object.keys(x).length) out[where] = x }
+    const tab = (name) => f.locator('.bp .sb-tabs button', { hasText: name }).click()
+    await tab('Settings')
+    await advanced(f)
     for (const p of ['slack', 'discord', 'teams']) {
       await f.locator(`.sb-where-tabs [data-platform="${p}"]`).click()
       await sleep(200)
-      for (const s of await f.locator('.modal.settings .sb [data-setting]').all()) {
+      for (const s of await f.locator('.bp .bp-main [data-setting]').all()) {
         await s.scrollIntoViewIfNeeded().catch(() => {})
         await look(`${p}: ${await s.getAttribute('data-setting')}`)
       }
     }
     await f.locator('.sb-where-tabs [data-platform="slack"]').click()
-    for (const t of ['Try It', 'Memory', 'Activity']) {
+    for (const t of ['Overview', 'Memory', 'Activity']) {
       await tab(t)
-      await f.locator('.modal.settings .sb .st-sec').first().waitFor({ timeout: 8000 })
+      await f.locator('.bp .bp-main .st-sec').first().waitFor({ timeout: 8000 })
       await look(t)
-      const last = f.locator('.modal.settings .sb .st-sec').last()
+      const last = f.locator('.bp .bp-main .st-sec').last()
       await last.evaluate((e) => e.lastElementChild?.scrollIntoView({ block: 'end' })).catch(() => {})
       await look(`${t}, its end`)
     }
-    await tab('Set Up')
+    await tab('Settings')
     return out
   }
+  // Its Settings' Advanced, open; and AI Assist's chat, which a new bot's page opens with (on a
+  // phone, over the whole page), closed.
+  const advanced = async (f) => {
+    const adv = f.locator('.bp [data-setting="bot-advanced"]')
+    await adv.waitFor({ timeout: 10000 })
+    if (!(await adv.evaluate((d) => d.open))) await adv.locator(':scope > summary').click()
+    await f.locator('.bp [data-setting="bot-advanced"] [data-setting="slack-limits"]').waitFor({ timeout: 8000 })
+  }
+  const noChat = async (f) => { if (await f.locator('.bp-chat .ai-head-close').count()) await f.locator('.bp-chat .ai-head-close').click() }
 
   let harbor = null
   let phoneName = null
-  await part('the phone: Settings › Bots, start to finish', async () => {
+  await part('the phone: Bots, start to finish', async () => {
     const { ctx, phone, f, errors } = await phonePage()
     if (!f) { await ctx.close(); return }
     phoneName = await until(newestPhone, 10000)
-    await openSettings(f)
-    const sec = (k) => f.locator(`.modal.settings [data-setting="${k}"]`)
-    const first = sec('bots-first')
-    await first.waitFor({ timeout: 8000 })
-    ok(!/computer it runs on/.test(await first.innerText()), 'no bot yet: Set up your first bot, right there on the phone', await first.innerText())
-    await first.locator('button', { hasText: 'Set up your first bot' }).click()
+    await newBotChat(f, { form: true })
+    const sec = (k) => f.locator(`.bp .bp-main [data-setting="${k}"]`)
+    ok(!/computer it runs on/.test(await f.locator('.bc').innerText()), 'no bot yet: a new bot\'s form, right there on the phone', await f.locator('.bc').innerText())
     const tpl = f.locator('.sb-tpl').nth(1)
     const tplName = (await tpl.locator('b').innerText()).trim()
     await tpl.click()
     await f.locator('.sb-new input').fill('Harbor')
     await f.locator('.sb-new button[type="submit"]').click()
+    await f.locator('.bp .sb-tabs [data-tab="settings"]').waitFor({ state: 'attached', timeout: 10000 })
+    await sleep(400)
+    await noChat(f)
+    await f.locator('.bp .sb-tabs [data-tab="settings"]').click()
+    await advanced(f)
     await sec('slack-guide').waitFor({ timeout: 10000 })
     harbor = (await desk.api('/bots')).bots.find((x) => x.name === 'Harbor')
     ok(!!harbor && !!events(harbor.id).find((e) => e.setting === 'created')?.new?.template, `a bot made on the phone, from a template (${tplName})`, harbor)
-    const off = await f.locator('.modal.settings .sb :is(input, select, textarea, button):disabled').evaluateAll((l) => l.map((e) => e.getAttribute('aria-label') || e.placeholder || e.innerText || e.name).filter(Boolean))
-    ok(!off.some((x) => /^(Its name in Slack|xapp-…|xoxb-…|~\/code)$/.test(x)), 'nothing in Set Up is greyed out on the phone', off)
-    ok(!/computer it runs on/.test(await f.locator('.modal.settings .sb').innerText()), 'and nothing says to do it on the computer it runs on')
+    const off = await f.locator('.bp .bp-main :is(input, select, textarea, button):disabled').evaluateAll((l) => l.map((e) => e.getAttribute('aria-label') || e.placeholder || e.innerText || e.name).filter(Boolean))
+    ok(!off.some((x) => /^(Its name in Slack|xapp-…|xoxb-…|~\/code)$/.test(x)), 'nothing in its Settings is greyed out on the phone', off)
+    ok(!/computer it runs on/.test(await f.locator('.bp .bp-main').innerText()), 'and nothing says to do it on the computer it runs on')
 
     // Links out: each a link of its own to open in the phone's browser (the apps open a new
     // window's link there: WebViewController.swift createWebViewWith, MainActivity's
@@ -167,7 +179,7 @@ try {
     await f.locator('.sb-where-tabs [data-platform="slack"]').click()
 
     // Its name, who may ask, its tokens.
-    const nameBox = sec('slack-identity').locator('input').first()
+    const nameBox = sec('bot-name').locator('input')
     await nameBox.fill('Harbor Desk')
     await nameBox.blur()
     ok(!!(await until(async () => (await botOf(harbor.id)).name === 'Harbor Desk', 8000)), 'renamed on the phone')
@@ -203,6 +215,7 @@ try {
     ok(/~[\\/]pricing/.test(await folders.locator('.sb-folders').innerText()), 'listed under Reads From')
 
     // Its instructions file, from the folders it reads from.
+    await sec('bot-purpose').locator('.bs-more').click()
     const ins = sec('slack-instructions')
     await ins.locator('label.sb-mode', { hasText: 'Use this file instead' }).click()
     await ins.locator('button', { hasText: 'Choose…' }).click()
@@ -230,12 +243,13 @@ try {
     ok(dl?.suggestedFilename() === 'Harbor-Desk.bridge-bot.json' && bundle?.name === 'Harbor Desk' && !leaked(body).length, 'Export: the bot\'s file downloaded to the phone, with no token in it', { name: dl?.suggestedFilename(), bot: bundle?.name, leaked: leaked(body) })
     ok(/Downloading Harbor-Desk\.bridge-bot\.json to this device\./.test(await sec('slack-export').innerText()), 'and says so', await sec('slack-export').innerText())
 
-    // Try It.
-    await f.locator('.sb-tabs button', { hasText: 'Try It' }).click()
-    await sec('slack-try').locator('textarea').fill('What do seats cost? [answer Seats are $40 a month.]')
-    await sec('slack-try').locator('button[type="submit"]').click()
-    const draft = await until(async () => { const x = await sec('slack-try').locator('.sb-try-draft').innerText().catch(() => ''); return /\$40 a month/.test(x) && x }, 40000)
-    ok(!!draft, 'Try It on the phone: its draft, answered on Desk', draft || await sec('slack-try').innerText())
+    // A test session: its session, opened on the phone, answered on Desk.
+    const tried = await askOnce(f, 'What do seats cost? [answer Seats are $40 a month.]')
+    const draft = await until(async () => { const x = await answerIn(tried); return /\$40 a month/.test(x) && x }, 40000)
+    ok(!!draft, 'a test session on the phone: its answer, from Desk', draft || await tried.innerText().catch(() => ''))
+    // (Back to its page from the session: its bot, over the Thread.)
+    if (await f.locator('.bh-sv').count()) await f.locator('.bh-sv-meta .link-btn').first().click()
+    await f.locator('.bp .sb-tabs').first().waitFor({ timeout: 10000 })
 
     // Memory.
     await f.locator('.sb-tabs button', { hasText: 'Memory' }).click()
@@ -405,11 +419,10 @@ try {
 
   await part('Studio\'s window on Desk', async () => {
     const { ctx, p, errors } = await page(b, `${studio.url}/m/${deskM.id}/`, { mode: 'dark', theme: 'midnight' })
-    await openSettings(p)
-    const sec = (k) => p.locator(`.modal.settings [data-setting="${k}"]`)
-    await p.locator('.sb-chip', { hasText: 'Ledger' }).click()
+    await openBot(p, { name: 'Ledger' })
+    const sec = (k) => p.locator(`.bp .bp-main [data-setting="${k}"]`)
     await sec('slack-identity').waitFor({ timeout: 10000 })
-    const about = sec('slack-identity').locator('input').nth(1)
+    const about = sec('bot-purpose').locator('input')
     ok(await about.isEnabled(), 'in Studio\'s window on Desk, its settings can be changed')
     await about.fill('The books')
     await about.blur()
@@ -429,7 +442,7 @@ try {
     ok(/Tester changed description on Studio: — → The books/.test(lines || ''), 'Activity names Studio for what was changed there', lines)
     await shot(p, `${tag}bots-remote-studio-window`)
     ok(errors.length === 0, 'no page errors in Studio\'s window', errors)
-    await p.locator('.sb-tabs button', { hasText: 'Set Up' }).click()
+    await p.locator('.sb-tabs button', { hasText: 'Settings' }).click()
     await ctx.close()
   })
 
@@ -437,9 +450,8 @@ try {
   await part('the phone, dark', async () => {
     const { ctx, phone, f, errors } = await phonePage({ mode: 'dark', theme: 'midnight' })
     if (!f) { await ctx.close(); return }
-    await openSettings(f)
-    await f.locator('.sb-chip', { hasText: 'Harbor Desk' }).click()
-    await f.locator('.modal.settings [data-setting="slack-guide"]').waitFor({ timeout: 10000 })
+    await openBot(f, { name: 'Harbor Desk' })
+    await f.locator('.bp [data-setting="slack-guide"]').waitFor({ timeout: 10000 })
     const faults = await allFaults(f)
     ok(!Object.keys(faults).length, 'dark, 390 px: every section, tab and place it answers in, with nothing too small, off the screen or cut short', faults)
     await shot(phone, `${tag}bots-remote-phone-dark`)
@@ -472,9 +484,8 @@ try {
     if (!f) { await ctx.close(); return }
     const downloads = []
     phone.on('download', (d) => downloads.push(d.suggestedFilename()))
-    await openSettings(f)
-    await f.locator('.sb-chip', { hasText: 'Harbor Desk' }).click()
-    const exp = f.locator('.modal.settings [data-setting="slack-export"]')
+    await openBot(f, { name: 'Harbor Desk' })
+    const exp = f.locator('.bp [data-setting="slack-export"]')
     await exp.locator('button', { hasText: 'Export Harbor Desk' }).click({ timeout: 10000 })
     const said = await until(async () => { const x = await exp.innerText(); return /is ready to save or share/.test(x) && x }, 15000)
     const saves = await f.evaluate(() => window.__saves || [])
@@ -487,9 +498,8 @@ try {
   await part('the Android app', async () => {
     const { ctx, f, errors } = await phonePage({ android: true })
     if (!f) { await ctx.close(); return }
-    await openSettings(f)
-    await f.locator('.sb-chip', { hasText: 'Harbor Desk' }).click()
-    const exp = f.locator('.modal.settings [data-setting="slack-export"]')
+    await openBot(f, { name: 'Harbor Desk' })
+    const exp = f.locator('.bp [data-setting="slack-export"]')
     await exp.waitFor({ timeout: 10000 })
     ok(/The Android app can't save files yet\./.test(await exp.innerText()) && !(await exp.locator('button, a').count()), 'the Android app: Export says it can\'t save files there yet, instead of a button that does nothing', await exp.innerText())
     ok(errors.length === 0, 'no page errors in the Android app', errors)

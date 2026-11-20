@@ -8,15 +8,17 @@
 //   The health check (scripts/health.js, the image's HEALTHCHECK) says each bot's connection, and
 //   is unhealthy while one can't connect until something's fixed; `bridge-ai status` lists them.
 //   Scheduled posts through Routines: run by hand and at their time, posted at the top of the
-//   channel, waiting for you first unless it may go without asking. Answering without a mention in
+//   channel, waiting for you first unless it may go without asking; one that sums up the channel reads
+//   the recent messages of those who may ask it only, runs no commands, and its post waits while
+//   others' words are in it. Answering without a mention in
 //   a channel you pick: people who may ask are answered, anyone else and what isn't for it left
-//   alone. Back after being away: what was missed (a DM, a mention, a reply in its thread) answered
-//   oldest first. Settings › Bots, Channels and Scheduled Posts, in light and dark.
+//   alone. Back after being away: what was missed (a DM, a mention, a reply in its thread) answered,
+//   its direct messages and the threads it's in first, then its channels, each oldest first. Settings › Bots, Channels and Scheduled Posts, in light and dark.
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync, spawn } from 'node:child_process'
 import { checks, until, sleep, browser, page, shot, phoneFaults, ROOT } from '../lib/harness.mjs'
-import { botKit, lookers, openSettings, M, M2, OWNER } from '../lib/bots.mjs'
+import { botKit, lookers, openBot, newBotChat, M, M2, OWNER } from '../lib/bots.mjs'
 
 const { ok, done } = checks('bots-always-on')
 const HANDBOOK = '# Handbook\n\nEveryone gets ten days of leave a year.\n'
@@ -139,6 +141,27 @@ try {
     ok(!(await mac.convs('b1', 'And sick days')).length, 'off again: a message without a mention isn\'t for it')
   })
 
+  // ---------- A scheduled post that sums up the channel ----------
+  // It reads the channel's recent messages from the people who may ask it (Dana's), never Eve's (who
+  // may not: left out, not even masked); runs at the least of what they may (no commands, even with
+  // commands on); and its post waits for you, though the bot may answer on its own, as Dana's words
+  // are in it.
+  await part('a post that sums up the channel', async () => {
+    await kit.api('/bots/b1/settings', { auto: true })
+    try {
+      const made = await kit.api('/routines', { name: 'Channel digest', command: 'Sum up the channel today [run ls] [answer Here is the digest.]', to: 'bot', bot: 'b1', channel: { id: 'C0LAUNCH', name: 'launch' } })
+      await kit.api(`/routines/${made.id}/run`, {})
+      const s = await mac.startOf('Sum up the channel today', 30000)
+      const brief = mac.briefOf(s)
+      ok(!!s && /latest messages from the people who may ask you/.test(brief) && /Lunch anyone\?/.test(brief) && !/Does anyone know the leave policy/.test(brief) && !/Eve:/.test(brief), 'it reads the channel\'s recent messages from those who may ask it, and nobody else\'s', brief.slice(0, 1200))
+      ok(!!s && !s.args.join(' ').includes('Bash') && !s.given?.sandbox, 'and runs no commands', s?.args?.slice(0, 2))
+      const d = await mac.draftOf('Sum up the channel today')
+      ok(d?.how === 'scheduled' && !(await slack.state()).posted.some((x) => x.channel === 'C0LAUNCH' && /Here is the digest/.test(x.text || '')), 'its post waits for you, though the bot may answer on its own: others\' words are in it', d && { draft: d.draft, state: d.state })
+      if (d) await kit.api(`/bots/questions/${d.id}`, { send: false })
+      await kit.api(`/routines/${made.id}`, {}, 'DELETE').catch(() => null)
+    } finally { await kit.api('/bots/b1/settings', { auto: false, bash: 'off' }) }
+  })
+
   // ---------- Back after being away: oldest first ----------
   await part('catching up', async () => {
     await slack.away()
@@ -149,9 +172,11 @@ try {
     await sleep(30)
     await slack.ask({ user: 'U0DANA', thread: listened.ts, text: 'Third, in its thread [answer Three.]' })
     await slack.back()
-    for (const w of ['First, in a DM', 'Second, a mention', 'Third, in its thread']) await mac.draftOf(w, 60000)
+    // (The DM's answer goes at once; the others wait for you.)
+    ok(!!(await until(async () => (await slack.state()).posted.some((x) => x.channel === 'D0DANA' && /One\./.test(x.text || '')), 60000)), 'the DM answered at once')
+    for (const w of ['Second, a mention', 'Third, in its thread']) await mac.draftOf(w, 60000)
     const got = mac.events().filter((e) => e.type === 'received' && /^(First, in a DM|Second, a mention|Third, in its thread)/.test(e.text || ''))
-    ok(got.map((e) => e.text.split(',')[0]).join() === 'First,Second,Third' && got.every((e) => e.late) && got.map((e) => e.how).join() === 'dm,mention,follow-up', 'back after being away: a DM, a mention and a reply in its thread, each answered, oldest first', got.map((e) => [e.text.slice(0, 20), e.how, e.late]))
+    ok(got.map((e) => e.text.split(',')[0]).join() === 'First,Third,Second' && got.every((e) => e.late) && got.map((e) => e.how).join() === 'dm,follow-up,mention', 'back after being away: a DM, a mention and a reply in its thread, each answered: its direct messages and threads first (oldest first), then its channels', got.map((e) => [e.text.slice(0, 20), e.how, e.late]))
   })
 
   // ---------- A post with a time of its own ----------
@@ -169,8 +194,7 @@ try {
   for (const [mode, theme, phone] of [['light', 'sky', false], ['dark', 'midnight', false], ['dark', 'midnight', true]]) {
     await part(`Settings, ${mode}${phone ? ', on a phone' : ''}`, async () => {
       const { ctx, p, errors } = await page(b, kit.url, { mode, theme, phone })
-      await openSettings(p)
-      await p.locator('.sb-tabs [role="tab"]', { hasText: 'Set Up' }).click()
+      await openBot(p)
       const sched = p.locator('[data-setting="slack-scheduled"]')
       await sched.waitFor({ timeout: 10000 })
       await sched.scrollIntoViewIfNeeded()
@@ -179,16 +203,15 @@ try {
       const chans = p.locator('[data-setting="slack-channels"]')
       ok(/without a mention/i.test(await chans.innerText()), 'Channels: where it answers without a mention')
       ok(/Instructions, memory and settings; never its tokens/.test(await p.locator('[data-setting="slack-export"]').innerText().catch(() => '')) || /never its tokens/.test(await p.locator('[data-setting="slack-identity"]').innerText()), 'its export, said to leave its tokens out')
-      if (phone) { const faults = await phoneFaults(p, '.modal.settings .sb'); ok(!Object.keys(faults).length, 'on a phone: nothing too small to tap, off the screen or cut short', faults) }
+      if (phone) { const faults = await phoneFaults(p, '.bp.phone .bp-main'); ok(!Object.keys(faults).length, 'on a phone: nothing too small to tap, off the screen or cut short', faults) }
       await shot(p, `${tag}bots-always-on-scheduled-${mode}${phone ? '-phone' : ''}`)
       if (mode === 'light') {
-        // A bot imported from the page: Import a bot… in New Bot.
-        await p.locator('.sb-chip.add').click()
+        // A bot imported from the page: Import a bot… in a new bot's form.
+        await newBotChat(p, { form: true })
         await p.locator('[data-setting="slack-import"] input[type="file"]').setInputFiles(fileOut)
         const made = await until(async () => (await kit.api('/bots')).bots.find((x) => x.name === 'Atlas (2)'), 10000)
-        ok(!!made, 'Import a bot… in Settings: brought in, named so it doesn\'t clash', (await kit.api('/bots')).bots.map((x) => x.name))
-        await until(async () => /Connect its Slack app here/.test(await p.locator('.sb').innerText()), 8000)
-        ok(/Connect its Slack app here/.test(await p.locator('.sb').innerText()), 'and it says what\'s left to do')
+        ok(!!made, 'Import a bot…: brought in, named so it doesn\'t clash', (await kit.api('/bots')).bots.map((x) => x.name))
+        ok(!!(await until(async () => /Connect its Slack app here/.test(await p.locator('.bp [data-setting="bot-imported"]').innerText().catch(() => '')), 8000)), 'its page opens, saying what\'s left to do')
         await shot(p, `${tag}bots-always-on-imported`)
       }
       ok(errors.length === 0, 'no page errors', errors)

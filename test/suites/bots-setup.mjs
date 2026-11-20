@@ -2,9 +2,9 @@
 // stand-in model for AI Assist (stand-ins/model.mjs), the stand-in Slack, a stand-in MCP server
 // (stand-ins/mcp-server.mjs, in Claude Code's own list) and Claude Code answering (stand-ins/bot-claude.cjs
 // in front of helper-claude.cjs).
-//   No model: + in the sidebar's Bots opens a chat that says there's none and offers the form, and
-//   nothing is made. With AI Assist's model: the sidebar lists Bots with + (Make your first bot);
-//   + opens the chat, the owner's words make a draft, listed in the sidebar as a Draft, whose page is
+//   No model: New bot described to AI Assist opens a chat that says there's none and offers the form,
+//   and nothing is made. With AI Assist's model: Bots in the sidebar (Make Your First Bot); New bot's
+//   Or describe it to AI Assist opens the chat, the owner's words make a draft, its tab named so, whose page is
 //   the chat and one card with every part of the bot AI Assist proposed (its name, folders among
 //   those Bridge AI knows, the people and channels named, its MCP server, limits), each changed in
 //   place or in words; nothing is set up until Create, and a Create that Settings' checks turn down
@@ -12,20 +12,40 @@
 //   walks through it (its tokens pasted there, each step said as it's done), the people named found
 //   once it's connected and added only once confirmed; a change in words shown first and applied on
 //   confirm, or left; one Settings refuses (the whole home folder) changes nothing. The Chief of
-//   Staff's `bridge bot draft`: a draft in the sidebar, nothing of it live until Create. Its MCP
+//   Staff's `bridge bot draft`: a draft among Bots' drafts, nothing of it live until Create. Its MCP
 //   servers: their tools listed with which only read; a run gets only its servers (--mcp-config,
 //   --strict-mcp-config, never a folder it may read), every tool for you and the people named, only
-//   the read-only ones for anyone else, and Activity records the tools it used. Try It as it goes:
-//   what it's reading and the time so far, Stop, and the answer the moment it's there. Someone else's
+//   the read-only ones for anyone else, and Activity records the tools it used. A test session (asked
+//   once, as this server keeps no sessions) as it goes: what it's reading and the time so far, Stop,
+//   and the answer the moment it's there. Someone else's
 //   Claude Code settings in a bot's folder (reads anywhere, a command run as it starts): its run
 //   loads only your own and Bridge AI's, so neither holds; an agent of your own there loads them as
-//   before; a Claude Code too old for that starts no run, saying why. Settings › Bots opens the same
-//   page. The pages in light and dark, on a computer and a phone (More › Bots).
+//   before; a Claude Code too old for that starts no run, saying why. Settings › Bots opens Bots.
+//   The pages in light and dark, on a computer and a phone (More › Bots).
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { startKit, startSlack, startModel, startLocalModel, checks, until, sleep, browser, page, shot, phoneFaults, ROOT, TEST } from '../lib/harness.mjs'
 import { lookers, openSettings } from '../lib/bots.mjs'
+
+// Bots (the sidebar's, a phone's More › Bots) at its Bots tab; a bot's page from its card (a draft's
+// from its chip); AI Assist's chat for a new bot, from New bot's three questions.
+const openBots = async (p) => {
+  await p.locator('.topbar, .tabbar').first().waitFor({ timeout: 20000 })
+  if (await p.locator('.tabbar').count()) {
+    await p.locator('.tabbar button', { hasText: 'More' }).click()
+    await p.locator('.m-more-row[data-id="bots"]').click()
+  } else await p.locator('[data-setting="rail-bots"] .rail-nav-btn').click({ timeout: 20000 })
+  await p.locator('.bh-tabs [data-tab="bots"]').click()
+}
+const openBot = async (p, name) => {
+  await openBots(p)
+  await p.locator('.bh :is(.bo-card, [data-group="drafts"] .sb-chip)', { hasText: name }).first().click()
+}
+const newChat = async (p) => {
+  await p.locator('[data-setting="rail-bots"] .rail-tool[aria-label="New bot"]').click({ timeout: 20000 })
+  await p.locator('[data-setting="bots-quick"] .ai-assist-link').click()
+}
 
 const { ok, done } = checks('bots-setup')
 const slack = await startSlack('bots-setup')
@@ -52,7 +72,9 @@ const logOf = (f) => { try { return fs.readFileSync(path.join(home, f), 'utf8').
 const chief = (...args) => spawnSync(process.execPath, [path.join(ROOT, 'chief', 'bin', 'bridge'), ...args], { encoding: 'utf8', cwd: path.join(kit.data, 'chief'), env: { ...process.env, BRIDGE_URL: kit.url, BRIDGE_HOME: kit.data, BRIDGE_THREAD: 'main' } })
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
-const part = async (name, fn) => { try { await fn() } catch (e) { ok(false, `${name}: crashed: ${e.stack}`) } }
+// (A part that crashes leaves a picture of the page as it was, for a run elsewhere to be read.)
+let crashPage = null
+const part = async (name, fn) => { try { await fn() } catch (e) { if (crashPage) await shot(crashPage, `${tag}bots-setup-crash-${name.replace(/[^\w-]+/g, '-')}`).catch(() => {}); ok(false, `${name}: crashed: ${e.stack}`) } }
 const assist = (id) => kit.api(`/bots/${id}/assist`)
 const shown = (p, sel, ms = 10000) => p.locator(sel).first().waitFor({ timeout: ms }).then(() => true, () => false)
 // A folder as these checks spell it (on Windows the server says ~\code\pricing).
@@ -72,8 +94,8 @@ try {
     ok(!r.bot && r.setup.messages.some((m) => m.kind === 'no-model'), 'said with no model: nothing made, and the chat says why', r.setup.messages)
     ok(!(await kit.api('/bots')).bots.length, 'no bot, not even a draft')
     const x = await page(b, kit.url, { mode: 'light' })
-    await x.p.locator('.rail-bots-head .rail-tool[aria-label="New bot"]').click()
-    ok(await shown(x.p, '.bc li[data-kind="no-model"]'), '+ in the sidebar\'s Bots: a chat that says there\'s no model', await x.p.locator('.bc').innerText().catch(() => ''))
+    await newChat(x.p)
+    ok(await shown(x.p, '.bc li[data-kind="no-model"]'), 'New bot, described to AI Assist: a chat that says there\'s no model', await x.p.locator('.bc').innerText().catch(() => ''))
     ok(await shown(x.p, '.bc .bc-form .sb-new input'), 'and offers the form right there')
     await shot(x.p, `${tag}bots-setup-no-model`)
     ok(!x.errors.length, 'no page errors', x.errors)
@@ -87,13 +109,15 @@ try {
   await kit.api('/agents/catalog')
 
   const { ctx, p, errors } = await page(b, kit.url, { mode: 'light' })
+  crashPage = p
   let id = null
   // ---------- The sidebar, + and the chat ----------
   await part('sidebar and chat', async () => {
-    ok(await shown(p, '.rail-bots-head'), 'the sidebar has Bots, under its own heading')
-    ok(await until(async () => /Make your first bot/.test(await p.locator('.rail-bot-list').innerText()), 10000), 'with no bot yet: Make your first bot')
-    await p.locator('.rail-bots-head .rail-tool[aria-label="New bot"]').click()
-    ok(await shown(p, '.bc .bc-examples'), '+: AI Assist\'s chat, asking what it should do, with examples')
+    ok(await shown(p, '[data-setting="rail-bots"] .rail-nav-btn'), 'the sidebar has Bots')
+    await p.locator('[data-setting="rail-bots"] .rail-nav-btn').click()
+    ok(await until(async () => /Make Your First Bot/.test(await p.locator('.bh').innerText()), 10000), 'with no bot yet: Make Your First Bot')
+    await newChat(p)
+    ok(await shown(p, '.bc .bc-examples'), 'Or describe it to AI Assist: its chat, asking what it should do, with examples')
     ok(/gpt-5/.test(await p.locator('.bc .bc-model').innerText().catch(() => '')), 'naming the model AI Assist uses')
     await shot(p, `${tag}bots-setup-new`)
     await p.locator('.bc-say textarea').fill('A bot called Pricing Desk that answers pricing questions for Dana and Sam in #launch, from my pricing folder, using the tracker MCP server.')
@@ -102,7 +126,7 @@ try {
     const list = (await kit.api('/bots')).bots
     id = list[0]?.id
     ok(list.length === 1 && list[0].draft && list[0].name === 'Pricing Desk', 'a draft, named as asked', list)
-    ok(await until(async () => /Pricing Desk/.test(await p.locator('.rail-bot-list').innerText()) && /draft/i.test(await p.locator('.rail-bot-list').innerText()), 10000), 'in the sidebar as a Draft', await p.locator('.rail-bot-list').innerText().catch(() => ''))
+    ok(await until(async () => /Pricing Desk/.test(await p.locator('.ws-tab[aria-selected="true"]').innerText().catch(() => '')), 10000), 'its tab named as the draft is', await p.locator('.ws-tab[aria-selected="true"]').innerText().catch(() => ''))
     const s = await assist(id)
     const pr = s.proposal || {}
     ok(fwds(pr.folders).includes('~/code/pricing') && pr.people.join() === 'Dana,Sam' && pr.channels.some((c) => c.name === 'launch') && pr.mcp.join() === 'tracker' && pr.platform === 'slack' && /Pricing Desk/.test(pr.instructions), 'AI Assist proposes the whole bot: its folder (one Bridge AI knows), the people and channel named, its MCP server, its instructions', pr)
@@ -134,7 +158,7 @@ try {
     const v = await botOf(id)
     ok(!v.draft && fwds(v.settings.readsFrom).join() === '~/code/pricing,~/docs' && v.settings.mcp.join() === 'tracker' && v.settings.limits.day === 20 && v.settings.who === 'named' && !v.settings.askers.length && /Pricing Desk/.test(v.instructions.text), 'made as proposed: its folders, MCP server, limits and instructions; the people named wait until it can find them', v.settings)
     ok(events(id).some((e) => e.type === 'settings.changed' && e.setting === 'created' && e.new?.with === 'AI Assist'), 'its record says it was made with AI Assist')
-    ok(await shown(p, '.bc-connect [data-setting="slack-guide"]'), 'the chat carries on: the steps to connect it, in Slack')
+    ok(await shown(p, '.bc-connect [data-setting="slack-guide-chat"]'), 'the chat carries on: the steps to connect it, in Slack')
     await shot(p, `${tag}bots-setup-created`)
   })
 
@@ -171,8 +195,10 @@ try {
     // The whole home folder: Settings' own check refuses it, and nothing of the change goes.
     await say('let it read ~ and rename it Pricing Bot')
     s = await until(async () => { const x = await assist(id); return x.change ? x : null }, 15000)
+    // (Its card as the chat shows it now, this change's: then its Apply.)
+    await until(async () => /Pricing Bot/.test(await p.locator('.bc-change').innerText().catch(() => '')), 15000)
     await p.locator('.bc-change .btn.primary').click()
-    ok(await until(async () => /not the whole of it/.test(await p.locator('.bc').innerText()), 8000), 'one Settings refuses: said in the chat', await p.locator('.bc').innerText().catch(() => ''))
+    ok(await until(async () => /not the whole of it/.test(await p.locator('.bc').innerText()), 20000), 'one Settings refuses: said in the chat', await p.locator('.bc').innerText().catch(() => ''))
     const v = await botOf(id)
     ok(v.name === 'Pricing Desk' && !v.settings.readsFrom.includes('~'), 'and none of it applied, not even the new name', { name: v.name, readsFrom: v.settings.readsFrom })
     await p.locator('.bc-change .ghost-btn', { hasText: 'Leave it as it is' }).click()
@@ -189,8 +215,9 @@ try {
     ok(s.proposal?.platform === 'discord' && s.proposal.who === 'channels' && fwds(s.proposal.folders).includes('~/docs') && s.messages.some((m) => m.kind === 'chief'), 'proposed from its words: Discord, anyone, its docs folder; the chat says the Chief drafted it', s.proposal)
     await kit.api(`/bots/${chiefBot.id}/try`, { text: 'hi' }).then(() => ok(false, 'a draft can\'t be asked'), (e) => ok(e.status === 409, 'nothing of it live: it can\'t be asked', e.message))
     ok(!(await kit.api('/health')).bots.some((x) => x.id === chiefBot.id), 'nor connected')
-    ok(await until(async () => /Docs Helper/.test(await p.locator('.rail-bot-list').innerText()), 10000), 'in the sidebar')
-    await p.locator('.rail-bot-list .bt-row', { hasText: 'Docs Helper' }).click()
+    await openBots(p)
+    ok(await until(async () => /Docs Helper/.test(await p.locator('.bh [data-group="drafts"]').innerText().catch(() => '')), 10000), 'among Bots\' drafts')
+    await p.locator('.bh [data-group="drafts"] .sb-chip', { hasText: 'Docs Helper' }).click()
     ok(await shown(p, '.bp-draft .bc-proposal') && /Chief of Staff drafted this/.test(await p.locator('.bc').innerText()), 'its page: the chat, saying where it came from, and its card to Create')
     await shot(p, `${tag}bots-setup-chief-draft`)
   })
@@ -207,17 +234,22 @@ try {
     await slack.ask({ user: 'U0EVE', text: '<@UBOT> what\'s open? [mcp tracker list_issues] [mcp tracker create_issue]' })
     const eve = await until(() => logOf('mcp-tries.log').filter((x) => x.tool === 'create_issue').length >= 1 && logOf('mcp-tries.log'), 25000)
     ok(eve && eve.find((x) => x.tool === 'list_issues')?.done === true && eve.find((x) => x.tool === 'create_issue')?.done === false, 'someone not named: the tool that only reads used, the other refused', eve)
-    const start = logOf('helpers-started.log').find((x) => /what's open/.test(x.message))
-    const args = logOf('claude-args.log').find((x) => /what's open/.test(x.message))?.args || []
+    // (Read again until both are there: a line being written as it's read reads as none.)
+    const start = await until(() => logOf('helpers-started.log').find((x) => /what's open/.test(x.message)), 10000)
+    const args = (await until(() => logOf('claude-args.log').find((x) => /what's open/.test(x.message)), 10000))?.args || []
     const cfg = args[args.indexOf('--mcp-config') + 1]
     ok(args.includes('--strict-mcp-config') && cfg && !(args.includes('--add-dir') && args.slice(args.indexOf('--add-dir')).includes(path.dirname(cfg))) && eve.every((x) => x.config && !x.read), 'its run: only its servers (--mcp-config, --strict-mcp-config), the config never a folder it may read', args)
     ok(args.includes('mcp__tracker__list_issues') && args.includes('mcp__tracker__search') && !args.includes('mcp__tracker') && args.slice(args.indexOf('--disallowedTools')).includes('mcp__tracker__create_issue'), 'allowed: the read-only tools; refused by name: the other', args)
     ok(!start.secrets?.length && !JSON.stringify(args).includes('tok-tracker-123'), 'its token not on its command line')
-    ok(await until(() => fs.existsSync(cfg) ? null : true, 20000), 'its MCP folder gone once the run\'s over')
     const spaces = ((await kit.api('/fleet?all=1')).workspaces || []).map((w) => w.label)
     ok(spaces.includes('Bot Runs') && !spaces.includes('Bots'), 'its answering agents run in the Bot Runs space, not one called Bots beside the sidebar\'s Bots', spaces)
     const shown = await kit.api('/fleet')
     ok(!shown.workspaces.some((w) => w.label === 'Bot Runs') && !shown.agents.some((a) => a.helper?.list === 'desk'), 'and none of it is in the sidebar: a bot\'s runs are on its page, under Conversations', shown.workspaces.map((w) => w.label))
+    // (Its folder is its session's: kept while the conversation may go on, gone once it ends.)
+    const sess = await until(async () => (await kit.api('/bots/sessions')).sessions.find((x) => /what's open/.test(x.title) && x.state !== 'working'), 20000)
+    ok(fs.existsSync(cfg) && !!sess, 'its MCP folder stays with its session, for its next turn', sess)
+    await kit.api(`/bots/sessions/${sess.id}/end`, {})
+    ok(await until(() => fs.existsSync(cfg) ? null : true, 20000), 'and is gone once the session ends')
     // Dana, named: every tool.
     await slack.ask({ user: 'U0DANA', text: '<@UBOT> file it please [mcp tracker create_issue]' })
     const dana = await until(() => logOf('mcp-tries.log').filter((x) => x.tool === 'create_issue').length >= 2 && logOf('mcp-tries.log').filter((x) => x.tool === 'create_issue').at(-1), 25000)
@@ -237,18 +269,21 @@ try {
     const o = await until(async () => { const x = await kit.api(`/bots/${id}/answerers?fresh=1`); return x.options.some((y) => y.id === 'model:ollama:llama3.1:8b') ? x : null }, 15000)
     ok(o && o.options.some((y) => y.id === 'model:ollama:llama3.1:8b' && y.local) && o.options.some((y) => y.id === 'model:openai:gpt-5' && !y.local) && o.options.some((y) => y.id === 'agent:claude:opus' && !y.local), 'what can answer: the agents (on a model of their own too) and every model reached, each Local or Cloud', o?.options)
     ok(o?.automatic[0] === 'agent:claude' && o.automatic.at(-1) === 'model:ollama:llama3.1:8b' && o.automatic.indexOf('model:openai:gpt-5') < o.automatic.indexOf('model:ollama:llama3.1:8b'), 'Automatic: Claude Code first, the model on this computer last', o?.automatic)
-    await p.locator('.rail-bot-list .bt-row', { hasText: 'Pricing Desk' }).click()
+    await openBot(p, 'Pricing Desk')
     await p.locator('.bc-say textarea').fill('use my local model if Claude is down')
     await p.locator('.bc-say button[type="submit"]').click()
-    const s = await until(async () => { const x = await assist(id); return x.change ? x : null }, 15000)
+    const s = await until(async () => { const x = await assist(id); return x.change ? x : null }, 30000)
     ok(s?.change.lines.some((l) => l.key === 'answerers' && l.after.join() === 'agent:claude,model:ollama:llama3.1:8b'), 'said in words: Claude Code first, the local model to fall back on, shown first', s?.change)
+    // (Its card as the chat shows it now, this change's: then its Apply.)
+    await until(async () => /llama3\.1/.test(await p.locator('.bc-change').innerText().catch(() => '')), 15000)
     await p.locator('.bc-change .btn.primary').click()
     ok(await until(async () => (await botOf(id)).settings.answerers?.join() === 'agent:claude,model:ollama:llama3.1:8b', 8000), 'applied on confirm')
     // A post on a schedule, in words: a routine of its own once confirmed.
     await p.locator('.bc-say textarea').fill('post a summary of what changed in #launch every Monday at 9')
     await p.locator('.bc-say button[type="submit"]').click()
-    const ps = await until(async () => { const x = await assist(id); return x.change ? x : null }, 15000)
+    const ps = await until(async () => { const x = await assist(id); return x.change ? x : null }, 30000)
     ok(ps?.change.lines.some((l) => l.key === 'posts' && l.after[0]?.channel === 'launch' && /every Monday at 9/.test(l.after[0].when)), 'a scheduled post said in words: shown first', ps?.change)
+    await until(async () => /Monday/.test(await p.locator('.bc-change').innerText().catch(() => '')), 15000)
     await p.locator('.bc-change .btn.primary').click()
     const rt = await until(async () => (await kit.api('/routines')).routines?.find((r) => r.to === 'bot' && r.bot === id && r.channel?.name === 'launch'), 8000)
     ok(rt && /what changed/i.test(rt.command) && /monday/i.test(rt.says || rt.schedule || ''), 'confirmed: a scheduled post of its own in #launch', rt)
@@ -259,31 +294,38 @@ try {
     ok(await until(async () => /looks like a token/.test(await p.locator('.bc').innerText()), 5000), 'a token pasted as words: refused, saying where it goes')
     ok(model.asked(/Known folders/).length === before && !(await assist(id)).messages.some((m) => /xoxb-/.test(m.text || '')), 'not sent to the model, not kept in the chat')
     await p.locator('.bc-say textarea').fill('')
-    await p.locator('.bp-main .sb-tabs [role="tab"]', { hasText: 'Access' }).click()
+    await p.locator('.bp-main .sb-tabs [data-tab="settings"]').click()
+    const adv = p.locator('.bp [data-setting="bot-advanced"]')
+    if (!(await adv.evaluate((d) => d.open))) await adv.locator(':scope > summary').click()
     const sec = p.locator('[data-setting="bots-answerers"]')
     await sec.scrollIntoViewIfNeeded()
     const said = await sec.innerText()
-    ok(/Your own list/.test(said) && /Claude Code/.test(said) && /llama3.1:8b/.test(said) && /Local/.test(said) && /Cloud/.test(said), 'its Access: What Answers, in order, each Local or Cloud', said)
+    ok(/Your own list/.test(said) && /Claude Code/.test(said) && /llama3.1:8b/.test(said) && /Local/.test(said) && /Cloud/.test(said), 'its Settings, under Advanced: What Answers, in order, each Local or Cloud', said)
     await shot(p, `${tag}bots-setup-what-answers`)
   })
 
-  // ---------- Try It, as it goes ----------
-  await part('Try It live', async () => {
-    await p.locator('.rail-bot-list .bt-row', { hasText: 'Pricing Desk' }).click()
-    await p.locator('.bp-main .sb-tabs [role="tab"]', { hasText: 'Try It' }).click()
-    await p.locator('.sb-try textarea').fill('Hi [answer Hello, I\'m Pricing Desk.] [work 6] [peek]')
-    await p.locator('.sb-try button[type="submit"]').click()
-    ok(await shown(p, '[data-setting="slack-try-live"]', 8000), 'asked: the run shows as it goes')
-    const reading = await until(async () => { const tx = await p.locator('[data-setting="slack-try-live"]').innerText().catch(() => ''); return /Reading .*README\.md/.test(tx) ? tx : null }, 10000)
-    ok(!!reading && /\d:\d\d/.test(reading) && /Stop/.test(reading), 'what it\'s reading, the time so far, and Stop', reading)
+  // ---------- A test session, as it goes (asked once, where there are no sessions) ----------
+  await part('a test session live', async () => {
+    await openBot(p, 'Pricing Desk')
+    await p.locator('.bp-main .sb-tabs [data-tab="overview"]').click()
+    const form = p.locator('.bp [data-setting="bot-test"] [data-setting="test-session"]')
+    await form.locator('textarea').fill('Hi [answer Hello, I\'m Pricing Desk.] [work 6] [peek]')
+    await form.locator('button[type="submit"]').click()
+    // (Claude Code answering: a session of its own, opened, as any other.)
+    const sv = p.locator('.bh-sv[data-session]')
+    ok(await shown(p, '.bh-sv[data-session] .bh-turns', 15000), 'asked: its session opens, the run showing as it goes')
+    const sid = await sv.getAttribute('data-session').catch(() => null)
+    const reading = await until(async () => { const tx = await p.locator('.bh-sv .bh-doing').innerText().catch(() => ''); return /README\.md/.test(tx) ? tx : null }, 10000)
+    ok(!!reading && await p.locator('[data-setting="session-stop"]').isVisible().catch(() => false), 'what it\'s reading, and Stop', reading)
     await shot(p, `${tag}bots-setup-try-live`)
-    ok(await until(async () => /Hello, I'm Pricing Desk\./.test(await p.locator('.sb-try-draft').innerText().catch(() => '')), 20000), 'its answer there the moment it\'s ready: "Hi" visibly gets a reply')
-    ok(!(await p.locator('[data-setting="slack-try-live"]').count()), 'and the run\'s line gone')
-    await p.locator('.sb-try textarea').fill('Take your time [work 30]')
-    await p.locator('.sb-try button[type="submit"]').click()
-    ok(await shown(p, '[data-setting="slack-try-live"] button:has-text("Stop")', 8000), 'a long one: Stop')
-    await p.locator('[data-setting="slack-try-live"] button:has-text("Stop")').click()
-    ok(await until(async () => /Stopped before it answered/.test(await p.locator('.sb-try-out').innerText().catch(() => '')), 15000), 'Stop: stopped, and said')
+    ok(await until(async () => /Hello, I'm Pricing Desk\./.test(await p.locator('.bh-sv .bh-turn .bh-reply').first().innerText().catch(() => '')), 20000), 'its answer there the moment it\'s ready: "Hi" visibly gets a reply')
+    ok(!!(await until(async () => !(await p.locator('[data-setting="session-stop"]').count()), 8000)), 'and its Stop gone')
+    // Its next turn, a long one: Stop, the session kept.
+    const pd = (await kit.api('/bots')).bots.find((x) => x.name === 'Pricing Desk')
+    await kit.api(`/bots/${pd.id}/sessions`, { text: 'Take your time [work 30]', sid })
+    ok(await shown(p, '[data-setting="session-stop"]', 10000), 'a long one: Stop')
+    await p.locator('[data-setting="session-stop"]').click()
+    ok(await until(async () => /Stopped/.test(await p.locator('.bh-sv .bh-turn').last().innerText().catch(() => '')), 15000), 'Stop: stopped, and said')
   })
 
   // ---------- Fallbacks, and a model answering ----------
@@ -401,13 +443,11 @@ try {
     ok(/Here again\./.test(x?.item.draft || ''), 'updated: it answers again', x?.item)
   })
 
-  // ---------- Settings › Bots opens the same ----------
+  // ---------- Settings › Bots opens Bots ----------
   await part('Settings › Bots', async () => {
-    await openSettings(p)
-    await p.locator('.sb-chip', { hasText: 'Pricing Desk' }).click()
-    ok(await shown(p, '.modal.settings .sb-page-link button'), 'Settings › Bots: the same bot, with Open as a page')
-    await p.locator('.modal.settings .sb-page-link button').click()
-    ok(await until(async () => !(await p.locator('.modal.settings').count()) && (await p.locator('.bp .bp-name').innerText().catch(() => '')) === 'Pricing Desk', 8000), 'which opens its page, Settings closed')
+    await openSettings(p, 'slack-bot', '.modal.settings [data-setting="bots-beta"]')
+    await p.locator('.modal.settings [data-setting="bots-open"]').click()
+    ok(await until(async () => !(await p.locator('.modal.settings').count()) && await p.locator('.bh[data-setting="bots-home"]').isVisible(), 8000), 'Settings › Bots: Open Bots opens Bots, Settings closed')
   })
   ok(errors.length === 0, 'no page errors', errors)
   await ctx.close()
@@ -418,23 +458,22 @@ try {
       const x = await page(b, kit.url, { mode, theme: mode === 'dark' ? 'midnight' : 'sky', phone })
       const label = `${mode}${phone ? ', a phone' : ''}`
       if (!phone) {
-        await x.p.locator('.rail-bot-list .bt-row', { hasText: 'Pricing Desk' }).click()
+        await openBot(x.p, 'Pricing Desk')
         ok(await shown(x.p, '.bp .sb-tabs'), `${label}: its page`)
         await shot(x.p, `${tag}bots-setup-page-${mode}`)
-        await x.p.locator('.rail-bot-list .bt-row', { hasText: 'Docs Helper' }).click()
+        await openBot(x.p, 'Docs Helper')
         ok(await shown(x.p, '.bp-draft .bc-proposal'), `${label}: a draft's page`)
         await shot(x.p, `${tag}bots-setup-draft-${mode}`)
       } else {
-        await x.p.locator('.tabbar button', { hasText: 'More' }).click()
-        await x.p.locator('.m-more-row[data-id="bots"]').click()
-        ok(await shown(x.p, '[data-setting="phone-bots"] .m-more-row[data-id="new-bot"]'), `${label}: More › Bots, with New bot`)
+        await openBots(x.p)
+        ok(await shown(x.p, '[data-setting="phone-bots"] [data-setting="bots-new"]'), `${label}: More › Bots, with New bot`)
         const rows = await until(async () => { const t = await x.p.locator('[data-setting="phone-bots"]').innerText(); return /Fallback Desk/.test(t) ? t : null }, 10000) || ''
         ok(/Pricing Desk/.test(rows) && /Docs Helper/.test(rows) && /draft/i.test(rows), `${label}: every bot, with how it stands`, rows)
         await sleep(300)
         let faults = await phoneFaults(x.p, '[data-setting="phone-bots"]')
         ok(!Object.keys(faults).length, `${label}: the list fits a phone`, faults)
         await shot(x.p, `${tag}bots-setup-phone-list-${mode}`)
-        await x.p.locator(`[data-setting="phone-bots"] .m-more-row[data-id="${id}"]`).click()
+        await x.p.locator(`[data-setting="phone-bots"] .bo-card[data-bot="${id}"]`).click()
         ok(await shown(x.p, '.bp.phone .sb-tabs'), `${label}: a bot's page`)
         await sleep(300)
         faults = await phoneFaults(x.p, '.bp.phone')
@@ -448,8 +487,13 @@ try {
         ok(!Object.keys(faults).length, `${label}: the chat fits a phone`, faults)
         await shot(x.p, `${tag}bots-setup-phone-chat-${mode}`)
         await x.p.locator('.m-view-back', { hasText: 'Bots' }).click()
-        await x.p.locator('[data-setting="phone-bots"] .m-more-row[data-id="new-bot"]').click()
-        ok(await shown(x.p, '.bp-new .bc-say'), `${label}: New bot, its chat`)
+        await x.p.locator('[data-setting="phone-bots"] [data-setting="bots-new"]').click()
+        ok(await shown(x.p, '[data-setting="phone-bots"] [data-setting="bots-quick"]'), `${label}: New bot, its three questions`)
+        await sleep(300)
+        faults = await phoneFaults(x.p, '[data-setting="phone-bots"]')
+        ok(!Object.keys(faults).length, `${label}: they fit a phone`, faults)
+        await x.p.locator('[data-setting="phone-bots"] [data-setting="bots-quick"] .ai-assist-link').click()
+        ok(await shown(x.p, '.bp-new .bc-say'), `${label}: or described to AI Assist, its chat`)
         await sleep(300)
         faults = await phoneFaults(x.p, '.bp-new')
         ok(!Object.keys(faults).length, `${label}: the new bot's chat fits a phone`, faults)

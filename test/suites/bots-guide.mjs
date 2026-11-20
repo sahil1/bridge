@@ -2,9 +2,9 @@
 // with stand-ins for Slack, Discord and Microsoft Teams (stand-ins/slack.mjs, discord.mjs,
 // teams.mjs) and Claude Code answering (stand-ins/helper-claude.cjs).
 //   Beta Features: the Bots line says where to start, and turned on offers Set up a bot, which
-//   opens Settings › Bots. With no bot yet, it says what one is in two lines, then Set up your first
-//   bot. A bot made, each place it answers (Slack, Discord, Teams) has its checklist under Where It
-//   Answers: seven steps from the bot made to its first answer, each with the clicks on that
+//   opens Bots. With no bot yet, Make Your First Bot says what one is in a line, and AI Assist with no
+//   model offers the form. A bot made, each place it answers (Slack, Discord, Teams) has its checklist
+//   under its Settings' Where It Answers (Advanced): seven steps from the bot made to its first answer, each with the clicks on that
 //   platform's own site, a button to the page where there is one, and what to do when it doesn't
 //   work. Each step ticks itself as it's done: the app and its tokens, connected, you there,
 //   invited (or added to a server, or to Teams), and its first answer sent. All done, it folds away
@@ -44,21 +44,29 @@ try {
     await openSettings(p, 'about', '.modal.settings [data-setting="beta"]')
     const line = p.locator('[data-setting="beta"] label.st-check', { hasText: /^Bots/ })
     const hint = await line.locator('span[title]').first().getAttribute('title')
-    ok(/Slack, Discord and Microsoft Teams/.test(hint || '') && /To start: Settings › Bots › Set up your first bot\.$/.test(hint || ''), 'the Bots beta feature says what it is, and ends with where to start', hint)
+    ok(/Slack, Discord and Microsoft Teams/.test(hint || '') && /To start: Bots in the sidebar\.$/.test(hint || ''), 'the Bots beta feature says what it is, and ends with where to start', hint)
     ok(!(await p.locator('[data-setting="beta-bots-start"]').count()), 'off: no Set up a bot')
     await line.locator('input[type="checkbox"]').check()
     const start = p.locator('[data-setting="beta-bots-start"] button', { hasText: 'Set up a bot' })
     ok(!!(await start.waitFor({ timeout: 5000 }).then(() => true, () => false)), 'turned on: Set up a bot, right there')
     await start.click()
-    const first = p.locator('[data-setting="bots-first"]')
-    ok(!!(await first.waitFor({ timeout: 8000 }).then(() => true, () => false)), 'which opens Settings › Bots')
+    const first = p.locator('.bh [data-setting="bots-quick"]')
+    ok(!!(await first.waitFor({ timeout: 8000 }).then(() => true, () => false)) && !(await p.locator('.modal.settings').count()), 'which opens Bots, Settings closed')
     const said = await first.innerText()
-    ok(/A bot answers people for you in Slack, Discord or Microsoft Teams/.test(said) && /everything it does is kept here/.test(said) && (await first.locator('p').count()) === 2, 'with no bot yet: what one is, in two lines', said)
+    ok(/Make Your First Bot/.test(said) && /A bot answers people in Slack, Discord or Microsoft Teams/.test(said), 'with no bot yet: Make Your First Bot, what one is in a line', said)
     await shot(p, `${tag}bots-guide-first`)
-    await first.locator('button', { hasText: 'Set up your first bot' }).click()
-    await p.locator('.sb-new input').fill('Atlas')
-    await p.locator('.sb-new button[type="submit"]').click()
-    ok(!!(await guide('slack').waitFor({ timeout: 10000 }).then(() => true, () => false)), 'Set up your first bot: its name, then its checklist')
+    await first.locator('.ai-assist-link').click()
+    await p.locator('.bc .bc-form .sb-new input').fill('Atlas')
+    await p.locator('.bc .bc-form .sb-new button[type="submit"]').click()
+    await p.locator('.bp .sb-tabs [data-tab="settings"]').waitFor({ timeout: 10000 })
+    await sleep(400)
+    // (Its page opens with AI Assist's chat beside it, which has the same steps: closed, so the
+    // checklist here is its Settings' own.)
+    if (await p.locator('.bp-chat .ai-head-close').count()) await p.locator('.bp-chat .ai-head-close').click()
+    await p.locator('.bp .sb-tabs [data-tab="settings"]').click({ timeout: 10000 })
+    const adv = p.locator('.bp [data-setting="bot-advanced"]')
+    if (!(await adv.evaluate((d) => d.open))) await adv.locator(':scope > summary').click()
+    ok(!!(await guide('slack').waitFor({ timeout: 10000 }).then(() => true, () => false)), 'with no model, AI Assist\'s form: its name, then its checklist under its Settings\' Advanced')
   })
 
   // ---------- Slack ----------
@@ -128,13 +136,24 @@ try {
   for (const [mode, phone] of [['dark', false], ['light', true], ['dark', true]]) {
     await part(`${mode}${phone ? ', a phone' : ''}`, async () => {
       const x = await page(b, kit.url, { mode, theme: mode === 'dark' ? 'midnight' : 'sky', phone })
-      await openSettings(x.p)
-      await x.p.locator('.sb-chip', { hasText: 'Pricing Desk' }).click()
+      if (phone) {
+        await x.p.locator('.tabbar button', { hasText: 'More' }).click({ timeout: 20000 })
+        await x.p.locator('.m-more-row[data-id="bots"]').click()
+      } else await x.p.locator('[data-setting="rail-bots"] .rail-nav-btn').click({ timeout: 20000 })
+      await x.p.locator('.bh-tabs [data-tab="bots"]').click()
+      await x.p.locator('.bh .bo-card', { hasText: 'Pricing Desk' }).click()
+      await x.p.locator('.bp .sb-tabs').first().waitFor({ state: 'attached', timeout: 10000 })
+      await x.p.waitForTimeout(300)
+      // (Not connected anywhere yet, it opens with AI Assist's chat: on a phone, over the page.)
+      if (await x.p.locator('.bp.phone .bp-chat .ai-head-close').count()) await x.p.locator('.bp.phone .bp-chat .ai-head-close').click()
+      await x.p.locator('.bp .sb-tabs [data-tab="settings"]').click()
+      const adv = x.p.locator('.bp [data-setting="bot-advanced"]')
+      if (!(await adv.evaluate((d) => d.open))) await adv.locator(':scope > summary').click()
       await x.p.locator('[data-setting="slack-guide"] li').first().waitFor({ timeout: 8000 })
       ok(/1 of 7 done/.test(await x.p.locator('[data-setting="slack-guide"]').innerText()), `${mode}${phone ? ', a phone' : ''}: a new bot's checklist`)
       if (phone) {
         await sleep(300)
-        const faults = await phoneFaults(x.p, '.modal.settings .sb')
+        const faults = await phoneFaults(x.p, '.bp.phone .bp-main')
         ok(!Object.keys(faults).length, `${mode}, a phone: nothing too small, off the screen or cut short`, faults)
       }
       await shot(x.p, `${tag}bots-guide-${mode}${phone ? '-phone' : ''}`)

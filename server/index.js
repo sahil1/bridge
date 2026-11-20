@@ -106,14 +106,15 @@ import { mcpRoutes, bridgeMcp } from './mcp.js'
 import { make as makeMcpTools } from './mcptools.js'
 import { make as makeOutside } from './outside.js'
 import { makeFrontDesk, SPACE as BOT_RUNS } from './frontdesk.js'
-import { makeSlack, manifest as slackManifest, connectionManifest, SCOPES as SLACK_SCOPES, SHARED_SCOPES, SCOPE_FOR as SLACK_SCOPE_FOR, commandOf as slackCommand, shortcutOf as slackShortcut } from './slackbot.js'
-import { makeDiscord } from './discordbot.js'
-import { makeTeams, PORT as TEAMS_PORT } from './teamsbot.js'
-import { combine, platformOf, PLATFORMS } from './connector.js'
+import { manifest as slackManifest, connectionManifest, SCOPES as SLACK_SCOPES, SHARED_SCOPES, SCOPE_FOR as SLACK_SCOPE_FOR, commandOf as slackCommand, shortcutOf as slackShortcut } from './slackbot.js'
+import { PORT as TEAMS_PORT } from './teamsbot.js'
+import { combine, platformOf, PLATFORMS, COMING, makeConnector as connectorFor } from './connector.js'
+import { makeBotSessions } from './botsessions.js'
 import { listTemplates, templateOf } from './bottemplates.js'
 import * as botsStore from './bots.js'
 import * as conns from './connections.js'
 import { makeHubs, RULES } from './connhub.js'
+import { makeConnCheck } from './conncheck.js'
 import { makeBotSetup, patchOf, proposalOf, linesOf, postSaid } from './botsetup.js'
 import * as botMcp from './botmcp.js'
 import * as botAnswer from './botanswer.js'
@@ -420,15 +421,18 @@ async function fleetView() {
 // question each, frontdesk.js), which are a bot's runs, seen on its page under Conversations, never a
 // chat of their own; nor their tabs, nor the space they run in while only they are in it. What
 // watches agents here (the helpers' ends, notifications, Try It) sees them all, and so does
-// /api/fleet?all=1 (a look at every agent, for tests and diagnosis).
+// /api/fleet?all=1 (a look at every agent, for tests and diagnosis). A bot's live session (a
+// conversation it goes on in, botsessions.js) is one of them, and is given on its own (botSessions,
+// each as the agents are), for Bots' Sessions to show live: still never in the sidebar.
 function shownFleet(f) {
   const runs = new Set((f?.agents || []).filter((a) => a.helper?.list === 'desk').map((a) => a.paneId))
   const theirs = (t) => t.panes?.length > 0 && t.panes.every((p) => runs.has(p.paneId))
   const tabs = new Set((f?.tabs || []).filter(theirs).map((t) => t.tabId))
   const spaces = new Set((f?.workspaces || []).filter((w) => { const own = f.tabs.filter((t) => t.workspaceId === w.id); return own.length ? own.every((t) => tabs.has(t.tabId)) : w.label === BOT_RUNS }).map((w) => w.id))
-  if (!runs.size && !spaces.size) return f
+  const botSessions = (f?.agents || []).filter((a) => a.helper?.list === 'desk' && a.helper.session)
+  if (!runs.size && !spaces.size) return { ...f, botSessions }
   const agents = f.agents.filter((a) => !runs.has(a.paneId))
-  return { ...f, agents, tabs: f.tabs.filter((t) => !tabs.has(t.tabId)), workspaces: f.workspaces.filter((w) => !spaces.has(w.id)), counts: agents.reduce((c, a) => ({ ...c, [a.status]: (c[a.status] || 0) + 1 }), {}) }
+  return { ...f, agents, botSessions, tabs: f.tabs.filter((t) => !tabs.has(t.tabId)), workspaces: f.workspaces.filter((w) => !spaces.has(w.id)), counts: agents.reduce((c, a) => ({ ...c, [a.status]: (c[a.status] || 0) + 1 }), {}) }
 }
 
 async function findAgent(paneId) {
@@ -1174,8 +1178,9 @@ app.post('/api/chief/delegate/:task/retry', wrap((req) => delegate.retry(req.par
 // as a folder you picked), allowed edits there when you said helpers may; in a folder the chief
 // named, as New agent starts one. Either way in the Helpers space, a tab each (the bots' answers in
 // their own space). Read-only (access 'read'): started so. fork: a copy of an agent's conversation, in
-// its folder.
-async function launchHelper({ kind, cwd, own, label, space, prompt, access, dirs, fork, model, env }) {
+// its folder. resume: a bot's session's own conversation, started again where it left off, in its
+// folder, kept as it was (its access and folders: its settings file says the rest, agents.js mcpOf).
+async function launchHelper({ kind, cwd, own, label, space, prompt, access, dirs, fork, model, env, resume }) {
   const f = await fleetView()
   const ws = (f.workspaces || []).find((w) => w.label.toLowerCase() === String(space).toLowerCase())
   const where = ws ? { workspaceId: ws.id } : { newSpace: space }
@@ -1192,7 +1197,7 @@ async function launchHelper({ kind, cwd, own, label, space, prompt, access, dirs
   // work of yours to remember the folder for.)
   if (!own && !fork && access !== 'read' && access !== 'change') return { ...(await launchFrom({ kind, cwd, label, ...where, prompt, effort: 'suggest', access })), session: f.session || '' }
   if (!(await installed()).some((k) => k.kind === kind)) throw notInstalled(kind)
-  const out = await launchAgent({ kind, cwd, label, workspaceId: ws?.id || null, newSpace: ws ? undefined : space, prompt, access, dirs: access === 'read' || access === 'change' ? dirs : undefined, fork, effort: 'suggest', ...(model ? { model, pinModel: true } : {}), ...(access === 'change' && env ? { env } : {}) })
+  const out = await launchAgent({ kind, cwd, label, workspaceId: ws?.id || null, newSpace: ws ? undefined : space, prompt, access, dirs: access === 'read' || access === 'change' ? dirs : undefined, fork, ...(resume && (access === 'read' || access === 'change') ? { resume } : {}), effort: 'suggest', ...(model ? { model, pinModel: true } : {}), ...((access === 'read' || access === 'change') && env ? { env } : {}) })
   pushFleet()
   return { ...out, session: f.session || '' }
 }
@@ -4386,13 +4391,11 @@ const freeTeamsPort = () => {
   while (used.has(n)) n++
   return n
 }
-const makeConnector = (c, cb) => {
-  const file = conns.tokensOf(c)
-  if (c.platform === 'discord') return makeDiscord({ id: c.id, file, ...cb, webhooks: c.shared })
-  if (c.platform === 'teams') return makeTeams({ id: c.id, file, ...cb, defaultPort: teamsBase() === 0 ? 0 : c.teamsPort ?? teamsBase() })
-  return makeSlack({ id: c.id, file, ...cb, wanted: c.shared ? SHARED_SCOPES : SLACK_SCOPES })
-}
-const hubs = makeHubs({ bots: () => botsStore.live(), desk, make: makeConnector, ask: (system, prompt) => setupAsk(system, prompt), you: () => botOwnerName(), enabled: botsOn })
+// (Each platform's connector as connector.js's registry makes it.)
+const makeConnector = (c, cb) => connectorFor(c, cb, { file: conns.tokensOf(c), port: teamsBase() === 0 ? 0 : c.teamsPort ?? teamsBase() })
+const hubs = makeHubs({ bots: () => botsStore.live(), desk, make: makeConnector, you: () => botOwnerName(), enabled: botsOn })
+// Test this connection, and linking you there by a code (conncheck.js; its routes with the others).
+const connCheck = makeConnCheck({ hubs, desk, bots: () => botsStore.live(), you: () => botOwnerName(), name: () => cfg.name })
 // A bot's way to Slack, Discord and Teams, as one channel of the desk (connector.js combine): on each,
 // a view of the connection it's on now (connhub.js view), its own or the shared one.
 const connectBot = (id) => {
@@ -4548,6 +4551,7 @@ function recordChanges(id, before, after, who) {
   }
 }
 
+makeBotSessions({ desk, rt, guard: botsGuard, wrap: wrapBot, connect: (id) => connectBot(id), resolve: (p) => places.resolveDir(p), view: (b) => botView(b), you: () => botOwnerName(), changed: () => pushFleet() }).routes(app)
 app.get('/api/bots', botsGuard, wrapBot(async () => ({
   bots: await Promise.all(botsStore.list().map((b) => botView(b, { brief: true }))),
   // Bots deleted whose record is kept, to look at in Activity until its time runs out.
@@ -5199,10 +5203,17 @@ async function connView(c) {
     ownerGuess,
     id: c.id, name: c.name, platform: c.platform, shared: c.shared, own: c.bot ? { id: c.bot, name: botsStore.get(c.bot)?.name || c.bot } : null,
     bots: on.map((b) => ({ id: b.id, name: b.name, description: b.description || '', paused: b.paused, command: slack && c.perBot ? slackCommand(b.name) : null })),
-    owner: c.owner, defaults: c.defaults, perBot: c.perBot, assist: c.assist, unsure: c.unsure, createdAt: c.createdAt || null,
+    owner: c.owner, defaults: c.defaults, perBot: c.perBot, createdAt: c.createdAt || null,
+    // (Its Chief, while that bot's on it; a code to link you waiting to be sent, until when; its last
+    // Test this connection, conncheck.js.)
+    chief: conns.chiefOf(c, live) ? { id: c.chief, name: botsStore.get(c.chief)?.name || c.chief } : null,
+    linking: conns.linking(c.id), check: connCheck.lastOf(c.id),
     // (Paused: brought from another computer, or moved to one; Settings › Back Up & Move starts it.)
     paused: c.paused ? { why: c.pausedWhy || null } : null,
     state: c.paused ? 'off' : s.state, why: c.paused ? c.pausedWhy || null : s.why || null, since: s.since || null, lastEvent: s.lastEvent || null, team: s.team || null, bot: s.bot || null, tokens: s.tokens || null, scopes: s.scopes || null, appId: s.appId || null,
+    // (Slack's: its count of the app's connections at the last hello, another copy on the same app,
+    // its reads held back, and what was missed being read.)
+    numConnections: s.numConnections ?? null, others: s.others || null, limited: s.limited || null, catchingUp: s.catchingUp || null,
     // (Discord's server, intents and invite; Teams' endpoint, port and app: as each says them.)
     status: slack ? null : s,
     reached, you: String(cfg.name || '').trim() || null,
@@ -5216,6 +5227,8 @@ async function connView(c) {
 app.get('/api/connections', botsGuard, wrapBot(async () => ({
   connections: await Promise.all(conns.list().map(connView)),
   suggested: conns.suggestName(cfg.name), you: String(cfg.name || '').trim() || null,
+  // (The platforms on their way, listed as coming: connector.js COMING.)
+  coming: Object.entries(COMING).map(([id, name]) => ({ id, name })),
 })))
 // A platform's shared connection, by the name you give it.
 app.post('/api/connections', botsGuard, wrapBot(async (req) => {
@@ -5229,14 +5242,13 @@ app.post('/api/connections', botsGuard, wrapBot(async (req) => {
   return connView(c)
 }))
 app.get('/api/connections/:cid', botsGuard, wrapBot(async (req) => connView(connOr404(req.params.cid))))
+connCheck.routes(app, { guard: botsGuard, wrap: wrapBot, record: (c, req) => connRecord(c, 'link', req) })
 app.get('/api/connections/:cid/activity', botsGuard, wrapBot(async (req) => ({ routed: conns.routed(connOr404(req.params.cid).id, 200) })))
-// How a shared connection hands each question to one of its bots (the Routing page): its rules in
-// connhub's order, its bots with what AI Assist picks them by (their descriptions) and the channels
-// each is the default bot in, and which model AI Assist would pick with (none: it can't, so it
-// asks, or goes to the bot you set for that).
+// How a shared connection hands each question to one of its bots: its rules in connhub's order, its
+// bots, its Chief and the channels each is the default bot in.
 app.get('/api/connections/:cid/routing', botsGuard, wrapBot(async (req) => {
   const c = connOr404(req.params.cid)
-  return { ...(await connView(c)), rules: c.shared ? RULES : [], assistModel: await assistState() }
+  return { ...(await connView(c)), rules: c.shared ? RULES : [] }
 }))
 // Try a Message: which bot a message would go to, and why (connhub.js dry), with nothing sent,
 // answered or kept, and no bot run. Who asks: you, someone picked from there ({ id, name }), or
@@ -5252,8 +5264,8 @@ app.post('/api/connections/:cid/try', botsGuard, wrapBot(async (req) => {
   const channel = x.channel && botsStore.CHANNEL_ID.test(String(x.channel)) ? String(x.channel) : null
   return hubs.dry(c.id, { text, channel, channelName: x.channelName ? String(x.channelName).replace(/^#/, '').slice(0, 80) : null, dm: x.dm === true, from, mention: x.mention !== false, thread: /^b\d{1,4}$/.test(String(x.thread || '')) ? String(x.thread) : null })
 }))
-// Its name, you there, which bot answers in which channel, a slash command for each bot, whether
-// AI Assist picks, and the bot for a question nothing else places.
+// Its name, you there, which bot answers in which channel, a slash command for each bot, and its
+// Chief (the bot a question nothing else places goes to).
 app.patch('/api/connections/:cid', botsGuard, wrapBot(async (req) => {
   const c = connOr404(req.params.cid)
   const x = req.body || {}
@@ -5279,15 +5291,16 @@ app.patch('/api/connections/:cid', botsGuard, wrapBot(async (req) => {
       next.defaults.push({ id, name: String(d?.name || '').replace(/^#/, '').trim().slice(0, 80) || null, bot: String(d.bot) })
     }
   }
-  // Whether AI Assist picks among the bots someone may ask, and the bot a question goes to when
-  // nothing says which (null: they're asked): one of the bots on it.
-  if (x.assist !== undefined) next.assist = x.assist !== false
-  if (x.unsure !== undefined) {
-    if (x.unsure && !conns.botsOn(c, botsStore.live()).some((b) => b.id === String(x.unsure))) throw new Error('Pick one of the bots on this connection')
-    next.unsure = x.unsure ? String(x.unsure) : null
+  // Its Chief: the bot a question goes to when nothing says which (null: they're asked), one of the
+  // bots on it. (unsure, as the bot for that was called before, is taken as the chief; AI Assist
+  // picking, assist, is no more: the Chief does that.)
+  const chief = x.chief !== undefined ? x.chief : x.unsure
+  if (chief !== undefined) {
+    if (chief && !conns.botsOn(c, botsStore.live()).some((b) => b.id === String(chief))) throw new Error('Pick one of the bots on this connection')
+    next.chief = chief ? String(chief) : null
   }
   const { before, after } = conns.save(c.id, next)
-  const said = (k, v) => settingSaid(k === 'defaults' ? v.map((d) => `${d.name || d.id}: ${botsStore.get(d.bot)?.name || d.bot}`) : k === 'unsure' && v ? botsStore.get(v)?.name || v : v)
+  const said = (k, v) => settingSaid(k === 'defaults' ? v.map((d) => `${d.name || d.id}: ${botsStore.get(d.bot)?.name || d.bot}`) : k === 'chief' && v ? botsStore.get(v)?.name || v : v)
   for (const k of Object.keys(next)) if (JSON.stringify(before[k]) !== JSON.stringify(after[k])) conns.note(c.id, { event: 'settings', what: k, old: said(k, before[k]), new: said(k, after[k]), ...changedBy(req) })
   pushFleet()
   return connView(after)

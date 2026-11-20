@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
 import CopyButton from '../CopyButton.jsx'
 import UsageCounts from './UsageCounts.jsx'
@@ -9,7 +9,6 @@ import { startTour } from '../Tour.jsx'
 import { withApp, installUpdate, channelTag } from '../UpdateChip.jsx'
 import { appVersion } from '../../permissions.js'
 import { t, tx, locale } from '../../i18n/index.js'
-import { openSettings } from '../SignIn.jsx'
 import { TRIALS } from '../../trials.js'
 import { AWAY_MINUTES, RELEASE_HOURS, waitingLong } from '../../../shared/autoupdate.js'
 import { isPre } from '../../../shared/version.js'
@@ -234,14 +233,11 @@ const SHORT = {
   'call-video': tx("On a call, whose mouth moves on its video names who said what. Read on this Mac; no pictures kept."),
   'mcp-server': tx('Claude Code, Claude Desktop, Cursor and Codex read your boards, files and meeting summaries, and suggest changes you keep. Set up in Settings › MCP Servers.'),
 }
-// Bots just turned on: Set up a bot, which opens Settings › Bots. (Settings lists Bots once it's heard
-// the beta feature is on, a moment after: asked again until it's there, and this has gone with
-// About.)
+// Bots just turned on: Set up a bot, which opens Bots (Settings closes), at its Bots tab, where a
+// first bot is three questions away.
 function StartBots() {
-  const alive = useRef(true)
-  useEffect(() => () => { alive.current = false }, [])
-  const go = (n = 0) => { openSettings('slack-bot'); if (n < 20) setTimeout(() => { if (alive.current) go(n + 1) }, 250) }
-  return <div className="st-row ab-trial-go" data-setting="beta-bots-start"><button type="button" className="btn small" onClick={() => go()}><Icon name="chat" size={12} /> {t('Set up a bot')}</button></div>
+  const go = () => window.dispatchEvent(new CustomEvent('bridge-open-bots', { detail: { tab: 'bots' } }))
+  return <div className="st-row ab-trial-go" data-setting="beta-bots-start"><button type="button" className="btn small" onClick={go}><Icon name="chat" size={12} /> {t('Set up a bot')}</button></div>
 }
 function Trials() {
   const { s, save } = useSettings()

@@ -21,11 +21,22 @@
 // envelope, acknowledged at once (Slack wants it within 3 seconds), and now and then asks for a
 // fresh connection (disconnect, refresh_requested), which is made before the old one goes. One that
 // goes quiet (a ping not answered: Wi-Fi gone, a lid closed) is ended and made again, and so is one
-// after the computer slept; between tries it waits longer each time, up to a minute. What was asked
-// while there was no connection (Bridge AI closed, the computer asleep) waits in Slack: once
-// connected, each conversation the bot is in is read from the last message it saw
-// (conversations.history), and each thread it's answering in from the last reply it saw
-// (conversations.replies), and what was put to it meanwhile is handed over then, oldest first.
+// after the computer slept; between tries it waits longer each time, up to a minute.
+// An app may have up to 10 connections open, and Slack sends each envelope to just one of them, any
+// one: two copies of Bridge AI on the same app (another computer, an old install) would each get
+// some of the questions. Slack's hello says how many are open (num_connections): more than this
+// copy's is said plainly (another-copy), and, after a drop or a sleep, when Slack may still count
+// the old one, looked at again a minute later (probe: a connection opened only to read its hello).
+// What was asked while there was no connection (Bridge AI closed, the computer asleep) waits in
+// Slack: once connected after a gap (not after a refresh, which leaves none), each conversation the
+// bot is in is read from the last message it saw there or the moment the gap began, whichever is
+// later (conversations.history, a few pages at most), and each thread it's answering in from the
+// last reply it saw (conversations.replies): direct messages and its threads first, then the
+// channels it listens in, then the rest; and what was put to it meanwhile is handed over then,
+// oldest first. Slack holds a distributed app outside its Marketplace to one read a minute of those
+// two (May 2025; an app made for its own workspace, as these are, isn't): a read Slack turns away
+// waits as long as it says, in the background, a question's own conversation going first, and the
+// connection says it's held (limited).
 //
 // Envelopes come in four kinds:
 //   events_api       a message, a mention, an edit or deletion, the Home tab opened
@@ -44,15 +55,17 @@
 //                    for that post (two seconds at most) so a problem can be said to the asker alone
 //   hello, disconnect   the connection itself
 //
-// What it hands over: a mention, a direct message, a reply in a thread (the front desk keeps only
-// those in threads it has answered in), a message at the top of a channel it was told to answer
-// without a mention (listens), /<name>, the shortcut, and an edit or deletion of a message in a
-// thread. A channel's other messages come too (message.channels, for the replies) and go no
-// further. With each, who wrote it: a guest (is_restricted, is_ultra_restricted) or someone from
-// another company (Slack Connect: another team, or is_stranger) says so, and one Slack couldn't say
-// anything about says that, so the desk refuses them. Files attached come as their names, types and
-// sizes; their contents are read only when the desk asks (download), from Slack's own addresses only,
-// with the bot token, and never over 20 MB.
+// What it hands over: a mention, a direct message, a reply in a thread it's answering in (follows:
+// a reply in any other thread goes no further, and nothing is looked up for it), a message at the
+// top of a channel it was told to answer without a mention (listens), /<name>, the shortcut, and an
+// edit or deletion of a message in a thread. A channel's other messages come too (message.channels,
+// for the replies) and go no further. With each, who wrote it (users.info for that person alone,
+// once, never the whole workspace's list): a guest (is_restricted, is_ultra_restricted) or someone
+// from another company (Slack Connect: another team, or is_stranger) says so, and one Slack
+// couldn't say anything about says that, so the desk refuses them. Files attached come as their
+// names, types and sizes; their contents are read only when the desk asks (download), from Slack's
+// own addresses only, with the bot token, and never over 20 MB. Its own posts come back as events
+// too: those go no further, but Test this connection waits for one (echo) to see events arrive.
 //
 // The Web API takes the bot token (xoxb-): auth.test (which workspace, which bot, and the scopes the
 // token has, in its x-oauth-scopes header), users.list and users.info (the members to pick askers
@@ -68,7 +81,11 @@
 // views.open and views.publish (the Edit and Ask modals, and the Home tab), agents.sessions.setStatus
 // (Slack's "working" status and Stop button; assistant.threads.setStatus is its older name, tried
 // when the new one isn't known). Slack's rate limits are kept: a 429 waits as long as its
-// Retry-After says, and posts go one at a time, a second apart.
+// Retry-After says, for that method (a post's, in that channel only: Slack's limit for posting is
+// per channel), and posts go one at a time in each conversation, a second apart, so one channel
+// that's held up holds up no other. Posting where the app isn't a member (not_in_channel) is said to
+// you (not-in-channel), not only to the record. check() is Test this connection's Slack part
+// (conncheck.js): each check as { id, label, state: ok | warn | fail | skip, detail, fix }.
 //
 // The tokens are kept in the bot's slack.json in the data folder, readable by you only (0600), with
 // where the bot got to in each conversation and who opened its Home tab lately: never in
@@ -100,6 +117,19 @@ const SLASH_WAIT = 2000 // /<name>'s acknowledgement waits this long for its que
 const HOME_DAYS = 30 // who opened its Home tab, remembered this long (to say it's offline)
 const HOME_MAX = 50
 const SEEN_MAX = 500 // envelopes and events remembered, so one sent twice is taken once
+const READ_WAIT = 10 // seconds a question's conversation waits for Slack's rate limit at most (else it's read without)
+// Seconds a reply waits for Slack's rate limit in its conversation at most: held longer, it's thrown
+// (ratelimited, retryAfter), and the desk goes on with the rest and posts it again after that.
+const POST_WAIT = 2
+const CATCHUP_PAGES = 4 // pages of a conversation read for what was missed, at most
+const GAP_SLACK = 60 // seconds before the gap began that what was missed is read from (events on their way)
+const GHOST_MS = Number(process.env.BRIDGE_SLACK_GHOST_MS) || 60 * 1000 // after a drop, another connection seen is looked at again this much later
+const NAMES_AT_ONCE = 20 // people looked up for a conversation's names, at most, each by users.info
+const ECHO_MS = Number(process.env.BRIDGE_SLACK_ECHO_MS) || 10 * 1000 // Test this connection waits this long for its own message's event
+const LIMITED_S = 20 // a read Slack holds back this long (or more) means the app is held to one a minute
+const READS = new Set(['conversations.history', 'conversations.replies'])
+// The methods that post: Slack's limit for them is per conversation, so a 429 holds up that one only.
+const POSTS = new Set(['chat.postMessage', 'chat.update', 'chat.postEphemeral', 'chat.startStream', 'chat.appendStream', 'chat.stopStream', 'chat.delete'])
 // A message's kinds that are someone writing: a reply sent to the channel too, one with a file.
 const WRITTEN = new Set(['thread_broadcast', 'file_share'])
 
@@ -278,11 +308,20 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
   let ws = null
   let pinger = null
   let retry = null
+  let ghost = null // another connection, looked at again (GHOST_MS)
   let tries = 0
   let gen = 0 // each connection's number: what an old one says after it's replaced is ignored
   let tick = Date.now()
-  // off | no-tokens | connecting | connected | reconnecting | error
-  let st = { state: kept.appToken && kept.botToken ? 'off' : 'no-tokens', why: null, since: new Date().toISOString(), lastEvent: null, connectedAt: null, drops: 0 }
+  // Why the next connection is made: start, refresh (Slack asked; the old one's still up), drop or
+  // slept (there was a gap, and Slack may still count the old one for a while).
+  let cause = 'start'
+  // When the last connection was last heard from (seconds), so what's missed is read from then.
+  let aliveAt = Number(kept.alive) || 0
+  const lived = () => { const now = Date.now() / 1000; if (now - (Number(kept.alive) || 0) > 30) { kept.alive = now; marked() } aliveAt = now }
+  // off | no-tokens | connecting | connected | reconnecting | error. numConnections: Slack's count at
+  // the last hello; others: the connections that aren't this copy's ({ n, since }); limited: Slack
+  // holding its reads back ({ method, wait, at }); catchingUp: what was missed, being read.
+  let st = { state: kept.appToken && kept.botToken ? 'off' : 'no-tokens', why: null, since: new Date().toISOString(), lastEvent: null, connectedAt: null, drops: 0, hello: null, numConnections: null, others: null, limited: null, catchingUp: null }
   const set = (patch) => { st = { ...st, ...patch, since: patch.state && patch.state !== st.state ? new Date().toISOString() : st.since } }
   // Envelopes and events taken lately, so one Slack sends again is taken once.
   const seen = new Set()
@@ -295,12 +334,22 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
   }
 
   // ---------- The Web API ----------
-  // One call, form-encoded (every method takes that), with the token as a bearer. A 429 waits as
-  // long as Slack says (up to three times, a minute at most each), then says so.
-  async function call(method, params = {}, { token = kept.botToken, waits = 3 } = {}) {
+  // One call, form-encoded (every method takes that), with the token as a bearer. A 429 holds that
+  // method back for as long as Slack says (a post's in that conversation only), for every call to
+  // it: this one waits (up to `waits` times, `most` seconds at most each), then says so.
+  const gates = new Map() // method (a post's with its channel) -> until (ms)
+  const gateOf = (method, params) => (POSTS.has(method) ? `post:${params.channel || params.channel_id || ''}` : method)
+  const held = (method, wait) => Object.assign(new Error(`Slack asked to wait ${wait} s before more (rate limited)`), { code: 'ratelimited', retryAfter: wait, method })
+  async function call(method, params = {}, { token = kept.botToken, waits = 3, most = 60 } = {}) {
     if (!token) throw Object.assign(new Error('No token yet'), { code: 'not_authed' })
     const body = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null).map(([k, v]) => [k, typeof v === 'object' ? JSON.stringify(v) : String(v)]))
+    const gate = gateOf(method, params)
     for (let i = 0; ; i++) {
+      const shut = (gates.get(gate) || 0) - Date.now()
+      if (shut > 0) {
+        if (i > waits || !waits || shut > most * 1000) throw held(method, Math.ceil(shut / 1000))
+        await sleep(shut)
+      }
       let res
       try {
         res = await fetch(`${API()}/${method}`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/x-www-form-urlencoded' }, body, signal: AbortSignal.timeout(20000) })
@@ -308,18 +357,26 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
         throw Object.assign(new Error(`Couldn't reach Slack: ${e.cause?.code || e.message}`), { code: 'offline', method })
       }
       if (res.status === 429) {
-        const wait = Math.min(60, Math.max(1, Number(res.headers.get('retry-after')) || 1))
-        if (i >= waits) throw Object.assign(new Error(`Slack asked to wait ${wait} s before more (rate limited)`), { code: 'ratelimited', retryAfter: wait, method })
-        await sleep(wait * 1000)
+        const said = Math.max(1, Number(res.headers.get('retry-after')) || 1)
+        gates.set(gate, Date.now() + Math.min(600, said) * 1000)
+        if (READS.has(method) && said >= LIMITED_S) limitedNow(method, said)
         continue
       }
       const j = await res.json().catch(() => null)
       if (!res.ok && !j) throw Object.assign(new Error(`Slack answered ${res.status}`), { code: `http_${res.status}`, method })
       if (!j?.ok) throw slackError(method, j)
+      // (A read that gave 15 when more were asked for, and more wait: Slack's limit for a held app.)
+      if (READS.has(method) && Number(params.limit) > 15 && j.has_more && Array.isArray(j.messages) && j.messages.length === 15) limitedNow(method, null)
       // The scopes the token has, as Slack says them with each answer.
       if (method === 'auth.test') Object.defineProperty(j, 'scopes', { value: res.headers.has('x-oauth-scopes') ? String(res.headers.get('x-oauth-scopes')).split(',').map((x) => x.trim()).filter(Boolean) : null })
       return j
     }
+  }
+  // Slack holding back the app's reads of conversations: said once a connection, kept in its state.
+  function limitedNow(method, wait) {
+    const was = st.limited
+    st.limited = { method, wait: wait ?? was?.wait ?? null, at: new Date().toISOString() }
+    if (!was) say({ what: 'rate-limited', ok: false, why: `Slack holds this app to about one read a minute of a conversation (${method}), as it does a distributed app outside its Marketplace: what was missed is read slowly, and some answers may come without their conversation. An app made in and for this workspace isn't held back.` })
   }
   // The scopes the manifest asks for that the app's token doesn't have (null: Slack didn't say).
   const missing = () => (Array.isArray(kept.scopes) ? wanted.filter((x) => !kept.scopes.includes(x)) : null)
@@ -327,7 +384,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
   const lacking = (scope) => Object.assign(new Error(`The Slack app lacks ${scope}: update it with the new manifest`), { code: 'missing_scope' })
 
   // ---------- Connecting ----------
-  const stopTimers = () => { clearInterval(pinger); pinger = null; clearTimeout(retry); retry = null }
+  const stopTimers = () => { clearInterval(pinger); pinger = null; clearTimeout(retry); retry = null; clearTimeout(ghost); ghost = null }
   function drop(socket) {
     try { socket?.removeAllListeners('close'); socket?.terminate() } catch { /* gone */ }
   }
@@ -339,8 +396,67 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     if (final) { set({ state: 'error', why }); say({ what: 'stopped', ok: false, why }); return }
     const wait = BACKOFF[Math.min(tries, BACKOFF.length - 1)]
     tries++
+    cause = 'drop'
     set({ state: 'reconnecting', why, nextTry: new Date(Date.now() + wait * 1000).toISOString() })
     retry = setTimeout(() => { connect().catch(() => {}) }, wait * 1000)
+  }
+
+  // One envelope, on whichever connection it came (the old one while a new one is made, or one
+  // opened only to read its hello): acknowledged once, at once (a slash command's when its question
+  // is posted, within two seconds), and every event taken; the same one twice is heard once.
+  function envelope(m, socket) {
+    let acked = false
+    const ack = (payload) => {
+      if (acked || !m.envelope_id) return
+      acked = true
+      try { socket.send(JSON.stringify({ envelope_id: m.envelope_id, ...(payload ? { payload } : {}) })) } catch { /* closing */ }
+    }
+    if (m.envelope_id && !fresh(`env:${m.envelope_id}`)) return ack()
+    if (m.type === 'slash_commands') return slash(m.payload, ack).catch((e) => { ack(); say({ what: 'command', ok: false, why: e.message }) })
+    if (m.type === 'interactive') return interact(m.payload, ack).catch((e) => { ack(); say({ what: 'interaction', ok: false, why: e.message }) })
+    ack()
+    if (m.type === 'events_api') {
+      if (!fresh(m.payload?.event_id ? `ev:${m.payload.event_id}` : null)) return
+      return heard(m.payload?.event, { team: m.payload?.team_id }).catch((e) => say({ what: 'event', ok: false, why: e.message }))
+    }
+  }
+
+  // How many connections Slack has open for the app, against how many are this copy's: more is
+  // another copy (or another program) on the same app, said plainly; fewer again, said too.
+  function counted(n, ours) {
+    if (!Number.isFinite(n)) return
+    st.numConnections = n
+    const extra = n - ours
+    if (extra > 0) {
+      const first = !st.others
+      st.others = { n: extra, since: st.others?.since || new Date().toISOString() }
+      if (first) say({ what: 'another-copy', ok: false, why: `Another copy of Bridge AI (or another program) is connected to this Slack app too${extra > 1 ? ` (${extra} more connections)` : ''}: Slack gives each message to just one of them, so some questions go there and not here. Quit Bridge AI on the other computer, or give each computer its own Slack app.` })
+    } else if (st.others) {
+      st.others = null
+      say({ what: 'another-copy', ok: true, why: 'No other copy is connected to this Slack app now' })
+    }
+  }
+  // A connection opened only to read Slack's hello (num_connections, with this one counted), then
+  // closed: { ok, n, ours } (ours: this copy's own, the probe's included), or { ok: false, why }.
+  // Whatever Slack sends it meanwhile is taken as on any other.
+  async function probe() {
+    let url
+    try { url = (await call('apps.connections.open', {}, { token: kept.appToken, waits: 1 })).url } catch (e) { return { ok: false, why: e.message } }
+    return new Promise((resolve) => {
+      const s = new WebSocket(url, { handshakeTimeout: 15000 })
+      let over = false
+      const done = (x) => { if (over) return; over = true; clearTimeout(t); try { s.close() } catch { /* gone */ } resolve(x) }
+      const t = setTimeout(() => done({ ok: false, why: 'Slack said nothing on a new connection' }), 15000)
+      t.unref?.()
+      s.on('message', (raw) => {
+        let m
+        try { m = JSON.parse(String(raw)) } catch { return }
+        if (m.type === 'hello') return done({ ok: true, n: Number(m.num_connections), ours: 1 + (ws?.readyState === WebSocket.OPEN && st.state === 'connected' ? 1 : 0) })
+        if (m.envelope_id) envelope(m, s)
+      })
+      s.on('error', (e) => done({ ok: false, why: `The connection failed: ${e.message}` }))
+      s.on('close', () => done({ ok: false, why: 'Slack closed the connection before saying hello' }))
+    })
   }
 
   async function connect() {
@@ -365,6 +481,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     }
     if (mine !== gen || !hear) return
     const was = ws
+    const why = cause
     const socket = new WebSocket(url, { handshakeTimeout: 15000 })
     ws = socket
     let alive = true
@@ -378,44 +495,42 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
         try { socket.ping() } catch { /* closing */ }
       }, PING_MS)
     })
-    socket.on('pong', () => { alive = true })
+    socket.on('pong', () => { alive = true; if (mine === gen) lived() })
     socket.on('message', (raw) => {
       alive = true
       let m
       try { m = JSON.parse(String(raw)) } catch { return }
-      // Every envelope acknowledged once, at once (a slash command's when its question is posted,
-      // within two seconds), and every event taken, on whichever connection it came (the old one,
-      // while a new one is made): the same one twice is heard once.
-      let acked = false
-      const ack = (payload) => {
-        if (acked || !m.envelope_id) return
-        acked = true
-        try { socket.send(JSON.stringify({ envelope_id: m.envelope_id, ...(payload ? { payload } : {}) })) } catch { /* closing */ }
-      }
-      if (m.envelope_id && !fresh(`env:${m.envelope_id}`)) return ack()
-      if (m.type === 'slash_commands') return slash(m.payload, ack).catch((e) => { ack(); say({ what: 'command', ok: false, why: e.message }) })
-      if (m.type === 'interactive') return interact(m.payload, ack).catch((e) => { ack(); say({ what: 'interaction', ok: false, why: e.message }) })
-      ack()
-      if (m.type === 'events_api') {
-        if (!fresh(m.payload?.event_id ? `ev:${m.payload.event_id}` : null)) return
-        return heard(m.payload?.event, { team: m.payload?.team_id }).catch((e) => say({ what: 'event', ok: false, why: e.message }))
-      }
+      if (m.envelope_id) return envelope(m, socket)
       if (mine !== gen) return
       if (m.type === 'hello') {
         tries = 0
         // (Which app it is, from Slack's hello: Settings links to its page, for its icon.)
         const appId = String(m.connection_info?.app_id || '')
         if (/^A[A-Z0-9]{1,20}$/.test(appId) && kept.appId !== appId) { kept.appId = appId; marked() }
+        // (The old one still up when this one said hello: Slack moved it, and nothing was missed.)
+        const seamless = !!was && was !== socket && was.readyState === WebSocket.OPEN
+        const gapFrom = aliveAt || Number(kept.alive) || 0
         if (was && was !== socket) drop(was)
-        set({ state: 'connected', why: null, connectedAt: new Date().toISOString(), nextTry: null })
+        set({ state: 'connected', why: null, connectedAt: new Date().toISOString(), nextTry: null, hello: new Date().toISOString() })
+        lived()
         say({ what: 'connected', ok: true })
         const short = missing()
         if (short?.length) say({ what: 'scopes-missing', ok: false, why: `The Slack app lacks ${short.join(', ')}: update it with the new manifest`, missing: short })
-        missed().catch((e) => say({ what: 'missed', ok: false, why: `Couldn't read what was asked while away: ${e.message}` }))
+        // Slack's count of connections: this copy's is one (two while the old one's still up). After
+        // a gap, Slack may count the old one a while yet: looked at again before it's said.
+        const n = Number(m.num_connections)
+        if (Number.isFinite(n) && n > 1 + (seamless ? 1 : 0) && (why === 'drop' || why === 'slept')) {
+          st.numConnections = n
+          clearTimeout(ghost)
+          ghost = setTimeout(() => { if (mine === gen) probe().then((r) => { if (r.ok && mine === gen) counted(r.n, r.ours) }).catch(() => {}) }, GHOST_MS)
+          ghost.unref?.()
+        } else counted(n, 1 + (seamless ? 1 : 0))
+        cause = 'drop'
+        if (!seamless) missed({ from: gapFrom }).catch((e) => say({ what: 'missed', ok: false, why: `Couldn't read what was asked while away: ${e.message}` }))
       } else if (m.type === 'disconnect') {
         // Slack moves the bot: refresh_requested and warning, a new connection first; link_disabled,
         // Socket Mode turned off for the app.
-        if (m.reason === 'link_disabled') { drop(socket); later('Socket Mode is turned off for your Slack app: turn it on in the app\'s settings › Socket Mode, then Connect again', { final: true }) } else connect().catch(() => {})
+        if (m.reason === 'link_disabled') { drop(socket); later('Socket Mode is turned off for your Slack app: turn it on in the app\'s settings › Socket Mode, then Connect again', { final: true }) } else { cause = 'refresh'; connect().catch(() => {}) }
       }
     })
     socket.on('close', (code) => {
@@ -435,7 +550,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
   // so it's made again at once, which reads what was asked meanwhile too.
   const watch = setInterval(() => {
     const now = Date.now()
-    if (now - tick > SLEPT_MS && hear && st.state === 'connected') { drop(ws); ws = null; tries = 0; set({ state: 'reconnecting', why: 'The computer slept; connecting again' }); connect().catch(() => {}) }
+    if (now - tick > SLEPT_MS && hear && st.state === 'connected') { drop(ws); ws = null; tries = 0; cause = 'slept'; set({ state: 'reconnecting', why: 'The computer slept; connecting again' }); connect().catch(() => {}) }
     tick = now
   }, 5000)
   watch.unref?.()
@@ -462,7 +577,8 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     users[u.id] = { guest: !!(u.is_restricted || u.is_ultra_restricted), team: u.team_id || null, stranger: u.is_stranger === true, bot: !!(u.is_bot || u.id === 'USLACKBOT') }
   }
   // Who's in a channel (conversations.members), each as person() has them (a guest, someone from
-  // another company, a bot); null when Slack can't say, or there are more than MEMBERS_MAX.
+  // another company, a bot); null when Slack can't say, or there are more than MEMBERS_MAX. (Many
+  // not known yet: the workspace's list once, rather than each of them on their own.)
   async function members(channel) {
     const ids = []
     let cursor
@@ -472,15 +588,15 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
       cursor = j.response_metadata?.next_cursor || undefined
     } while (cursor && ids.length < MEMBERS_MAX)
     if (cursor) return null
+    if (ids.filter((u) => !users[u]).length > NAMES_AT_ONCE) await people().catch(() => {})
     const out = []
     for (const u of ids) out.push(u === kept.bot?.userId ? { id: u, bot: true } : { ...(await person({ user: u })), bot: !!users[u]?.bot })
     return out
   }
   // Who wrote it: a member of this workspace, a guest, or someone from another company (Slack
-  // Connect: the event says another team, or Slack does), from the members listed, else asked of
-  // Slack (users.info). One Slack can't say anything about: unknown, and why (refused, as a guest is).
+  // Connect: the event says another team, or Slack does), as Slack says of them alone (users.info,
+  // once, kept). One Slack can't say anything about: unknown, and why (refused, as a guest is).
   async function person(e) {
-    if (!users[e.user]) await people().catch(() => {})
     if (!users[e.user]) {
       try { learn((await call('users.info', { user: e.user })).user) } catch (err) { return { id: e.user, name: null, unknown: true, why: err.message } }
     }
@@ -489,6 +605,16 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     const team = kept.team?.id
     const other = (t) => !!(t && team && t !== team)
     return { id: e.user, name: names[e.user] || null, guest: u.guest, external: u.stranger || other(u.team) || other(e.user_team) || other(e.source_team) }
+  }
+  // Its own messages waited for as events (Test this connection): `${channel}:${ts}` -> resolve;
+  // and the last of them that came, for one that came before it was waited for.
+  const echoes = new Map()
+  const recent = new Set()
+  // The names of the people in a conversation read for context, each not known yet asked of Slack
+  // on its own (users.info, NAMES_AT_ONCE at most), never the whole workspace's list.
+  async function named(ids) {
+    const want = [...new Set(ids)].filter((u) => u && USER.test(u) && !names[u]).slice(0, NAMES_AT_ONCE)
+    await Promise.all(want.map((u) => call('users.info', { user: u }, { waits: 1 }).then((j) => learn(j.user), () => {})))
   }
   // Files attached to a message: their names, types and sizes for the desk; where each is kept by
   // Slack, remembered here for download() (the last 500).
@@ -524,19 +650,31 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
       const k = `${e.channel}:${thread}`
       if (!kept.threads[k] || Number(e.ts) > Number(kept.threads[k])) { kept.threads[k] = e.ts; marked() }
     }
+    // (Its own message, back as an event: what Test this connection waits for.)
+    if ((e.bot_id && e.bot_id === kept.bot?.botId) || (e.user && e.user === kept.bot?.userId)) {
+      const k = `${e.channel}:${e.ts}`
+      recent.add(k)
+      if (recent.size > 50) recent.delete(recent.values().next().value)
+      echoes.get(k)?.()
+    }
     if (e.bot_id || (e.subtype && !WRITTEN.has(e.subtype)) || !e.user || e.user === kept.bot?.userId) return
     const mention = e.type === 'app_mention' || String(e.text || '').includes(`<@${kept.bot?.userId}>`)
     // A channel's own message that doesn't mention it: not for it, unless it answers that channel
-    // without a mention.
+    // without a mention. A reply in a thread it isn't answering in: not for it either, and nothing's
+    // looked up for it (who wrote it, the channel).
     const listened = !dm && !mention && !thread && !!listens(e.channel)
     if (!dm && !mention && !thread && !listened) return
+    if (thread && !dm && !mention && !follows(e.channel, thread)) return
     set({ lastEvent: new Date().toISOString() })
     const place = await placeOf(e.channel, dm ? 'im' : null)
     const files = filesOf(e)
+    const from = await person(e)
+    // (The people it mentions, by name.)
+    await named([...String(e.text || '').matchAll(/<@([UW][A-Z0-9]{2,20})>/g)].map((x) => x[1]).filter((u) => u !== kept.bot?.userId))
     await hear({
       ts: e.ts, channel: e.channel, thread, mention, dm,
       ...(listened ? { via: 'listen' } : {}),
-      from: await person(e),
+      from,
       text: plainText(e.text, { bot: kept.bot?.userId, names }),
       ...(files.length ? { files } : {}),
       place,
@@ -616,7 +754,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
         ack()
         let meta = {}
         try { meta = JSON.parse(v.private_metadata) || {} } catch { /* nothing to go on */ }
-        return asked({ user, team, channel: meta.channel, thread: meta.thread || meta.ts, text: q })
+        return asked({ user, team, channel: meta.channel, thread: meta.thread || meta.ts, text: q, about: meta.ts || null })
       }
       return ack()
     }
@@ -713,13 +851,15 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
   // conversation shows it, then handed over as a mention is, its answer in that post's thread, or in
   // the channel where the bot answers there (the shortcut's in the message's own thread). { ts }
   // back, or why not.
-  async function asked({ user, team, channel, thread = null, text, via = 'shortcut', command = null }) {
+  // about: the message the shortcut was used on (its ts), the question's subject.
+  async function asked({ user, team, channel, thread = null, text, via = 'shortcut', command = null, about = null }) {
     if (!hear || !channel || !USER.test(String(user?.id || ''))) return { error: 'Slack didn\'t say who or where' }
     const dmd = String(channel).startsWith('D')
     let posted
     try {
       posted = await call('chat.postMessage', { channel, text: `<@${user.id}> ${via === 'slash' ? 'asked' : 'asked me about this'}: ${escape(text)}`, ...(thread ? { thread_ts: thread } : {}), unfurl_links: false, unfurl_media: false }, { waits: 0 })
     } catch (e) {
+      notIn(channel, e)
       const why = ['not_in_channel', 'channel_not_found'].includes(e.code) ? `Invite me to this channel first: /invite @${kept.bot?.name || info().name || 'me'}` : `Couldn't take that: ${e.message}`
       if (via !== 'slash') await tell(null, user.id, why)
       return { error: why }
@@ -728,7 +868,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     const place = await placeOf(channel, dmd ? 'im' : null)
     const top = thread || posted.ts
     hear({
-      ts: posted.ts, channel, thread: thread || null, mention: true, dm: dmd, via, ...(command ? { command } : {}),
+      ts: posted.ts, channel, thread: thread || null, mention: true, dm: dmd, via, ...(command ? { command } : {}), ...(about && via === 'shortcut' ? { about: String(about) } : {}),
       from: await person({ user: user.id, user_team: team && team !== kept.team?.id ? team : undefined }),
       text: plainText(text, { bot: kept.bot?.userId, names }),
       place, at: new Date(Number(posted.ts) * 1000).toISOString(), late: false,
@@ -819,18 +959,47 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
   // `since`, when the answer goes on from an earlier one); at the top of a channel, its latest
   // messages and what's pinned there; in a direct message, its latest messages. Each with who wrote
   // it, and whether that was this bot. { kind, messages: [{ ts, person, text, you }], pins, problem }
+  // (A question's conversation goes before reading what was missed: catch-up waits while one's read,
+  // and one waits READ_WAIT seconds at most for Slack's rate limit, else goes without.)
+  let reads = 0
   async function context({ channel, thread, ts, since = null, dm = false }) {
     // (A message posted as one of a shared connection's bots carries that bot's name: username.)
-    const said = (m) => ({ ts: m.ts, person: { id: m.user || m.bot_id || null, name: (m.bot_id && m.username) || names[m.user] || m.username || m.bot_profile?.name || m.user || null }, text: clip(plainText(m.text, { bot: kept.bot?.userId, names }), LONGEST_SAID), you: !!((m.user && m.user === kept.bot?.userId) || (m.bot_id && m.bot_id === kept.bot?.botId)) })
-    if (!Object.keys(names).length) await people().catch(() => {})
+    // (What's known of who wrote it, as person() says of an asker: a guest, someone from another
+    // organization (also from the message's own team); a bot or an integration (a webhook, a workflow),
+    // whose words are anyone's. A post of this app's own: as, the name it was posted as, one of a shared
+    // connection's bots, so a bot takes only its own as its own words: frontdesk.js heardFrom.)
+    const team = kept.team?.id
+    const other = (t) => !!(t && team && t !== team)
+    const said = (m) => {
+      const own = !!((m.user && m.user === kept.bot?.userId) || (m.bot_id && m.bot_id === kept.bot?.botId))
+      const u = m.user ? users[m.user] : null
+      // (Someone Slack said nothing of, never looked up: taken as one who can't be checked, so their
+      // words are masked, as a guest's are.)
+      const flags = { ...(u?.guest ? { guest: true } : {}), ...(u?.stranger || other(u?.team) || other(m.user_team) || other(m.source_team) ? { external: true } : {}), ...(!u && m.user && !own ? { unknown: true } : {}) }
+      return {
+        ts: m.ts, person: { id: m.user || m.bot_id || null, name: (m.bot_id && m.username) || names[m.user] || m.username || m.bot_profile?.name || m.user || null, ...flags },
+        text: clip(plainText(m.text, { bot: kept.bot?.userId, names }), LONGEST_SAID), you: own,
+        ...(own ? { as: m.username || /^\*([^*\n]{1,80}):\*/.exec(String(m.text || ''))?.[1] || null } : (m.bot_id || m.subtype === 'bot_message' || u?.bot) ? { bot: true } : {}),
+      }
+    }
     const before = (m) => Number(m.ts) < Number(ts) && (!since || Number(m.ts) > Number(since)) && String(m.text || '').trim()
     const order = (a, b) => Number(a.ts) - Number(b.ts)
-    if (thread) {
-      const j = await call('conversations.replies', { channel, ts: thread, limit: 200 })
-      return { kind: 'thread', messages: (j.messages || []).filter(before).sort(order).slice(-THREAD_CONTEXT).map(said), pins: [] }
-    }
-    const j = await call('conversations.history', { channel, latest: ts, inclusive: false, limit: CHANNEL_CONTEXT })
-    const messages = (j.messages || []).filter(before).sort(order).slice(-CHANNEL_CONTEXT).map(said)
+    // (Names in the words too: <@U…> mentions.)
+    const who = async (list) => named(list.flatMap((m) => [m.user, ...[...String(m.text || '').matchAll(/<@([UW][A-Z0-9]{2,20})>/g)].map((x) => x[1])]))
+    let messages
+    reads++
+    try {
+      if (thread) {
+        const j = await call('conversations.replies', { channel, ts: thread, limit: 200 }, { waits: 1, most: READ_WAIT })
+        const list = (j.messages || []).filter(before).sort(order).slice(-THREAD_CONTEXT)
+        await who(list)
+        return { kind: 'thread', messages: list.map(said), pins: [] }
+      }
+      const j = await call('conversations.history', { channel, latest: ts, inclusive: false, limit: CHANNEL_CONTEXT }, { waits: 1, most: READ_WAIT })
+      const list = (j.messages || []).filter(before).sort(order).slice(-CHANNEL_CONTEXT)
+      await who(list)
+      messages = list.map(said)
+    } finally { reads-- }
     if (dm) return { kind: 'dm', messages, pins: [] }
     let pins = []
     let problem = null
@@ -839,14 +1008,36 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
   }
 
   // What was put to the bot while it wasn't connected: each conversation it's in, read from the
-  // last message it saw there (or from when it was first connected, at most three days back), and
-  // each thread it's answering in, from the last reply it saw there; all of it gathered first, then
-  // handed over oldest first, whichever conversation it was in.
+  // last message it saw there, or from when the gap began (from: seconds; GAP_SLACK before it, for
+  // events on their way), whichever is later, never before it was first connected nor more than
+  // three days back; and each thread it's answering in, from the last reply it saw there. In three
+  // rounds, each handed over oldest first once it's read, so what matters most isn't held up by the
+  // rest: its direct messages and threads, then group messages and the channels it listens in, then
+  // its other channels (mentions only). A read Slack holds back waits as long as Slack says, a
+  // question's own conversation going first; asked again meanwhile (another gap), it reads again
+  // from the earlier point once it's done.
   let reading = null
-  function missed() {
-    if (reading) return reading
+  let again = null
+  function missed({ from: gap = 0 } = {}) {
+    if (reading) { again = again == null ? gap : Math.min(again, gap); return reading }
     reading = (async () => {
-      const floor = Math.max(Number(kept.since || 0), Date.now() / 1000 - MISSED_DAYS * 86400)
+      const floor = Math.max(Number(kept.since || 0), Date.now() / 1000 - MISSED_DAYS * 86400, gap ? gap - GAP_SLACK : 0)
+      const handed = new Set()
+      const problems = []
+      let n = 0
+      // A read, as slow as Slack wants: a 429 waits its Retry-After; a question's read goes first.
+      const slow = async (method, params) => {
+        for (;;) {
+          if (!hear) throw Object.assign(new Error('Stopped'), { code: 'stopped' })
+          while (reads > 0) await sleep(250)
+          try { return await call(method, params, { waits: 0 }) } catch (e) {
+            if (e.code !== 'ratelimited') throw e
+            st.catchingUp = { ...st.catchingUp, waiting: e.retryAfter }
+            await sleep(Math.min(600, e.retryAfter || 1) * 1000)
+            if (st.catchingUp) st.catchingUp = { ...st.catchingUp, waiting: null }
+          }
+        }
+      }
       const chans = []
       let cursor
       do {
@@ -854,52 +1045,91 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
         chans.push(...(j.channels || []))
         cursor = j.response_metadata?.next_cursor || undefined
       } while (cursor && chans.length < MAX_CONVERSATIONS)
-      const found = []
-      // (One conversation or thread that can't be read is said, and the rest still read.)
-      const problems = []
-      for (const c of chans.slice(0, MAX_CONVERSATIONS)) {
-        const from = Math.max(floor, Number(kept.seen?.[c.id] || 0))
-        let j
-        try { j = await call('conversations.history', { channel: c.id, oldest: from.toFixed(6), inclusive: false, limit: 100 }) } catch (e) { problems.push(`${c.name ? `#${c.name}` : c.id}: ${e.message}`); continue }
-        const msgs = (j.messages || []).filter((m) => Number(m.ts) > from).sort((a, b) => Number(a.ts) - Number(b.ts))
-        const im = c.is_im === true
-        for (const m of msgs) {
-          const mention = String(m.text || '').includes(`<@${kept.bot?.userId}>`)
-          if (!im && !mention && !(!m.thread_ts && listens(c.id))) continue
-          found.push({ ...m, type: im || !mention ? 'message' : 'app_mention', channel: c.id, channel_type: im ? 'im' : undefined })
+      const all = chans.slice(0, MAX_CONVERSATIONS)
+      const follow = (await Promise.resolve(threads()).catch(() => [])).slice(0, MAX_CONVERSATIONS)
+      const rounds = [
+        { chans: all.filter((c) => c.is_im === true), threads: follow },
+        { chans: all.filter((c) => c.is_mpim === true || (c.is_im !== true && listens(c.id))), threads: [] },
+        { chans: all.filter((c) => c.is_im !== true && c.is_mpim !== true && !listens(c.id)), threads: [] },
+      ]
+      st.catchingUp = { of: all.length + follow.length, done: 0, since: new Date().toISOString(), waiting: null }
+      // One conversation's messages since `from`, a few pages at most.
+      const history = async (c, from) => {
+        const out = []
+        let more
+        for (let page = 0; page < CATCHUP_PAGES; page++) {
+          const j = await slow('conversations.history', { channel: c.id, oldest: from.toFixed(6), inclusive: false, limit: 100, ...(more ? { cursor: more } : {}) })
+          out.push(...(j.messages || []))
+          more = j.has_more ? j.response_metadata?.next_cursor : null
+          if (!more) break
         }
-        if (msgs.length) { if (!kept.seen) kept.seen = {}; kept.seen[c.id] = msgs.at(-1).ts; marked() }
+        return out
       }
-      for (const t of (await Promise.resolve(threads()).catch(() => [])).slice(0, MAX_CONVERSATIONS)) {
-        const from = Math.max(floor, Number(kept.threads?.[`${t.channel}:${t.thread}`] || 0), Number(t.since || 0))
-        let j
-        try { j = await call('conversations.replies', { channel: t.channel, ts: t.thread, oldest: from.toFixed(6), inclusive: false, limit: 200 }) } catch (e) { if (e.code !== 'thread_not_found') problems.push(`a thread in ${t.channel}: ${e.message}`); continue }
-        const msgs = (j.messages || []).filter((m) => Number(m.ts) > from && m.ts !== t.thread)
-        for (const m of msgs) found.push({ ...m, type: 'message', channel: t.channel, channel_type: t.dm ? 'im' : 'channel', thread_ts: m.thread_ts || t.thread })
-      }
-      // (A mention in a thread it follows comes both ways: once is enough.)
-      const once = new Map()
-      for (const m of found) { const k = `${m.channel}:${m.ts}`; if (!once.has(k) || m.type === 'app_mention') once.set(k, m) }
-      const list = [...once.values()].sort((a, b) => Number(a.ts) - Number(b.ts))
-      for (const m of list) await heard(m, { late: true })
-      if (list.length) say({ what: 'missed', ok: true, why: `${list.length} asked while away` })
+      try {
+        for (const r of rounds) {
+          const found = []
+          for (const c of r.chans) {
+            const from = Math.max(floor, Number(kept.seen?.[c.id] || 0))
+            let list
+            try { list = await history(c, from) } catch (e) { if (e.code === 'stopped') throw e; problems.push(`${c.name ? `#${c.name}` : c.id}: ${e.message}`); continue } finally { st.catchingUp.done++ }
+            const msgs = list.filter((m) => Number(m.ts) > from).sort((a, b) => Number(a.ts) - Number(b.ts))
+            const im = c.is_im === true
+            for (const m of msgs) {
+              const mention = String(m.text || '').includes(`<@${kept.bot?.userId}>`)
+              if (!im && !mention && !(!m.thread_ts && listens(c.id))) continue
+              found.push({ ...m, type: im || !mention ? 'message' : 'app_mention', channel: c.id, channel_type: im ? 'im' : undefined })
+            }
+            if (msgs.length) { if (!kept.seen) kept.seen = {}; if (Number(msgs.at(-1).ts) > Number(kept.seen[c.id] || 0)) kept.seen[c.id] = msgs.at(-1).ts; marked() }
+          }
+          for (const t of r.threads) {
+            const from = Math.max(floor, Number(kept.threads?.[`${t.channel}:${t.thread}`] || 0), Number(t.since || 0))
+            let j
+            try { j = await slow('conversations.replies', { channel: t.channel, ts: t.thread, oldest: from.toFixed(6), inclusive: false, limit: 200 }) } catch (e) { if (e.code === 'stopped') throw e; if (e.code !== 'thread_not_found') problems.push(`a thread in ${t.channel}: ${e.message}`); continue } finally { st.catchingUp.done++ }
+            const msgs = (j.messages || []).filter((m) => Number(m.ts) > from && m.ts !== t.thread)
+            for (const m of msgs) found.push({ ...m, type: 'message', channel: t.channel, channel_type: t.dm ? 'im' : 'channel', thread_ts: m.thread_ts || t.thread })
+          }
+          // (A mention in a thread it follows comes both ways: once is enough.)
+          const once = new Map()
+          for (const m of found) { const k = `${m.channel}:${m.ts}`; if (handed.has(k)) continue; if (!once.has(k) || m.type === 'app_mention') once.set(k, m) }
+          const list = [...once.values()].sort((a, b) => Number(a.ts) - Number(b.ts))
+          for (const m of list) { handed.add(`${m.channel}:${m.ts}`); n++; await heard(m, { late: true }) }
+        }
+      } catch (e) { if (e.code !== 'stopped') throw e }
+      if (n) say({ what: 'missed', ok: true, why: `${n} asked while away` })
       if (problems.length) say({ what: 'missed', ok: false, why: `Couldn't read what was asked while away in ${problems.slice(0, 3).join('; ')}` })
-    })().finally(() => { reading = null })
+    })().finally(() => {
+      reading = null
+      st.catchingUp = null
+      if (again != null && hear) { const g = again; again = null; missed({ from: g }).catch((e) => say({ what: 'missed', ok: false, why: `Couldn't read what was asked while away: ${e.message}` })) } else again = null
+    })
     return reading
   }
 
   // ---------- What goes out ----------
-  // Posts one at a time, a second apart (Slack's limit for posting to a conversation).
-  let line = Promise.resolve()
-  let lastPost = 0
-  function inLine(fn) {
-    const go = line.then(async () => {
-      const wait = 1000 - (Date.now() - lastPost)
+  // Posts one at a time in each conversation, a second apart (Slack's limit for posting is per
+  // conversation): one held up (a 429 there) holds up no other.
+  const lines = new Map() // channel -> { line, last, n }
+  function inLine(channel, fn) {
+    const key = String(channel || '')
+    const l = lines.get(key) || { line: Promise.resolve(), last: 0, n: 0 }
+    lines.set(key, l)
+    l.n++
+    const go = l.line.then(async () => {
+      const wait = 1000 - (Date.now() - l.last)
       if (wait > 0) await sleep(wait)
-      try { return await fn() } finally { lastPost = Date.now() }
+      try { return await fn() } finally { l.last = Date.now() }
     })
-    line = go.catch(() => {})
+    l.line = go.catch(() => {}).finally(() => { if (--l.n === 0 && lines.get(key) === l) setTimeout(() => { if (l.n === 0 && lines.get(key) === l) lines.delete(key) }, 1500).unref?.() })
     return go
+  }
+  // Posting where the app isn't (not_in_channel, or a channel it can't see): said to you, with what
+  // to do, then thrown as it was.
+  function notIn(channel, e) {
+    if (!['not_in_channel', 'channel_not_found'].includes(e?.code) || String(channel).startsWith('D')) return e
+    const name = places[channel]?.name
+    const app = kept.bot?.name || info().name || 'the app'
+    say({ what: 'not-in-channel', ok: false, channel, why: `I couldn't post in ${name ? `#${name}` : `a channel (${channel})`}: ${app} isn't in it. Invite it there with /invite @${app}, or pick a channel it's in.` })
+    return e
   }
 
   // An answer streamed into its thread: started, added to, and ended, in at most three calls, its
@@ -921,7 +1151,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     const dmd = String(reply.channel).startsWith('D')
     if (!dmd && !reply.user) throw Object.assign(new Error('Slack needs to know who a stream is for'), { code: 'no_recipient' })
     const [first, ...more] = parts(text).map(escape)
-    const j = await call('chat.startStream', { channel: reply.channel, thread_ts: reply.thread, markdown_text: first, ...(reply.user ? { recipient_user_id: reply.user, recipient_team_id: kept.team?.id } : {}), ...as }, { waits: 1 })
+    const j = await call('chat.startStream', { channel: reply.channel, thread_ts: reply.thread, markdown_text: first, ...(reply.user ? { recipient_user_id: reply.user, recipient_team_id: kept.team?.id } : {}), ...as }, { waits: 1, most: POST_WAIT })
     const ts = j.ts
     const last = more.pop()
     try {
@@ -975,7 +1205,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
   // buttons: [{ id, label, value, style }], under the words (a change's Approve and Deny, or Undo),
   // remembered as a draft's are, so settle() can put the outcome in their place.
   function post(reply, text, { files = [], stream = false, as = null, buttons = null } = {}) {
-    return inLine(async () => {
+    return inLine(reply.channel, async () => {
       const out = { ts: null, channel: reply.channel, streamed: false, streamError: null, files: [], ...(as?.name ? { as: as.name, customized: !!persona(as).username } : {}) }
       const raw = String(text ?? '')
       const body = as?.name && !persona(as).username ? `*${as.name}:* ${raw}` : raw
@@ -984,7 +1214,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
           { type: 'section', text: { type: 'mrkdwn', text: clip(escape(body), 3000) } },
           { type: 'actions', block_id: `bb_t_${Date.now().toString(36)}`, elements: buttons.slice(0, 5).map((b) => button(b.id, b.label, b.value, b.style || null)) },
         ]
-        const j = await call('chat.postMessage', { channel: reply.channel, text: escape(clip(body, 3000)), blocks, ...(reply.thread ? { thread_ts: reply.thread } : {}), unfurl_links: false, unfurl_media: false, ...persona(as) }, { waits: 1 })
+        const j = await call('chat.postMessage', { channel: reply.channel, text: escape(clip(body, 3000)), blocks, ...(reply.thread ? { thread_ts: reply.thread } : {}), unfurl_links: false, unfurl_media: false, ...persona(as) }, { waits: 1, most: POST_WAIT })
         Object.assign(out, { ts: j.ts, channel: j.channel || reply.channel })
         asks.set(`${out.channel}:${out.ts}`, blocks)
         if (asks.size > 200) asks.delete(asks.keys().next().value)
@@ -996,17 +1226,17 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
           } catch (e) { out.streamError = e.code || e.message }
         } else if (stream) out.streamError = !reply.thread ? 'not_in_thread' : body.length > STREAM_MAX ? 'too_long' : 'missing_scope'
         if (!out.ts) {
-          const j = await call('chat.postMessage', { channel: reply.channel, text: escape(body), ...(reply.thread ? { thread_ts: reply.thread } : {}), unfurl_links: false, unfurl_media: false, ...persona(as) }, { waits: 1 })
+          const j = await call('chat.postMessage', { channel: reply.channel, text: escape(body), ...(reply.thread ? { thread_ts: reply.thread } : {}), unfurl_links: false, unfurl_media: false, ...persona(as) }, { waits: 1, most: POST_WAIT })
           Object.assign(out, { ts: j.ts, channel: j.channel || reply.channel })
         }
       }
       for (const f of files.slice(0, FILES_MAX)) out.files.push(await upload(reply, f, out.ts))
       return out
-    })
+    }).catch((e) => { throw notIn(reply.channel, e) })
   }
   // "Pricing Desk or Docs Helper?": the question's asker picks with a button (bb_pick, its value the
   // question's key and the bot's id), in the question's thread.
-  const choose = (reply, { text, key, options = [] }) => inLine(async () => {
+  const choose = (reply, { text, key, options = [] }) => inLine(reply.channel, async () => {
     const blocks = [
       { type: 'section', text: { type: 'mrkdwn', text: clip(escape(text), 3000) } },
       { type: 'actions', block_id: `bb_p_${String(key).slice(0, 200)}`, elements: options.slice(0, 5).map((o, i) => button('bb_pick', o.label, `${key} ${o.id}`, i === 0 ? 'primary' : null)) },
@@ -1049,7 +1279,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
   }
   async function dm(user, text) {
     const channel = await openDm(user)
-    const j = await inLine(() => call('chat.postMessage', { channel, text: escape(text), unfurl_links: false, unfurl_media: false }, { waits: 1 }))
+    const j = await inLine(channel, () => call('chat.postMessage', { channel, text: escape(text), unfurl_links: false, unfurl_media: false }, { waits: 1 }))
     return { channel: j.channel || channel, ts: j.ts }
   }
 
@@ -1147,7 +1377,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     if (!owner?.id) throw new Error('Set who you are in Slack first')
     const channel = await openDm(owner.id)
     const { text, blocks } = item?.kind === 'memory' ? memoryBlocks(item) : item?.kind === 'limit' ? limitBlocks(item) : item?.kind === 'screen' ? screenBlocks(item) : draftBlocks(item || {})
-    const j = await inLine(() => call('chat.postMessage', { channel, text, blocks, unfurl_links: false, unfurl_media: false }, { waits: 1 }))
+    const j = await inLine(channel, () => call('chat.postMessage', { channel, text, blocks, unfurl_links: false, unfurl_media: false }, { waits: 1 }))
     const handle = { channel: j.channel || channel, ts: j.ts }
     asks.set(`${handle.channel}:${handle.ts}`, blocks)
     if (asks.size > 200) asks.delete(asks.keys().next().value)
@@ -1166,7 +1396,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     const kept = before.length ? before : [{ type: 'section', text: { type: 'mrkdwn', text: clip(md(body || words), 3000) } }]
     const blocks = [...kept, { type: 'context', elements: [{ type: 'mrkdwn', text: clip(`:white_check_mark: ${md(words)}`, 2000) }] }]
     try {
-      await inLine(() => call('chat.update', { channel: handle.channel, ts: handle.ts, text: escape(clip(words, 300)), blocks }, { waits: 1 }))
+      await inLine(handle.channel, () => call('chat.update', { channel: handle.channel, ts: handle.ts, text: escape(clip(words, 300)), blocks }, { waits: 1 }))
       asks.delete(`${handle.channel}:${handle.ts}`)
       return { ok: true }
     } catch (e) { return { ok: false, error: e.message } }
@@ -1177,7 +1407,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
   // isn't asked: it says so (and Settings says to update the app).
   async function react({ channel, ts, name, off = false }) {
     if (lacks('reactions:write')) throw lacking('reactions:write')
-    try { await call(off ? 'reactions.remove' : 'reactions.add', { channel, timestamp: ts, name }, { waits: 1 }) } catch (e) { if (!['already_reacted', 'no_reaction'].includes(e.code)) throw e }
+    try { await call(off ? 'reactions.remove' : 'reactions.add', { channel, timestamp: ts, name }, { waits: 1 }) } catch (e) { if (!['already_reacted', 'no_reaction'].includes(e.code)) throw notIn(channel, e) }
   }
 
   // A file attached to a question, read: from Slack's own addresses only (a redirect followed only
@@ -1248,12 +1478,129 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     return out.sort((a, b) => a.name.localeCompare(b.name))
   }
 
+  // ---------- Test this connection (conncheck.js) ----------
+  // Slack's checks, in order, each { id, label, state: ok | warn | fail | skip, detail, fix }: its
+  // tokens; its scopes (a shared app's chat:write.customize too); Socket Mode (connected, its last
+  // hello, and how many connections Slack has open for the app, from one opened to count them: more
+  // than this copy's is another copy); you there, and your direct messages with it opening; then a
+  // message it posts there (deleted at the end): its own event coming back to this copy (events
+  // arrive, and not to another copy), a reaction put on it and taken off, a file sent into its
+  // thread and read back, Slack's working status on that thread, and how long Slack takes to let it
+  // read a conversation and a thread (a 429: held back, as a distributed app outside the
+  // Marketplace is); and the channels it's in against those it's meant to answer or post in.
+  // owner: you there ({ id, name }); want: [{ id, name, why }] the channels it's meant to be in.
+  async function check({ owner = null, want = [] } = {}) {
+    const out = []
+    const add = (id, label, state, detail = null, fix = null) => { out.push({ id, label, state, detail, fix }); return state }
+    const LATER = [['scopes', 'Scopes'], ['socket', 'Socket Mode'], ['owner', 'You here'], ['events', 'Events arrive'], ['reactions', 'Reactions'], ['files', 'Files in and out'], ['status', 'Working status'], ['reads', 'Reading conversations'], ['channels', 'Channels']]
+    const skipRest = (from, why) => { for (const [id, label] of LATER.slice(LATER.findIndex(([x]) => x === from))) add(id, label, 'skip', why) }
+    const app = () => kept.bot?.name || 'the app'
+    if (!kept.appToken || !kept.botToken) { add('tokens', 'Tokens', 'fail', 'No tokens yet', 'Paste the app-level token (xapp-) and the bot token (xoxb-) from your Slack app'); skipRest('scopes', 'Needs the tokens first'); return out }
+    // 1. Tokens: the bot token (who and where) and the app-level one (a connection's address).
+    let who = null
+    let bad = null
+    try {
+      who = await call('auth.test', {}, { waits: 1 })
+      kept.scopes = who.scopes
+      kept.team = { id: who.team_id, name: who.team, url: who.url }
+      kept.bot = { userId: who.user_id, botId: who.bot_id || null, name: who.user }
+    } catch (e) { bad = { detail: `The bot token: ${e.message}`, fix: 'Copy the Bot User OAuth Token (xoxb-) again from OAuth & Permissions in your Slack app, and paste it in Advanced' } }
+    if (!bad) {
+      try { await call('apps.connections.open', {}, { token: kept.appToken, waits: 1 }) } catch (e) { bad = { detail: `The app-level token: ${e.message}`, fix: e.code === 'missing_scope' ? 'Give the app-level token the connections:write scope (Basic Information › App-Level Tokens)' : 'Copy the app-level token (xapp-) again from Basic Information › App-Level Tokens, and paste it in Advanced' } }
+    }
+    if (bad) { add('tokens', 'Tokens', 'fail', bad.detail, bad.fix); skipRest('scopes', 'Needs working tokens first'); return out }
+    add('tokens', 'Tokens', 'ok', `@${who.user} in ${who.team}`)
+    // 2. Scopes.
+    const short = missing()
+    if (short == null) add('scopes', 'Scopes', 'warn', 'Slack didn\'t say which scopes the app has', null)
+    else if (!short.length) add('scopes', 'Scopes', 'ok', 'Every scope its manifest asks for')
+    else add('scopes', 'Scopes', short.includes('chat:write') ? 'fail' : 'warn', `It lacks ${short.join(', ')}: ${short.map((x) => SCOPE_FOR[x]).filter(Boolean).join('; ')}`, 'Update Your Slack App: paste the new manifest in its App Manifest page, save, then reinstall it to the workspace')
+    // 3. Socket Mode: connected, the last hello, and the connections Slack has open for it.
+    const connected = st.state === 'connected'
+    const r = await probe()
+    if (r.ok) counted(r.n, r.ours)
+    const others = r.ok ? Math.max(0, r.n - r.ours) : 0
+    if (!connected) add('socket', 'Socket Mode', 'fail', st.why || `Not connected (${st.state})`, 'Press Connect; if it stays off, check Socket Mode is on in the app\'s settings')
+    else if (others) add('socket', 'Socket Mode', 'warn', `Connected since ${st.connectedAt}, but Slack has ${others === 1 ? 'another connection' : `${others} other connections`} open for this app: another copy of Bridge AI (or another program) gets some of its messages`, 'Quit Bridge AI on the other computer, or give each computer its own Slack app')
+    else add('socket', 'Socket Mode', r.ok ? 'ok' : 'warn', `Connected since ${st.connectedAt}${st.hello ? `, Slack's last hello ${st.hello}` : ''}${r.ok ? ', and no other copy is connected' : `; couldn't count its connections: ${r.why}`}`)
+    // 4. You there, and your direct messages with it.
+    let dmc = null
+    if (!owner?.id) add('owner', 'You here', 'warn', 'Nobody is linked as you here: your bots don\'t know it\'s you, so they answer you as anyone else (or turn you away), and can\'t ask you anything in Slack', `Make a code under You Here, then send it to @${app()} in a direct message`)
+    else {
+      try { dmc = await openDm(owner.id); add('owner', 'You here', 'ok', `${owner.name || owner.id}, and your direct messages with @${app()} open`) } catch (e) { add('owner', 'You here', 'fail', `${owner.name || owner.id} is linked, but your direct messages with it don't open: ${e.message}`, e.code === 'missing_scope' ? 'Update Your Slack App (it needs im:write), then reinstall it' : null) }
+    }
+    if (!dmc) { skipRest('events', owner?.id ? 'Needs your direct messages with it' : 'Needs you linked here: it tests in your direct messages'); return out.concat(await channelsCheck(want)) }
+    // 5–10. A message in your direct messages, to test with (deleted at the end).
+    let msg = null
+    let arrived = null
+    try {
+      const j = await inLine(dmc, () => call('chat.postMessage', { channel: dmc, text: 'Testing this connection from Bridge AI: this message goes in a moment.', unfurl_links: false, unfurl_media: false }, { waits: 1 }))
+      msg = { channel: j.channel || dmc, ts: j.ts }
+    } catch (e) { add('events', 'Events arrive', 'fail', `Couldn't post in your direct messages: ${e.message}`, e.code === 'missing_scope' ? 'Update Your Slack App, then reinstall it' : null); skipRest('reactions', 'Needs a message to test with'); return out.concat(await channelsCheck(want)) }
+    const t0 = Date.now()
+    const key = `${msg.channel}:${msg.ts}`
+    if (!connected) add('events', 'Events arrive', 'skip', 'Not connected')
+    else {
+      arrived = recent.has(key) || await new Promise((resolve) => {
+        const t = setTimeout(() => { echoes.delete(key); resolve(false) }, ECHO_MS)
+        t.unref?.()
+        echoes.set(key, () => { clearTimeout(t); echoes.delete(key); resolve(true) })
+      })
+      if (arrived) add('events', 'Events arrive', 'ok', `Slack sent its message back as an event in ${Date.now() - t0} ms`)
+      else add('events', 'Events arrive', 'fail', `Slack didn't send this copy the event for a message it posted (${Math.round(ECHO_MS / 1000)} s)${others ? ': another copy connected to the app may have had it' : ''}`, others ? 'Quit Bridge AI on the other computer, or give each computer its own Slack app' : 'Check Event Subscriptions is on in your Slack app, with message.im among its bot events: Update Your Slack App with the manifest')
+    }
+    // Reactions: on, then off.
+    try {
+      await react({ channel: msg.channel, ts: msg.ts, name: 'eyes' })
+      await react({ channel: msg.channel, ts: msg.ts, name: 'eyes', off: true })
+      add('reactions', 'Reactions', 'ok', '👀 put on and taken off')
+    } catch (e) { add('reactions', 'Reactions', e.code === 'missing_scope' ? 'warn' : 'fail', e.message, e.code === 'missing_scope' ? 'Update Your Slack App (reactions:write), then reinstall it' : null) }
+    // A file, sent into its thread and read back.
+    const nonce = `bridge-check ${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}\n`
+    const up = await upload({ channel: msg.channel, thread: msg.ts }, { name: 'bridge-check.txt', content: nonce, title: 'Bridge AI connection test' }, msg.ts)
+    if (!up.ok) add('files', 'Files in and out', up.code === 'missing_scope' ? 'warn' : 'fail', `Couldn't send a file: ${up.error}`, up.code === 'missing_scope' ? 'Update Your Slack App (files:write), then reinstall it' : null)
+    else {
+      try {
+        const got = await download({ id: up.id, name: up.name })
+        if (got.toString('utf8') === nonce) add('files', 'Files in and out', 'ok', 'A file sent and read back the same')
+        else add('files', 'Files in and out', 'fail', 'A file sent came back different', null)
+      } catch (e) { add('files', 'Files in and out', e.code === 'missing_scope' ? 'warn' : 'fail', `Sent a file, but couldn't read it back: ${e.message}`, e.code === 'missing_scope' ? 'Update Your Slack App (files:read), then reinstall it' : null) }
+      call('files.delete', { file: up.id }, { waits: 0 }).catch(() => {})
+    }
+    // Slack's working status (and Stop) on its thread, then done.
+    const s = await status({ channel: msg.channel, thread: msg.ts }, true)
+    if (s.ok) { await status({ channel: msg.channel, thread: msg.ts }, false); add('status', 'Working status', 'ok', `Shown and cleared (${s.method})`) } else add('status', 'Working status', 'warn', `Slack's working status and Stop aren't shown: ${s.error}${s.method ? ` (${s.method})` : ''}`, /assistant:write|unknown_method|not_allowed|feature/.test(String(s.error)) ? 'Update Your Slack App with the manifest (it declares the app an agent), then reinstall it' : null)
+    // How quickly Slack lets it read a conversation and a thread.
+    const timed = async (method, params) => { const a = Date.now(); try { await call(method, params, { waits: 0 }); return { ms: Date.now() - a } } catch (e) { return { ms: Date.now() - a, e } } }
+    const h = await timed('conversations.history', { channel: msg.channel, limit: 1 })
+    const t = await timed('conversations.replies', { channel: msg.channel, ts: msg.ts, limit: 1 })
+    const held = [h, t].find((x) => x.e?.code === 'ratelimited')
+    const broke = [h, t].find((x) => x.e && x.e.code !== 'ratelimited')
+    if (held) add('reads', 'Reading conversations', 'warn', `Slack asked it to wait ${held.e.retryAfter} s after a read (${held.e.method}): it holds a distributed app outside its Marketplace to about one read a minute, so catching up after time away is slow, and some answers may come without their conversation`, 'Make the app in and for this workspace only (not distributed), from the manifest here')
+    else if (broke) add('reads', 'Reading conversations', 'fail', `${broke.e.method}: ${broke.e.message}`, broke.e.code === 'missing_scope' ? 'Update Your Slack App, then reinstall it' : null)
+    else add('reads', 'Reading conversations', 'ok', `A conversation in ${h.ms} ms, a thread in ${t.ms} ms`)
+    // (The test message goes: its thread's file and all.)
+    call('chat.delete', { channel: msg.channel, ts: msg.ts }, { waits: 1 }).catch(() => {})
+    return out.concat(await channelsCheck(want))
+  }
+  // The channels it's in against those it's meant to be in: each it isn't, said with what to do.
+  async function channelsCheck(want) {
+    const mine = await channels().catch((e) => ({ error: e }))
+    if (mine.error) return [{ id: 'channels', label: 'Channels', state: 'fail', detail: `Couldn't list the channels it's in: ${mine.error.message}`, fix: null }]
+    const ids = new Set(mine.map((c) => c.id))
+    const out = (want || []).filter((w) => w?.id && !String(w.id).startsWith('D') && !ids.has(w.id))
+    const first = (x) => `#${x.name || x.id}${x.why ? ` (${x.why})` : ''}`
+    if (out.length) return [{ id: 'channels', label: 'Channels', state: 'warn', detail: `Not in ${out.slice(0, 5).map(first).join(', ')}${out.length > 5 ? ` and ${out.length - 5} more` : ''}: it can't hear or answer there`, fix: `Invite it in each: /invite @${kept.bot?.name || 'the app'}`, channels: out.map((x) => ({ id: x.id, name: x.name || null })) }]
+    return [{ id: 'channels', label: 'Channels', state: 'ok', detail: `In ${mine.length} ${mine.length === 1 ? 'channel' : 'channels'}${(want || []).length ? ', every one it\'s meant to answer or post in among them' : ''}` }]
+  }
+
   // Connected and staying so, handing each question to hear(q).
   function start(fn) {
     hear = fn
     if (!kept.appToken || !kept.botToken) { set({ state: 'no-tokens', why: null }); return }
     if (['connected', 'connecting', 'reconnecting'].includes(st.state) && ws) return
     tries = 0
+    cause = 'start'
     connect().catch((e) => later(e.message))
   }
   // Stopped (quiet: only for a moment, new tokens taking over, so its Home tab isn't told).
@@ -1265,7 +1612,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     stopTimers()
     drop(ws)
     ws = null
-    set({ state: kept.appToken && kept.botToken ? 'off' : 'no-tokens', why: null, nextTry: null })
+    set({ state: kept.appToken && kept.botToken ? 'off' : 'no-tokens', why: null, nextTry: null, others: null, numConnections: null })
   }
   const state = () => ({ ...st, team: kept.team || null, bot: kept.bot || null, appId: kept.appId || null, tokens: kept.appToken || kept.botToken ? { app: masked(kept.appToken), bot: masked(kept.botToken) } : null, scopes: { missing: kept.botToken ? missing() : null, known: Array.isArray(kept.scopes) } })
 
@@ -1284,6 +1631,8 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     save()
     memo = { at: 0, list: null }
     dms.clear()
+    gates.clear()
+    st.limited = null
     const was = hear
     stop({ quiet: true })
     if (was) start(was)
@@ -1300,5 +1649,5 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     set({ state: 'no-tokens', why: null })
   }
 
-  return { id, label: 'Slack', start, stop, state, post, react, context, people, channels, members, setTokens, forget, missed, masked, whisper, status, askOwner, settle, dm, download, choose }
+  return { id, label: 'Slack', platform: 'slack', start, stop, state, post, react, context, people, channels, members, setTokens, forget, missed, masked, whisper, status, askOwner, settle, dm, download, choose, check, probe }
 }

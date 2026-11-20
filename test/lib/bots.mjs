@@ -51,7 +51,9 @@ export function lookers(kit, slack) {
     // Every event in a bot's record, as written.
     events: (id = 'b1') => { try { return fs.readFileSync(path.join(kit.data, 'bots', id, 'trace', `${month()}.jsonl`), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) } catch { return [] } },
     posted: async () => (await slack.state()).posted,
-    postedLike: (re, ms = 20000) => until(async () => (await slack.state()).posted.find((x) => re.test(x.text || '')), ms),
+    // (Not a draft's card in your direct messages, whose words have the draft in them too: posts go
+    // in each conversation at once now, so its Sent can land a moment after the answer.)
+    postedLike: (re, ms = 20000) => until(async () => (await slack.state()).posted.find((x) => re.test(x.text || '') && !/ — Draft: /.test(x.text || '')), ms),
     reacted: async (ts, name, app = 'A1') => (await slack.state()).reactions.some((r) => r.ts === ts && r.name === name && r.app === app),
     calls: (method) => slack.calls().filter((c) => c.method === method),
   }
@@ -73,4 +75,71 @@ export async function openSettings(p, section = 'slack-bot', ready = '.modal.set
     return p.locator(ready).first().waitFor({ timeout: 2500 }).then(() => true, () => false)
   }, 20000, 100)
   await p.locator(ready).first().waitFor({ timeout: 5000 })
+}
+
+// Bots (the sidebar's Bots row; a phone's More › Bots) at one of its tabs: connections, bots or
+// sessions. (Settings › Bots is the beta feature's switch and Open Bots: everything else is here.)
+export async function openBots(p, tab = 'bots') {
+  await p.locator('.topbar, .tabbar').first().waitFor({ timeout: 20000 })
+  if (await p.locator('.tabbar').count()) {
+    await p.locator('.tabbar button', { hasText: 'More' }).click()
+    await p.locator('.m-more-row[data-id="bots"]').click()
+  } else await p.locator('[data-setting="rail-bots"] .rail-nav-btn').click({ timeout: 20000 })
+  await p.locator(`.bh-tabs [data-tab="${tab}"]`).click()
+  await p.locator(`.bh[data-tab="${tab}"] .bh-body > *`).first().waitFor({ timeout: 10000 })
+}
+
+// A bot's page, from its card in Bots: by its name (the first bot when none is said; a name alone may
+// be given in place of the options), at one of its tabs (overview, settings, memory, activity). Its
+// Settings open with Advanced open too, where most of a bot's settings are, unless basic.
+export async function openBot(p, o = {}) {
+  const { name = null, tab = 'settings', basic = false } = typeof o === 'string' ? { name: o } : o || {}
+  await openBots(p, 'bots')
+  await (name ? p.locator('.bh .bo-card', { hasText: name }) : p.locator('.bh .bo-card')).first().click()
+  // (Its page, not another bot's: the cards' order isn't the test's to count on.)
+  if (name) await p.locator('.bp', { hasText: name }).first().waitFor({ timeout: 10000 })
+  await p.locator('.bp .sb-tabs').first().waitFor({ state: 'attached', timeout: 10000 })
+  await p.waitForTimeout(300)
+  // (A bot not connected anywhere opens with AI Assist's chat beside it: on a phone, over the page.)
+  if (await p.locator('.bp.phone .bp-chat .ai-head-close').count()) await p.locator('.bp.phone .bp-chat .ai-head-close').click()
+  await p.locator(`.bp .sb-tabs [data-tab="${tab}"]`).click({ timeout: 10000 })
+  if (tab !== 'settings' || basic) return
+  const adv = p.locator('.bp [data-setting="bot-advanced"]')
+  if (!(await adv.evaluate((d) => d.open))) await adv.locator(':scope > summary').click()
+  await p.locator('.bp [data-setting="bot-advanced"] [data-setting="slack-limits"]').waitFor({ timeout: 8000 })
+}
+
+// A question asked from its Overview's Start a Test Session, as someone (by name). Claude Code
+// answering, it's a session of its own, which opens (SessionView): what's given back is its Thread,
+// where its answer shows as a turn's reply (.bh-reply), with the files it made or attached (.sb-files).
+// Answered by Codex or a model (no session), or where the server keeps no sessions: its answer's
+// section under the form (settings/Bots.jsx TryResult, .sb-try-draft).
+export async function askOnce(p, text, { as = null } = {}) {
+  await p.locator('.bp .sb-tabs [data-tab="overview"]').click()
+  const form = p.locator('.bp [data-setting="bot-test"] [data-setting="test-session"]')
+  if (as) await form.locator('select').selectOption({ label: as })
+  await form.locator('textarea').fill(text)
+  await form.locator('button[type="submit"]').click()
+  const thread = p.locator('.bh-sv .bh-thread')
+  const once = p.locator('.bp [data-setting="bot-test"] [data-setting="slack-try"]')
+  await until(async () => (await thread.count()) > 0 || (await once.count()) > 0, 20000, 150)
+  return (await thread.count()) ? thread : once
+}
+// What a test session answered (askOnce): its Thread's latest reply, or the one-off answer's draft.
+export const answerIn = (sec) => sec.locator('.bh-turn .bh-reply p, .sb-try-draft').last().innerText({ timeout: 2000 }).catch(() => '')
+
+// AI Assist's chat for a new bot: New bot's Or describe it to AI Assist. form: its form (by name, a
+// template, an import) open in it, as it is by itself with no model, else with Set it up with the form.
+export async function newBotChat(p, { form = false } = {}) {
+  await p.locator('.topbar, .tabbar').first().waitFor({ timeout: 20000 })
+  if (await p.locator('.tabbar').count()) {
+    await openBots(p, 'bots')
+    await p.locator('.bh [data-setting="bots-quick"], .bh [data-setting="bots-new"]').first().waitFor({ timeout: 10000 })
+    if (!(await p.locator('.bh [data-setting="bots-quick"]').count())) await p.locator('.bh [data-setting="bots-new"]').click()
+  } else await p.locator('[data-setting="rail-bots"] .rail-tool[aria-label="New bot"]').click({ timeout: 20000 })
+  await p.locator('.bh [data-setting="bots-quick"] .ai-assist-link').click()
+  if (!form) return
+  await p.locator('.bc .sb-new, .bc button:has-text("Set it up with the form")').first().waitFor({ timeout: 15000 })
+  if (!(await p.locator('.bc .sb-new').count())) await p.locator('.bc button', { hasText: 'Set it up with the form' }).click()
+  await p.locator('.bc .sb-new').waitFor({ timeout: 8000 })
 }

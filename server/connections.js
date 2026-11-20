@@ -10,10 +10,10 @@
 //   connections/<id>/connection.json   its settings: { name, platform, shared, bot (a connection of
 //                                      one bot's own: that bot), owner (you there), defaults (the
 //                                      channels each go to one bot: [{ id, name, bot }]), perBot
-//                                      (a slash command for each bot, besides its own), assist
-//                                      (AI Assist picks among the bots someone may ask: on unless
-//                                      you turn it off), unsure (the bot a question goes to when
-//                                      nothing else says which: null, to ask them), teamsPort,
+//                                      (a slash command for each bot, besides its own), chief (the
+//                                      bot a question goes to when nothing else says which, its
+//                                      Chief, which hands it on or asks the others: null, to ask
+//                                      them; one kept as unsure before is the chief now), teamsPort,
 //                                      migratedFrom, createdAt, paused (not connected until Start:
 //                                      one brought from another computer, or moved to one, as an
 //                                      app can't be connected from two at once; pausedWhy says so,
@@ -25,38 +25,51 @@
 //   connections/<id>/teams.json        config.json, never given to a model, nor shown back in full
 //   connections/<id>/routing.jsonl     which bot each question went to, and why; and its connection
 //   connections/<id>/state.json        the bot each person used last in a direct message
+//   connections/<id>/check.json        its last Test this connection (conncheck.js)
+//
+// You there (owner) is who your bots know as you on that platform: picked from its people, or linked
+// by a code. Link makes one (linkCode: eight letters and digits, good for 15 minutes, kept in memory
+// only, one at a time), which you send to the app in a direct message; the first direct message
+// that is that code (takeLink, from connhub.js before anything routes it) makes whoever sent it you
+// there, if the platform says who they are and they're no guest and from no other organization.
+// Five wrong codes and it's spent, so it can't be guessed; nothing else can set you there.
 //
 // Bots made before connections had each their own app, its tokens in bots/<id>/: each becomes a
 // connection of that bot's own (migrate), named as the bot, so nothing about it changes. Move to the
 // shared connection takes a bot off its own (its app can be deleted in Slack afterwards).
 import fs from 'node:fs'
 import path from 'node:path'
+import crypto from 'node:crypto'
 import { dataFile, writeFileAtomic } from './paths.js'
+import { REGISTRY, PERSON_ID, CHANNEL_ID, personOk } from './connector.js'
 
 export const DIR = dataFile('connections')
 const ID = /^c\d{1,4}$/
+const BOT = /^b\d{1,4}$/
 export const NAME_MAX = 35 // Slack's longest app name
-export const PLATFORMS = ['slack', 'discord', 'teams']
+export const PLATFORMS = Object.keys(REGISTRY)
 const ROUTED_MAX = 1000 // routing decisions kept, the latest
 const clean = (s, n) => String(s ?? '').replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n)
 export const fileOf = (id, name) => path.join(DIR, id, name)
 export const tokensOf = (c) => fileOf(c.id, `${c.platform}.json`)
 const read = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')) } catch { return null } }
-const place = (x) => (x && /^([CGD][A-Z0-9]{2,20}|discord:\d{1,25}|teams:[^\s"<>]{3,300})$/.test(String(x.id || '')) && /^b\d{1,4}$/.test(String(x.bot || '')) ? { id: String(x.id), name: clean(x.name, 80) || null, bot: String(x.bot) } : null)
-const person = (p) => (p && /^([UW][A-Z0-9]{2,20}|discord:\d{1,25}|teams:[\w-]{6,64})$/.test(String(p.id || '')) ? { id: String(p.id), name: clean(p.name, 80) || null } : null)
+const place = (x) => (x && CHANNEL_ID.test(String(x.id || '')) && BOT.test(String(x.bot || '')) ? { id: String(x.id), name: clean(x.name, 80) || null, bot: String(x.bot) } : null)
+const person = (p) => (p && PERSON_ID.test(String(p.id || '')) ? { id: String(p.id), name: clean(p.name, 80) || null } : null)
 
-// A connection as kept, with every setting there.
+// A connection as kept, with every setting there. (assist and unsure were AI Assist's pick and the
+// bot for when it couldn't: the Chief does both now, and the one you'd set for unsure is it.)
 function shape(id, j) {
   const c = { ...(j || {}), id }
   c.platform = PLATFORMS.includes(c.platform) ? c.platform : 'slack'
   c.name = clean(c.name, NAME_MAX) || 'Bridge AI'
-  c.bot = /^b\d{1,4}$/.test(String(c.bot || '')) ? String(c.bot) : null
+  c.bot = BOT.test(String(c.bot || '')) ? String(c.bot) : null
   c.shared = !c.bot && c.shared !== false
   c.owner = person(c.owner)
   c.defaults = (Array.isArray(c.defaults) ? c.defaults : []).map(place).filter(Boolean).slice(0, 200)
   c.perBot = c.perBot === true
-  c.assist = c.assist !== false
-  c.unsure = /^b\d{1,4}$/.test(String(c.unsure || '')) ? String(c.unsure) : null
+  c.chief = c.chief === null ? null : BOT.test(String(c.chief || '')) ? String(c.chief) : BOT.test(String(c.unsure || '')) ? String(c.unsure) : null
+  delete c.unsure
+  delete c.assist
   c.teamsPort = Number.isInteger(c.teamsPort) ? c.teamsPort : null
   c.paused = c.paused === true
   c.pausedWhy = c.paused ? clean(c.pausedWhy, 300) || null : null
@@ -90,6 +103,9 @@ export const ownOf = (bot, platform) => list().find((c) => c.bot === bot && c.pl
 export const of = (bot, platform) => ownOf(bot, platform) || sharedOf(platform)
 // The bots a connection reaches, of those given: its own bot's, or every one without its own there.
 export const botsOn = (c, bots) => (c.bot ? bots.filter((b) => b.id === c.bot) : bots.filter((b) => !ownOf(b.id, c.platform)))
+// Its Chief, of those given: the bot set as its chief while that bot is still on it (one moved to a
+// connection of its own, or deleted, is no chief here), else null.
+export const chiefOf = (c, bots) => (c?.chief && botsOn(c, bots).some((b) => b.id === c.chief) ? c.chief : null)
 
 // A shared connection's name to start from: your first name's, as "maya_bot" for Maya.
 export const suggestName = (you = '') => `${String(you || '').trim().split(/\s+/)[0].toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '') || 'my'}_bot`
@@ -105,8 +121,7 @@ export function create({ platform, name, shared = true, bot = null, owner = null
   write(c)
   return c
 }
-// Its settings changed (its name, you there, the channels' bots, per-bot commands, whether AI Assist
-// picks, and the bot for a question nothing else places).
+// Its settings changed (its name, you there, the channels' bots, per-bot commands, and its Chief).
 export function save(id, patch) {
   const before = get(id)
   if (!before) throw Object.assign(new Error('No such connection'), { status: 404 })
@@ -118,7 +133,54 @@ export function save(id, patch) {
 export function remove(id) {
   if (!ID.test(String(id))) throw new Error('No such connection')
   memo = null
+  links.delete(id)
   fs.rmSync(path.join(DIR, id), { recursive: true, force: true })
+}
+
+// ---------- You there, linked by a code ----------
+const LINK_MS = Number(process.env.BRIDGE_LINK_MS) || 15 * 60 * 1000
+const LINK_TRIES = 5
+const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789' // (no 0, O, 1 or I, to be read and typed right)
+const links = new Map() // connection id -> { code, at, tries }
+// The words a link code is sent in: the code, "link" before it or not, its dash, any case.
+const LINK_WORDS = /^\s*(?:link\s+)?([a-z2-9]{4})-([a-z2-9]{4})\s*$/i
+// A new code for a connection, the last one it had no longer good: { code, expiresAt }.
+export function linkCode(id) {
+  if (!get(id)) throw Object.assign(new Error('No such connection'), { status: 404 })
+  const four = () => Array.from({ length: 4 }, () => LETTERS[crypto.randomInt(LETTERS.length)]).join('')
+  const x = { code: `${four()}-${four()}`, at: Date.now(), tries: 0 }
+  links.set(id, x)
+  return { code: x.code, expiresAt: new Date(x.at + LINK_MS).toISOString() }
+}
+// Whether a code waits to be sent there, and until when.
+export function linking(id) {
+  const x = links.get(id)
+  if (!x) return null
+  if (Date.now() - x.at > LINK_MS) { links.delete(id); return null }
+  return { expiresAt: new Date(x.at + LINK_MS).toISOString(), tries: x.tries }
+}
+// A direct message to the app, read as a code: null when no code waits there or it isn't one (the
+// message goes on to the bots); else { ok, owner, before } when it was the code and its sender is
+// you there now, or { ok: false, why: expired | wrong | spent | who }. from: who sent it, its id as
+// the desk keeps ids (connector.js), with the platform's guest, external and unknown.
+export function takeLink(id, text, from) {
+  const x = links.get(id)
+  const m = x ? LINK_WORDS.exec(String(text || '')) : null
+  if (!m) return null
+  const c = get(id)
+  if (!c || Date.now() - x.at > LINK_MS) { links.delete(id); return { ok: false, why: 'expired' } }
+  const said = Buffer.from(`${m[1]}-${m[2]}`.toUpperCase())
+  if (said.length !== x.code.length || !crypto.timingSafeEqual(said, Buffer.from(x.code))) {
+    x.tries++
+    if (x.tries >= LINK_TRIES) { links.delete(id); return { ok: false, why: 'spent' } }
+    return { ok: false, why: 'wrong' }
+  }
+  // (The right code from someone it can't be: a guest, another organization's, someone the platform
+  // couldn't say. It's spent, as it's out.)
+  links.delete(id)
+  if (!from || from.unknown || from.guest || from.external || !personOk(from.id, c.platform)) return { ok: false, why: 'who' }
+  const { before, after } = save(id, { owner: { id: String(from.id), name: from.name || null } })
+  return { ok: true, owner: after.owner, before: before.owner }
 }
 
 // ---------- What it routed, and the person's last bot ----------

@@ -1,0 +1,203 @@
+/* Bots (BotsHome.jsx): its three tabs, Connections (ConnectionCard.jsx, TestConnection.jsx), Bots
+   and Sessions (SessionList.jsx); a session (SessionView.jsx), its Thread and Live; a bot's Overview
+   (BotOverview.jsx) and the top of its Settings. The app's tokens, so it follows light and dark mode;
+   on a phone nothing wider than the screen, every control a whole 40 px target, fields at 16 px. */
+
+/* ---------- Bots, and its tabs ---------- */
+.bh { height: 100%; min-height: 0; min-width: 0; display: flex; flex-direction: column; background: var(--pane); }
+.bh-head { flex: none; display: flex; align-items: center; gap: 8px; padding: 16px 24px 0; color: var(--ink-2); }
+.bh-head .bp-name { color: var(--ink); }
+.bh-tabs { flex: none; align-self: flex-start; margin: 10px 24px 0; }
+.bh-tabs button { display: inline-flex; align-items: center; gap: 6px; }
+.bh-tabs .bt-count { margin-left: 2px; }
+.bh-body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 24px 40px; display: grid; gap: 12px; align-content: start; }
+.bh-empty { display: grid; justify-items: center; gap: 8px; padding: 28px 12px; color: var(--ink-3); text-align: center; }
+.bh-empty p { margin: 0; max-width: 420px; color: var(--ink-2); }
+
+/* ---------- Bots › Bots ---------- */
+.bh-bots { display: grid; gap: 14px; min-width: 0; }
+.bh-new-row { flex-wrap: wrap; }
+.bh-group { display: grid; gap: 8px; min-width: 0; }
+.bh-group-head { margin: 0; font: 600 12px var(--font); text-transform: uppercase; letter-spacing: .04em; color: var(--ink-3); }
+.bh-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; min-width: 0; }
+.bh-chief-tag { color: var(--accent); background: var(--accent-soft); }
+.bh-quick { display: grid; gap: 10px; min-width: 0; padding: 14px 16px; border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line)); border-radius: 12px; background: var(--pane-2); }
+.bh-quick textarea { width: 100%; height: auto; min-height: 52px; padding: 8px 11px; resize: vertical; font: 13px/1.45 var(--font); }
+.bh-quick .sb-add { display: flex; gap: 6px; min-width: 0; }
+.bh-quick .sb-add input { flex: 1; min-width: 0; }
+.bh-quick > p { margin: 0; }
+.bh-quick .st-row { flex-wrap: wrap; }
+.ai-assist-link { display: inline-flex; align-items: center; gap: 5px; color: var(--ai); }
+.bh-gone { min-width: 0; }
+.bh-gone-one { margin-left: 14px; }
+
+/* ---------- Bots › Connections ---------- */
+.bh-conns { display: grid; gap: 12px; min-width: 0; }
+.bh-conns > .st-sec.bh-card { padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--pane); box-shadow: var(--shadow); }
+.bh-conns > .cn-new { padding: 12px 0 0; }
+.bh-setup { display: grid; gap: 8px; min-width: 0; }
+.bh-setup .st-sec { padding-left: 0; padding-right: 0; }
+.bh-test { display: grid; gap: 8px; min-width: 0; }
+.bh-test-row { flex-wrap: wrap; }
+.bh-test-sum { font-weight: 600; }
+.bh-test-sum.s-ok { color: var(--good); }
+.bh-test-sum.s-warn { color: var(--warning); }
+.bh-test-sum.s-fail { color: var(--critical); }
+.bh-checks { list-style: none; margin: 0; padding: 8px 10px; display: grid; gap: 6px; border-radius: 10px; border: 1px solid var(--line); background: var(--pane-2); }
+.bh-check { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.bh-check > .icon { flex: none; margin-top: 2px; }
+.bh-check.s-ok > .icon { color: var(--good); }
+.bh-check.s-warn > .icon { color: var(--warning); }
+.bh-check.s-fail > .icon { color: var(--critical); }
+.bh-check.s-skip { opacity: .7; }
+.bh-check.s-skip > .icon { color: var(--ink-3); }
+.bh-check-text { min-width: 0; overflow-wrap: anywhere; }
+.bh-fix { display: block; margin-top: 2px; color: var(--ink); }
+.bh-you .st-row { flex-wrap: wrap; }
+.bh-you-name { display: inline-flex; align-items: center; gap: 5px; color: var(--good); font-weight: 600; }
+.bh-code { display: grid; gap: 6px; padding: 10px 12px; border-radius: 10px; border: 1px dashed color-mix(in srgb, var(--accent) 45%, var(--line-2)); background: var(--accent-soft); }
+.bh-code > p { margin: 0; }
+.bh-code-text { font: 600 18px var(--font-mono); letter-spacing: .12em; color: var(--ink); padding: 2px 8px; border-radius: 6px; background: var(--pane); }
+.bh-reach { gap: 6px; }
+.bh-chief { max-width: 420px; }
+.bh-adv > summary { font-weight: 600; }
+.bh-adv[open] { gap: 10px; }
+.bh-adv .st-sec { padding-left: 0; padding-right: 0; }
+.bh-soon { display: flex; align-items: center; gap: 6px; margin: 4px 0 0; }
+
+/* ---------- Bots › Sessions ---------- */
+.bh-sessions { display: grid; gap: 10px; min-width: 0; }
+.bh-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.bh-tools select.st-input { flex: 0 1 200px; min-width: 0; width: auto; }
+.bh-test-sess { display: grid; gap: 8px; min-width: 0; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--pane-2); }
+.bh-test-sess textarea { width: 100%; height: auto; min-height: 52px; padding: 8px 11px; resize: vertical; font: 13px/1.45 var(--font); }
+.bh-test-sess .st-row { flex-wrap: wrap; }
+.bh-sess-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; min-width: 0; }
+.bh-sess { width: 100%; display: grid; grid-template-columns: 10px minmax(0, 1fr) auto 12px; align-items: center; gap: 10px; min-width: 0; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--pane); color: var(--ink); font: 13px var(--font); text-align: left; cursor: pointer; }
+.bh-sess:hover, .bh-sess:focus-visible { border-color: var(--accent); }
+.bh-sess.st-waiting { border-color: color-mix(in srgb, var(--needs) 45%, var(--line)); }
+.bh-sess-main { display: grid; gap: 2px; min-width: 0; }
+.bh-sess-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.bh-sess-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bh-sess-side { display: grid; gap: 2px; justify-items: end; text-align: right; }
+.bh-sdot { flex: none; display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--idle); }
+.bh-sdot.s-working { background: var(--working); }
+.bh-sdot.s-waiting { background: var(--needs); box-shadow: 0 0 0 3px color-mix(in srgb, var(--needs) 22%, transparent); }
+.bh-sdot.s-closed { background: transparent; box-shadow: inset 0 0 0 1.5px var(--idle); }
+.bh-state { white-space: nowrap; color: var(--ink-2); }
+.bh-state.s-waiting { color: var(--needs); font-weight: 600; }
+.bh-state.s-working { color: var(--working); }
+
+/* ---------- A session ---------- */
+.bh-sv { display: flex; flex-direction: column; }
+.bh-sv-head { flex: none; display: grid; gap: 6px; padding: 14px 24px 10px; border-bottom: 1px solid var(--line); }
+.bh-sv-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.bh-sv-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 0; }
+.bh-sv-meta .link-btn { display: inline-flex; align-items: center; gap: 4px; }
+.bh-sv-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.bh-sv-acts .seg button { display: inline-flex; align-items: center; gap: 5px; }
+.bh-live-dot { display: inline-block; width: 7px; height: 7px; margin-left: 2px; border-radius: 50%; background: var(--good); }
+.bh-sv-note { margin: 8px 24px 0; }
+.bh-thread { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 24px 40px; display: grid; gap: 10px; align-content: start; }
+.bh-turns { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; min-width: 0; }
+.bh-turn { display: grid; gap: 4px; min-width: 0; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--pane); }
+.bh-turn.waiting { padding: 0; border: 0; background: transparent; }
+.bh-turn > p { margin: 0; }
+.bh-turn-head { display: flex; align-items: baseline; gap: 8px; }
+.bh-said { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.5; color: var(--ink); }
+.bh-reply { display: grid; gap: 3px; margin-top: 4px; padding: 6px 0 2px 10px; border-left: 3px solid color-mix(in srgb, var(--accent) 55%, var(--line)); }
+.bh-reply > span { display: inline-flex; align-items: center; gap: 5px; }
+.bh-reply > p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.5; }
+.bh-doing { display: flex; align-items: center; gap: 6px; margin: 0; }
+.bh-live { flex: 1; min-height: 0; display: flex; flex-direction: column; min-width: 0; }
+.bh-live > .pane { flex: 1; min-height: 0; }
+.bh-live-off { align-items: center; justify-content: center; gap: 10px; padding: 32px 16px; text-align: center; color: var(--ink-3); }
+.bh-live-off p { margin: 0; max-width: 440px; color: var(--ink-2); }
+
+/* ---------- A bot's Overview, and the top of its Settings ---------- */
+.bo-ov { display: grid; gap: 0; min-width: 0; }
+.bo-facts { gap: 10px; }
+.bo-facts > p { margin: 0; font-size: 13.5px; overflow-wrap: anywhere; }
+.bo-dl { display: grid; gap: 6px; margin: 0; }
+.bo-dl > div { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 10px; align-items: baseline; }
+.bo-dl dt { font-size: 12px; color: var(--ink-2); font-weight: 500; }
+.bo-dl dd { margin: 0; display: flex; flex-wrap: wrap; gap: 4px 10px; min-width: 0; font-size: 13px; overflow-wrap: anywhere; }
+.bo-via { display: inline-flex; align-items: center; gap: 5px; }
+.bs { display: grid; gap: 0; min-width: 0; }
+.bs-basic { gap: 12px; }
+.bs-field { display: grid; gap: 5px; min-width: 0; }
+.bs-field > p { margin: 0; }
+.bs-field .st-input { max-width: 520px; }
+.bs-more { justify-self: start; display: inline-flex; align-items: center; gap: 5px; }
+.bs-more .icon { transition: transform .15s; }
+.bs-switch { align-items: flex-start; }
+.bs-adv { margin-top: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
+.bs-adv > summary { font-weight: 600; font-size: 13px; color: var(--ink); }
+.bs-adv[open] { gap: 0; }
+
+/* ---------- On a phone ---------- */
+.bh.phone .bh-head { padding: 12px 12px 0; }
+.bh.phone .bh-tabs { align-self: stretch; margin: 8px 12px 0; display: flex; }
+.bh.phone .bh-tabs button { flex: 1; justify-content: center; min-height: 40px; }
+.bh.phone .bh-body { padding: 12px 12px 32px; }
+.bh.phone .bh-cards { grid-template-columns: minmax(0, 1fr); }
+:is(.bh, .bp).phone :is(.bo-card, .bh-sess, .sb-chip) { min-height: 44px; }
+:is(.bh, .bp).phone .bh-sess { grid-template-columns: 10px minmax(0, 1fr) 12px; }
+:is(.bh, .bp).phone .bh-sess-side { grid-column: 2; grid-row: 2; justify-items: start; text-align: left; }
+:is(.bh, .bp).phone .bh-sess .bh-go { grid-column: 3; grid-row: 1 / span 2; }
+.bh.phone .bh-tools select.st-input { flex: 1 1 140px; }
+.bh.phone :is(.bh-quick textarea, .bh-test-sess textarea, .ro-try-form textarea) { font-size: 16px; }
+.bh.phone .bh-sv-head { padding: 10px 12px 8px; }
+/* (A session's title, its first words as asked, wraps on a phone rather than being cut short.) */
+.bh.phone .bh-sv-title .bp-name { white-space: normal; overflow-wrap: anywhere; text-overflow: clip; font-size: 16px; }
+.bh.phone .bh-sv-note { margin: 8px 12px 0; }
+.bh.phone .bh-thread { padding: 10px 12px 32px; }
+.bh.phone .bh-sv-acts .seg { display: flex; }
+.bh.phone .bh-sv-acts .seg button { min-height: 40px; }
+.bh.phone .bh-sv-meta .link-btn { min-height: 40px; }
+.bh.phone .ny-item .ny-device { min-height: 40px; }
+.bh.phone .bh-code-text { font-size: 16px; }
+:is(.bp, .bh).phone .bo-dl > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+:is(.bp, .bh).phone :is(.bs-more, .ai-assist-link) { min-height: 40px; }
+.bp.phone .bs-switch input { width: 20px; height: 20px; }
+.bh.phone .ny-draft { font-size: 16px; }
+/* (A narrow window folds a row of choices to its icons: these keep their words, they fit.) */
+.app.narrow :is(.bh-tabs, .bh-sv-acts .seg) span { font-size: inherit; padding: 0; gap: 0; }
+.app.narrow .bh-tabs span.bt-count { font-size: 10px; padding: 0 5px; }
+.app.narrow .bp .sb-tabs .sb-tag { font-size: 10px; }
+.bh-body > * { max-width: 980px; }
+/* On a phone: a session's words wrap rather than cut off; its Live gives the pane the room. */
+:is(.bh, .bp).phone :is(.bh-sess-title, .bh-sess-meta) { white-space: normal; overflow-wrap: anywhere; }
+.bh-sv.phone.v-live .bh-sv-meta { display: none; }
+.bh-all-checks { justify-self: start; }
+:is(.bh, .bp).phone .bh-all-checks { min-height: 40px; }
+/* A phone: Thread and Live a row of their own, the actions under them; filters side by side. */
+.bh-sv.phone .bh-sv-acts .seg { flex: 1 1 100%; }
+.bh-sv.phone .bh-sv-acts .seg button { flex: 1; justify-content: center; }
+.bh-sv.phone .bh-sv-acts .sb-grow { display: none; }
+.bh-sv.phone .bh-sv-more { min-width: 40px; min-height: 40px; margin-left: auto; }
+.bh.phone .bh-tools select.st-input { flex: 1 1 0; max-width: none; }
+.bh.phone .bh-tools .btn { flex: 1 1 100%; justify-content: center; }
+/* A connection's one status line: how it stands, its last test, and Test this connection. */
+.bh-status-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0; }
+.bh-status-row .bh-test-sum { font-size: 12.5px; }
+.bh-status-row .bh-test-sum::before { content: "·"; margin-right: 6px; color: var(--ink-3); font-weight: 400; }
+.bh-status-row > .btn { flex: none; }
+/* One chip style: a connection's platform and kind, and how a session stands. */
+.cn-kind.sb-plat { margin-left: 0; }
+.bh-chip { flex: none; display: inline-flex; align-items: center; padding: 0 8px; border-radius: 999px; font: 500 11.5px/20px var(--font); white-space: nowrap; color: var(--ink-2); background: var(--pane-2); box-shadow: inset 0 0 0 1px var(--line); }
+.bh-chip.s-waiting { color: var(--needs); background: color-mix(in srgb, var(--needs) 12%, transparent); box-shadow: none; }
+.bh-chip.s-working { color: var(--working); background: color-mix(in srgb, var(--working) 12%, transparent); box-shadow: none; }
+.bh-chip.s-closed { color: var(--ink-3); }
+/* Pickers on a connection's card: compact, the same width. */
+.bh-card .bh-chief { max-width: 260px; }
+.bh-card .cn-add-default select { flex: 0 1 260px; }
+.bh.phone .bh-card .cn-add-default select { flex: 1 1 140px; }
+.bh.phone .bh-card .bh-chief { max-width: none; }
+.bh-status-words { flex: 1 1 260px; min-width: 0; line-height: 1.5; }
+.bh-status-words > .icon { vertical-align: -2px; margin-right: 6px; }
+.bh-status-words .sb-status-text { display: inline; }
+.bh-status-words .bh-test-sum { display: inline; margin-left: 6px; }
+.bh-status-words .link-btn { margin-left: 6px; }
+.bh-status-row > .btn { color: var(--ink); }
+.bh.phone .bh-tools .sb-grow { display: none; }

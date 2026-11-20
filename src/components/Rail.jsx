@@ -35,9 +35,12 @@ export const shortPath = (p) => {
 // Rows follow herdr's tab order: an agent tab shows its agents, a shell-only tab
 // (dev servers, editors) shows as one row that opens the tab's panes.
 export function groupByWorkspace(fleet) {
-  const agents = fleet?.agents || []
-  const tabs = fleet?.tabs || []
-  return (fleet?.workspaces || []).map((w, i) => {
+  // (A bot's session pane is Bots › Sessions', never a row here.)
+  const bots = new Set((fleet?.botSessions || []).map((a) => a.paneId))
+  const agents = (fleet?.agents || []).filter((a) => !bots.has(a.paneId))
+  const tabs = (fleet?.tabs || []).filter((x) => !(x.panes?.length && x.panes.every((p) => bots.has(p.paneId))))
+  const spaces = (fleet?.workspaces || []).filter((w) => !bots.size || tabs.some((x) => x.workspaceId === w.id) || agents.some((a) => a.workspaceId === w.id) || !(fleet?.tabs || []).some((x) => x.workspaceId === w.id))
+  return spaces.map((w, i) => {
     const list = agents.filter((a) => a.workspaceId === w.id)
     const rows = []
     // herdr's own order (its tab numbers don't change when a tab is moved).
@@ -305,7 +308,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
         {!fleet?.down && <button className={`mini-nav ${chiefOn ? 'on' : ''}`} data-tour="chief" onClick={goChief} disabled={launching} aria-label={t('Chief of Staff')} title={`${t('Chief of Staff')}\n${chiefWhat}`}><Icon name="helm" size={15} />{(chief?.status === 'blocked' || threads.some((a) => a.status === 'blocked')) && <span className="mini-needs" />}</button>}
         <button className={`mini-nav ${String(selected || '').startsWith('view:meeting') ? 'on' : ''}`} onClick={() => onMeetings?.()} aria-label={recording ? t('Meetings (recording)') : t('Meetings')} title={t('Meetings')}><Icon name="mic" size={15} />{recording && <span className="rec-dot mini-rec" />}</button>
         {whiteboards && <button className={`mini-nav ${inStudio ? 'on' : ''}`} onClick={() => onOpen('view:studio')} aria-label={t('Studio')} title={t('Studio')}><Icon name="layers" size={15} /></button>}
-        <Quiet name="Bots"><MiniBots selected={selected} onExpand={onToggle} /></Quiet>
+        <Quiet name="Bots"><MiniBots selected={selected} onOpen={onOpen} /></Quiet>
         <div className="rail-mini">
           {groups.filter((g) => rowsOf(g).length).map((g) => (
             <div key={g.id} className="mini-ws">
@@ -399,7 +402,7 @@ export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpe
           )}
           <Quiet name="Devices"><RailMachines /></Quiet>
         </div>
-        {/* Your bots (a beta feature): each a page of its own, and + to make one by saying what it's for. */}
+        {/* Bots (a beta feature): one row, opening its Connections, Bots and Sessions, and + for a new one. */}
         <Quiet name="Bots"><RailBots selected={selected} onOpen={onOpen} /></Quiet>
         <div className="rail-head rail-spaces-head">
           <button type="button" className="rail-sec" onClick={() => setSpacesOpen(!spacesOpen)} {...fold(spacesOpen, t('Spaces'))}>

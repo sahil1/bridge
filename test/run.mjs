@@ -161,6 +161,8 @@ const SUITES = [
   // heard, replies, rate limits, reconnecting and resuming (Discord), every token checked (Teams).
   { name: 'discord-client', build: null, covers: [/^server\/(discordbot|connector)\.js$/, /^test\/stand-ins\/discord\.mjs$/] },
   { name: 'teams-client', build: null, covers: [/^server\/(teamsbot|teamsapp|connector)\.js$/, /^test\/stand-ins\/teams\.mjs$/] },
+  // Test this connection and linking you there by a code (server/conncheck.js).
+  { name: 'conn-check', build: null, covers: [/^server\/(conncheck|connections|connhub|connector|slackbot|discordbot|teamsbot|frontdesk|bots|index)\.js$/, /^test\/stand-ins\/(slack|discord|helper-claude)\.(mjs|cjs)$/] },
   // Bots in Discord and Teams, end to end: set up in Settings › Bots › Where It Answers, questions
   // answered, who's refused, commands, memory, limits, pause, a change, the record naming each.
   { name: 'discord-bot', build: 'dist', browser: true, minutes: 8, covers: [/^server\/(frontdesk|discordbot|connector|bots|botmemory|botchanges|trace|index)\.js$/, /^src\/components\/settings\/(Bots\.jsx|bots\.css)$/, /^test\/stand-ins\/(discord\.mjs|helper-claude\.cjs|gh\.cjs)$/, /^test\/lib\/bots\.mjs$/] },
@@ -179,6 +181,13 @@ const SUITES = [
   // Bots per use case: each bot's Access on its page, starting points (Hiring, Marketing), a shared
   // connection's Routing with Try a Message (a dry run: nothing kept, nothing run), the overview.
   { name: 'bots-write', build: 'dist', browser: true, minutes: 12, covers: [/^server\/(botwrite|botguard|filesmcp|botmcp|frontdesk|slackbot|connhub|bots|agents|delegate|index)\.(js|mjs)$/, /^src\/components\/bots\//, /^src\/components\/settings\/(Bots\.jsx|bots\.css)$/, /^src\/components\/(NeedsYou\.jsx|needsyou\.css)$/, /^test\/stand-ins\/(slack\.mjs|model\.mjs|helper-claude\.cjs)$/, /^test\/lib\/bots\.mjs$/] },
+  { name: 'bots-sessions', build: null, minutes: 10, covers: [/^server\/(botsessions|frontdesk|delegate|agents|botmcp|botguard|sessionmcp|botwrite|bots|index)\.(js|mjs)$/, /^server\/runtime\/(builtin|herdr)\.js$/, /^test\/stand-ins\/(slack\.mjs|helper-claude\.cjs)$/, /^test\/lib\/bots\.mjs$/] },
+  { name: 'bots-push', build: null, minutes: 8, covers: [/^server\/(botsessions|frontdesk|botchanges|botguard|sessionmcp|botmcp|bots|agents|index)\.(js|mjs)$/, /^test\/stand-ins\/(slack\.mjs|helper-claude\.cjs|gh\.cjs)$/, /^test\/lib\/bots\.mjs$/] },
+  { name: 'bots-chief', build: null, minutes: 8, covers: [/^server\/(botsessions|frontdesk|sessionmcp|botmcp|connections|connhub|bots|index)\.js$/, /^test\/stand-ins\/(slack\.mjs|helper-claude\.cjs)$/, /^test\/lib\/bots\.mjs$/] },
+  // Bots as the owner meets it: one row in the sidebar, Connections, Bots and Sessions, a bot's
+  // Overview and Settings (Basic and Advanced), a session's Thread and Live, against the server's
+  // own sessions, checks and links (only what's hard to bring about stood in for in the page).
+  { name: 'bots-ui', build: 'dist', browser: true, minutes: 12, covers: [/^src\/components\/bots\//, /^src\/components\/settings\/(Bots\.jsx|bots\.css)$/, /^src\/components\/(NeedsYou|Console|Rail)\.jsx$/, /^src\/(App|lazy)\.jsx$/, /^server\/(connections|connhub|conncheck|connector|slackbot|botsessions|sessionmcp|frontdesk|delegate|botwrite|bots|index)\.(js|mjs)$/, /^test\/stand-ins\/(slack\.mjs|helper-claude\.cjs)$/, /^test\/lib\/bots\.mjs$/] },
   { name: 'bots-routing', build: 'dist', browser: true, minutes: 8, covers: [/^server\/(connections|connhub|bots|bottemplates|frontdesk|index)\.js$/, /^src\/components\/bots\//, /^src\/components\/settings\/(Bots\.jsx|bots\.css)$/, /^src\/App\.jsx$/, /^test\/stand-ins\/(slack|model)\.mjs$/, /^test\/stand-ins\/helper-claude\.cjs$/, /^test\/lib\/bots\.mjs$/] },
   // Files a bot makes: its run's outbox, sent with its answer (Slack's upload API, Discord's
   // attachments, Teams' reply saying it can't), what's refused, and its Activity's files with Open

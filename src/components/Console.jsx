@@ -652,8 +652,10 @@ export default function Console(props) {
 }
 
 // agents and onThread (the chief of staff): the fleet's agents for its thread bar, and how to show
-// another thread in its place.
-function AgentConsole({ agent, variant = 'focus', simple = false, controls = {}, onBack, onOpenInHerdr, onPopOut, extraActions, queued = [], delivered = [], agents, onThread }) {
+// another thread in its place. steer: a bot's session (bots/SessionView.jsx), its Chat and Terminal
+// only, where what you send is Step in ({ send(text), stop(), placeholder }): it goes through the
+// session, which tells it the owner stepped in, never typed straight in, and Stop stops its turn.
+function AgentConsole({ agent, variant = 'focus', simple = false, controls = {}, onBack, onOpenInHerdr, onPopOut, extraActions, queued = [], delivered = [], agents, onThread, steer = null }) {
   const [view, setViewRaw] = useState('chat')
   const [openPath, setOpenPath] = useState(null)
   const setView = (v) => {
@@ -729,7 +731,7 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
   // message as usual, so nothing doubles up. Only while the input box is showing (not a menu).
   const mirrored = useRef('')
   const mirrorTimer = useRef(null)
-  const mirrorOn = view === 'terminal' && !!agent?.caps?.inputBox && agent?.status !== 'blocked'
+  const mirrorOn = view === 'terminal' && !!agent?.caps?.inputBox && agent?.status !== 'blocked' && !steer
   const draftNow = useRef('')
   const syncMirror = useCallback(() => {
     clearTimeout(mirrorTimer.current)
@@ -760,6 +762,7 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
 
   // review: a review from the Changes tab, always a new message (never the edit you have open).
   const send = async (text, { now = false, review = false } = {}) => {
+    if (steer) return steer.send(text)
     // Whatever was mirrored is replaced by this send (the agent's box is cleared first).
     clearTimeout(mirrorTimer.current)
     const wasMirrored = mirrored.current
@@ -842,6 +845,7 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
   }
   const heldCount = queued.length + going.filter((x) => (x.way !== 'prompt' || x.answer?.queued) && !queued.some((q) => q.cid === x.cid || q.id === x.answer?.id) && !delivered.some((d) => d.id === x.answer?.id)).length
   const stop = async () => {
+    if (steer) { await steer.stop(); return }
     try { await api(`/agents/${pid}/keys`, { method: 'POST', body: { keys: ['esc'] } }); setFlash(t('Sent Esc to interrupt')) } catch (e) { setFlash(e.message) }
   }
 
@@ -851,7 +855,7 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
   const mute = async (on) => {
     try { await api(`/agents/${pid}/mute`, { method: 'POST', body: { muted: on } }); setFlash(on ? t('Muted: no notifications from this agent until you unmute it') : t('Notifications are back on for this agent')) } catch (e) { setFlash(e.message) }
   }
-  const canFork = !!(agent?.caps?.fork && agent?.sessionId)
+  const canFork = !!(agent?.caps?.fork && agent?.sessionId) && !steer
   const fork = async () => {
     try {
       const r = await api(`/agents/${pid}/fork`, { method: 'POST' })
@@ -882,7 +886,7 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
   // Named by you (Rename): the name is its title, so the tab's name isn't said twice.
   const where = agent.chief ? (agent.thread && !agent.thread.main ? t('{name} thread · {kind}', { name: agent.thread.name, kind: kindName }) : t('{kind} · sends work to your agents', { kind: kindName })) : `${agent.workspace}${agent.tab && !agent.named && !/^\d+$/.test(agent.tab) ? ` › ${agent.tab}` : ''} · ${kindName}`
   // Rename: the name it goes by everywhere, over the title the agent gives its own session.
-  const canRename = !agent.chief && !!agent.tabId
+  const canRename = !agent.chief && !!agent.tabId && !steer
   const rename = async (label) => {
     setRenaming(false)
     if (!label) return
@@ -921,7 +925,7 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
           <div className="seg" role="tablist" data-tour="views">
             {/* A plain chat has no project; on the simple layout, neither has the chief of staff to show.
                 Only the chief of staff has Tasks. */}
-            {VIEWS.filter(([id]) => !((agent.plainChat || (simple && agent.chief)) && (id === 'files' || id === 'changes' || id === 'preview')) && (id !== 'tasks' || agent.chief)).map(([id, icon, label]) => (
+            {VIEWS.filter(([id]) => !((agent.plainChat || (simple && agent.chief)) && (id === 'files' || id === 'changes' || id === 'preview')) && (id !== 'tasks' || agent.chief) && (!steer || id === 'chat' || id === 'terminal')).map(([id, icon, label]) => (
               <button key={id} role="tab" aria-selected={view === id} className={view === id ? 'on' : ''} data-tour={id === 'changes' ? 'changes' : undefined} onClick={() => setView(id)} title={t(label)}><Icon name={icon} size={14} /><span>{t(label)}</span></button>
             ))}
           </div>
@@ -964,8 +968,8 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
           {agent.chief && agents && onThread && <ChiefThreads agent={agent} agents={agents} onSwitch={onThread} onNote={setFlash} />}
           <div className="console-body">
             <PathCtx.Provider value={openFromChat}>
-              {view === 'chat' && <Chat agent={agent} going={going} queued={queued} delivered={delivered} outbox={outbox} queuedActions={queuedActions} onEdit={agent.caps?.rewind ? (t) => { setEditTarget({ ...t, undoFiles: false, canUndoFiles: agent.kind === 'claude' }); setPrefill({ text: t.original, n: Date.now() }) } : null}
-                onUndo={agent.caps?.undo ? undoReply : null} editingText={editTarget?.original} onOpenTerminal={() => setView('terminal')}
+              {view === 'chat' && <Chat agent={agent} going={going} queued={queued} delivered={delivered} outbox={outbox} queuedActions={queuedActions} onEdit={agent.caps?.rewind && !steer ? (t) => { setEditTarget({ ...t, undoFiles: false, canUndoFiles: agent.kind === 'claude' }); setPrefill({ text: t.original, n: Date.now() }) } : null}
+                onUndo={agent.caps?.undo && !steer ? undoReply : null} editingText={editTarget?.original} onOpenTerminal={() => setView('terminal')}
                 accounts={movable && quota.data ? { others, onContinue: (x) => continueOn(x, { nudge: true }) } : null} onLimit={setAtLimit} />}
             </PathCtx.Provider>
             <div className="term-wrap" hidden={view !== 'terminal'}><Terminal paneId={agent.paneId} active={view === 'terminal'} focusKey={termFocus} onChat={() => setView('chat')} /></div>
@@ -1015,7 +1019,7 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
             )}
             {/* The Chief of Staff: ask it out loud, and hear the answer (voice/AskOutLoud.jsx). */}
             {agent.chief && view === 'chat' && <AskOutLoud agent={agent} onSend={send} />}
-            <Composer id={agent.paneId} placeholder={agent.chief ? t('Tell your chief of staff what you need…') : t('Message {name}…', { name: title })}
+            <Composer id={agent.paneId} placeholder={steer?.placeholder || (agent.chief ? t('Tell your chief of staff what you need…') : t('Message {name}…', { name: title }))}
               onSend={send} keysOpen={keysOpen} onToggleKeys={() => setKeysOpen(!keysOpen)}
               busy={isWorking(agent)}
               prefill={prefill} editing={editTarget} onEditChange={(e) => setEditTarget(e)}
