@@ -22,13 +22,16 @@
 // servers' tools under the same rules as Claude Code's runs (botmcp.js). It can't change a file, run a
 // command or reach anything else, so it's kept to its folders as Claude Code is. Its one way to make
 // a file is save_file, into its run's outbox (botfiles.js) and nowhere else, to send back with its
-// answer.
+// answer; and attach_file sends one that's in the bot's folders as it is (botattach.js: checked, and
+// noted in its outbox, the file copied in and checked again once the answer is in), as Claude Code's
+// run has them from Bridge AI's MCP server (outboxmcp.js).
 import fs from 'node:fs'
 import path from 'node:path'
 import { adapter, readOnly, canChange } from './agents.js'
 import { HOME } from './paths.js'
 import * as botmcp from './botmcp.js'
 import * as modelList from './modellist.js'
+import * as botattach from './botattach.js'
 
 const AGENTS = ['claude', 'codex']
 const ID = /^(agent:(claude|codex)(:[\w.-]{1,60})?|model:[a-z][\w-]*:[^\s]{1,200})$/
@@ -77,11 +80,13 @@ export function listOf(bot, { installed = [], models = [] }) {
   return { list, automatic: !own, fallback: bot.fallback !== false }
 }
 // Why it can't answer now, before it's tried, or null: not installed, not one that can only read,
-// not signed in; a model no key or server here reaches.
-export function notReady(e, { installed = [], models = [], signedIn = {} }) {
+// too old to be kept to its folders (tooOld: agents.js keptProblem, by kind), not signed in; a model
+// no key or server here reaches.
+export function notReady(e, { installed = [], models = [], signedIn = {}, tooOld = {} }) {
   if (e.kind === 'agent') {
     if (!installed.includes(e.agent)) return `${adapter(e.agent).label} isn't installed here`
     if (!readOnly(e.agent)) return `${adapter(e.agent).label} can't answer read-only`
+    if (tooOld[e.agent]) return tooOld[e.agent]
     if (signedIn[e.agent] === false) return `${adapter(e.agent).label} isn't signed in here`
     return null
   }
@@ -100,8 +105,8 @@ const TOOLS = [
   { name: 'list_files', description: 'List a folder you can read: its files, and its folders ending in /.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'The folder; the first of yours if not given' } } } },
   { name: 'search', description: 'Search the files in your folders for text or a regular expression. Returns "path:line: text" for each match.', parameters: { type: 'object', properties: { pattern: { type: 'string', description: 'Text or a JavaScript regular expression' }, path: { type: 'string', description: 'A folder or file to search in; all your folders if not given' } }, required: ['pattern'] } },
 ]
-const SAVE = { name: 'save_file', description: 'Save a file to send back with your answer (a chart, a table, a document). It goes in your outbox, the only place you can write.', parameters: { type: 'object', properties: { name: { type: 'string', description: 'Its name, with its extension: chart.svg, totals.csv' }, content: { type: 'string', description: 'What it holds' }, base64: { type: 'boolean', description: 'true when content is base64 (a picture, a PDF)' } }, required: ['name', 'content'] } }
-const SAVE_MAX = 25 * 1024 * 1024
+const SAVE = { name: 'save_file', description: 'Save a file you make to send back with your answer (a chart, a table, a document). It goes in your outbox, the only place you can write.', parameters: { type: 'object', properties: { name: { type: 'string', description: 'Its name, with its extension: chart.svg, totals.csv' }, content: { type: 'string', description: 'What it holds' }, base64: { type: 'boolean', description: 'true when content is base64 (a picture, a PDF)' } }, required: ['name', 'content'] } }
+const ATTACH = { name: 'attach_file', description: `Send back a file that's in your folders as it is, with your answer: a PDF, a Word document, a spreadsheet, a picture. Give its path. ${botattach.MAX} files at most with an answer, none over ${botattach.sizeOf(botattach.EACH)}; never a hidden file or one that holds keys, passwords or credentials.`, parameters: { type: 'object', properties: { path: { type: 'string', description: 'The file: a path in one of your folders, or relative to the first' } }, required: ['path'] } }
 const tilde = (p) => (p === HOME || p.startsWith(HOME + path.sep) ? `~${p.slice(HOME.length)}` : p)
 const refused = (why) => Object.assign(new Error(why), { refused: true })
 
@@ -109,36 +114,58 @@ const refused = (why) => Object.assign(new Error(why), { refused: true })
 // the folders it may read (the first, where a relative path starts); also: other folders of its own
 // (the files attached to the question); mcp: { servers: { name: config }, all } (its MCP servers, and
 // whether every tool may be used, else only those that only read). outbox: its run's, where
-// save_file writes (botfiles.js); none, no save_file. onStep({ doing, reading, tools }): as it goes,
-// for Try It. signal: stop it. messages: its conversation, added to as it goes, so the caller has it
-// when it's stopped (frontdesk.js: a run stopped at its time limit is picked up from it); with none,
-// it starts from the brief.
-export async function runChat({ reply, model, brief, folders = [], also = [], mcp = null, outbox = null, signal, onStep = () => {}, messages = null }) {
+// save_file writes (botfiles.js); none, no save_file. attach: { folders, cwd }, the bot's folders a
+// file may be attached from (with an outbox); none, no attach_file. onStep({ doing, reading, tools }):
+// as it goes, for Try It. signal: stop it. messages: its conversation, added to as it goes, so the
+// caller has it when it's stopped (frontdesk.js: a run stopped at its time limit is picked up from
+// it); with none, it starts from the brief.
+export async function runChat({ reply, model, brief, folders = [], also = [], mcp = null, outbox = null, attach = null, signal, onStep = () => {}, messages = null }) {
   const real = async (p) => fs.promises.realpath(p).catch(() => null)
   const roots = (await Promise.all(folders.map(real))).filter(Boolean)
   const allowed = [...roots, ...(await Promise.all(also.map(real))).filter(Boolean)]
-  const within = (p) => allowed.some((r) => p === r || p.startsWith(r + path.sep))
-  // A path it asked for, as the real path it is, only inside its folders.
+  const given = [...folders, ...also].map((f) => path.resolve(String(f)))
+  const keptOut = await Promise.all(botattach.keptOut().map(async (d) => (await real(d)) || path.resolve(d)))
+  const rootOf = (p) => allowed.find((r) => p === r || p.startsWith(r + path.sep))
+  // What under one of its folders isn't for it to read, as botattach.js has it for what's sent: a
+  // hidden file or folder, a name that says it holds keys, passwords or credentials, or a folder that
+  // holds keys (but where its folder is in one itself: the files attached to the question, in Bridge
+  // AI's own). Why, or null. (file: it's a file, whose name is looked at as a file's; else a folder.)
+  const closed = (p, root, { file = true } = {}) => {
+    const names = p.slice(root.length).split(/[\\/]+/).filter(Boolean)
+    if (names.some((n) => n.startsWith('.'))) return 'is hidden, or in a hidden folder'
+    if (names.some((n, i) => botattach.secretLike(n, { folder: !(file && i === names.length - 1) }))) return 'has a name that says it holds keys, passwords or credentials'
+    if (keptOut.some((k) => botattach.within(p, k) && !botattach.within(root, k))) return 'is in a folder that holds keys'
+    return null
+  }
+  // A path it asked for, as the real path it is, only inside its folders: inside them as it's written
+  // before anything is asked of the system (a path elsewhere, \\host\\share or /net/host say, is never
+  // looked up), then as its real path, and nothing under them that isn't for it to read.
   async function place(p, { dir = false } = {}) {
     const raw = String(p || '').trim().replace(/^~(?=$|[\\/])/, HOME)
     if (!raw && dir && roots[0]) return roots[0]
     if (!roots.length && !raw) throw refused('You have no folders to read.')
-    const full = path.isAbsolute(raw) ? raw : path.join(roots[0] || HOME, raw)
+    const full = path.isAbsolute(raw) ? path.resolve(raw) : path.resolve(roots[0] || HOME, raw)
+    if (![...given, ...allowed].some((r) => botattach.within(full, r))) throw refused(`${tilde(full)} is outside the folders you can read: refused.`)
     const r = await real(full)
     if (!r) throw refused(`${tilde(full)} isn't there.`)
-    if (!within(r)) throw refused(`${tilde(full)} is outside the folders you can read: refused.`)
+    const root = rootOf(r)
+    if (!root) throw refused(`${tilde(full)} is outside the folders you can read: refused.`)
+    const why = closed(r, root, { file: !!(await fs.promises.stat(r).catch(() => null))?.isFile() })
+    if (why) throw refused(`${tilde(full)} ${why}: refused.`)
     return r
   }
   const reads = []
   const used = new Map()
   const status = (doing) => onStep({ doing, reading: reads.map((x) => x.what).slice(-5), tools: [...used.values()] })
-  async function walk(dir, fn, depth = 0) {
+  // (Never into what isn't for it to read: hidden, named as keys, a folder that holds keys.)
+  async function walk(dir, fn, depth = 0, root = dir) {
     let ents = []
     try { ents = await fs.promises.readdir(dir, { withFileTypes: true }) } catch { return }
     for (const e of ents) {
       if (SKIP.has(e.name) || e.isSymbolicLink()) continue
       const p = path.join(dir, e.name)
-      if (e.isDirectory()) { if (depth < 8) { if (await walk(p, fn, depth + 1) === false) return false } } else if (e.isFile() && (await fn(p)) === false) return false
+      if (closed(p, root, { file: !e.isDirectory() })) continue
+      if (e.isDirectory()) { if (depth < 8) { if (await walk(p, fn, depth + 1, root) === false) return false } } else if (e.isFile() && (await fn(p)) === false) return false
     }
     return true
   }
@@ -148,23 +175,21 @@ export async function runChat({ reply, model, brief, folders = [], also = [], mc
     const r = await botmcp.toolsOf(server, raw)
     for (const t of r.tools || []) if (mcp.all || t.readOnly) mcpTools.set(botmcp.toolName(server, t.name), { server, tool: t.name, raw, description: t.description || t.title || t.name, schema: t.schema || { type: 'object', properties: {} } })
   }
-  const tools = [...TOOLS, ...(outbox ? [SAVE] : []), ...[...mcpTools].map(([name, x]) => ({ name, description: `${x.description} (MCP server ${x.server})`, parameters: x.schema }))]
+  const attaching = !!(outbox && attach?.folders?.length)
+  const tools = [...TOOLS, ...(outbox ? [SAVE] : []), ...(attaching ? [ATTACH] : []), ...[...mcpTools].map(([name, x]) => ({ name, description: `${x.description} (MCP server ${x.server})`, parameters: x.schema }))]
   async function run(c) {
     const a = c.args || {}
-    // (Its name only: a path in it goes nowhere but the outbox.)
+    // (Its name only: a path in it goes nowhere but the outbox. As many as a run sends, all told,
+    // with what it attached.)
     if (c.name === 'save_file' && outbox) {
-      const name = path.basename(String(a.name || '').replace(/\\/g, '/')).replace(/\p{Cf}/gu, '').replace(/[:*?"<>|\x00-\x1f]+/g, '-').replace(/^\.+/, '').slice(0, 120) // eslint-disable-line no-control-regex
-      if (!name) throw refused('Give the file a name.')
-      const body = a.base64 === true ? Buffer.from(String(a.content || ''), 'base64') : Buffer.from(String(a.content ?? ''), 'utf8')
-      if (body.length > SAVE_MAX) throw refused('That file is too big to send back.')
-      // (As many as a run sends, all told: 5, 25 MB each.)
-      const there = (await fs.promises.readdir(outbox).catch(() => [])).filter((n) => n !== name)
-      const sizes = await Promise.all(there.map((n) => fs.promises.lstat(path.join(outbox, n)).then((x) => x.size, () => 0)))
-      if (there.length >= 5) throw refused('You\'ve saved 5 files already, the most that go with an answer.')
-      if (sizes.reduce((a, b) => a + b, 0) + body.length > 5 * SAVE_MAX) throw refused('That\'s more than an answer can send back, all told.')
-      await fs.promises.writeFile(path.join(outbox, name), body, { mode: 0o600 })
-      status(`save_file: ${name}`)
-      return `Saved ${name} (${body.length} bytes): it goes with your answer.`
+      const said = botattach.save(outbox, a)
+      status(`save_file: ${botattach.nameOf(a.name)}`)
+      return said
+    }
+    // (Checked, and noted for Bridge AI to copy in once the answer is in, checking it again.)
+    if (c.name === 'attach_file' && attaching) {
+      status(`attach_file: ${botattach.nameOf(a.path)}`)
+      return botattach.attach(outbox, a.path, attach)
     }
     if (c.name === 'read_file') {
       const p = await place(a.path)
@@ -183,7 +208,7 @@ export async function runChat({ reply, model, brief, folders = [], also = [], mc
       reads.push({ tool: 'Glob', what: tilde(p) })
       status(`list_files: ${tilde(p)}`)
       const ents = await fs.promises.readdir(p, { withFileTypes: true })
-      return ents.filter((e) => !e.name.startsWith('.')).slice(0, 500).map((e) => (e.isDirectory() ? `${e.name}/` : e.name)).join('\n') || '(empty)'
+      return ents.filter((e) => !e.name.startsWith('.') && !botattach.secretLike(e.name, { folder: e.isDirectory() })).slice(0, 500).map((e) => (e.isDirectory() ? `${e.name}/` : e.name)).join('\n') || '(empty)'
     }
     if (c.name === 'search') {
       let re

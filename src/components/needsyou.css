@@ -36,7 +36,7 @@
 .ny-block { flex: none; display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 5px; background: color-mix(in srgb, var(--needs) 14%, transparent); color: var(--needs); font-size: 11px; font-weight: 650; letter-spacing: .01em; }
 .ny-top { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--ink-3); min-width: 0; }
 .ny-kind { font-weight: 650; color: var(--ink-2); }
-.t-permission .ny-kind, .t-question .ny-kind { color: var(--needs); }
+.t-permission .ny-kind, .t-question .ny-kind, .t-folder .ny-kind { color: var(--needs); }
 .t-failed .ny-kind { color: var(--critical); }
 .ny-device { display: inline-flex; align-items: center; gap: 4px; max-width: 45%; padding: 1px 7px; border-radius: 6px; background: var(--pane-3); color: var(--ink-2); font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ny-device.here { background: transparent; box-shadow: inset 0 0 0 1px var(--line-2); }
@@ -60,7 +60,7 @@
 .ny-panel.phone .ny-item { padding: 12px; }
 .ny-panel.phone .ny-acts .btn.small, .ny-panel.phone .ny-acts .ghost-btn { min-height: 36px; }
 /* A bot's answer to send or discard (a change to approve) on a phone: whole 40 px targets. */
-.ny-panel.phone .ny-item.t-slack .ny-acts :is(.btn.small, .btn, .ghost-btn) { min-height: 40px; min-width: 40px; }
+:is(.ny-panel.phone, .hm.phone) .ny-item:is(.t-slack, .t-folder) .ny-acts :is(.btn.small, .btn, .ghost-btn) { min-height: 40px; min-width: 40px; }
 
 /* What has gone quiet: one quiet line, folded; opened, short rows under their project, each opening
    to its card. The inbox and Home have it alike. */
@@ -129,6 +129,11 @@
 .ny-item.t-slack.yours { border-color: color-mix(in srgb, var(--warning) 45%, transparent); }
 .ny-item.t-slack .ny-top > .icon { color: var(--accent); }
 .ny-item.t-slack.yours .ny-top > .icon { color: var(--warning); }
+/* A change to files with a draft (WriteOf): why it waits for you whoever asks, in the warning colour;
+   a request held before it started (ScreenItem): Deny first, as the safe choice. */
+.ny-write .ny-held { color: var(--warning); }
+.ny-write .ny-held .icon { color: var(--warning); }
+.ny-item.t-screen .ny-from .icon { color: var(--warning); }
 /* A draft stopped at its time limit: Continue, below the reply, set apart from Send. */
 .ny-limit { margin-top: 9px; padding-top: 7px; border-top: 1px dashed var(--line-2); }
 .ny-from { margin: 4px 0 0; line-height: 1.4; overflow-wrap: anywhere; }
@@ -136,3 +141,9 @@
 .ny-draft:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 /* (16 px on a phone, so the reply box doesn't zoom the page when it's tapped.) */
 .ny-panel.phone .ny-draft { font-size: 16px; }
+/* Files attached from a bot's folders, to look at before its answer goes (BotFiles.jsx FileRow). */
+.ny-attached { margin: 4px 0 2px; }
+.ny-attached .bf-list { margin-top: 2px; }
+@media (max-width: 760px) {
+  .ny-attached .link-btn { min-height: 40px; min-width: 40px; }
+}

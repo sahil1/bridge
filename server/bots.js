@@ -19,6 +19,8 @@
 //                               (botcontext.js), never in its export (only your backup, sealed,
 //                               and a Move to your own computer carry it: backup.js)
 //   bots/<id>/setup.json        its setup chat with AI Assist and what it proposes (botsetup.js)
+//   bots/<id>/writes/<change>/  each change to files it made or proposed, and the files before and
+//                               after it, for its diff, your approval and Undo (botwrite.js)
 //   bots/<id>/trace/            its record (trace.js)
 // A draft (draft: true) is a bot AI Assist proposed, from the setup chat or the Chief of Staff's
 // `bridge bot`: listed, but nothing of it applies, connects or answers until you press Create.
@@ -50,7 +52,11 @@ const tilde = (p) => (p === HOME || p.startsWith(HOME + path.sep) ? `~${p.slice(
 // answers from what it knows; drafts you review; its record kept a year.
 // Who you are in Slack (owner: so its drafts come to your direct messages, and you may always ask),
 // and in Discord and Teams (owners: so you may always ask there too),
-// what it may change (changes: none, suggest or pr, in repo, one of its folders), the limits per
+// what it may change (changes: none, suggest or pr, in repo, one of its folders; or edit, files in its
+// write folders, writesTo, each one of or inside its folders, botwrite.js), whose changes to files
+// are made without asking you (trustYou: you, unless you say yours wait too; trusted: the people you
+// list), the bots it hands a change to files to (handsTo: a bot that only reads handing on to one
+// that edits, frontdesk.js), the limits per
 // person (30 questions a day, 2 at once, 10 minutes a run, and at that time limit asking you whether
 // it may go on, up to its Longest Run), memory (kept once you approve, straight away, or off),
 // paused, the channels muted with !mute, the channels it answers in without a
@@ -59,12 +65,19 @@ const tilde = (p) => (p === HOME || p.startsWith(HOME + path.sep) ? `~${p.slice(
 // what answers (answerers: its first choice and fallbacks, botanswer.js ids, or null for
 // Automatic; fallback: whether the next is tried when one can't answer), and where it answers a
 // question asked at the top of a channel (answerIn: in the channel, or in a thread of its own).
+// Files from its folders (botattach.js): whether an answer with one goes without asking when answers
+// do (attachAuto: 'no', the default, so it waits for you; 'named', in a direct message with you or
+// someone you named; 'everyone', to anyone who may ask, in a direct message or a private channel,
+// never a public one: frontdesk.js), and whether data and config files may go as well as documents
+// and pictures (attachConfig). And each folder it reads as it was when you picked it (folderIds: its
+// real path), so one that leads somewhere else since isn't read until you say it may be.
 // At the Time Limit (atLimit): a run that reaches its minutes asks you whether it may go on ('ask',
 // every bot's unless you say otherwise, ones made before there was a choice too), or is stopped
 // there and comes to you ('stop', as every run was before). Asking, it goes on for a few minutes
 // while you decide, and each Continue gives it more, never past its Longest Run (longest, minutes),
 // where it's stopped without asking (frontdesk.js).
 export const LIMITS = { day: 30, atOnce: 2, minutes: 10, atLimit: 'ask', longest: 120 }
+export const ATTACH_AUTO = ['no', 'named', 'everyone']
 // Answer In (answerIn): where the answer to a question at the top of a channel goes, in the channel
 // itself ('channel', a new bot's) or in a thread started from the question ('thread', as every bot
 // answered before there was a choice, so one made before keeps it). Either way, the same person
@@ -75,8 +88,13 @@ export const ANSWER_IN = ['channel', 'thread']
 export const CARRY_ON_MIN = 30
 const DEFAULTS = {
   name: 'Bridge AI', description: '', who: 'named', askers: [], others: 'polite', readsFrom: [], instructionsFile: null, agent: null, auto: false, agentCopies: false, retention: '1y', max: 2,
-  owner: null, owners: {}, changes: 'none', repo: null, limits: LIMITS, memory: 'approve', paused: false, muted: [], listen: [], agentsStatus: false, template: null, mcp: [], answerers: null, fallback: true, draft: false, icon: null,
+  owner: null, owners: {}, changes: 'none', repo: null, writesTo: [], trustYou: true, trusted: [], handsTo: [], limits: LIMITS, memory: 'approve', paused: false, muted: [], listen: [], agentsStatus: false, template: null, mcp: [], answerers: null, fallback: true, draft: false, icon: null,
+  attachAuto: 'no', attachConfig: false, folderIds: {},
 }
+// What it may change: nothing; a suggested change or a draft pull request in a repository
+// (botchanges.js); or files in its write folders (botwrite.js), at most WRITES_MAX of them.
+export const CHANGES = ['none', 'suggest', 'pr', 'edit']
+export const WRITES_MAX = 10
 // Its icon where a shared connection posts as it (connhub.js): an emoji's Slack name, or a picture's
 // https address.
 export const ICON = /^(:[\w+-]{1,60}:|https:\/\/\S{1,500})$/
@@ -122,8 +140,12 @@ function shape(id, j) {
   b.max = Math.max(1, Math.min(5, Math.round(Number(b.max)) || 2))
   b.owner = person(b.owner)
   b.owners = Object.fromEntries(['discord', 'teams'].map((k) => [k, someone(b.owners?.[k], k)]).filter(([, v]) => v))
-  b.changes = ['suggest', 'pr'].includes(b.changes) ? b.changes : 'none'
+  b.changes = CHANGES.includes(b.changes) ? b.changes : 'none'
   b.repo = b.repo ? String(b.repo) : null
+  b.writesTo = [...new Set((Array.isArray(b.writesTo) ? b.writesTo : []).map(String).filter(Boolean))].slice(0, WRITES_MAX)
+  b.trustYou = b.trustYou !== false
+  b.trusted = (Array.isArray(b.trusted) ? b.trusted : []).filter((x) => PERSON_ID.test(String(x?.id || ''))).map((x) => ({ id: String(x.id), name: clean(x.name, 80) || null })).slice(0, 200)
+  b.handsTo = [...new Set((Array.isArray(b.handsTo) ? b.handsTo : []).map(String).filter((x) => ID.test(x) && x !== id))].slice(0, 10)
   b.limits = limitsOf(b.limits)
   b.memory = ['auto', 'off'].includes(b.memory) ? b.memory : 'approve'
   b.paused = b.paused === true
@@ -138,6 +160,9 @@ function shape(id, j) {
   b.draft = b.draft === true
   b.icon = ICON.test(String(b.icon || '')) ? String(b.icon) : null
   b.answerIn = b.answerIn === 'channel' ? 'channel' : 'thread'
+  b.attachAuto = ATTACH_AUTO.includes(b.attachAuto) ? b.attachAuto : 'no'
+  b.attachConfig = b.attachConfig === true
+  b.folderIds = Object.fromEntries(Object.entries(b.folderIds && typeof b.folderIds === 'object' ? b.folderIds : {}).filter(([k, v]) => b.readsFrom.includes(k) && typeof v?.real === 'string' && v.real).map(([k, v]) => [k, { real: v.real }]))
   return b
 }
 
@@ -198,11 +223,12 @@ export function undraft(id, instructions) {
 
 // ---------- Export and import ----------
 // A bot as a file, to take to another computer (the Docker image on an always-on machine, say):
-// its settings, its instructions and what it remembers, never its tokens (its Slack app is
+// its settings (but the bots it hands changes to, which are this computer's), its instructions and
+// what it remembers, never its tokens (its Slack app is
 // connected again there, with tokens pasted there) nor anyone's running context (people.json). Its
 // folders go as they're named here (~/…), and are checked where it's brought in.
 export const BUNDLE_KIND = 'bridge-ai-bot'
-const CARRIED = ['icon', 'description', 'who', 'askers', 'others', 'readsFrom', 'instructionsFile', 'agent', 'auto', 'agentCopies', 'retention', 'max', 'owner', 'owners', 'changes', 'repo', 'limits', 'memory', 'muted', 'listen', 'agentsStatus', 'template', 'mcp', 'answerers', 'fallback', 'answerIn']
+const CARRIED = ['icon', 'description', 'who', 'askers', 'others', 'readsFrom', 'instructionsFile', 'agent', 'auto', 'agentCopies', 'retention', 'max', 'owner', 'owners', 'changes', 'repo', 'writesTo', 'trustYou', 'trusted', 'limits', 'memory', 'muted', 'listen', 'agentsStatus', 'template', 'mcp', 'answerers', 'fallback', 'answerIn', 'attachAuto', 'attachConfig']
 export function bundleOf(id, memory = []) {
   const b = get(id)
   if (!b) throw Object.assign(new Error('No such bot'), { status: 404 })
@@ -211,11 +237,13 @@ export function bundleOf(id, memory = []) {
 // The settings a bot from a file (its export, a backup, a move) takes only once they've passed the
 // checks Settings makes (index.js checkSettings): the folders it reads and its instructions' file
 // (there, inside your home folder, not Bridge AI's own), who may ask and you there (people by their
-// ids), answering without asking, what it may change and where, what answers, its MCP servers, its
-// channels, copies of your agents' conversations, saying what your agents are doing, and keeping
-// what it learns without asking. Held back from the bot as it's made (held), so nothing in a file is
-// ever kept unchecked.
-export const CHECKED = ['who', 'askers', 'owner', 'owners', 'readsFrom', 'instructionsFile', 'repo', 'agent', 'answerers', 'changes', 'mcp', 'muted', 'listen', 'agentCopies', 'agentsStatus', 'memory', 'auto']
+// ids), answering without asking, what it may change and where (the folders it changes files in, and
+// whose changes are made without asking you), what answers, its MCP servers, its channels, copies of
+// your agents' conversations, saying what your agents are doing, keeping what it learns without
+// asking, and sending files from its folders (without asking, and data and config files). Held back
+// from the bot as it's made (held), so nothing in a file is ever kept unchecked.
+// (Its folders' identities, folderIds, are this computer's: never carried, found again here.)
+export const CHECKED = ['who', 'askers', 'owner', 'owners', 'readsFrom', 'instructionsFile', 'repo', 'writesTo', 'trustYou', 'trusted', 'agent', 'answerers', 'changes', 'mcp', 'muted', 'listen', 'agentCopies', 'agentsStatus', 'memory', 'auto', 'attachAuto', 'attachConfig']
 // A bot from such a file: a new one, by its name (with a number after it when that's taken here),
 // answering as it did once its Slack app is connected here. Anything in the file that isn't one of
 // its settings is left out, so a token in it never is kept. held: the CHECKED settings aren't kept

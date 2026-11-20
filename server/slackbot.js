@@ -33,7 +33,10 @@
 //                    (agent_session_stopped). The same event sent twice (by its event id) is
 //                    taken once.
 //   interactive      a button pressed in your direct messages (Send, Edit, Discard, Approve, Keep;
-//                    Continue and Stop for a run at its time limit),
+//                    Continue and Stop for a run at its time limit; Approve and Deny for a change to
+//                    files, Allow Once and Deny for a request held before it started), or where a
+//                    question was asked (a change's Approve and Deny, Undo on its reply): who pressed
+//                    it as Slack says, which the desk decides counts or not,
 //                    a modal sent (the reply you edited, a question about a message), or the
 //                    message shortcut "Ask <name> about this" (message_action)
 //   slash_commands   /<name> and a question: posted in the conversation as the bot ("@Dana asked:
@@ -91,6 +94,8 @@ const MARK_MS = 2000 // where it got to, written this long after it moved
 const STREAM_MAX = 12000 // a streamed message's words, all told (Slack's limit)
 const FILE_MAX = 20 * 1024 * 1024 // a file attached to a question, read at most this big
 const FILES_MAX = 10 // and this many of them
+const PLACE_MS = 10 * 60 * 1000 // what a channel is (private, shared with another company), looked up again after this
+const MEMBERS_MAX = 2000 // a channel with more members than this is taken as one whose members can't be checked
 const SLASH_WAIT = 2000 // /<name>'s acknowledgement waits this long for its question to be posted
 const HOME_DAYS = 30 // who opened its Home tab, remembered this long (to say it's offline)
 const HOME_MAX = 50
@@ -153,7 +158,8 @@ const escape = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').rep
 // manifest can't carry an icon: that's set in Slack's app page.) An app made from an earlier one
 // lacks some scopes: Settings says which, from auth.test, and what each would let it do.
 export const SCOPES = ['app_mentions:read', 'chat:write', 'im:history', 'im:read', 'im:write', 'users:read', 'channels:history', 'channels:read', 'groups:history', 'groups:read', 'mpim:history', 'mpim:read', 'reactions:write', 'pins:read', 'files:read', 'files:write', 'commands', 'assistant:write']
-export const EVENTS = ['app_mention', 'message.channels', 'message.groups', 'message.im', 'message.mpim', 'app_home_opened', 'agent_session_stopped']
+// (And a channel shared with another organization, or no longer: told at once, not at the next look.)
+export const EVENTS = ['app_mention', 'message.channels', 'message.groups', 'message.im', 'message.mpim', 'app_home_opened', 'agent_session_stopped', 'channel_shared', 'channel_unshared']
 // What each scope lets it do, for "your app lacks …".
 export const SCOPE_FOR = {
   'app_mentions:read': 'hear when it\'s mentioned',
@@ -437,22 +443,38 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
   // ---------- What comes in ----------
   const names = {} // user id -> name, from users.list and users.info
   const users = {} // user id -> { guest, team, stranger }, the same
-  const places = {} // channel id -> { kind, id, name, private, shared }
+  const places = {} // channel id -> { kind, id, name, private, shared, at }
   // Where a message was: a direct message, or a channel by its name and whether it's private or
   // shared with another company (a lookup that fails says neither, and is tried again next time).
+  // Looked up again after PLACE_MS, and at once when Slack says it's been shared or unshared.
   async function placeOf(channel, type) {
     if (type === 'im' || String(channel).startsWith('D')) return { kind: 'dm', id: channel, name: null, private: true, shared: false }
-    if (places[channel]) return places[channel]
+    if (places[channel] && Date.now() - places[channel].at < PLACE_MS) return places[channel]
     try {
       const c = (await call('conversations.info', { channel })).channel || {}
-      places[channel] = { kind: 'channel', id: channel, name: c.name || null, private: !!(c.is_private || c.is_im || c.is_mpim), shared: !!(c.is_ext_shared || c.is_shared) }
+      places[channel] = { kind: 'channel', id: channel, name: c.name || null, private: !!(c.is_private || c.is_im || c.is_mpim), shared: !!(c.is_ext_shared || c.is_shared), at: Date.now() }
       return places[channel]
     } catch { return { kind: 'channel', id: channel, name: null, private: false, shared: false } }
   }
   const learn = (u) => {
     if (!u?.id) return
     names[u.id] = u.profile?.display_name || u.profile?.real_name || u.real_name || u.name || u.id
-    users[u.id] = { guest: !!(u.is_restricted || u.is_ultra_restricted), team: u.team_id || null, stranger: u.is_stranger === true }
+    users[u.id] = { guest: !!(u.is_restricted || u.is_ultra_restricted), team: u.team_id || null, stranger: u.is_stranger === true, bot: !!(u.is_bot || u.id === 'USLACKBOT') }
+  }
+  // Who's in a channel (conversations.members), each as person() has them (a guest, someone from
+  // another company, a bot); null when Slack can't say, or there are more than MEMBERS_MAX.
+  async function members(channel) {
+    const ids = []
+    let cursor
+    do {
+      const j = await call('conversations.members', { channel, limit: 200, cursor })
+      ids.push(...(j.members || []))
+      cursor = j.response_metadata?.next_cursor || undefined
+    } while (cursor && ids.length < MEMBERS_MAX)
+    if (cursor) return null
+    const out = []
+    for (const u of ids) out.push(u === kept.bot?.userId ? { id: u, bot: true } : { ...(await person({ user: u })), bot: !!users[u]?.bot })
+    return out
   }
   // Who wrote it: a member of this workspace, a guest, or someone from another company (Slack
   // Connect: the event says another team, or Slack does), from the members listed, else asked of
@@ -487,6 +509,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     if (!e || !hear) return
     if (e.type === 'app_home_opened') return home(e)
     if (e.type === 'agent_session_stopped') return stopped(e, team)
+    if (e.type === 'channel_shared' || e.type === 'channel_unshared') { delete places[e.channel]; return }
     if (e.type === 'message' && (e.subtype === 'message_changed' || e.subtype === 'message_deleted')) return altered(e)
     if (e.type !== 'message' && e.type !== 'app_mention') return
     const dm = e.channel_type === 'im' || String(e.channel).startsWith('D')
@@ -581,6 +604,12 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
         if (typeof meta === 'string') meta = { q: meta }
         return act({ act: 'edit', q: meta.q, user, team, text }, meta.channel ? { channel: meta.channel } : null)
       }
+      if (v.callback_id === 'bb_wapprove') {
+        ack()
+        let meta = {}
+        try { meta = JSON.parse(v.private_metadata) || {} } catch { /* nothing to go on */ }
+        return act({ act: 'wok', q: meta.q, change: meta.change || null, nonce: meta.nonce || null, user, team }, meta.channel ? { channel: meta.channel, thread: meta.thread || null } : null)
+      }
       if (v.callback_id === 'bb_ask') {
         const q = typed(v, 'q', 'text')
         if (!q) return ack({ response_action: 'errors', errors: { q: 'Write a question first' } })
@@ -602,6 +631,13 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
       // (A run at its time limit: Continue, its value the question and the minutes; Stop.)
       if (a.action_id === 'bb_continue') { const [q, n] = String(a.value || '').split(' '); return act({ act: 'continue', q, minutes: Number(n) || null, user, team }, where) }
       if (a.action_id === 'bb_halt') return act({ act: 'halt', q: a.value, user, team }, where)
+      // (A change to files: Approve and Deny, in your direct messages or where it was asked; Undo on
+      // its reply; Allow Once and Deny for a request held before it started. Its value: the question,
+      // the change and that change's own code. Who pressed it is Slack's to say: the desk decides
+      // whether that counts.)
+      if (['bb_wno', 'bb_sok', 'bb_sno', 'bb_undo'].includes(a.action_id)) { const [q, change, nonce] = String(a.value || '').split(' '); return act({ act: a.action_id.slice(3), q, change: change || null, nonce: nonce || null, user, team }, where) }
+      // (Approve: first the whole change to look at, for you alone; its own Approve makes it.)
+      if (a.action_id === 'bb_wok') { const [q, change, nonce] = String(a.value || '').split(' '); return approver(p, { q, change: change || null, nonce: nonce || null, user, team }, where) }
       if (a.action_id === 'bb_edit') return editor(p, a.value, user, where)
       // (A bot picked for a question on a shared connection: connhub.js.)
       if (a.action_id === 'bb_pick') { const [key, bot] = String(a.value || '').split(' '); return act({ act: 'pick', key, bot, user, team }, where) }
@@ -626,6 +662,35 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
         }, { waits: 0 })
       } catch (e) { await tell(channel ? { channel, thread } : null, user.id, `Couldn't open the question: ${e.message}`) }
     }
+  }
+  // A change to files' Approve, pressed (in your direct messages or where it was asked): the desk says
+  // whether it's yours to approve and gives the whole change; a modal shows all of it (who asked,
+  // why it waits, every line of its diff) with Approve, which makes it. One too long for Slack to show
+  // whole, or with a file that can't be shown at all, has no Approve there: Needs You has it. Anyone
+  // else is told, privately, that only you can.
+  async function approver(p, a, where) {
+    const r = await act({ act: 'wview', ...a }, where)
+    if (!r?.ok || !r.view) return
+    const v = r.view
+    const head = { type: 'section', text: { type: 'mrkdwn', text: clip(`*${md(v.who)}* asked *${md(v.bot)}* ${md(v.where)} for a change to ${v.files.length === 1 ? '1 file' : `${v.files.length} files`}:\n${v.files.slice(0, 20).map((f) => `• \`${md(f.path)}\`${f.op === 'add' ? ' (new)' : f.op === 'remove' ? ' (deleted)' : f.op === 'move' ? ` (moved from \`${md(f.from)}\`)` : ''}`).join('\n')}${v.files.length > 20 ? `\n…and ${v.files.length - 20} more` : ''}`, 3000) } }
+    const why = v.held ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: clip(`:warning: It waits for you whoever asks: ${md(v.held)}`, 2000) }] }] : []
+    const text = md(v.diff).replace(/```/g, '`​``')
+    const chunks = []
+    for (let i = 0; i < text.length; i += 2800) chunks.push(text.slice(i, i + 2800))
+    const fits = chunks.length <= 90
+    // (A file in it that can't be shown at all, binary or too long: no Approve here either.)
+    const approvable = fits && !v.unshown
+    const blocks = [head, ...why, ...(fits ? chunks.map((c) => ({ type: 'section', text: { type: 'mrkdwn', text: `\`\`\`${c}\`\`\`` } })) : [{ type: 'section', text: { type: 'mrkdwn', text: 'Its diff is too long to show here: approve it in Needs You in Bridge AI, which shows all of it.' } }]),
+      ...(fits && v.unshown ? [{ type: 'section', text: { type: 'mrkdwn', text: 'Part of it can\'t be shown here (a binary file, or one too long): approve it in Needs You in Bridge AI, where its files can be opened.' } }] : [])]
+    try {
+      await call('views.open', {
+        trigger_id: p.trigger_id,
+        view: {
+          type: 'modal', callback_id: 'bb_wapprove', private_metadata: JSON.stringify({ q: v.q, change: v.change, nonce: v.nonce, channel: where?.channel || null, thread: where?.thread || null }),
+          title: { type: 'plain_text', text: 'Approve the change' }, ...(approvable ? { submit: { type: 'plain_text', text: 'Approve' } } : {}), close: { type: 'plain_text', text: 'Cancel' }, blocks,
+        },
+      }, { waits: 0 })
+    } catch (e) { await tell(where, a.user.id, `Couldn't show the change: ${e.message}`) }
   }
   // Edit: a modal with the draft in it, to change and send.
   async function editor(p, q, user, where) {
@@ -907,12 +972,23 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
   // take falls back to a plain post, saying why. Throws { code, retryAfter } when the words can't
   // go; a file that can't go is said in files[], not thrown. as: the bot it's posted as, on a shared
   // connection.
-  function post(reply, text, { files = [], stream = false, as = null } = {}) {
+  // buttons: [{ id, label, value, style }], under the words (a change's Approve and Deny, or Undo),
+  // remembered as a draft's are, so settle() can put the outcome in their place.
+  function post(reply, text, { files = [], stream = false, as = null, buttons = null } = {}) {
     return inLine(async () => {
       const out = { ts: null, channel: reply.channel, streamed: false, streamError: null, files: [], ...(as?.name ? { as: as.name, customized: !!persona(as).username } : {}) }
       const raw = String(text ?? '')
       const body = as?.name && !persona(as).username ? `*${as.name}:* ${raw}` : raw
-      if (body.trim() || !files.length) {
+      if (buttons?.length) {
+        const blocks = [
+          { type: 'section', text: { type: 'mrkdwn', text: clip(escape(body), 3000) } },
+          { type: 'actions', block_id: `bb_t_${Date.now().toString(36)}`, elements: buttons.slice(0, 5).map((b) => button(b.id, b.label, b.value, b.style || null)) },
+        ]
+        const j = await call('chat.postMessage', { channel: reply.channel, text: escape(clip(body, 3000)), blocks, ...(reply.thread ? { thread_ts: reply.thread } : {}), unfurl_links: false, unfurl_media: false, ...persona(as) }, { waits: 1 })
+        Object.assign(out, { ts: j.ts, channel: j.channel || reply.channel })
+        asks.set(`${out.channel}:${out.ts}`, blocks)
+        if (asks.size > 200) asks.delete(asks.keys().next().value)
+      } else if (body.trim() || !files.length) {
         if (stream && reply.thread && body.length <= STREAM_MAX && !lacks('chat:write')) {
           try {
             const s = await streamed(reply, body, persona(as))
@@ -992,7 +1068,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     else blocks.push({ type: 'section', text: { type: 'mrkdwn', text: clip(`*Draft:*\n${md(it.draft || '')}`, 3000) } })
     const notes = [
       it.sources?.length ? `From ${it.sources.slice(0, 6).map(md).join(', ')}` : null,
-      it.files?.length ? `Files: ${it.files.map((f) => `${md(f.name)}${f.size ? ` (${sized(f.size)})` : ''}`).join(', ')}` : null,
+      it.files?.length ? `Files: ${it.files.map((f) => `${md(f.name)}${f.size ? ` (${sized(f.size)})` : ''}${f.from ? ` from ${md(f.from)}` : ''}`).join(', ')}` : null,
       it.warn ? `:warning: ${md(it.warn)}` : null,
       !it.needsOwner && it.why ? md(it.why) : null,
     ].filter(Boolean)
@@ -1001,14 +1077,31 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
       blocks.push({ type: 'section', text: { type: 'mrkdwn', text: clip(`*A change* on \`${md(it.change.branch || '')}\`${it.change.mode === 'suggest' ? ', waiting for you' : ''}${it.change.stat ? `\n${md(it.change.stat)}` : ''}`, 3000) } })
       if (it.change.diff) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `\`\`\`${clip(md(it.change.diff).replace(/```/g, '`​``'), 2500)}\`\`\`` } })
     }
+    // (A change to files: what it changes and why it waits for you, its diff; Approve and Deny while it
+    // waits, Undo once it's made.)
+    const w = it.write
+    if (w) {
+      const files = (w.files || []).slice(0, 8).map((f) => `\`${md(f.path)}\`${f.op === 'add' ? ' (new)' : f.op === 'remove' ? ' (deleted)' : f.op === 'move' ? ` (moved from \`${md(f.from)}\`)` : ''}`).join(', ')
+      const state = w.state === 'waiting' ? `asked by *${md(it.who || 'someone')}*, waiting for you` : w.state === 'applied' ? 'made already' : w.state === 'refused' ? 'refused, so nothing was changed' : w.state
+      blocks.push({ type: 'section', text: { type: 'mrkdwn', text: clip(`*A change to files*, ${state}: ${files}${(w.files || []).length > 8 ? `, and ${w.files.length - 8} more` : ''}`, 3000) } })
+      const why = [...(w.held || []).map((h) => `:warning: Waits for you whoever asks: ${md(h.said)}`), ...(w.refused || []).slice(0, 3).map((r) => `:no_entry: ${md(r.file)}: ${md(r.said)}`)]
+      if (why.length) blocks.push({ type: 'context', elements: why.slice(0, 10).map((n) => ({ type: 'mrkdwn', text: clip(n, 2000) })) })
+      if (w.diff) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `\`\`\`${clip(md(w.diff).replace(/```/g, '`​``'), 2500)}\`\`\`` } })
+      // (Only its start fits in Slack: the whole diff is in Needs You and its Activity.)
+      if (w.diffCut || md(w.diff || '').length > 2500) blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: 'Only the start of the diff fits here: Needs You and its Activity in Bridge AI have all of it.' }] })
+    }
     const approve = it.change && it.change.mode === 'suggest'
+    const waits = w?.state === 'waiting' && w.value
     blocks.push({
       type: 'actions', block_id: `bb_${String(it.q).slice(0, 200)}`,
-      elements: [
-        approve ? button('bb_approve', 'Approve and open a pull request', it.q, 'primary') : button('bb_send', 'Send', it.q, 'primary'),
-        button('bb_edit', it.needsOwner ? 'Write the reply' : 'Edit', it.q),
-        button('bb_discard', 'Discard', it.q, 'danger'),
-      ],
+      elements: waits
+        ? [button('bb_wok', 'Approve and send', w.value, 'primary'), button('bb_wno', 'Deny', w.value, 'danger')]
+        : [
+          approve ? button('bb_approve', 'Approve and open a pull request', it.q, 'primary') : button('bb_send', 'Send', it.q, 'primary'),
+          button('bb_edit', it.needsOwner ? 'Write the reply' : 'Edit', it.q),
+          button('bb_discard', 'Discard', it.q, 'danger'),
+          ...(w?.state === 'applied' && w.undo ? [button('bb_undo', 'Undo the change', w.undo)] : []),
+        ],
     })
     // (Stopped at its time limit for want of your answer: Continue, as long as it can be.)
     if (it.limit?.choices?.length) {
@@ -1040,18 +1133,29 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     ]
     return { text: escape(clip(`${it.bot || 'Your bot'} would like to remember: ${it.text || ''}`, 300)), blocks }
   }
+  // A request to a bot that changes files, held before it started: who asked, where and what, why it
+  // was held, and Allow Once or Deny.
+  function screenBlocks(it) {
+    const blocks = [
+      { type: 'section', text: { type: 'mrkdwn', text: clip(`*${md(it.who || 'Someone')}* asked *${md(it.bot || 'your bot')}* ${md(it.where || 'in Slack')}:\n${quote(it.question || '')}`, 3000) } },
+      { type: 'context', elements: [{ type: 'mrkdwn', text: clip(`:warning: It wasn't started, as ${md(it.why || 'it looks odd')}${it.by === 'model' ? ' (AI Assist\'s read of it)' : ''}. Allow it once to let it go ahead, under every limit as always.`, 2000) }] },
+      { type: 'actions', block_id: `bb_s_${String(it.q).slice(0, 200)}`, elements: [button('bb_sok', 'Allow Once', it.q, 'primary'), button('bb_sno', 'Deny', it.q, 'danger')] },
+    ]
+    return { text: escape(clip(`${it.bot || 'Your bot'}: ${it.who || 'Someone'} asked ${it.where || 'in Slack'}, held for you: ${it.question || ''}`, 300)), blocks }
+  }
   async function askOwner(owner, item) {
     if (!owner?.id) throw new Error('Set who you are in Slack first')
     const channel = await openDm(owner.id)
-    const { text, blocks } = item?.kind === 'memory' ? memoryBlocks(item) : item?.kind === 'limit' ? limitBlocks(item) : draftBlocks(item || {})
+    const { text, blocks } = item?.kind === 'memory' ? memoryBlocks(item) : item?.kind === 'limit' ? limitBlocks(item) : item?.kind === 'screen' ? screenBlocks(item) : draftBlocks(item || {})
     const j = await inLine(() => call('chat.postMessage', { channel, text, blocks, unfurl_links: false, unfurl_media: false }, { waits: 1 }))
     const handle = { channel: j.channel || channel, ts: j.ts }
     asks.set(`${handle.channel}:${handle.ts}`, blocks)
     if (asks.size > 200) asks.delete(asks.keys().next().value)
     return handle
   }
-  // A draft in your direct messages, decided: its buttons give way to what came of it.
-  async function settle(handle, { outcome, by = null, text = null, link = null } = {}) {
+  // A draft in your direct messages, decided: its buttons give way to what came of it. (body: what the
+  // message said, for one whose blocks aren't remembered here any more, so its words stay.)
+  async function settle(handle, { outcome, by = null, text = null, link = null, body = null } = {}) {
     if (!handle?.channel || !handle?.ts) return { ok: false, error: 'nothing to settle' }
     const said = {
       sent: `Sent${by ? ` by ${by}` : ''}`, discarded: `Discarded${by ? ` by ${by}` : ''}`, approved: `Approved${by ? ` by ${by}` : ''}`,
@@ -1059,7 +1163,8 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     }[outcome] || outcome || 'Done'
     const words = [said, link ? `Pull request: ${link}` : null, text].filter(Boolean).join(' · ')
     const before = (asks.get(`${handle.channel}:${handle.ts}`) || []).filter((b) => b.type !== 'actions')
-    const blocks = [...(before.length ? before : [{ type: 'section', text: { type: 'mrkdwn', text: md(words) } }]), { type: 'context', elements: [{ type: 'mrkdwn', text: clip(`:white_check_mark: ${md(words)}`, 2000) }] }]
+    const kept = before.length ? before : [{ type: 'section', text: { type: 'mrkdwn', text: clip(md(body || words), 3000) } }]
+    const blocks = [...kept, { type: 'context', elements: [{ type: 'mrkdwn', text: clip(`:white_check_mark: ${md(words)}`, 2000) }] }]
     try {
       await inLine(() => call('chat.update', { channel: handle.channel, ts: handle.ts, text: escape(clip(words, 300)), blocks }, { waits: 1 }))
       asks.delete(`${handle.channel}:${handle.ts}`)
@@ -1135,7 +1240,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     do {
       const j = await call('users.conversations', { types: 'public_channel,private_channel', exclude_archived: true, limit: 200, cursor })
       for (const c of j.channels || []) {
-        places[c.id] = { kind: 'channel', id: c.id, name: c.name || null, private: !!c.is_private, shared: !!(c.is_ext_shared || c.is_shared) }
+        places[c.id] = { kind: 'channel', id: c.id, name: c.name || null, private: !!c.is_private, shared: !!(c.is_ext_shared || c.is_shared), at: Date.now() }
         out.push({ id: c.id, name: c.name || c.id, private: !!c.is_private })
       }
       cursor = j.response_metadata?.next_cursor || undefined
@@ -1195,5 +1300,5 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     set({ state: 'no-tokens', why: null })
   }
 
-  return { id, label: 'Slack', start, stop, state, post, react, context, people, channels, setTokens, forget, missed, masked, whisper, status, askOwner, settle, dm, download, choose }
+  return { id, label: 'Slack', start, stop, state, post, react, context, people, channels, members, setTokens, forget, missed, masked, whisper, status, askOwner, settle, dm, download, choose }
 }

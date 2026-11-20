@@ -23,6 +23,7 @@ import * as accounts from '../accounts.js'
 import { firstRun, knows } from '../firstrun.js'
 import { lineAnsi, SCROLLBACK, watchModes, wheelBytes } from './screen.js'
 import * as host from './hostlink.js'
+import { noBackupRightsFirst } from '../winpriv.js'
 
 const { Terminal } = headless
 
@@ -109,7 +110,9 @@ async function spawnPane({ paneId, tabId, workspaceId, kind, cwd, sessionId, res
     if (effort && a.effort) args = [...a.effort(effort), ...args]
     if (access && a.access) args = [...a.access(access, { dirs }), ...args]
   }
-  const [file, argv] = shellCommand(bin, args, setup, cwd)
+  // (A bot's run that changes files, on Windows: its terminal takes Windows' backup and restore
+  // rights out of its own token before it starts the agent, so the agent never has them: winpriv.js.)
+  const [file, argv] = shellCommand(bin, args, setup, cwd, { before: IS_WIN && access === 'change' && bin ? noBackupRightsFirst() : null })
   // Checked without blocking: macOS can hold a look into Desktop or Documents until you answer its
   // permission prompt, and the rest of Bridge AI shouldn't wait for that.
   const there = await fs.promises.access(cwd).then(() => true, () => false)

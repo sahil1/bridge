@@ -30,7 +30,10 @@
 // only in Settings (and on its Routing page). Each decision is in the connection's own record
 // (which bot, and why: "#sales's default"), never the question's words; the question is in that
 // bot's record. Try a Message (dry) takes a message you make up through the same steps
-// (route) and only says where it would go: nothing posted, answered or kept, and no bot run.
+// (route) and only says where it would go, and, for a bot that changes files, whether a change asked
+// for would be made, wait for you, be held before it starts, or be refused: nothing posted, answered
+// or kept, and no bot run. A bot that only reads may hand a change to files on to a bot that makes
+// them (frontdesk.js handOff): that bot's rules then apply to whoever asked, as routing's do.
 import { idOf, bare, failure, PLATFORMS as NAMES } from './connector.js'
 import * as conns from './connections.js'
 import { commandOf, shortcutOf } from './slackbot.js'
@@ -342,7 +345,10 @@ export function makeHubs({ bots, desk, make, ask = null, you = () => 'the owner'
     if (r.ask) return { ...out, rule: 'asked', detail: r.detail || null, asks: r.ask.map((b) => one(b.id)) }
     if (!r.to) return { ...out, rule: 'none', detail: r.none || null, silent: !!r.silent }
     const b = botOf(r.to)
-    return { ...out, rule: r.why, detail: r.detail || null, bot: one(r.to), asked: r.text ?? words, then: { may: desk.mayAsk(r.to, who, chan), paused: !!b?.paused } }
+    // (And a change to files asked for: whether that bot would make it without asking you, wait for
+    // you, hold it before it starts, or refuse them; for a bot that only reads, the same for each bot
+    // it hands changes to, under that bot's own rules for the same person.)
+    return { ...out, rule: r.why, detail: r.detail || null, bot: one(r.to), asked: r.text ?? words, then: { may: desk.mayAsk(r.to, who, chan), paused: !!b?.paused, write: desk.writeVerdict?.(r.to, who, chan, r.text ?? words) || null } }
   }
 
   // Said where it was asked, as the connection.
@@ -458,6 +464,8 @@ export function makeHubs({ bots, desk, make, ask = null, you = () => 'the owner'
       settle: pass('settle'), download: pass('download'), dm: pass('dm'), missed: pass('missed'),
       masked: (...a) => con()?.masked?.(...a),
       people: (o) => must().people(o), channels: () => must().channels(), person: (id) => con()?.person?.(id),
+      // Who's in a channel, where the platform can say (Slack); null where it can't.
+      members: async (channel) => (con()?.members ? con().members(channel) : null),
       // Its own connection's tokens: set and forgotten here (a shared one's, in Connections).
       setTokens: pass('setTokens'), setToken: pass('setToken'), setGuild: pass('setGuild'), setCredentials: pass('setCredentials'), setEndpoint: pass('setEndpoint'), checkEndpoint: pass('checkEndpoint'), teamsApp: pass('teamsApp'),
       forget() { const c = conn(); if (c && !c.shared) hubOf(c).connector.forget?.() },

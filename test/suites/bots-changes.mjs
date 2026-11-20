@@ -21,7 +21,9 @@ const { ok, done } = checks('bots-changes')
 // Its server needs git, as Bridge AI does for a change: on Windows the kit's PATH has only the
 // system's folders, so git's own is added (where this test finds it).
 const gitDir = IS_WIN ? path.dirname(String(spawnSync('where', ['git'], { encoding: 'utf8' }).stdout || '').split(/\r?\n/)[0] || 'C:\\Program Files\\Git\\cmd\\git.exe') : null
-const { slack, kit, draftOf, startOf, logOf, botOf, connected, timelineOf, events, posted } = await botKit('bots-changes', { folders: ['code'], env: ({ PATH }) => (gitDir ? { PATH: `${PATH}${path.delimiter}${gitDir}`, BRIDGE_PATH: `${PATH}${path.delimiter}${gitDir}` } : {}) })
+// (Its hook given as Windows has it on every system, BRIDGE_HOOK_EXEC: a program and its arguments,
+// which needs a Claude Code new enough to run it so.)
+const { slack, kit, draftOf, startOf, startsOf, logOf, botOf, connected, timelineOf, events, posted } = await botKit('bots-changes', { folders: ['code'], env: ({ PATH }) => ({ BRIDGE_HOOK_EXEC: '1', ...(gitDir ? { PATH: `${PATH}${path.delimiter}${gitDir}`, BRIDGE_PATH: `${PATH}${path.delimiter}${gitDir}` } : {}) }) })
 kit.program('gh', fs.readFileSync(path.join(TEST, 'stand-ins', 'gh.cjs'), 'utf8'))
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
@@ -40,6 +42,8 @@ git(APP, 'config', 'user.name', 'Tester')
 git(APP, 'config', 'user.email', 'tester@example.com')
 fs.writeFileSync(path.join(APP, 'README.md'), 'Hello wrold\n')
 fs.writeFileSync(path.join(APP, 'CHANGELOG.md'), '# Changes\n')
+// (A .gitattributes of its own, which a change may never alter: checked out with \r\n on Windows.)
+fs.writeFileSync(path.join(APP, '.gitattributes'), '*.txt text\n')
 git(APP, 'add', '-A')
 git(APP, 'commit', '-q', '-m', 'First')
 git(APP, 'remote', 'add', 'origin', ORIGIN)
@@ -69,6 +73,8 @@ try {
     const s1 = await startOf('fix the typo in the README')
     const a1 = s1?.args.join(' ') || ''
     ok(real(s1?.cwd || '').startsWith(real(path.join(kit.data, 'front-desk', 'changes'))) && a1.includes('--tools Read,Grep,Glob,Edit,Write --allowedTools Edit(./**)') && a1.includes('--permission-mode dontAsk') && !a1.includes(APP) && !/acceptEdits|bypassPermissions/.test(a1), 'its agent works in its own copy of the repository, edits allowed only there, nothing asked', s1 && { cwd: s1.cwd, args: s1.args })
+    // (Nothing attached from your own repository in a change's run: it reads its copy, so it has no attach_file.)
+    ok(!s1?.args.includes('mcp__bridge_outbox__attach_file') && s1?.args.includes('mcp__bridge_outbox__save_file'), 'a change\'s run gets no attach_file: the repository its copy came from isn\'t one it reads', s1?.args)
     const d1 = await draftOf('fix the typo in the README')
     const tries = logOf('answer-tries.log')
     ok(tries.some((x) => x.try === 'edit' && x.done) && tries.some((x) => x.try === 'edit-outside' && !x.done) && tries.some((x) => x.try === 'run' && !x.done), 'it edits its copy; writing outside it and running a command are refused', tries)
@@ -98,7 +104,7 @@ try {
     await slack.ask({ user: 'U0EVE', text: `${M} Change the README to say hacked [edit README.md Hacked] [answer Done.]` })
     const s = await startOf('Change the README to say hacked')
     const d = await draftOf('Change the README to say hacked')
-    ok(real(s?.cwd || '') === real(APP) && /--tools Read,Grep,Glob (--add-dir \S+ )?--mcp-config \S+ --allowedTools mcp__bridge_outbox__save_file --permission-mode dontAsk/.test(s.args.join(' ')) && !s.args.some((x) => /^(Edit|Write)\(/.test(x)), 'everyone may ask in its channels, but only people you named may ask for a change: Eve\'s agent can only read', s?.args)
+    ok(real(s?.cwd || '') === real(APP) && /--tools Read,Grep,Glob (--add-dir \S+ )?--mcp-config \S+ --allowedTools mcp__bridge_outbox__save_file mcp__bridge_outbox__attach_file --permission-mode dontAsk/.test(s.args.join(' ')) && !s.args.some((x) => /^(Edit|Write)\(/.test(x)), 'everyone may ask in its channels, but only people you named may ask for a change: Eve\'s agent can only read', s?.args)
     ok(!d?.change && /I can't change README\.md here/.test(d?.draft || '') && fs.readFileSync(path.join(APP, 'README.md'), 'utf8') === 'Hello wrold\n', 'nothing changed, and its answer says so', d?.draft)
     await kit.api(`/bots/questions/${d.id}`, { send: false })
   })
@@ -130,6 +136,85 @@ try {
     fs.rmSync(path.join(kit.home, 'gh-signed-out'))
     const r = await kit.api(`/bots/questions/${d.id}`, { send: true, text: d.draft })
     ok(!!(await until(async () => (await inThread(q.ts)).find((x) => /Bumped\.[\s\S]*Draft pull request: https:/.test(x.text)), 20000)), 'signed in again: Send opens it, and sends the link', r.item?.state)
+  })
+
+  // ---------- A Claude Code too old for its hook ----------
+  // Its hook given as a program and its arguments (as on Windows) needs Claude Code 2.1.139 or later,
+  // and any run kept to its folders 2.1.257, so it's the higher that's said: an older one (the
+  // stand-in saying 2.1.100, the program changed as an update changes it) is said
+  // on its Access card, and a change asked for isn't started, said in Needs You and the record; once
+  // it's new again, a change goes through.
+  let bumps = 0
+  const claudeIs = (v) => {
+    const f = path.join(kit.home, 'claude-version')
+    if (v) fs.writeFileSync(f, `${v}\n`); else fs.rmSync(f, { force: true })
+    for (const n of ['claude', 'claude.cmd']) { const p = path.join(kit.dir, 'bin', n); if (fs.existsSync(p)) fs.utimesSync(p, new Date(), new Date(Date.now() + ++bumps * 60000)) }
+  }
+  await part('Claude Code too old for its hook', async () => {
+    claudeIs('2.1.100')
+    const v = await botOf()
+    ok(v.changes?.hook?.need === '2.1.257' && v.changes.hook.have === '2.1.100', 'its Access says Claude Code is too old for its hook, and which it needs', v.changes?.hook)
+    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
+    await openSettings(p)
+    const said = await p.locator('[data-setting="bots-changes-hook"]').first().innerText({ timeout: 15000 }).catch(() => '')
+    ok(/needs Claude Code 2\.1\.257 or later, and this computer has 2\.1\.100: update it with claude update/.test(said), 'and its Changes say so, with how to update it', said)
+    ok(errors.length === 0, 'no page errors', errors)
+    await ctx.close()
+    const before = startsOf('Fix the footer').length
+    await slack.ask({ user: 'U0DANA', text: `${M} Fix the footer [edit README.md Footer fixed] [answer Fixed.]` })
+    const d = await until(async () => (await kit.api('/needs-you')).slack?.find((x) => /Fix the footer/.test(x.text || '') && x.needsOwner), 30000)
+    ok(/Changing files on Windows needs Claude Code 2\.1\.257 or later, and this computer has 2\.1\.100: update it with claude update in a terminal/.test(d?.why || '') && startsOf('Fix the footer').length === before && !d.change, 'a change asked for: not started, and you\'re told why in Needs You', d?.why)
+    ok((await timelineOf('b1', 'Fix the footer')).some((e) => e.type === 'changes.blocked' && e.why === 'claude-old' && e.need === '2.1.257' && e.have === '2.1.100'), 'and in its record')
+    if (d) await kit.api(`/bots/questions/${d.id}`, { send: false })
+    claudeIs(null)
+    ok(!(await botOf()).changes?.hook, 'updated: nothing said')
+    await slack.ask({ user: 'U0DANA', text: `${M} Fix the header [edit README.md Header fixed] [answer Fixed.]` })
+    const e = await draftOf('Fix the header')
+    ok(!!e?.change?.branch && logOf('hooks.log').some((x) => x.status === 0 && Array.isArray(x.args) && /README\.md$/.test(x.path || '')), 'and a change goes through again, its hook run as a program and its arguments', e?.change)
+    if (e) await kit.api(`/bots/questions/${e.id}`, { send: false })
+  })
+
+  // ---------- Git's own files in its copy, written by its agent ----------
+  // Its hook refuses .git; one written past it (as if the hook never ran) pointing git at a folder of
+  // the agent's own, with a file-system monitor or a filter that would run a command, and a
+  // .gitattributes naming it: Bridge AI's git never follows it, nothing runs, nothing is taken.
+  await part('git\'s own files', async () => {
+    const marker = path.join(kit.home, 'PWNED')
+    const evil = [
+      '[edit-anywhere .git gitdir: elsewhere]', '[edit-anywhere .claude./settings.json x]', '[edit-anywhere CLAUDE~1/settings.json x]', '[edit-anywhere .mcp.json:x y]',
+      '[force-write .git gitdir: evil]', '[force-write evil/HEAD ref: refs/heads/main]', '[force-write evil/objects/.keep x]', '[force-write evil/refs/heads/.keep x]',
+      `[force-write evil/config {{core}}\\n\\trepositoryformatversion = 0\\n\\tbare = false\\n\\tfsmonitor = "touch '${marker}'; false"\\n{{filter "x"}}\\n\\tclean = "touch '${marker}'; cat"]`,
+      '[force-write .gitattributes * filter=x]', '[edit README.md Hello evil]', '[answer Done.]',
+    ].join(' ')
+    await slack.ask({ user: 'U0DANA', text: `${M} Please tidy the readme ${evil}` })
+    const d = await draftOf('Please tidy the readme')
+    const failed = (await timelineOf('b1', 'Please tidy the readme')).find((e) => e.type === 'change.failed')
+    ok(!fs.existsSync(marker), 'nothing the agent wrote in git\'s own files ran', fs.existsSync(marker))
+    ok(/git files were changed/.test(failed?.error || '') && !d?.change, 'the change isn\'t taken, and that\'s said', failed?.error)
+    ok(logOf('hooks.log').some((x) => x.status === 2 && /\.git$/.test(x.path || '')), 'its hook refused .git', logOf('hooks.log').filter((x) => x.status === 2))
+    const refusedTop = logOf('hooks.log').filter((x) => x.status === 2).map((x) => slashed(x.path))
+    ok([/\.claude\.\/settings\.json$/, /CLAUDE~1\/settings\.json$/, /\.mcp\.json:x$/].every((re) => refusedTop.some((p) => re.test(p))), 'and Claude Code\'s own files at its top by the names Windows gives them too (.claude., CLAUDE~1, .mcp.json:stream)', refusedTop)
+    ok(fs.readFileSync(path.join(APP, 'README.md'), 'utf8') === 'Hello wrold\n' && git(APP, 'rev-parse', 'main') === MAIN, 'your checkout untouched')
+    if (d) await kit.api(`/bots/questions/${d.id}`, { send: false })
+  })
+
+  // ---------- Its .gitattributes, byte for byte ----------
+  // The repository's own .gitattributes rewritten by its agent past its hook: with a space (a
+  // non-breaking one) before its first rule, which git then doesn't read as that rule, nothing is
+  // taken; with \r\n for its line's end, nothing is taken either, but on Windows, where git checks
+  // files out so and reads the \r as nothing.
+  await part('its .gitattributes', async () => {
+    const tried = async (words, body) => {
+      await slack.ask({ user: 'U0DANA', text: `${M} ${words} [force-write .gitattributes ${body}] [edit README.md ${words}] [answer Done.]` })
+      const d = await draftOf(words)
+      const failed = (await timelineOf('b1', words)).find((e) => e.type === 'change.failed')
+      if (d) await kit.api(`/bots/questions/${d.id}`, { send: false })
+      return failed?.error || ''
+    }
+    const nbsp = await tried('Spaced attributes', ' *.txt text')
+    ok(/git files were changed.*\.gitattributes was added or changed/.test(nbsp), 'a space before its first rule: nothing taken', nbsp)
+    const crlf = await tried('Windows line ends', '*.txt text\\r')
+    ok(IS_WIN ? !/git files were changed/.test(crlf) : /\.gitattributes was added or changed/.test(crlf), IS_WIN ? 'its line ending \\r\\n on Windows: the same file, taken' : 'its line ending \\r\\n off Windows: nothing taken', crlf)
   })
 
   // ---------- In Bridge AI ----------

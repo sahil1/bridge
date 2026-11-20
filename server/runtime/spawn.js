@@ -38,8 +38,10 @@ export const SETUP_DONE = '\x1b]7420\x07'
 // open as a plain shell when the agent exits (so you can read its last words or restart it).
 // setup: { command, cwd } to run first, in view (a new worktree's `npm install` at its top
 // folder), then back to `dir` for the agent. It goes through eval, so a typo in it can't stop
-// the agent from starting.
-export function shellCommand(bin, args, setup, dir) {
+// the agent from starting. before: a command of the shell's own run before all of it (on Windows, a
+// bot's run that changes files taking Windows' backup and restore rights out of its terminal first:
+// winpriv.js).
+export function shellCommand(bin, args, setup, dir, { before = null } = {}) {
   const shell = userShell()
   const go = (to) => (IS_WIN ? `Set-Location -LiteralPath ${psQuote(to)}` : `cd ${shQuote(to)}`)
   const move = setup && dir && path.resolve(setup.cwd) !== path.resolve(dir)
@@ -47,7 +49,7 @@ export function shellCommand(bin, args, setup, dir) {
     IS_WIN ? `Write-Host ${psQuote(`> ${setup.command}`)}` : `printf '%s\\n' ${shQuote(`> ${setup.command}`)}`,
     move && go(setup.cwd), IS_WIN ? `Invoke-Expression ${psQuote(setup.command)}` : `eval ${shQuote(setup.command)}`, move && go(dir), !IS_WIN && `printf '\\033]7420\\007'`,
   ].filter(Boolean).join('; ')
-  const run = [first, bin && quoteCommand(bin, args)].filter(Boolean).join('; ')
+  const run = [before, first, bin && quoteCommand(bin, args)].filter(Boolean).join('; ')
   if (IS_WIN) return run ? [shell, ['-NoLogo', '-NoExit', '-Command', run]] : [shell, ['-NoLogo']]
   return run ? [shell, ['-l', '-c', `${run}; exec ${shQuote(shell)} -l`]] : [shell, ['-l']]
 }

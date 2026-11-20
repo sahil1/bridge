@@ -5,7 +5,9 @@ import { hostApi } from '../api.js'
 import { ago } from './Machines.jsx'
 import { t, tx } from '../i18n/index.js'
 import { sentTo } from '../sendbox.js'
+import { guardWhy } from './bots/access.js'
 import { split, reason, isQuiet, activeAt, projectOf, QUIET_DAYS, TOP } from '../../shared/focus.js'
+import { FileRow } from './bots/BotFiles.jsx'
 import './needsyou.css'
 
 // The needs-you inbox: everything waiting on you, on this computer, your other devices and the
@@ -372,8 +374,73 @@ export function OutsideItem({ it, onDone, setNote }) {
 const sizeOf = (n) => (n == null ? '' : n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`)
 const whereOf = (it) => (it.place?.kind === 'dm' ? t('in a direct message') : it.place?.name ? t('in #{channel}', { channel: it.place.name }) : t('in a channel'))
 const timeOf = (iso) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+// A request to a bot that changes files, held before it started, is a card of its own (ScreenItem);
+// a change to files with a draft shows in it, with Approve and Send or Deny while it waits, and Undo
+// once it's made.
 export function SlackItem(props) {
-  return props.it.limit?.phase === 'asking' ? <LimitItem {...props} /> : <DraftItem {...props} />
+  return props.it.state === 'screened' ? <ScreenItem {...props} /> : props.it.limit?.phase === 'asking' ? <LimitItem {...props} /> : <DraftItem {...props} />
+}
+
+// A request held before it started (server/frontdesk.js screenAct): who asked, where and what, why it
+// was held, and Allow Once (it goes ahead, under every limit as always) or Deny (they're told).
+function ScreenItem({ it, onDone, setNote }) {
+  const [busy, setBusy] = useState(false)
+  const [problem, setProblem] = useState(null)
+  const who = it.from?.name || t('Someone')
+  const bot = it.bot?.name || t('Your bot')
+  const go = async (allow) => {
+    setBusy(true)
+    setProblem(null)
+    try {
+      const out = await onDevice(null, `/bots/questions/${encodeURIComponent(it.id)}/screen`, { allow })
+      onDone(it)
+      setNote({ text: out.already ? t('That isn\'t waiting any more') : allow ? t('{bot} goes ahead with it, once', { bot }) : t('Denied: {name} is told', { name: who }) })
+    } catch (e) { setProblem(e.message) } finally { setBusy(false) }
+  }
+  return (
+    <article className="ny-item t-slack t-screen yours" aria-label={t('{name} asked {bot} {where}, held for you', { name: who, bot, where: whereOf(it) })}>
+      <div className="ny-top">
+        <Icon name="alert" size={12} />
+        <span className="ny-kind">{t('Held before it started')}</span>
+        <span className="ny-age" title={new Date(it.at).toLocaleString()}>{ago(it.at)}</span>
+        <span className="ny-grow" />
+        <span className="ny-device here" title={t('Through {bot} (Settings › Bots)', { bot })}><Icon name="chat" size={11} />{bot}</span>
+      </div>
+      <p className="ny-text">{t('{name} asked {where}:', { name: who, where: whereOf(it) })}</p>
+      <p className="ny-said">“{it.text}”</p>
+      {(it.more || []).map((m, i) => <p key={i} className="ny-said ny-more"><span className="muted small">{t('Then {name}:', { name: m.from?.name || t('Someone') })}</span> “{m.text}”</p>)}
+      <p className="muted small ny-from"><Icon name="info" size={11} /> {t('It wasn\'t started, as {why}. Allow it once to let it go ahead: every limit still holds, and a change still shows you its diff.', { why: it.screen?.why || t('it looks odd') })}</p>
+      {problem && <p className="ny-problem" role="alert"><Icon name="alert" size={12} />{problem}</p>}
+      <div className="ny-acts">
+        <button type="button" className="btn small" disabled={busy} onClick={() => go(true)}><Icon name="play" size={12} /> {t('Allow Once')}</button>
+        <button type="button" className="btn small primary" disabled={busy} onClick={() => go(false)}><Icon name="x" size={12} /> {t('Deny')}</button>
+      </div>
+    </article>
+  )
+}
+
+// A change to files with a draft: what it changes, who asked, why it waits for you whoever asks, and
+// its diff; made already, Undo.
+// (whole: the whole diff, fetched when the record's is its start: a change waiting is approved only
+// once all of it is shown.)
+function WriteOf({ it, onUndo, busy, whole = null, onMore = null }) {
+  const w = it.write
+  if (!w) return null
+  const files = (w.files || []).map((f) => `${f.path}${f.op === 'add' ? ` (${t('new')})` : f.op === 'remove' ? ` (${t('deleted')})` : f.op === 'move' ? ` (${t('moved from {from}', { from: f.from })})` : ''}`)
+  const line = w.state === 'waiting' ? t('It changed {files} in its copy. Approve it, and Bridge AI makes the change, then sends the reply.', { files: files.join(', ') })
+    : w.state === 'applied' ? t('It changed {files}, without asking you.', { files: files.join(', ') })
+      : w.state === 'refused' ? (w.guard ? t('The folder guard didn\'t run, so nothing was changed: {why}', { why: guardWhy(w.guard) }) : t('Its change was refused, so nothing was changed.'))
+        : w.state === 'undone' ? t('Its change was undone.') : w.state === 'failed' ? t('Its change couldn\'t be made: {why}', { why: w.error || '' }) : null
+  return (
+    <div className="ny-write" data-setting="ny-write">
+      {line && <p className="muted small ny-from"><Icon name="file" size={11} /> {line}</p>}
+      {(w.held || []).map((h) => <p key={h.why} className="muted small ny-from ny-held"><Icon name="alert" size={11} /> {t('It waits for you whoever asks: {why}', { why: h.said })}</p>)}
+      {(w.refused || []).slice(0, 5).map((r, i) => <p key={i} className="muted small ny-from ny-held"><Icon name="alert" size={11} /> {r.file}: {r.said}</p>)}
+      {w.diff && <pre className="ny-change" aria-label={t('The diff')}>{whole ?? w.diff}</pre>}
+      {w.diffCut && whole == null && onMore && <div className="ny-acts"><button type="button" className="btn small" onClick={onMore}><Icon name="file" size={12} /> {t('Show the whole diff')}</button></div>}
+      {w.state === 'applied' && onUndo && <div className="ny-acts"><button type="button" className="btn small" disabled={busy} onClick={onUndo}><Icon name="undo" size={12} /> {t('Undo the change')}</button></div>}
+    </div>
+  )
 }
 
 // Continue or Stop, for a run at its time limit (server/frontdesk.js limitAct): on the computer it
@@ -438,6 +505,14 @@ function DraftItem({ it, onDone, setNote }) {
   const bot = it.bot?.name || t('Your bot')
   const change = it.change || null
   const approve = change?.mode === 'suggest' && !change.pr?.url
+  // (A change to files waiting on you: Send approves that change, named by its hash, and Discard denies
+  // it. One whose diff here is cut short has the whole of it fetched, and is approved only once it's
+  // shown.)
+  const writes = it.write?.state === 'waiting'
+  const [whole, setWhole] = useState(null)
+  const more = () => onDevice(null, `/bots/${encodeURIComponent(it.bot?.id || '')}/writes/${encodeURIComponent(it.write.id)}`).then((r) => setWhole(r.write?.diff ?? ''), (e) => setProblem(e.message))
+  useEffect(() => { if (writes && it.write.diffCut && whole == null) more() }, [writes, it.write?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  const unseen = writes && it.write.diffCut && whole == null
   const from = it.needsOwner ? t('Nothing could answer it: {why}. {name} was told it\'s passed on to you.', { why: it.why || '', name: who })
     : r?.to === 'agent' ? t('Answered by a read-only copy of {agent}\'s conversation.', { agent: r.name })
       : r?.to === 'throwaway' ? t('{bot} answered from what it knows: it reads no folders.', { bot })
@@ -446,17 +521,25 @@ function DraftItem({ it, onDone, setNote }) {
     setBusy(true)
     setProblem(null)
     try {
-      const out = await onDevice(null, `/bots/questions/${encodeURIComponent(it.id)}`, { send, text })
+      const out = await onDevice(null, `/bots/questions/${encodeURIComponent(it.id)}`, { send, text, ...(writes ? { write: { id: it.write.id, hash: it.write.hash } } : {}) })
       if (out.item?.state === 'draft') { setProblem(out.item.problem || null); return }
       onDone(it)
-      setNote({ text: !send ? t('Discarded: nothing sent') : out.item?.state === 'sent' ? t('Sent to {name} in Slack', { name: who }) : t('Sending to Slack: {why}', { why: out.item?.problem || t('in a moment') }) })
+      setNote({ text: writes ? (send ? t('Approved: the change is made, and the reply is on its way to {name}', { name: who }) : t('Denied: nothing was changed, and {name} is told', { name: who })) : !send ? t('Discarded: nothing sent') : out.item?.state === 'sent' ? t('Sent to {name} in Slack', { name: who }) : t('Sending to Slack: {why}', { why: out.item?.problem || t('in a moment') }) })
+    } catch (e) { setProblem(e.message) } finally { setBusy(false) }
+  }
+  const undo = async () => {
+    setBusy(true)
+    setProblem(null)
+    try {
+      await onDevice(null, `/bots/${encodeURIComponent(it.bot?.id || '')}/writes/${encodeURIComponent(it.write.id)}/undo`, {})
+      setNote({ text: t('Undone: the files are back as they were.') })
     } catch (e) { setProblem(e.message) } finally { setBusy(false) }
   }
   return (
     <article className={`ny-item t-slack ${it.needsOwner ? 'yours' : ''}`} aria-label={t('{name} asked {where}', { name: who, where })}>
       <div className="ny-top">
         <Icon name="chat" size={12} />
-        <span className="ny-kind">{it.needsOwner ? t('Needs your reply') : t('Answer to check')}</span>
+        <span className="ny-kind">{it.needsOwner ? t('Needs your reply') : writes ? t('A change to approve') : t('Answer to check')}</span>
         <span className="ny-age" title={new Date(it.at).toLocaleString()}>{ago(it.at)}</span>
         <span className="ny-grow" />
         <span className="ny-device here" title={t('Through {bot} (Settings › Bots)', { bot })}><Icon name="chat" size={11} />{bot}</span>
@@ -467,6 +550,12 @@ function DraftItem({ it, onDone, setNote }) {
       <p className="muted small ny-from">{from}</p>
       {it.warn && <p className="muted small ny-from"><Icon name="info" size={11} /> {it.warn}</p>}
       {it.files?.length > 0 && <p className="muted small ny-from"><Icon name="paperclip" size={11} /> {t('With {files}', { files: it.files.map((f) => `${f.name}${f.size != null ? ` (${sizeOf(f.size)})` : ''}`).join(', ') })}</p>}
+      {it.files?.some((f) => f.from && f.kept) && (
+        <div className="ny-attached" data-setting="ny-attached">
+          <p className="muted small">{t('From its folders, to look at before it goes:')}</p>
+          <ul className="bf-list">{it.files.filter((f) => f.from && f.kept).map((f) => <FileRow key={f.kept} bot={it.bot?.id} f={{ name: f.name, size: f.size, path: f.kept, from: f.from }} send={false} />)}</ul>
+        </div>
+      )}
       {change && (
         <>
           <p className="muted small ny-from"><Icon name="branch" size={11} /> {change.pr?.url ? t('A draft pull request opened on {branch}:', { branch: change.branch || '' }) : approve ? t('It made a change on {branch}: approve the diff, and a draft pull request opens.', { branch: change.branch || '' }) : t('It made a change on {branch}.', { branch: change.branch || '' })}{change.pr?.url && <> <a href={change.pr.url} target="_blank" rel="noreferrer">{change.pr.url}</a></>}</p>
@@ -474,12 +563,13 @@ function DraftItem({ it, onDone, setNote }) {
           {change.diff && <pre className="ny-change" aria-label={t('The diff')}>{change.diff}</pre>}
         </>
       )}
+      <WriteOf it={it} onUndo={undo} busy={busy} whole={whole} onMore={more} />
       {it.ownerAsked && <p className="muted small ny-from"><Icon name="chat" size={11} /> {t('Also in your Slack direct messages: answer it there or here.')}</p>}
       <textarea className="ny-draft" value={text} onChange={(e) => setText(e.target.value)} rows={Math.min(8, Math.max(3, text.split('\n').length + 1))} placeholder={t('Write the reply…')} aria-label={t('Reply to {name}', { name: who })} disabled={busy || limit.busy} />
       {(problem || limit.problem) && <p className="ny-problem" role="alert"><Icon name="alert" size={12} />{problem || limit.problem}</p>}
       <div className="ny-acts">
-        <button type="button" className="btn small primary" disabled={busy || limit.busy || !text.trim()} onClick={() => decide(true)}><Icon name={approve ? 'branch' : 'send'} size={12} /> {busy ? t('Sending…') : approve ? t('Approve and open a pull request') : t('Send')}</button>
-        <button type="button" className="btn small" disabled={busy || limit.busy} onClick={() => decide(false)}>{t('Discard')}</button>
+        <button type="button" className="btn small primary" disabled={busy || limit.busy || !text.trim() || unseen} onClick={() => decide(true)}><Icon name={approve ? 'branch' : writes ? 'check' : 'send'} size={12} /> {busy ? t('Sending…') : approve ? t('Approve and open a pull request') : writes ? t('Approve and Send') : t('Send')}</button>
+        <button type="button" className="btn small" disabled={busy || limit.busy} onClick={() => decide(false)}>{writes ? t('Deny') : t('Discard')}</button>
       </div>
       {it.limit?.phase === 'stopped' && (
         <div className="ny-limit">
@@ -499,6 +589,42 @@ function DraftItem({ it, onDone, setNote }) {
 // Devices May Connect, server/remote.js): until then it can't use this computer at all. Allow lets
 // it in; Keep Out leaves it out, and not New any more (Settings › Remote Access changes either).
 // Only in this computer's own window, where it's changed.
+// A bot that stopped reading one of its folders, which leads somewhere else now than when it was
+// picked (a link changed): Keep reading it where it leads now, or Stop reading it.
+export function FolderItem({ it, onDone, setNote }) {
+  const [busy, setBusy] = useState(false)
+  const [problem, setProblem] = useState(null)
+  const bot = it.bot?.name || t('Your bot')
+  const decide = async (keep) => {
+    setBusy(true)
+    setProblem(null)
+    try {
+      await onDevice(null, `/bots/${encodeURIComponent(it.bot.id)}/settings`, keep ? { keepFolder: it.folder, keepAt: it.leadsTo } : { stopFolder: it.folder })
+      onDone(it)
+      setNote({ text: keep ? t('{bot} reads {folder} again, where it leads now', { bot, folder: it.folder }) : t('{bot} doesn\'t read {folder} any more', { bot, folder: it.folder }) })
+    } catch (e) { setProblem(e.message) } finally { setBusy(false) }
+  }
+  return (
+    <article className="ny-item t-folder" data-folder={it.folder} aria-label={t('{bot} stopped reading {folder}', { bot, folder: it.folder })}>
+      <div className="ny-top">
+        <Icon name="folder" size={12} />
+        <span className="ny-kind">{t('Folder not read')}</span>
+        {it.since && <span className="ny-age" title={new Date(it.since).toLocaleString()}>{ago(it.since)}</span>}
+        <span className="ny-grow" />
+        <span className="ny-device here" title={t('Through {bot} (Settings › Bots)', { bot })}><Icon name="chat" size={11} />{bot}</span>
+      </div>
+      <p className="ny-text">{it.was
+        ? t('{bot} stopped reading {folder}: it leads to {now} now, not {was} as when you picked it. It reads it again only if you say so.', { bot, folder: it.folder, now: it.leadsTo, was: it.was })
+        : t('{bot} stopped reading {folder}: it leads to {now}, not where its name says. It reads it only if you say so.', { bot, folder: it.folder, now: it.leadsTo })}</p>
+      {problem && <p className="ny-problem" role="alert"><Icon name="alert" size={12} />{problem}</p>}
+      <div className="ny-acts">
+        <button type="button" className="btn small primary" disabled={busy} onClick={() => decide(true)}><Icon name="check" size={12} /> {t('Keep reading it')}</button>
+        <button type="button" className="btn small" disabled={busy} onClick={() => decide(false)}>{t('Stop reading it')}</button>
+      </div>
+    </article>
+  )
+}
+
 export function LetInItem({ it, onDone, setNote }) {
   const [busy, setBusy] = useState(false)
   const [problem, setProblem] = useState(null)
@@ -596,7 +722,8 @@ export function NeedsYouPanel({ data, refresh, phone = false, focus = null, onCl
   const outside = (data?.outside || []).filter((x) => !gone[`outside|${x.id}`])
   const slack = (data?.slack || []).filter((x) => !gone[`slack|${x.id}`])
   const letIn = (data?.letIn || []).filter((x) => !gone[`letin|${x.id}`])
-  const waiting = all.filter((i) => isAsk(i) && i.online && !isQuiet(i)).length + outside.length + slack.length + letIn.length
+  const folders = (data?.folders || []).filter((x) => !gone[`folder|${x.id}`])
+  const waiting = all.filter((i) => isAsk(i) && i.online && !isQuiet(i)).length + outside.length + slack.length + letIn.length + folders.length
   const list = (rows) => rows.map((it) => <NeedsItem key={uid(it)} it={it} focused={uid(it) === focusId} top={top.has(uid(it))} onOpen={onOpen} onGone={onGone} setNote={setNote} />)
   // Clear all that have gone quiet, each on its own device: off the list at once, and back with a
   // note for any its device couldn't clear.
@@ -647,6 +774,12 @@ export function NeedsYouPanel({ data, refresh, phone = false, focus = null, onCl
             {letIn.map((x) => <LetInItem key={x.id} it={x} setNote={setNote} onDone={(o) => { setGone((g) => ({ ...g, [`letin|${o.id}`]: Date.now() })); for (const ms of [0, 1500]) setTimeout(() => refresh(''), ms) }} />)}
           </section>
         )}
+        {folders.length > 0 && (
+          <section className="ny-group" aria-label={t('Folders Not Read')}>
+            <h3>{t('Folders Not Read')}<span className="fcount">{folders.length}</span></h3>
+            {folders.map((x) => <FolderItem key={x.id} it={x} setNote={setNote} onDone={(o) => { setGone((g) => ({ ...g, [`folder|${o.id}`]: Date.now() })); for (const ms of [0, 1500]) setTimeout(() => refresh(''), ms) }} />)}
+          </section>
+        )}
         {slack.length > 0 && (
           <section className="ny-group" aria-label={t('From Slack')}>
             <h3>{t('From Slack')}<span className="fcount">{slack.length}</span></h3>
@@ -659,7 +792,7 @@ export function NeedsYouPanel({ data, refresh, phone = false, focus = null, onCl
             {outside.map((x) => <OutsideItem key={x.id} it={x} setNote={setNote} onDone={(o) => { setGone((g) => ({ ...g, [`outside|${o.id}`]: Date.now() })); for (const ms of [0, 1500]) setTimeout(() => refresh(''), ms) }} />)}
           </section>
         )}
-        {data && !items.length && !outside.length && !slack.length && !letIn.length && (
+        {data && !items.length && !outside.length && !slack.length && !letIn.length && !folders.length && (
           <div className="ny-empty"><Icon name="check" size={20} /><p>{t('Nothing needs you right now.')}</p><small className="muted">{quiet.length ? t('Only what has been quiet for a while, folded below.') : t('Questions, permissions, failed runs and finished work from all your devices show here.')}</small></div>
         )}
         {by === 'urgent'

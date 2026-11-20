@@ -3,3 +3,7 @@
 .bf-file { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; min-width: 0; }
 .bf-name { font-weight: 500; overflow-wrap: anywhere; min-width: 0; }
 .bf-made { margin: 4px 0 2px; grid-column: 1 / -1; }
+.bf-from { overflow-wrap: anywhere; min-width: 0; }
+@media (max-width: 760px) {
+  .bf-file .link-btn { min-height: 40px; min-width: 40px; }
+}

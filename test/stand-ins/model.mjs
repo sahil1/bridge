@@ -64,6 +64,8 @@
 //   and a bot's question asked of a model with Bridge AI's tools: what it reads with them (botAnswer).
 //   AI Assist routing a question on a shared connection to one of its bots ("The bots (an id…"): the
 //   one bot whose name or description shares a word with the question, else none (routeBot below).
+//   A request to a bot that changes files, screened before it starts: one with [odd] in it held for
+//   its owner, one with [garbled] answered in words rather than the object asked for, any other fine.
 //   Anything else: "echo: <the last thing said>".
 //   A key of sk-bad is turned down (HTTP 401), as a provider would.
 import http from 'node:http'
@@ -217,10 +219,12 @@ function routeBot(first) {
 }
 
 // A bot's question, answered with Bridge AI's tools (botanswer.js runChat), as the question asks:
-// [read <path>] reads that file, [mcp <server> <tool>] calls that tool when it was offered, else it
-// lists its folder and reads README.md; then [answer <text>] is its answer, or what it read ("It says:
-// <the file's first line that isn't a heading>", or why it couldn't), or what the tool said. [change]
-// with the brief's CHANGE NEEDED: CHANGE NEEDED. [noanswer]: NO ANSWER.
+// [read <path>] reads that file, [mcp <server> <tool>] calls that tool when it was offered, [attach
+// <path>] calls attach_file with that path when it was offered, else it lists its folder and reads
+// README.md; then [answer <text>] is its answer, or what it read ("It says: <the file's first line
+// that isn't a heading>", or why it couldn't), or what the tool said. [attach-line <path>] ends it
+// with a line ATTACH: <path>. [change] with the brief's CHANGE NEEDED: CHANGE NEEDED. [noanswer]: NO
+// ANSWER.
 function botAnswer(b, first) {
   const m = b.messages || []
   const q = (/----- question from.*? -----\n([\s\S]*?)\n----- end of question -----/.exec(first) || [])[1] || ''
@@ -232,6 +236,7 @@ function botAnswer(b, first) {
     const read = /\[read ([^\]]+)\]/.exec(q)
     if (read) calls.push(['read_file', { path: read[1] }])
     for (const mm of q.matchAll(/\[mcp ([\w.-]+) ([\w.-]+)\]/g)) if (offered.includes(`mcp__${mm[1]}__${mm[2]}`)) calls.push([`mcp__${mm[1]}__${mm[2]}`, {}])
+    for (const mm of q.matchAll(/\[attach ([^\]]+)\]/g)) if (offered.includes('attach_file')) calls.push(['attach_file', { path: mm[1].trim() }])
     if (!calls.length && !/\[(noanswer|change)\]/.test(q)) calls.push(['list_files', {}], ['read_file', { path: 'README.md' }])
     if (calls.length) return { choices: [{ finish_reason: 'tool_calls', message: { role: 'assistant', content: null, tool_calls: calls.map(([name, args], i) => ({ id: `call_${i}`, type: 'function', function: { name, arguments: JSON.stringify(args) } })) } }] }
   }
@@ -240,7 +245,8 @@ function botAnswer(b, first) {
   const a = /\[answer ([^\]]+)\]/.exec(q)
   const refused = [...q.matchAll(/\[mcp ([\w.-]+) ([\w.-]+)\]/g)].filter((mm) => !offered.includes(`mcp__${mm[1]}__${mm[2]}`)).map((mm) => `${mm[1]}'s ${mm[2]} wasn't offered to me.`)
   const said = results.map((r) => (/^\d+\t/.test(r) ? `It says: ${(r.split('\n').map((l) => l.replace(/^\d+\t/, '')).find((l) => l.trim() && !l.startsWith('#')) || '').trim()}` : r)).filter(Boolean)
-  return say(a ? a[1] : [...said, ...refused].join(' ') || 'Here is what I found.')
+  const lines = [...q.matchAll(/\[attach-line ([^\]]+)\]/g)].map((mm) => `ATTACH: ${mm[1].trim()}`)
+  return say([a ? a[1] : [...said, ...refused].join(' ') || 'Here is what I found.', ...lines].join('\n'))
 }
 
 function answer(b) {
@@ -249,6 +255,9 @@ function answer(b) {
   const first = words(m.find((x) => x.role === 'user')?.content)
   if (/^Known folders/.test(first) && /\nWhat .+ said:\n-----\n/.test(first)) return say(botSetup(first))
   if (/^The bots \(an id, its name, and what it answers\):/.test(first)) return say(routeBot(first))
+  // A request to a bot that changes files, screened before it starts (server/botwrite.js screenWith):
+  // one that says [odd] is for its owner to look at first; any other is fine.
+  if (/^Screen this request, between the lines:/.test(first)) return say(/\[odd\]/i.test(first) ? '{"ok": false, "why": "it asks for something odd"}' : /\[garbled\]/i.test(first) ? 'Sure, that looks fine to me.' : '{"ok": true}')
   if (b.tools?.length && /----- question from/.test(first)) return botAnswer(b, first)
   if (/^sonar/.test(b.model || '')) {
     const q = /: ([^\n]*)$/.exec(last)?.[1] || last

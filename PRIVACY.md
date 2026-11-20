@@ -234,9 +234,22 @@ What else a bot sends to Slack, and keeps:
   that it answers from Bridge AI on your computer, and whether it's online, paused or offline.
 - A file attached to a question is downloaded from the address Slack gives for it (on
   `files.slack.com`), with the bot's token, into `~/.bridge-ai/front-desk/files/` for its agent to
-  read, and deleted once the question is done. A file its answer sends back (a chart, a table), and a
-  long answer as a file, go up to the address Slack gives for each upload; until they're sent they're
-  kept in `~/.bridge-ai/front-desk/out/`.
+  read, and deleted once the question is done. A file its answer sends back (a chart or a table it
+  made, or a file in the folders it reads, such as a PDF, as it is), and a long answer as a file, go
+  up to the address Slack gives for each upload; until they're sent they're kept in
+  `~/.bridge-ai/front-desk/out/`. A file from its folders goes only from the folders you gave it (and
+  only while each still leads where it did when you picked it: one that leads somewhere else since,
+  through a link, isn't read until you say Keep reading it), never a hidden one, one reached through
+  a link, one whose name says it holds keys, passwords or credentials, or one that looks like it
+  holds a key, a password or a token. It sends documents and pictures (PDFs, Word, Excel and PowerPoint files,
+  pictures, CSV, text and Markdown); data and config files (JSON, YAML, XML, HTML) only once you turn
+  on "Data and config files too" (Settings › Bots). Whoever gets the answer gets the whole file, so
+  an answer with a file from its folders waits for you in Needs You, which says where the file is
+  from, even when it answers without asking, unless you change Send Files From Its Folders Without
+  Asking: to people you named, in a direct message with them; or to everyone who may ask, in a direct
+  message or a private channel where everyone may ask it (Slack is asked who's in it: no guest, no
+  one from another organization), since everyone in that channel gets the file. Never without asking
+  in a public channel.
 - In a channel you pick for it to answer without a mention, Bridge AI keeps the top-level messages
   of the people who may ask it; everyone else's are dropped as they arrive, as in any channel.
 
@@ -261,6 +274,17 @@ branch) to the repository's own remote, and opens a draft pull request there wit
 (`gh`) sign-in: the branch, the commit and the pull request (with the question and the answer in its
 description) are then on GitHub, as any pull request you open is. It never merges and never pushes to
 your default branch. With Suggest, none of that happens until you approve the diff.
+
+If you let a bot edit files in its folders (Settings › Bots › Changes › Edits Files in Its Folders),
+its agent edits only a copy of the folders you picked for it, in `~/.bridge-ai/front-desk/writes/`
+(deleted when it's done), with no commands and no network. Bridge AI takes what changed there and
+makes it in your folders itself, on your computer: at once when everyone whose words it worked from
+is you or someone you listed, and otherwise once you approve it, from Needs You or your direct
+messages. What waits for you is shown there with its diff, all of it before you approve; where it
+was asked, only how many files it changes is said until then. Each change, and the files before and after it, are kept with the bot's
+record in `~/.bridge-ai/bots/<bot>/writes/`, readable by you only, for Undo, and deleted with its
+record. A request to such a bot may be read first by AI Assist's model, if you have one, to say
+whether it looks odd; it goes nowhere else for that.
 
 A bot's file (Settings › Bots › Export, or `bridge-ai bots export`) holds its instructions, the
 settings you gave it (with the Slack names and ids of the people who may ask) and what it remembers,

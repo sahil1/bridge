@@ -302,6 +302,22 @@
 .sb-since { flex: none; font: 600 12px var(--font-mono); color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .sb-live p { margin: 0; overflow-wrap: anywhere; }
 
+/* ---------- Edits Files in Its Folders (Changes), and Hands Changes To ---------- */
+.sb-edits { display: grid; gap: 8px; margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--line-2); min-width: 0; }
+.sb-edits h5 { margin: 6px 0 0; font-size: 12.5px; font-weight: 600; color: var(--ink); }
+.sb-edits > p { margin: 0; }
+.sb-held { margin: 0; padding-left: 18px; display: grid; gap: 3px; color: var(--ink-2); }
+.sb-writes { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.sb-write { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: var(--pane); min-width: 0; }
+.sb-write > .icon { flex: none; color: var(--ink-3); }
+.sb-write.s-applied > .icon { color: var(--good); }
+.sb-write.s-waiting > .icon { color: var(--warning); }
+.sb-write-text { flex: 1; min-width: 0; display: grid; gap: 2px; overflow-wrap: anywhere; }
+.sb-write .btn { flex: none; display: inline-flex; align-items: center; gap: 5px; min-height: 30px; }
+.sb-write-why, .sb-write-diff { list-style: none; margin: -2px 0 0; padding: 0 10px; overflow-wrap: anywhere; }
+.sb-write-diff summary { cursor: pointer; display: flex; align-items: center; gap: 4px; min-height: 24px; color: var(--ink-2); }
+.sb-writes-log { margin-top: 8px; }
+
 /* ---------- Its MCP servers (Set Up) ---------- */
 .sb-mcp { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .sb-mcp > li { display: grid; gap: 4px; padding: 8px 10px; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: var(--pane); min-width: 0; }
@@ -364,3 +380,11 @@
 .bc-via > .icon, .bc-via > svg { flex: none; margin-top: 2px; }
 .bp-conns .bp-main { max-width: 860px; }
 .cn-part > p, .cn-card > p { margin: 0; }
+/* Files from its folders: whether they go without asking, and which kinds. */
+.sb-attach { display: grid; gap: 6px; margin: 10px 0 6px; }
+.sb-attach > label.st-row { display: grid; gap: 6px; align-items: start; }
+.sb-attach select.st-input { max-width: 100%; }
+.sb-attach > p { margin: 0; }
+@media (max-width: 760px) {
+  .sb-keep-folder { min-height: 40px; min-width: 40px; }
+}

@@ -35,6 +35,8 @@
 //                      the thread's replies), and sent as events to the apps connected
 //   POST /_test/edit { channel, ts, text }, /_test/delete { channel, ts }   a message changed, gone
 //   POST /_test/pin { channel, ts }    a message pinned
+//   POST /_test/channel { channel, members?, shared? }   a channel's members set; shared with another company
+//                      (or no longer), told to the apps in it (channel_shared, channel_unshared)
 //   POST /_test/scopes { app, scopes } the scopes an app's token has (an app made from an older
 //                      manifest); without scopes, every one again
 //   POST /_test/drop   every connection closes at once (a network that changed)
@@ -61,9 +63,10 @@
 //                      thread_ts }], views: [{ app, kind: 'open' | 'publish', user, trigger, view }],
 //                      statuses: [{ app, method, channel, thread, status }], streams: [{ app,
 //                      channel, thread, ts, text, stopped, calls, username? }], files: [{ id, name, size,
-//                      channel, thread, app, title, content }], dms: [{ app, users, channel }] }
+//                      channel, thread, app, title, content, sha256 }], dms: [{ app, users, channel }] }
 import http from 'node:http'
 import fs from 'node:fs'
+import crypto from 'node:crypto'
 import { WebSocketServer } from 'ws'
 
 const [port, log] = process.argv.slice(2)
@@ -119,7 +122,10 @@ let clock = Date.now() / 1000
 const ts = () => { clock = Math.max(clock + 0.001, Date.now() / 1000); return clock.toFixed(6) }
 const note = (o) => { if (log) fs.appendFileSync(log, `${JSON.stringify(o)}\n`) }
 const find = (channel, at) => history[channel]?.find((m) => m.ts === at) || Object.entries(replies).filter(([k]) => k.startsWith(`${channel}:`)).flatMap(([, l]) => l).find((m) => m.ts === at) || null
-const strip = ({ apps, ...c }) => c // eslint-disable-line no-unused-vars
+const strip = ({ apps, members, ...c }) => c // eslint-disable-line no-unused-vars
+// Who's in each channel (conversations.members): #launch everyone, #secret-project Dana, Eve, you and
+// the first app's bot; a direct message, its person and the app's bot (or as /_test/channel set).
+const membersOf = (c) => c.members || (c.is_im ? [c.user, c.apps.includes('A2') ? 'UBOT2' : 'UBOT'] : c.id === 'C0PRIV' ? ['U0DANA', 'U0EVE', 'U0OWNER', 'UBOT'] : [...PEOPLE.filter((p) => !p.deleted && !p.is_bot).map((p) => p.id), 'UBOT', 'UBOT2'])
 const textLike = (name, type) => /^text\/|json|csv|svg|xml|markdown/i.test(String(type || '')) || /\.(txt|md|csv|json|svg|xml|html?|tsv|ya?ml|js|ts|py)$/i.test(String(name || ''))
 // A message in a conversation: at its top, or in a thread (the thread made with its first message).
 const put = (channel, m) => {
@@ -241,6 +247,18 @@ const server = http.createServer(async (req, res) => {
       const s = streams.filter((x) => x.app === app && x.channel === j.channel && x.thread === j.thread && !x.stopped).map((x) => x.ts)
       return answer(res, 200, { ok: true, envelope_id: send(app, { type: 'agent_session_stopped', channel: j.channel, thread_ts: j.thread, user: j.user, streaming_message_ts: s, event_ts: ts() }), delivered: live(app) })
     }
+    // A channel's members set, or shared with another company (or no longer): channel_shared and
+    // channel_unshared to the apps in it, as Slack sends them.
+    if (what === 'channel') {
+      const c = CHANNELS[j.channel]
+      if (!c) return answer(res, 404, { ok: false })
+      if (Array.isArray(j.members)) c.members = j.members
+      if (j.shared !== undefined && !!c.is_ext_shared !== !!j.shared) {
+        c.is_ext_shared = !!j.shared
+        for (const x of c.apps) send(x, { type: j.shared ? 'channel_shared' : 'channel_unshared', channel: c.id, connected_team_id: 'T0OTHER', event_ts: ts() })
+      }
+      return answer(res, 200, { ok: true })
+    }
     if (what === 'pin') { const m = find(j.channel, j.ts); if (m) pins[j.channel].push({ type: 'message', channel: j.channel, message: m }); return answer(res, 200, { ok: !!m }) }
     if (what === 'scopes') { APPS[j.app || 'A1'].scopes = Array.isArray(j.scopes) ? j.scopes : ALL; return answer(res, 200, { ok: true }) }
     if (what === 'drop') { for (const s of sockets) s.terminate(); return answer(res, 200, { ok: true }) }
@@ -306,6 +324,7 @@ const server = http.createServer(async (req, res) => {
     return ok({ channels: Object.values(CHANNELS).filter((c) => c.apps.includes(a) && types.includes(kind(c))).map(strip), response_metadata: { next_cursor: '' } })
   }
   if (method === 'conversations.info') return mine(params.channel) ? ok({ channel: strip(CHANNELS[params.channel]) }) : no('channel_not_found')
+  if (method === 'conversations.members') return mine(params.channel) ? ok({ members: membersOf(CHANNELS[params.channel]), response_metadata: { next_cursor: '' } }) : no('channel_not_found')
   if (method === 'conversations.open') {
     const lacks = needs('im:write')
     if (lacks) return lacks
@@ -452,7 +471,7 @@ const server = http.createServer(async (req, res) => {
       const u = uploads[f.id]
       if (!u || u.app !== a || !u.bytes) return no('file_not_found')
       attachments[f.id] = { name: u.name, type: 'application/octet-stream', bytes: u.bytes }
-      const shared = { id: f.id, name: u.name, title: f.title || u.name, size: u.bytes.length, channel: params.channel_id || null, thread: params.thread_ts || null, app: a, content: textLike(u.name) ? u.bytes.toString('utf8').slice(0, 20000) : null }
+      const shared = { id: f.id, name: u.name, title: f.title || u.name, size: u.bytes.length, channel: params.channel_id || null, thread: params.thread_ts || null, app: a, content: textLike(u.name) ? u.bytes.toString('utf8').slice(0, 20000) : null, sha256: crypto.createHash('sha256').update(u.bytes).digest('hex') }
       files.push(shared)
       done.push({ id: f.id, title: shared.title })
       if (params.channel_id) put(params.channel_id, { ...botMsg(params.initial_comment || ''), subtype: 'file_share', ...(params.thread_ts ? { thread_ts: params.thread_ts } : {}), files: [{ id: f.id, name: u.name, title: shared.title, size: shared.size }] })

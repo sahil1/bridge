@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'
 import CopyButton from '../CopyButton.jsx'
 import { api, apiUrl, BASE, onThisComputer, viaRelay } from '../../api.js'
@@ -8,7 +8,7 @@ import { ago } from '../Machines.jsx'
 import AiAssist from '../AiAssist.jsx'
 import { Connections, BotReach } from '../bots/Connections.jsx'
 import Access, { AccessLine } from '../bots/Access.jsx'
-import { accessSaid } from '../bots/access.js'
+import { accessSaid, guardWhy } from '../bots/access.js'
 import Conversations, { AnswerIn } from '../bots/Conversations.jsx'
 import BotFiles, { MadeFiles } from '../bots/BotFiles.jsx'
 import { t } from '../../i18n/index.js'
@@ -168,7 +168,9 @@ function Save({ href, name, className, children }) {
 // keeps out (Bridge AI's own folder, your keys, what's hidden) isn't listed, and the server checks
 // what's picked again.
 const relOf = (p) => String(p || '').replace(/^~[\\/]?/, '').replace(/\\/g, '/')
-function Browse({ files = false, tops = null, onPick, onClose }) {
+// (label and button: what it's for and its button's words, for another use than Reads From: the
+// folders a bot changes files in.)
+function Browse({ files = false, tops = null, onPick, onClose, label = null, button = null }) {
   const roots = tops ? tops.map(relOf) : null
   const [at, setAt] = useState(roots ? (roots.length === 1 ? roots[0] : null) : '')
   const st = useFolder(BASE, 'home', at ?? '', { on: at != null })
@@ -179,12 +181,12 @@ function Browse({ files = false, tops = null, onPick, onClose }) {
   const up = at == null ? null : roots ? (!roots.includes(at) ? parent : roots.length > 1 ? () => setAt(null) : null) : at ? parent : null
   const pick = async (rel) => { setBusy(true); try { await onPick(`~/${rel}`) } finally { setBusy(false) } }
   return (
-    <div className="sb-browse" role="region" aria-label={files ? t('Pick its instructions file') : t('Pick a folder for it to read from')}>
+    <div className="sb-browse" role="region" aria-label={label || (files ? t('Pick its instructions file') : t('Pick a folder for it to read from'))}>
       <div className="sb-browse-head">
         {up && <button type="button" className="icon-btn" onClick={up} aria-label={t('Up to the folder it\'s in')}><Icon name="up" size={13} /></button>}
         <code className="sb-browse-at">{at == null ? '' : at ? `~/${at}` : '~'}</code>
         <span className="sb-grow" />
-        {!files && at != null && <button type="button" className="btn small primary" disabled={busy || !at} onClick={() => pick(at)}><Icon name="plus" size={12} /> {t('Read from this folder')}</button>}
+        {!files && at != null && <button type="button" className="btn small primary" disabled={busy || !at} onClick={() => pick(at)}><Icon name="plus" size={12} /> {button || t('Read from this folder')}</button>}
         <button type="button" className="icon-btn" onClick={onClose} aria-label={t('Close')}><Icon name="x" size={12} /></button>
       </div>
       {at == null && (
@@ -207,7 +209,7 @@ function Browse({ files = false, tops = null, onPick, onClose }) {
           </ul>
         )
         : <p className="muted small">{files ? t('No files here: open a folder, or go up.') : t('No folders in it.')}</p>)}
-      {!files && at === '' && <p className="muted small">{t('Open the folder it should read from, then Read from this folder. Your whole home folder can\'t be picked.')}</p>}
+      {!files && !button && at === '' && <p className="muted small">{t('Open the folder it should read from, then Read from this folder. Your whole home folder can\'t be picked.')}</p>}
     </div>
   )
 }
@@ -811,12 +813,15 @@ export function Askers({ d, save }) {
         </label>
       </div>
       <p className="muted small">{t('Guests and people from other companies (in channels shared through Slack Connect) are never answered, either way.')} {t('Nor, in Discord, anyone outside its server or still to pass its screening, or, in Teams, guests and people from other organizations.')}</p>
-      {everyone
-        ? <p className="small"><b>{t('People you name')}</b> <span className="muted">{t('Anyone in its channels can ask; only the people named here, and you, can ask it for a change.')}</span></p>
-        : s.changes && s.changes !== 'none' && <p className="muted small">{t('The people named here, and you, can also ask it for a change.')}</p>}
+      {s.changes === 'edit'
+        ? <p className="muted small">{t('Anyone who may ask can ask it to change files: it waits for you to approve, unless they\'re under May Change Files Without Asking Me (Changes).')}</p>
+        : everyone
+          ? <p className="small"><b>{t('People you name')}</b> <span className="muted">{t('Anyone in its channels can ask; only the people named here, and you, can ask it for a change.')}</span></p>
+          : s.changes && s.changes !== 'none' && <p className="muted small">{t('The people named here, and you, can also ask it for a change.')}</p>}
+      {s.changes === 'edit' && everyone && <p className="small"><b>{t('People you name')}</b></p>}
       {askers.length > 0
         ? <Chips list={askers} onDrop={drop} dropLabel={(a) => t('Remove {name}', { name: a.name || a.id })} />
-        : <p className="small sb-none">{everyone ? t('Nobody named: only you can ask it for a change.') : t('Nobody yet: until you add someone, every question gets what anyone else gets.')}</p>}
+        : <p className="small sb-none">{everyone ? (s.changes === 'edit' ? t('Nobody named yet.') : t('Nobody named: only you can ask it for a change.')) : t('Nobody yet: until you add someone, every question gets what anyone else gets.')}</p>}
       {connected && <PeoplePicker people={people} skip={askers.map((a) => a.id)} onPick={add} label={t('Add someone who can ask')} placeholder={t('Add someone from {team}', { team: d.team?.name || t('your workspace') })} />}
       {!connected && <p className="muted small">{t('Connect the app first to pick from your workspace\'s people.')}</p>}
       {error && <p className="error-text small">{t('Couldn\'t list your workspace\'s people: {error}', { error })}</p>}
@@ -903,6 +908,7 @@ export function ReadsFrom({ d, save }) {
               <div className="sb-folder-text">
                 <code title={f.path}>{f.shown}</code>
                 {!f.ok && <span className="error-text small">{f.problem}</span>}
+                {f.confirm && <button type="button" className="link-btn small sb-keep-folder" onClick={() => save({ keepFolder: f.shown, ...(f.leadsTo ? { keepAt: f.leadsTo } : {}) })}>{t('Keep reading it')}</button>}
               </div>
               <button type="button" className="icon-btn" onClick={() => drop(f)} aria-label={t('Stop reading from {folder}', { folder: f.name })}><Icon name="x" size={12} /></button>
             </li>
@@ -975,33 +981,43 @@ export function McpServers({ d, save }) {
   )
 }
 
-// Changes: none, a diff you approve before a draft pull request opens, or a draft pull request at
-// once. The agent edits only its own copy (a git worktree), and Bridge AI does the git and GitHub
-// part with your own gh. Only the people named, and you, may ask for one.
+// Changes: none; a diff you approve before a draft pull request opens, or a draft pull request at
+// once (the agent edits only its own copy, a git worktree, and Bridge AI does the git and GitHub part
+// with your own gh; only the people named, and you, may ask for one); or Edits Files in Its Folders
+// (server/botwrite.js): files in the folders picked here, each one of or inside a folder it reads,
+// changed in a copy and made by Bridge AI, at once for the people under May Change Files Without
+// Asking Me, after you approve the diff for anyone else, and after you approve it whoever asks when
+// it deletes, moves, is large or touches a secret. A bot that changes nothing can hand a change to
+// files on to one that makes them (Hands Changes To).
 export function Changes({ d, save }) {
   const s = d.settings
   const c = d.changes || {}
   const repos = c.repos || []
-  const can = c.agentOk !== false && repos.some((r) => r.ok)
+  const agentOk = c.agentOk !== false
+  const canPr = agentOk && repos.some((r) => r.ok)
+  const mode = s.changes || 'none'
   const modes = [
-    ['none', t('No changes'), t('It only answers.')],
-    ['suggest', t('Suggest a change'), t('You approve the diff first, then a draft pull request opens.')],
-    ['pr', t('Open a draft pull request'), t('A draft pull request opens at once, for you to review on GitHub.')],
+    ['none', t('No changes'), t('It only answers.'), true],
+    ['suggest', t('Suggest a change'), t('You approve the diff first, then a draft pull request opens.'), canPr],
+    ['pr', t('Open a draft pull request'), t('A draft pull request opens at once, for you to review on GitHub.'), canPr],
+    ['edit', t('Edits Files in Its Folders'), t('It changes files in the folders you pick: at once for the people you trust with that, once you approve the diff for anyone else.'), agentOk],
   ]
-  const on = s.changes && s.changes !== 'none'
+  const pr = mode === 'suggest' || mode === 'pr'
   return (
     <section className="st-sec" data-setting="slack-changes">
       <h4>{t('Changes')}</h4>
-      <p className="muted small">{t('When someone asks for a change, its agent edits only its own copy of the repository (a git worktree), with no commands and no network. Bridge AI, not the agent, commits, pushes a branch named bot/{bot}/… and opens a draft pull request with your own gh sign-in. It never merges, and never writes to the default branch.', { bot: slugOf(d.name) })}</p>
+      <p className="muted small">{mode === 'edit'
+        ? t('Its agent changes files only in a copy of the folders below, with no commands and no network. Bridge AI checks what changed, shows you the diff, and makes the change in the real folders itself.')
+        : t('When someone asks for a change, its agent edits only its own copy of the repository (a git worktree), with no commands and no network. Bridge AI, not the agent, commits, pushes a branch named bot/{bot}/… and opens a draft pull request with your own gh sign-in. It never merges, and never writes to the default branch.', { bot: slugOf(d.name) })}</p>
       <div className="sb-modes" role="radiogroup" aria-label={t('Changes')}>
-        {modes.map(([k, label, about]) => (
-          <label key={k} className={`sb-mode ${(s.changes || 'none') === k ? 'on' : ''}`}>
-            <input type="radio" name={`sb-changes-${d.id}`} checked={(s.changes || 'none') === k} disabled={k !== 'none' && !can} onChange={() => save({ changes: k })} />
+        {modes.map(([k, label, about, can]) => (
+          <label key={k} className={`sb-mode ${mode === k ? 'on' : ''}`} data-mode={k}>
+            <input type="radio" name={`sb-changes-${d.id}`} checked={mode === k} disabled={!can && mode !== k} onChange={() => save({ changes: k })} />
             <span><b>{label}</b><span className="muted small">{about}</span></span>
           </label>
         ))}
       </div>
-      {repos.length > 1 && (
+      {pr && repos.length > 1 && (
         <label className="sb-field sb-repo">
           <span>{t('In the repository')}</span>
           <select className="st-input" value={c.repo || ''} onChange={(e) => save({ repo: e.target.value || null })}>
@@ -1009,11 +1025,144 @@ export function Changes({ d, save }) {
           </select>
         </label>
       )}
-      {repos.length === 1 && <p className="small">{t('In the repository {repo}.', { repo: repos[0].shown || repos[0].path })}</p>}
-      {c.problem && <p className={`small ${on ? 'error-text' : 'muted'}`}>{c.problem}</p>}
-      {on && c.gh === false && <p className="error-text small">{t('GitHub\'s gh isn\'t installed here, so no pull request can open: install it, and sign in with gh auth login.')}</p>}
-      <p className="muted small">{t('Only the people you named under Who Can Ask, and you, can ask for one; anyone else gets an answer only.')}</p>
+      {pr && repos.length === 1 && <p className="small">{t('In the repository {repo}.', { repo: repos[0].shown || repos[0].path })}</p>}
+      {c.problem && <p className={`small ${mode !== 'none' ? 'error-text' : 'muted'}`} role={mode !== 'none' ? 'alert' : undefined}>{c.problem}</p>}
+      {mode !== 'none' && c.hook && <p className="error-text small" role="alert" data-setting="bots-changes-hook">{t('Changing files on Windows needs Claude Code {need} or later, and this computer has {have}: update it with claude update in a terminal. Until then it changes nothing.', { need: c.hook.need, have: c.hook.have })}</p>}
+      {pr && c.gh === false && <p className="error-text small">{t('GitHub\'s gh isn\'t installed here, so no pull request can open: install it, and sign in with gh auth login.')}</p>}
+      {pr && <p className="muted small">{t('Only the people you named under Who Can Ask, and you, can ask for one; anyone else gets an answer only.')}</p>}
+      {mode === 'edit' && <EditsFiles d={d} save={save} />}
+      {mode === 'none' && <HandsTo d={d} save={save} />}
     </section>
+  )
+}
+
+// The folders it changes files in (each one of, or inside, a folder it reads), whose changes are
+// made without asking you (you, unless yours wait too, and the people listed), what always waits for
+// you whoever asks, and its latest changes, with Undo.
+function EditsFiles({ d, save }) {
+  const s = d.settings
+  const listed = d.changes?.writes || []
+  const reads = (d.folders || []).filter((f) => f.ok)
+  const [where, setWhere] = useState('')
+  const [browse, setBrowse] = useState(false)
+  const { people, connected } = usePeople(d)
+  const trusted = s.trusted || []
+  const keep = async (f) => { const ok = await save({ writesTo: [...(s.writesTo || []), f] }); if (ok) setWhere(''); return ok }
+  const drop = (i) => save({ writesTo: (s.writesTo || []).filter((_, j) => j !== i) })
+  return (
+    <div className="sb-edits" data-setting="bots-edits">
+      <h5>{t('Changes Files In')}</h5>
+      {listed.length > 0
+        ? (
+          <ul className="sb-folders">
+            {listed.map((f, i) => (
+              <li key={`${f.shown}-${i}`} className={f.ok ? '' : 'bad'}>
+                <Icon name="folder" size={14} />
+                <div className="sb-folder-text">
+                  <code title={f.shown}>{f.shown}</code>
+                  {!f.ok && <span className="error-text small">{f.problem}</span>}
+                </div>
+                <button type="button" className="icon-btn" onClick={() => drop(i)} aria-label={t('Stop changing files in {folder}', { folder: f.shown })}><Icon name="x" size={12} /></button>
+              </li>
+            ))}
+          </ul>
+        )
+        : <p className="small sb-none">{t('None yet: until you pick a folder, it changes nothing.')}</p>}
+      <form className="sb-add" onSubmit={(e) => { e.preventDefault(); keep(where.trim()) }}>
+        <input className="st-input mono" value={where} onChange={(e) => setWhere(e.target.value)} placeholder={reads[0]?.shown || '~/Hiring'} aria-label={t('A folder it changes files in')} spellCheck={false} />
+        {reads.length > 0 && <button type="button" className="btn small" aria-expanded={browse} onClick={() => setBrowse((x) => !x)}>{t('Choose…')}</button>}
+        <button type="submit" className="btn small" disabled={!where.trim()}><Icon name="plus" size={12} /> {t('Change files here')}</button>
+      </form>
+      <p className="muted small">{reads.length ? t('One of the folders it reads from, or a folder inside one. Never a hidden folder.') : t('Add a folder under Reads From first: it changes files only in a folder it reads.')}</p>
+      {browse && reads.length > 0 && <Browse tops={reads.map((f) => f.shown)} label={t('Pick a folder for it to change files in')} button={t('Change files here')} onPick={async (f) => { if (await keep(f)) setBrowse(false) }} onClose={() => setBrowse(false)} />}
+
+      <h5>{t('May Change Files Without Asking Me')}</h5>
+      <p className="muted small">{t('Their changes are made as soon as it\'s done, with Undo on its reply and in Activity. Anyone else who may ask can ask for a change too: it waits for you to approve the diff.')}</p>
+      <label className="st-check" data-setting="bots-trust-you">
+        <input type="checkbox" checked={s.trustYou !== false} onChange={(e) => save({ trustYou: e.target.checked })} />
+        <span>{t('You (when you ask it yourself)')}</span>
+      </label>
+      {trusted.length > 0 && <Chips list={trusted} onDrop={(p) => save({ trusted: trusted.filter((x) => x.id !== p.id) })} dropLabel={(p) => t('Ask me first for {name}', { name: p.name || p.id })} />}
+      {connected && <PeoplePicker people={people} skip={trusted.map((x) => x.id)} onPick={(p) => save({ trusted: [...trusted, { id: p.id, name: p.name }] })} label={t('Add someone whose changes are made without asking you')} placeholder={t('Add someone from {team}', { team: d.team?.name || t('your workspace') })} />}
+
+      <h5>{t('Always Waits for You')}</h5>
+      <ul className="sb-held small">
+        <li>{t('Deleting, moving or renaming a file')}</li>
+        <li>{t('More than 20 files, or a very large change')}</li>
+        <li>{t('A dotfile, or a file like a secret (.env, keys, credentials)')}</li>
+        <li>{t('A file that can be run')}</li>
+        <li>{t('A bot\'s instructions, or a file that steers an agent or builds code (CLAUDE.md, package.json, a tool\'s config)')}</li>
+        <li>{t('A file it can\'t show you in full, or a new one in a folder git ignores')}</li>
+        <li>{d.changes?.screen ? t('A request that looks destructive, sweeping or odd, read before it starts (by its own rules and AI Assist)') : t('A request that looks destructive or sweeping, read before it starts')}</li>
+      </ul>
+      <p className="muted small">{t('Anything outside these folders, or through a link, is never changed, and it never runs a command.')}</p>
+      <WritesMade d={d} />
+    </div>
+  )
+}
+
+// Its latest changes to files (Activity has them all): what changed, who asked, how it stands, and
+// Undo for one that's made.
+function WritesMade({ d }) {
+  const list = d.writes || []
+  const [busy, setBusy] = useState(null)
+  const [note, setNote] = useState(null)
+  if (!list.length) return null
+  const undo = async (w) => {
+    setBusy(w.id)
+    setNote(null)
+    try { await api(`/bots/${d.id}/writes/${encodeURIComponent(w.id)}/undo`, { method: 'POST', body: {} }); setNote({ ok: true, text: t('Undone: the files are back as they were.') }) } catch (e) { setNote({ text: e.message }) } finally { setBusy(null) }
+  }
+  return (
+    <>
+      <h5>{t('Its Latest Changes')}</h5>
+      <ul className="sb-writes" data-setting="bots-writes">
+        {list.map((w) => <WriteRow key={w.id} w={w} busy={busy === w.id} onUndo={() => undo(w)} />)}
+      </ul>
+      {note && <p className={note.ok ? 'muted small' : 'error-text small'} role={note.ok ? 'status' : 'alert'}>{note.text}</p>}
+    </>
+  )
+}
+// A change to files, in a line or two: its files, how it stands, who asked and who approved it.
+const WRITE_STATE = () => ({ waiting: t('Waiting for you'), applied: t('Made'), denied: t('Denied'), undone: t('Undone'), replaced: t('Replaced by a newer change'), refused: t('Refused'), failed: t('Couldn\'t be made'), tried: t('Try It: not made'), proposed: t('Being made') })
+export function WriteRow({ w, busy = false, onUndo = null }) {
+  const files = (w.files || []).map((f) => f.path)
+  const by = w.applied ? (w.applied.direct ? t('made without asking you') : t('approved by {name}', { name: w.applied.by || '' })) : w.denied ? t('denied by {name}', { name: w.denied.by || '' }) : w.undone ? t('undone by {name}', { name: w.undone.by || '' }) : null
+  return (
+    <li className={`sb-write s-${w.state}`}>
+      <Icon name={w.state === 'applied' ? 'check' : w.state === 'waiting' ? 'clock' : 'file'} size={12} />
+      <div className="sb-write-text">
+        <span className="small"><b>{WRITE_STATE()[w.state] || w.state}</b>: {files.slice(0, 3).join(', ')}{files.length > 3 ? ` ${t('and {n} more', { n: files.length - 3 })}` : ''}</span>
+        <span className="muted small">{[w.by?.name ? t('asked by {name}', { name: w.by.name }) : null, by, w.at ? ago(w.at) : null].filter(Boolean).join(' · ')}</span>
+      </div>
+      {w.state === 'applied' && onUndo && <button type="button" className="btn small" disabled={busy} onClick={onUndo}><Icon name="undo" size={12} /> {t('Undo')}</button>}
+    </li>
+  )
+}
+
+// A bot that changes nothing itself handing a change to files on to one that does: it answers HAND TO
+// with that bot's name, and that bot takes it from there, under its own rules for whoever asked.
+function HandsTo({ d, save }) {
+  const others = d.otherBots || []
+  const picked = d.settings.handsTo || []
+  const editors = others.filter((o) => o.edits)
+  if (!editors.length && !picked.length) return null
+  const toggle = (id, on) => save({ handsTo: on ? [...picked, id] : picked.filter((x) => x !== id) })
+  return (
+    <div className="sb-edits" data-setting="bots-hands-to">
+      <h5>{t('Hands Changes To')}</h5>
+      <p className="muted small">{t('{bot} changes nothing itself. Asked to change files one of these bots looks after, it hands the request on, and that bot takes it from there under its own rules for whoever asked: handed on, nobody may do more.', { bot: d.name })}</p>
+      <ul className="sb-mcp">
+        {editors.map((o) => (
+          <li key={o.id} className={picked.includes(o.id) ? 'on' : ''}>
+            <label className="st-check">
+              <input type="checkbox" checked={picked.includes(o.id)} onChange={(e) => toggle(o.id, e.target.checked)} />
+              <span><b>{o.name}</b> <span className="muted small">{(o.writesTo || []).length ? t('changes files in {folders}', { folders: o.writesTo.join(', ') }) : t('no folders picked yet')}</span></span>
+            </label>
+          </li>
+        ))}
+      </ul>
+    </div>
   )
 }
 
@@ -1205,11 +1354,26 @@ function Replies({ d, save }) {
         </label>
         <label className={`sb-mode ${s.auto ? 'on' : ''}`}>
           <input type="radio" name={`sb-auto-${d.id}`} checked={!!s.auto} onChange={() => save({ auto: true })} />
-          <span><b>{t('Answer without asking')}</b><span className="muted small">{t('An answer goes straight to Slack when what answered is held to its folders (Claude Code, or a model through Bridge AI\'s tools). An answer from a copy of an agent\'s conversation, or from Codex, which can read anywhere, still waits for you.')}</span></span>
+          <span><b>{t('Answer without asking')}</b><span className="muted small">{t('An answer goes straight to Slack when what answered is held to its folders (Claude Code, or a model through Bridge AI\'s tools). An answer from a copy of an agent\'s conversation, or from Codex, which can read anywhere, still waits for you, and so does one with a file from its folders unless you say otherwise below.')}</span></span>
         </label>
       </div>
       {s.auto && by && !by.confined && <p className="st-note warn"><Icon name="alert" size={13} />{t('{agent} answers here and isn\'t held to its folder, so every answer still waits for you.', { agent: label })}</p>}
       {s.auto && <p className="muted small">{t('Answers sent without asking are streamed into Slack as they\'re posted. One for a public channel that quotes a file it read waits for you all the same.')}</p>}
+      <div className="sb-attach" data-setting="bots-attach">
+        <label className="st-row">
+          <span><b>{t('Send Files From Its Folders Without Asking')}</b> <span className="muted small">{t('It can attach a file from the folders it reads, a PDF or a spreadsheet say, as it is. Whoever gets the answer gets the whole file.')}</span></span>
+          <select className="st-input" value={s.attachAuto || 'no'} onChange={(e) => save({ attachAuto: e.target.value })} aria-label={t('Send Files From Its Folders Without Asking')}>
+            <option value="no">{t('No: each answer with one waits for you')}</option>
+            <option value="named">{t('To people you named, in a direct message')}</option>
+            <option value="everyone">{t('To everyone who may ask, in a direct message or a private channel they\'re all in')}</option>
+          </select>
+        </label>
+        <p className="muted small">{!s.auto ? t('Every answer waits for you now, files and all.') : (s.attachAuto || 'no') === 'no' ? t('An answer with a file from its folders waits in Needs You, which shows where each file is from, until you send it.') : s.attachAuto === 'named' ? t('An answer with a file from its folders goes without asking only in a direct message with you or someone you named, when everyone it answers is one of them. Anywhere else, it waits for you.') : t('An answer with a file from its folders goes without asking only in a direct message, or in a private channel where everyone may ask it (no guest, no one from another organization, and with only people you named asking, no one else): everyone in that channel gets the file. Anywhere else, it waits for you.')}</p>
+        <label className="st-check">
+          <input type="checkbox" checked={!!s.attachConfig} onChange={(e) => save({ attachConfig: e.target.checked })} />
+          <span><b>{t('Data and config files too')}</b> <span className="muted small">{t('Off: it attaches PDFs, Word, Excel and PowerPoint files, pictures, CSV, text and Markdown only. On: JSON, YAML, XML and HTML files too, where settings and keys are often kept. A file that looks like it holds a key, a password or a token never goes.')}</span></span>
+        </label>
+      </div>
       <p className="muted small sb-approvals">{s.owner ? t('Drafts also come to your Slack direct messages, to send, edit or discard from your phone.') : t('Set You in Slack, above, to approve its drafts from Slack too.')}</p>
       {terms && <p className="st-note warn sb-terms" data-setting="slack-terms"><Icon name="info" size={13} /><span>{terms}</span></p>}
       <label className="st-check">
@@ -1352,12 +1516,15 @@ const OUTCOMES = () => [
   ['sent', t('Sent')], ['edited', t('Sent, as you edited it')], ['auto', t('Sent without asking')], ['waiting', t('Waiting for you')], ['passed-on', t('Passed on to you')],
   ['discarded', t('Discarded')], ['refused', t('Refused')], ['failed', t('Failed')], ['answering', t('Being answered')], ['skipped', t('Not for it')],
   ['stopped', t('Stopped')], ['queued', t('Waiting its turn')], ['try', t('Try It')],
+  ['screened', t('Held for you before it started')], ['handed', t('Handed on to another bot')],
 ]
 const REFUSED = () => ({
   'not-allowed': t('not someone it answers'), guest: t('a guest'), external: t('from another company'), unknown: t('Slack couldn\'t say who they are'), empty: t('no question with the mention'),
   muted: t('it\'s muted in that channel'), paused: t('it\'s paused'), 'over-limit': t('over their limit for the day'),
-  'not-owner': t('only you can let a run carry on'),
+  'not-owner': t('only you can let a run carry on'), screened: t('you didn\'t let it go ahead'),
 })
+// A change to files, as its files are said in a line.
+const filesLine = (files = []) => { const n = files.map((f) => f.path || f); return n.length > 4 ? `${n.slice(0, 4).join(', ')} ${t('and {n} more', { n: n.length - 4 })}` : n.join(', ') }
 // Where a decision about a run at its time limit was made: on another of your devices, or from your
 // direct messages on a platform.
 const fromSaid = (e) => (e.device ? t('on {device}', { device: e.device }) : e.via && e.via !== 'app' ? t('from {app}', { app: platName(e.via) }) : null)
@@ -1387,6 +1554,7 @@ function eventLine(e) {
     case 'queued': return t('Waiting its turn, behind {n} of their questions', { n: e.ahead ?? 1 })
     case 'context': return e.problem ? t('Read the conversation: {why}', { why: e.problem }) : t('Read {n} earlier messages and {pins} pinned, as context', { n: e.messages?.length || 0, pins: e.pins?.length || 0 })
     case 'run.started': return t('{agent} started, reading {folders}{from}; instructions {version} from {source}', { agent: e.answerer?.label || (e.agent === 'codex' ? 'Codex' : e.agent === 'model' ? e.model || '' : 'Claude Code'), folders: e.folders?.length ? e.folders.join(', ') : t('no folders'), from: e.from ? t(', going on from its earlier conversation') : '', version: e.instructions?.hash || '', source: e.instructions?.source === 'file' ? e.instructions.path : t('Settings') }) + (e.instructions?.problem ? ` (${e.instructions.problem})` : '') + (e.earlier?.problem ? ` (${e.earlier.problem})` : '')
+        + (e.notRead?.length ? ` ${t('(not reading {folders})', { folders: e.notRead.map((x) => `${x.folder}: ${x.why}`).join('; ') })}` : '')
         + (e.resumed ? ` ${e.resumed.how === 'session' ? t('(picking up where it stopped at its time limit, for {n} minutes)', { n: e.resumed.minutes }) : e.resumed.how === 'messages' ? t('(starting again after its time limit with what it had so far, for {n} minutes)', { n: e.resumed.minutes }) : t('(starting again after its time limit, for {n} minutes)', { n: e.resumed.minutes })}` : '')
     case 'limit.asked': return t('At its time limit, after {n} minutes: asked you whether it may carry on ({doing})', { n: e.ran ?? '?', doing: e.doing || '' })
     case 'limit.continued': {
@@ -1420,6 +1588,7 @@ function eventLine(e) {
         return e.via === 'slack' ? t('Sent by {name} from Slack', { name: e.by || t('you') }) : t('Sent by {name}', { name: e.by || t('you') })
       }
       if (e.kind === 'hold') return t('Told them it\'s passed on to you')
+      if (e.kind === 'waits') return t('Told them the change waits for you')
       if (e.kind === 'checking') return t('Told them it\'s being checked with you')
       if (e.kind === 'longer') return t('Told them it\'s taking longer, and that you\'re asked whether it may carry on')
       return t('Told them: “{text}”', { text: e.text })
@@ -1431,6 +1600,8 @@ function eventLine(e) {
     case 'message.deleted': return t('{name} deleted a message', { name: who })
     case 'approval.asked':
       if (e.limit) return e.phase === 'stopped' ? t('Told you in your {app} direct messages it was stopped, and how to let it carry on', { app: platName(e.via) }) : t('Asked you in your {app} direct messages whether it may carry on', { app: platName(e.via) })
+      if (e.screen) return t('Asked you in your {app} direct messages whether it may go ahead', { app: platName(e.via) })
+      if (e.write) return e.undo ? t('Put Undo on its reply') : e.inThread ? t('Told them where they asked that the change waits for you, with Approve and Deny that only you can press') : t('Asked you in your {app} direct messages to approve the change', { app: platName(e.via) })
       return e.memory ? t('Asked you in your Slack direct messages whether to keep it') : t('Sent to your Slack direct messages, to send, edit or discard')
     case 'approval.failed': return e.limit ? t('Couldn\'t ask you in your {app} direct messages: {why}', { app: platName(e.via), why: e.error }) : t('Couldn\'t send it to your Slack direct messages: {why}', { why: e.error })
     case 'memory.proposed': return t('Would like to remember: “{text}”', { text: wordsOf(e.item?.text) })
@@ -1440,9 +1611,31 @@ function eventLine(e) {
     case 'memory.deleted': return e.device ? t('{name} deleted from its memory, on {device}: “{text}”', { name: by, device: e.device, text: wordsOf(e.item?.text) }) : t('{name} deleted from its memory: “{text}”', { name: by, text: wordsOf(e.item?.text) })
     case 'change.proposed': return t('Changed {n} files on {branch}', { n: e.files?.length || 0, branch: e.branch || '' })
     case 'change.approved': return e.via === 'slack' ? t('{name} approved the change from Slack', { name: by }) : t('{name} approved the change', { name: by })
-    case 'change.failed': return t('The change couldn\'t go through ({step}): {why}', { step: e.step || '', why: e.error || '' })
+    case 'change.failed': return e.guard ? t('The folder guard didn\'t run, so nothing was changed: {why}', { why: guardWhy(e.guard) }) : t('The change couldn\'t go through ({step}): {why}', { step: e.step || '', why: e.error || '' })
+    case 'changes.blocked': return t('Didn\'t start: {why}', { why: guardWhy(e) })
     case 'pr.opened': return t('Opened a draft pull request')
-    case 'files.made': return e.files?.length ? t('Made {files}', { files: e.files.map((f) => f.name).join(', ') }) : t('Made no file it could send')
+    // (Changes to files.)
+    case 'write.screened': return t('Held for you before it started: {why}', { why: e.why || '' })
+    case 'write.screen': return t('Read before it started by its own rules only: {why}', { why: e.problem || '' })
+    case 'write.allowed': { const from = fromSaid(e); return `${t('{name} allowed it once', { name: by })}${from ? ` (${from})` : ''}` }
+    case 'write.proposed':
+      if (e.try) return t('Try It: it would change {files}', { files: filesLine(e.files) })
+      if (e.guard) return t('Changed {files} in its copy, but the folder guard didn\'t run, so nothing was changed: {why}', { files: filesLine(e.files), why: guardWhy(e.guard) })
+      if (e.refused?.length) return t('Changed {files} in its copy: refused, so nothing was changed', { files: filesLine(e.files || e.refused.map((r) => r.file)) })
+      return e.waits ? t('Changed {files} in its copy: waiting for you', { files: filesLine(e.files) }) : t('Changed {files} in its copy', { files: filesLine(e.files) })
+    case 'write.applied': { const from = fromSaid(e); return e.direct ? t('Made the change, without asking you: {files}', { files: filesLine(e.files) }) : `${t('{name} approved the change, and it was made: {files}', { name: by, files: filesLine(e.files) })}${from ? ` (${from})` : ''}` }
+    case 'write.declined': { const from = fromSaid(e); return `${t('{name} denied the change: nothing was changed', { name: by })}${from ? ` (${from})` : ''}` }
+    case 'write.undone': { const from = fromSaid(e); return `${t('{name} undid the change: {files}', { name: by, files: filesLine(e.files) })}${from ? ` (${from})` : ''}` }
+    case 'write.replaced': return t('A newer change in this conversation took its place')
+    case 'write.failed': return t('The change couldn\'t be made ({step}): {why}', { step: e.step || '', why: e.error || '' })
+    case 'handed': return t('Handed it on to {name}, which takes it from there under its own rules', { name: e.to?.name || '' })
+    case 'files.made': {
+      // (A file it attached from its folders, with where it came from.)
+      const made = (e.files || []).filter((f) => !f.from)
+      const attached = (e.files || []).filter((f) => f.from)
+      if (!made.length && !attached.length) return e.refused?.length && e.refused.every((r) => r.from) ? t('Attached no file it could send') : t('Made no file it could send')
+      return [made.length ? t('Made {files}', { files: made.map((f) => f.name).join(', ') }) : null, attached.length ? t('Attached {files}', { files: attached.map((f) => t('{name} from {path}', { name: f.name, path: f.from })).join(', ') }) : null].filter(Boolean).join('; ')
+    }
     case 'file.uploaded': return e.ok === false ? t('Couldn\'t send the file {name}: {why}', { name: e.name, why: e.error || '' }) : t('Sent the file {name} ({size})', { name: e.name, size: sizeOf(e.size) })
     case 'context.noted': return e.ok === false ? t('Couldn\'t keep this in {name}\'s running context: {why}', { name: who, why: e.error || '' }) : e.state === 'kept' ? t('Kept in {name}\'s running context', { name: who }) : t('In {name}\'s running context once you keep it', { name: who })
     case 'context.kept': return t('{name} kept {n} of {person}\'s conversations in their running context', { name: by, n: e.n ?? 0, person: who })
@@ -1455,7 +1648,7 @@ function eventLine(e) {
     default: return e.type
   }
 }
-const isBad = (e) => e.ok === false || ['posted.failed', 'refused', 'approval.failed', 'change.failed', 'run.skipped', 'run.passed'].includes(e.type) || (e.type === 'run.finished' && e.end === 'timeout')
+const isBad = (e) => e.ok === false || ['posted.failed', 'refused', 'approval.failed', 'change.failed', 'write.failed', 'write.screened', 'run.skipped', 'run.passed'].includes(e.type) || (e.type === 'run.finished' && e.end === 'timeout') || (e.type === 'write.proposed' && e.refused?.length > 0)
 
 // A conversation's events, in order, as kept.
 function Events({ d, events }) {
@@ -1587,6 +1780,7 @@ function Activity({ d, save }) {
         </ul>
       )}
       <BotFiles d={d} />
+      <WritesLog d={d} />
       {x?.changes?.length > 0 && (
         <details className="sb-ctx sb-changes" data-setting="bots-changes">
           <summary><Icon name="chevron" size={11} />{t('Changes to it ({n})', { n: x.changes.length })}</summary>
@@ -1604,6 +1798,39 @@ function Activity({ d, save }) {
   )
 }
 
+// Every change to files it made or proposed (server/frontdesk.js writes), the latest first: its files,
+// how it stands, who asked and who approved, denied or undid it; its diff; Undo for one that's made.
+function WritesLog({ d }) {
+  const [list, setList] = useState(null)
+  const [busy, setBusy] = useState(null)
+  const [note, setNote] = useState(null)
+  const [diff, setDiff] = useState({}) // change id -> its diff, once opened
+  const load = () => api(`/bots/${d.id}/writes`).then((r) => setList(r.writes || []), () => {})
+  useEffect(() => { load(); const every = setInterval(() => { if (!document.hidden) load() }, 6000); return () => clearInterval(every) }, [d.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  if (!list?.length) return null
+  const undo = async (w) => {
+    setBusy(w.id)
+    setNote(null)
+    try { await api(`/bots/${d.id}/writes/${encodeURIComponent(w.id)}/undo`, { method: 'POST', body: {} }); setNote({ ok: true, text: t('Undone: the files are back as they were.') }); load() } catch (e) { setNote({ text: e.message }) } finally { setBusy(null) }
+  }
+  const open = (w) => { if (!diff[w.id]) api(`/bots/${d.id}/writes/${encodeURIComponent(w.id)}`).then((r) => setDiff((x) => ({ ...x, [w.id]: r.write?.diff || '' })), () => {}) }
+  return (
+    <details className="sb-ctx sb-writes-log" data-setting="bots-writes-log" open>
+      <summary><Icon name="chevron" size={11} />{t('Changes to Files ({n})', { n: list.length })}</summary>
+      <ul className="sb-writes">
+        {list.map((w) => (
+          <Fragment key={w.id}>
+            <WriteRow w={w} busy={busy === w.id} onUndo={() => undo(w)} />
+            {(w.held?.length > 0 || w.refused?.length > 0) && <li className="muted small sb-write-why">{[...w.held.map((h) => h.said), ...w.refused.map((r) => `${r.file}: ${r.said}`)].join(' · ')}</li>}
+            <li className="sb-write-diff"><details onToggle={(e) => { if (e.currentTarget.open) open(w) }}><summary className="small"><Icon name="chevron" size={11} />{t('The diff')}</summary><pre className="sb-diff">{diff[w.id] ?? w.diff}</pre></details></li>
+          </Fragment>
+        ))}
+      </ul>
+      {note && <p className={note.ok ? 'muted small' : 'error-text small'} role={note.ok ? 'status' : 'alert'}>{note.text}</p>}
+    </details>
+  )
+}
+
 // ---------- What an answer brings: its files, its change ----------
 function ChangeOf({ c }) {
   if (!c) return null
@@ -1618,7 +1845,7 @@ function ChangeOf({ c }) {
     </div>
   )
 }
-const FilesOf = ({ files }) => (files?.length ? <p className="muted small sb-files"><Icon name="paperclip" size={12} /> {t('With {files}', { files: files.map((f) => `${f.name}${f.size != null ? ` (${sizeOf(f.size)})` : ''}`).join(', ') })}</p> : null)
+const FilesOf = ({ files }) => (files?.length ? <p className="muted small sb-files"><Icon name="paperclip" size={12} /> {t('With {files}', { files: files.map((f) => `${f.name}${f.size != null ? ` (${sizeOf(f.size)})` : ''}${f.from ? ` ${t('from {path}', { path: f.from })}` : ''}`).join(', ') })}</p> : null)
 
 // ---------- Try It ----------
 // A question asked here as someone would in Slack: the same agent, folders, instructions and memory,
