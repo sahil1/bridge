@@ -306,7 +306,7 @@ const offlineText = () => (silent ? 'Your computer isn\'t answering right now.' 
 // too much at once, as many phones and tabs connected as it takes, the account is stopped, or it's
 // switched off. Until then, no trying again.
 let limited = { until: 0 }
-const OWN = 'For no limits, put the relay on your own Cloudflare account (Settings › Devices, on the computer).'
+const OWN = 'For no limits, put the relay on your own Cloudflare account (Settings › Devices & Access › Phone, on the computer).'
 function onLimit(m) {
   const until = Math.min(Math.max(Number(m.until) || 0, Date.now() + 3000), Date.now() + 8 * 24 * 3600000)
   const text = m.why === 'window'
@@ -314,7 +314,7 @@ function onLimit(m) {
     : m.why === 'week'
       ? `This computer's Bold Bridge account has used this week's allowance on Bridge AI's relay. It resets on ${when(until)}. ${OWN}`
       : m.why === 'all'
-        ? `Bridge AI's relay has carried all it can today, for every computer on it. It starts again at ${when(until)}. For no limits, put the relay on your own Cloudflare account (Settings › Devices, on the computer), or use Tailscale.`
+        ? `Bridge AI's relay has carried all it can today, for every computer on it. It starts again at ${when(until)}. For no limits, put the relay on your own Cloudflare account (Settings › Devices & Access › Phone, on the computer), or use Tailscale.`
         : String(m.text || 'Bridge AI\'s relay can\'t take this right now.').slice(0, 300)
   const title = { window: 'Relay allowance used for now', week: 'Relay allowance used this week', all: 'Daily limit reached', off: 'Bridge AI\'s relay is off', phones: 'Too many connected', suspended: 'Account suspended', relay: 'No relay on this account', deleted: 'Account deleted', token: 'Not signed in on the computer' }[m.why] || 'One moment…'
   limited = { why: m.why, text, until, title }
@@ -795,7 +795,7 @@ let moving = false
 const relayOrigin = (u) => { try { const x = new URL(String(u || '')); return x.protocol === 'https:' || (x.protocol === 'http:' && (x.hostname === '127.0.0.1' || /\.localhost$/i.test(x.hostname))) ? x.origin : null } catch { return null } }
 async function moved(m) {
   const name = String(m?.name || '').trim().slice(0, 60) || (thisComputer() === 'Your computer' ? 'your computer' : thisComputer())
-  if (m?.forgot) return removedThere(`${name} stopped using its relay, so it forgot this phone. To use it again: on ${name}, set up the phone in Settings › Account & Devices, click Pair a device, and scan its code ${apps ? 'here (Add a computer)' : 'with this phone\'s camera'}.`)
+  if (m?.forgot) return removedThere(`${name} stopped using its relay, so it forgot this phone. To use it again: on ${name}, set up the phone in Settings › Devices & Access › Phone, click Pair a device, and scan its code ${apps ? 'here (Add a computer)' : 'with this phone\'s camera'}.`)
   const to = relayOrigin(m?.url)
   // This phone followed it before and was paired there with a new key, so the key here isn't this
   // phone's any more (again): not followed by itself, but said, with the way on (movedAway).
@@ -815,7 +815,7 @@ async function moved(m) {
   if (!to || to === relay || moving) return
   moving = true
   const where = m.hosted ? 'Bridge AI\'s relay' : 'its own relay'
-  if (!native && !link) { moving = false; return waitScreen(`${name} moved to ${where}`, `Pair this phone with it there: on ${name}, open Settings › Account & Devices, click Pair a device, and scan its code.`, false) }
+  if (!native && !link) { moving = false; return waitScreen(`${name} moved to ${where}`, `Pair this phone with it there: on ${name}, open Settings › Devices & Access › Phone, click Pair a device, and scan its code.`, false) }
   dropSession()
   abandon()
   awayBanner(false)

@@ -15,8 +15,9 @@ import { WindowRow } from '../Usage.jsx'
 import { openSettings } from '../SignIn.jsx'
 import { HostedFull, PairCode, limitSaid, pickWay } from './Relay.jsx'
 import { api, apiOn, viaRelay } from '../../api.js'
+import { where } from './search.js'
 import { t, locale } from '../../i18n/index.js'
-import { Advanced } from './Advanced.jsx'
+import { Advanced, More } from './Advanced.jsx'
 import './account.css'
 
 const day = (iso) => (iso ? new Date(iso).toLocaleDateString(locale(), { day: 'numeric', month: 'short', year: 'numeric' }) : '')
@@ -110,7 +111,7 @@ export function SignIn({ st, onIn, inline = false }) {
           </ul>
         </div>
       )}
-      <p className="muted small" title={t('What Bold Bridge keeps: your email, the names of the devices you sign in on, and what you ask for. Never anything from this computer: your agents, meetings, mail and files stay here.')}>{t('Bold Bridge keeps your email, your devices\' names and what you ask for. Never anything from this computer.')}</p>
+      <p className="muted small">{t('Bold Bridge keeps your email, your devices\' names and what you ask for. Never anything from this computer.')} <More>{t('What Bold Bridge keeps: your email, the names of the devices you sign in on, and what you ask for. Never anything from this computer: your agents, meetings, mail and files stay here.')}</More></p>
     </section>
   )
 }
@@ -194,8 +195,8 @@ function EarlyRow({ st, act, busy, stopped }) {
       </div>
       {s === 'yes' && !stopped ? (
         st.earlyLeft
-          ? <p className="muted small">{t('This computer left Early Access, so it stays on regular releases. To join again, pick Early Access in Settings › About & Updates.')}</p>
-          : <p className="muted small">{st.earlyHere ? t('Your computers get pre-releases of Bridge AI before everyone else, by themselves. To leave on this one, open Settings › About & Updates.') : t('Your account has Early Access. It\'s for the desktop app: this copy of Bridge AI updates another way, so it stays on regular releases.')}</p>
+          ? <p className="muted small">{t('This computer left Early Access, so it stays on regular releases. To join again, pick Early Access in {place}.', { place: where('channel') })}</p>
+          : <p className="muted small">{st.earlyHere ? t('Your computers get pre-releases of Bridge AI before everyone else, by themselves. To leave on this one, open {place}.', { place: where('channel') }) : t('Your account has Early Access. It\'s for the desktop app: this copy of Bridge AI updates another way, so it stays on regular releases.')}</p>
       ) : s === 'requested' ? <p className="muted small">{t('You asked for Early Access. Bold Bridge emails you when it\'s on.')}</p>
         : stopped ? <p className="muted small">{t('Off while your account is suspended.')}</p>
           : (
@@ -309,7 +310,7 @@ function ThisComputer({ rs, setRs, load }) {
   if (!rs.hostedAvailable) return null
   const name = rs.computer
   if (viaRelay) {
-    return <p className="muted small acct-here">{rs.hosted ? <><Icon name="check" size={12} /> {t('On for {name}.', { name })}</> : t('{name} doesn\'t use it. Turn it on in Bridge AI on that computer: Settings › Account & Devices.', { name })}</p>
+    return <p className="muted small acct-here">{rs.hosted ? <><Icon name="check" size={12} /> {t('On for {name}.', { name })}</> : t('{name} doesn\'t use it. Turn it on in Bridge AI on that computer: {place}.', { name, place: where('hosted-relay') })}</p>
   }
   const use = async () => {
     if (rs.configured && !rs.hosted && !window.confirm(t('Move to Bridge AI\'s relay? Phones and computers paired here come along: they find this computer there by themselves.'))) return
@@ -410,7 +411,7 @@ function Others({ st, hostedHere }) {
           </div>
         </div>
       )}
-      {results?.map((r, i) => <p key={r.id || i} className={`st-note ${r.ok ? 'ok' : 'warn'} acct-result`}><Icon name={r.ok ? 'check' : 'alert'} size={13} /> {r.ok ? t('{name} is signed in.', { name: r.name }) : r.why === 'declined' ? t('{name} said not to be signed in from your other computers. Sign in there by hand, in Settings › Account & Devices.', { name: r.name }) : r.why === 'devices' ? t('{name}: your account has 5 devices already. Remove one above, then try again.', { name: r.name }) : `${r.name ? `${r.name}: ` : ''}${r.text}`}</p>)}
+      {results?.map((r, i) => <p key={r.id || i} className={`st-note ${r.ok ? 'ok' : 'warn'} acct-result`}><Icon name={r.ok ? 'check' : 'alert'} size={13} /> {r.ok ? t('{name} is signed in.', { name: r.name }) : r.why === 'declined' ? t('{name} said not to be signed in from your other computers. Sign in there by hand, in {place}.', { name: r.name, place: where('bold-bridge') }) : r.why === 'devices' ? t('{name}: your account has 5 devices already. Remove one above, then try again.', { name: r.name }) : `${r.name ? `${r.name}: ` : ''}${r.text}`}</p>)}
       <ul className="ph-devices">
         {list.map((o) => (
           <li key={o.id}>
@@ -420,7 +421,7 @@ function Others({ st, hostedHere }) {
           </li>
         ))}
       </ul>
-      {elsewhere.length > 0 && <p className="muted small acct-also">{elsewhere.length === 1 ? t('Also on {name}? It uses its own relay, and only a computer moves its own: in Bridge AI on {name}, choose Use Bridge AI\'s relay instead in Settings › Account & Devices. Its phones come along.', { name: elsewhere[0].name }) : t('Also on {names}? They use their own relays, and only a computer moves its own: in Bridge AI on each, choose Use Bridge AI\'s relay instead in Settings › Account & Devices. Their phones come along.', { names: names(elsewhere) })}</p>}
+      {elsewhere.length > 0 && <p className="muted small acct-also">{elsewhere.length === 1 ? t('Also on {name}? It uses its own relay, and only a computer moves its own: in Bridge AI on {name}, choose Use Bridge AI\'s relay instead in {place}. Its phones come along.', { name: elsewhere[0].name, place: where('hosted-relay') }) : t('Also on {names}? They use their own relays, and only a computer moves its own: in Bridge AI on each, choose Use Bridge AI\'s relay instead in {place}. Their phones come along.', { place: where('hosted-relay'), names: names(elsewhere) })}</p>}
       {offer.length > 0 && !asked.length && !results && <div><button type="button" className="ghost-btn" onClick={() => { setLater([]); try { localStorage.removeItem('cc-account-later') } catch { /* not kept */ } }}>{t('Sign in {names} too', { names: names(offer) })}</button></div>}
     </section>
   )

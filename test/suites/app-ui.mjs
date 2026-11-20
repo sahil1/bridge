@@ -22,7 +22,7 @@
 // their icons before any of them leaves it; its chips are one family, all as tall, quiet but for what
 // needs you; a pin in Status
 // puts one in the bar or takes it out (an unpinned one isn't counted), kept for the next window;
-// Settings › Appearance › In the Top Bar has the same switches; and the weather with none to show
+// Settings › You › In the Top Bar has the same switches; and the weather with none to show
 // (no city picked, or not fetched) says why, at every width, and opens the city picker. Usage
 // pinned is kept small: the provider's mark, the account new agents start on and the one figure
 // that matters, colored and readable as it runs low, a model's own limit only once it's the one
@@ -55,31 +55,40 @@ try {
     await p.waitForSelector('.modal.settings', { timeout: 5000 }).catch(() => {})
     ok(await solid(p, '.modal.settings'), `${t}: Settings opens, solid`)
     await p.locator('.st-nav-item', { hasText: 'Meetings' }).click()
-    ok(!!(await until(async () => /Name who spoke on the call/.test(await p.locator('.st-body').innerText()), 5000)), `${t}: Settings › Voice & Meetings`)
+    ok(!!(await until(async () => /Name who spoke on the call/.test(await p.locator('.st-body').innerText()), 5000)), `${t}: Settings › Meetings & Voice`)
     await shot(p, `${tag}settings-${t}`)
-    // Devices: one tab for the relay, the phone, your other devices and notifications.
-    const navs = (await p.locator('.st-nav-item').allInnerTexts()).map((x) => x.trim())
-    ok(navs.filter((x) => x === 'Devices').length === 1 && !navs.some((x) => /machines|Phone & notifications/i.test(x)), `${t}: Devices is one tab`, navs)
+    // Devices & Access: one section for the phone, your other devices, who may see this screen and Share
+    // Links, each a tab of it. (A beta feature's section has its Beta chip beside its name.)
+    const navs = await p.locator('.st-nav-item').evaluateAll((l) => l.map((e) => e.querySelector(':scope > span:not(.st-chip)')?.innerText.trim()))
+    ok(navs.filter((x) => x === 'Devices & Access').length === 1 && !navs.some((x) => /^(machines|Phone|Computers|Remote Access|Share Links|Sharing|Phone & notifications)$/i.test(x)), `${t}: Devices & Access is one section`, navs)
     // Names are in Title Case (Model Providers, About & Updates, Chief of Staff), short joining words aside.
     const titled = (x) => x.split(/\s+/).every((w, i) => (i > 0 && /^(a|an|and|as|at|by|for|in|of|on|or|the|to|&)$/.test(w)) || !/^\p{Ll}/u.test(w))
     ok(navs.length > 5 && navs.every(titled), `${t}: Settings' section names are in Title Case`, navs)
-    // README.md's table of Settings has a row for each of them (Mail's row says it's a Mac's), and
-    // none for a section that isn't there (Account's is: the tests run without Bold Bridge accounts).
+    // README.md's table of Settings has a row for each of them (Mail & Calendar's row says it's a
+    // Mac's), and none for a section that isn't there (Account & Backup is called Back Up & Move here:
+    // the tests run without Bold Bridge accounts).
     // (Windows' checkout writes its lines with \r\n: read as \n, so the table ends at its blank line.)
     const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8').replace(/\r\n/g, '\n')
     const table = readme.slice(readme.indexOf('| Section | What\'s there |'))
     const rows = [...table.slice(0, table.search(/\n\n/)).matchAll(/^\| ([^|]+?) \|/gm)].map((m) => m[1]).filter((x) => !/^(Section|-+)$/.test(x))
-    ok(navs.every((x) => rows.includes(x)) && rows.every((x) => navs.includes(x) || x === 'Mail' || x === 'Account'), `${t}: README.md's Settings table has a row for each section, and only those`, { rows, navs })
-    await p.locator('.st-nav-item', { hasText: 'Devices' }).click()
-    // Its three tabs: connect first (the relay's own heading, once it's in), then your computers, then notifications.
+    const named = navs.map((x) => (x === 'Back Up & Move' ? 'Account & Backup' : x))
+    ok(named.every((x) => rows.includes(x)) && rows.every((x) => named.includes(x) || x === 'Mail & Calendar'), `${t}: README.md's Settings table has a row for each section, and only those`, { rows, navs })
+    await p.locator('.st-nav-item', { hasText: 'Devices & Access' }).click()
+    // Its four tabs: connect first (the relay's own heading, once it's in), then your computers, then
+    // who may connect to this computer (there with Remote Screen and Preview off), then Share Links.
     const heads = async () => (await p.locator('.st-body .st-scroll h4').allInnerTexts()).map((x) => x.trim())
+    const words = () => p.locator('.st-body .st-scroll').innerText().catch(() => '')
     const tabs = await p.locator('.st-head .st-tabs [role="tab"]').allInnerTexts()
     const order = []
-    for (const [tab, re] of [['Phone', /relay|Tailscale/i], ['Computers', /^Your Devices$/], ['Notifications', /^What to notify about$/]]) {
+    for (const [tab, re] of [['Phone', /relay|Tailscale/i], ['Computers', /^Your Devices$/], ['Remote Access', /^Which Devices May Connect$/m], ['Share Links', /Nothing is shared now/]]) {
       await p.locator('.st-tabs [role="tab"]', { hasText: tab }).click()
-      order.push(await until(async () => { const h = await heads(); return h.some((x) => re.test(x)) && h }, 6000) || await heads())
+      order.push(await until(async () => { const h = await heads(); const w = await words(); return (h.some((x) => re.test(x)) || re.test(w)) && { h, w: w.slice(0, 400) } }, 6000) || { h: await heads(), w: (await words()).slice(0, 400) })
     }
-    ok(tabs.join('|') === 'Phone|Computers|Notifications' && /relay|Tailscale/i.test(order[0].join()) && !order[0].includes('Your Devices') && order[1].includes('Your Devices') && !order[1].some((x) => /relay|Notifications/i.test(x)) && order[2].includes('Notifications on this device') && order[2].includes('What to notify about'), `${t}: Devices' tabs: Phone (connect), Computers (your devices), Notifications, each with its own`, { tabs, order })
+    ok(tabs.join('|') === 'Phone|Computers|Remote Access|Share Links' && /relay|Tailscale/i.test(order[0].h.join()) && !order[0].h.includes('Your Devices') && order[1].h.includes('Your Devices') && !order[1].h.some((x) => /relay|Notifications/i.test(x)) && /Which Devices May Connect/.test(order[2].w) && !order[2].h.includes('Your Devices') && /Nothing is shared now/.test(order[3].w), `${t}: Devices & Access' tabs: Phone (connect), Computers (your devices), Remote Access (which may connect), Share Links, each with its own`, { tabs, order })
+    // Notifications: a section of its own now, what and where.
+    await p.locator('.st-nav-item', { hasText: 'Notifications' }).click()
+    const told = await until(async () => { const h = await heads(); return h.includes('Notifications on this device') && h.includes('What to notify about') && h }, 6000)
+    ok(!!told && await p.locator('.st-head .st-tabs').count() === 0, `${t}: Notifications, a section of its own: on this device, and what to notify about`, told || await heads())
     await p.keyboard.press('Escape')
     // The devices menu's way in (section "machines") opens it at your devices.
     await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'machines' } })))
@@ -589,7 +598,7 @@ try {
   // weather, the clock, usage and the update are in the bar with their words, sounds aren't; each
   // says what it is on hover and opens what its Status row opens. A pin in Status puts one in the bar
   // or takes it out (an unpinned update isn't counted on Status when there's no room), kept in this
-  // browser for the next window; Settings › Appearance › In the Top Bar has the same switches.
+  // browser for the next window; Settings › You › In the Top Bar has the same switches.
   const deskCalm = async (c) => {
     await deskBusy(c)
     await c.route(/\/api\/setup\/plan(\?|$)/, (r) => r.fulfill({ json: { running: false, needsYou: null, run: null, items: [] } }))
@@ -623,7 +632,7 @@ try {
     ok((await pin('Notification sounds').getAttribute('aria-pressed')) === 'false' && (await pin('Weather').getAttribute('aria-pressed')) === 'true' && (await pin('Clock').getAttribute('aria-pressed')) === 'true'
       && (await pin('Usage').getAttribute('aria-pressed')) === 'true' && (await pin('Updates').getAttribute('aria-pressed')) === 'true', 'Status: a pin on each item, pressed for what\'s in the bar')
     ok((await pin('Weather').getAttribute('title')) === 'Unpin from the bar' && (await pin('Notification sounds').getAttribute('title')) === 'Pin to the bar', 'each pin says what a click does')
-    ok(/Pin any of these to see it in the top bar too\. Settings › Appearance/.test((await p.locator('.status-foot').innerText().catch(() => '')).replace(/\s+/g, ' ')), 'and the menu says how to put something in the bar')
+    ok(/Pin any of these to see it in the top bar too\. Settings › You › In the Top Bar/.test((await p.locator('.status-foot').innerText().catch(() => '')).replace(/\s+/g, ' ')), 'and the menu says how to put something in the bar, and where in Settings')
     await pin('Notification sounds').click()
     await pin('Weather').click()
     await pin('Updates').click()
@@ -644,12 +653,12 @@ try {
     const next = await until(async () => { const x = await deskBar(p2).catch(() => null); return x?.has.usage && x.has.sounds && x }, 15000)
     ok(!!next && !next.has.weather && !next.has.update && next.has.clock, 'the next window has the same pins', next?.has)
     await p2.close()
-    // Settings › Appearance › In the Top Bar, from the foot of the Status menu: the same pins as switches.
+    // Settings › You › In the Top Bar (under Advanced), from the foot of the Status menu: the same pins as switches.
     await p.setViewportSize({ width: ROOM, height: 900 })
     await p.locator('.topbar .status-btn').click()
     await p.locator('.status-foot .link-btn').click()
     const sec = p.locator('#st-topbar')
-    ok(!!(await until(() => sec.isVisible(), 5000)) && /Appearance/.test(await p.locator('.st-nav-item.on').innerText()) && (await sec.locator('h4').innerText()) === 'In the Top Bar', 'Settings › Appearance opens at In the Top Bar')
+    ok(!!(await until(() => sec.isVisible(), 5000)) && (await p.locator('.st-nav-item.on').innerText()).trim() === 'You' && (await sec.locator('h4').innerText()) === 'In the Top Bar', 'Settings › You opens at In the Top Bar, its Advanced opened to show it')
     const sw = (name) => sec.locator('label', { hasText: name }).locator('input')
     ok(!(await sw('Weather').isChecked()) && (await sw('Notification sounds').isChecked()) && !(await sw('Updates').isChecked()) && (await sw('Clock').isChecked()) && (await sw('Usage').isChecked()) && (await sw('Setup').isChecked()) && (await sw('Restart to apply').isChecked()), 'its switches are the pins as they are')
     await p.waitForTimeout(300)

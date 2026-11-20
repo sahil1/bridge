@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import Icon from './Icon.jsx'
 import { api, refetch, viaRelay, useFleet } from '../api.js'
 import { t, tx, locale, tn } from '../i18n/index.js'
+import { where } from './settings/search.js'
 
 // The account switcher, like a model picker: Auto, then each agent's accounts with how much of
 // its usage window is left. In the top bar a pick is the account new agents of that kind start
@@ -250,8 +251,8 @@ export async function makeDefault(kind, id) {
 export async function removeAccount(kind, a, { ask = true } = {}) {
   const agent = agentName(kind)
   const q = !a.isDefault ? t('Sign out of {name} and remove it from Bridge AI?', { name: nameOf(a) })
-    : a.named ? t("Take {name} off Bridge AI's list? It's your usual login, so nothing is signed out: {agent} keeps it for the terminal. You can show it again in Settings › Model Providers › Accounts.", { name: a.label, agent })
-      : t("Take your usual login off Bridge AI's list? Nothing is signed out: {agent} keeps it for the terminal. You can show it again in Settings › Model Providers › Accounts.", { agent })
+    : a.named ? t("Take {name} off Bridge AI's list? It's your usual login, so nothing is signed out: {agent} keeps it for the terminal. You can show it again in {place}.", { place: where('accounts'), name: a.label, agent })
+      : t("Take your usual login off Bridge AI's list? Nothing is signed out: {agent} keeps it for the terminal. You can show it again in {place}.", { place: where('accounts'), agent })
   if (ask && !window.confirm(q)) return false
   await api(`/accounts/${encodeURIComponent(a.id)}`, { method: 'DELETE' })
   changed()
@@ -378,7 +379,7 @@ export default function AccountMenu({ groups, value, onPick, onAdd, extra = [], 
             return (
               <div key={a.id} className={`acct-row ${needs ? 'has-act' : ''} ${canSet ? 'can-set' : ''}`}>
                 <button type="button" data-item role="menuitemradio" aria-checked={on} className="acct-item" onClick={() => pick(g.kind, a.id)} disabled={busy}
-                  title={[!dialog && on && t('Your default: new agents start here'), windowsText(a), a.signedIn === false && t('Not signed in yet (Settings › Model Providers › Accounts)')].filter(Boolean).join('\n') || undefined}>
+                  title={[!dialog && on && t('Your default: new agents start here'), windowsText(a), a.signedIn === false && t('Not signed in yet ({place})', { place: where('accounts') })].filter(Boolean).join('\n') || undefined}>
                   {/* In the top bar a pick is your default: the star, as in Usage and Settings. */}
                   <span className={`acct-check ${on && !dialog ? 'is-default' : ''}`}>{on && <Icon name={dialog ? 'check' : 'star'} size={13} />}</span>
                   <span className="acct-main">

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import Icon from './Icon.jsx'
 import { api, viaRelay } from '../api.js'
 import { t } from '../i18n/index.js'
+import { where } from './settings/search.js'
 
 // First-run setup (Onboarding.jsx): where to set up Bridge AI on your phone. Setup asks for nothing,
 // so it only says where: Settings › Account & Devices, once setup is done (Bridge AI's relay there
@@ -18,7 +19,7 @@ export function PhonePick() {
     <p className="wiz-awake wiz-phone" role="note">
       <Icon name="phone" size={14} />
       <b>{t('Use Bridge AI on your phone')}</b>
-      <small>{t('Once setup is done, Settings › Account & Devices sets it up: Bridge AI\'s relay with a Bold Bridge account, a relay on your own Cloudflare account, or Tailscale.')}</small>
+      <small>{t('Once setup is done, {place} sets it up: Bridge AI\'s relay with a Bold Bridge account, a relay on your own Cloudflare account, or Tailscale.', { place: where('phone') })}</small>
     </p>
   )
 }

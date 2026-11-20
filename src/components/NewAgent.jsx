@@ -10,6 +10,7 @@ import { AccountPicker, nameOf } from './AccountMenu.jsx'
 import NewCloudAgent from './NewCloudAgent.jsx'
 import { EffortChip, launchEffort } from './Recommended.jsx'
 import { t, tn } from '../i18n/index.js'
+import { where } from './settings/search.js'
 
 // Start any installed agent in a project folder (in an existing space or a new one), or as a
 // plain chat with no project, like talking to Claude or Codex directly. Optionally with a first message.
@@ -175,7 +176,7 @@ export default function NewAgent({ fleet, initial = {}, onClose, onLaunched, onA
               {[['claude', 'Claude', 'Claude Code'], ['codex', 'ChatGPT', 'Codex']].map(([k, plan, app]) => (
                 <div key={k} className="na-none-row"><AgentMark kind={k} label={app} size={20} /><span className="na-none-name"><b>{plan}</b> <span className="muted small">{t('with {app}', { app })}</span></span><InstallAgentButton kind={k} label={t('Install {app}', { app })} onCheck={reloadKinds} /></div>
               ))}
-              <button type="button" className="link-btn" onClick={() => openSettings('agents')}>{t('Gemini, Copilot and more in Settings › Agents')}</button>
+              <button type="button" className="link-btn" onClick={() => openSettings('agents')}>{t('Gemini, Copilot and more in {place}', { place: where('agents') })}</button>
               <button type="button" className="link-btn" onClick={() => pickKind('chat')}>{t('Or work with any model through an API key')}</button>
             </div>
           ) : (

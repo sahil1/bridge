@@ -5,6 +5,7 @@ import { api } from '../../../api.js'
 import { t, tx } from '../../../i18n/index.js'
 import { base64 } from '../files.js'
 import { W, H, LAYOUTS, LOOKS, colorsOf, fontStack } from '../deck.js'
+import { where } from '../../settings/search.js'
 
 // The deck editor's parts: a slide drawn at a size, the menus and galleries of its toolbar,
 // presenting, and writing slides with AI.
@@ -390,7 +391,7 @@ export function AiPanel({ file, getSlides, at, mode, setMode, draw, onKeep, onCl
           {err && (
             <p className="error-text small" role="alert">{err.text || err}{err.noModel && <> <button type="button" className="link-btn" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'providers' } }))}>{t('Model Providers')}</button></>}</p>
           )}
-          {models && !models.length && !err && <p className="muted small">{t('No model to write with yet: sign in to an agent (Claude Code, Codex…) or add a key in Settings › Model Providers. Ask an agent, at the top, changes the file itself.')}</p>}
+          {models && !models.length && !err && <p className="muted small">{t('No model to write with yet: sign in to an agent (Claude Code, Codex…) or add a key in {place}. Ask an agent, at the top, changes the file itself.', { place: where('providers') })}</p>}
           {busy ? (
             <div className="sd-ai-busy" role="status">
               <Icon name="refresh" size={14} className="spin" />

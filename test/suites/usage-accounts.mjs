@@ -364,7 +364,7 @@ try {
       ok(await bg(inField.locator('.acct-row', { has: p.locator('.acct-nm', { hasText: /^Work$/ }) }).locator('.acct-dot').first()) === want7, `${t}: and its list, Work in Violet`)
       await p.keyboard.press('Escape')
       await p.keyboard.press('Escape')
-      // Settings › Model Providers › Accounts: each account's swatch before its name, Work's Violet.
+      // Settings › Agents & Models › Model Providers › Accounts: each account's swatch before its name, Work's Violet.
       await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'accounts' } })))
       const sec = p.locator('#pv-accounts')
       await sec.waitFor({ timeout: 15000 })

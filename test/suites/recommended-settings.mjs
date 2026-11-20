@@ -5,7 +5,7 @@
 // Enterprise, an API key; none through a cloud provider, none signed out), Use these and Keep, asked
 // again when the plan changes, what's passed when an agent starts (--model, --effort), and Claude
 // Code's own settings never written. A task's effort, suggested from sample asks. In the app, in
-// the browser named by BRIDGE_TEST_BROWSER: setup's Connect your AI and Settings › Agents say the
+// the browser named by BRIDGE_TEST_BROWSER: setup's Connect your AI and Settings › Agents & Models › Agents say the
 // recommendation and Use these applies it; what it starts with is changed there; Home's box and New
 // have an effort chip suggested from what's typed, changed from its menu, which is what the agent
 // starts with; the agent's model menu says it; a switch for it saved off from before changes
@@ -20,7 +20,7 @@ const kit = await startKit('recommended-settings', { env: { CLAUDE_STAND_IN: 'fr
 kit.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'claude.cjs'), 'utf8'))
 const claudeDir = path.join(kit.home, '.claude')
 fs.mkdirSync(claudeDir, { recursive: true })
-// Signed in as Settings › Agents' own check sees it (server/providers.js): a login file there.
+// Signed in as Settings › Agents & Models › Agents' own check sees it (server/providers.js): a login file there.
 fs.writeFileSync(path.join(claudeDir, '.credentials.json'), '{}')
 const plan = (p) => { fs.rmSync(path.join(claudeDir, 'stand-in-signed-out'), { force: true }); fs.writeFileSync(path.join(claudeDir, 'stand-in-plan.json'), JSON.stringify(p)) }
 const signOut = () => fs.writeFileSync(path.join(claudeDir, 'stand-in-signed-out'), '')
@@ -150,7 +150,7 @@ try {
     await ctx.close()
   }
   await kit.api('/setup', { name: 'Tester' })
-  // Settings › Agents, as a link to it opens it (asked again until the app is up to hear it).
+  // Settings › Agents & Models › Agents, as a link to it opens it (asked again until the app is up to hear it).
   const openAgents = async (p) => {
     const row = p.locator('.modal.settings [data-setting="agent-claude"]')
     await until(async () => {
@@ -166,7 +166,7 @@ try {
     await openAgents(p)
     const row = p.locator('.modal.settings [data-setting="agent-claude"]')
     const card = row.locator('.rec-card')
-    ok(!!(await card.waitFor({ timeout: 15000 }).then(() => true, () => false)), `${t}: Settings › Agents: the recommendation under Claude Code`)
+    ok(!!(await card.waitFor({ timeout: 15000 }).then(() => true, () => false)), `${t}: Settings › Agents & Models › Agents: the recommendation under Claude Code`)
     ok(/Recommended for your Max plan: Opus, high effort/.test(await card.innerText()) && /Starts with\s+Claude Code's defaults/.test(await row.locator('.rec-starts').innerText()), `${t}: with what it starts with now: Claude Code's defaults`, await row.innerText())
     await shot(p, `${tag}recommended-agents-${t}`)
     await card.locator('button', { hasText: 'Use these' }).click()
@@ -175,7 +175,7 @@ try {
     await row.locator('select[aria-label="Claude Code effort"]').selectOption('xhigh')
     ok(!!(await until(async () => /Opus · Extra high effort\s+\(as you set it\)/.test(await row.locator('.rec-starts').innerText()) && userConfig().agents?.claude?.effort === 'xhigh', 10000)), `${t}: the effort changed there is saved and said`, await row.locator('.rec-starts').innerText())
     await shot(p, `${tag}recommended-agents-used-${t}`)
-    ok(errors.length === 0, `${t}: Settings › Agents: no page errors`, errors)
+    ok(errors.length === 0, `${t}: Settings › Agents & Models › Agents: no page errors`, errors)
     await ctx.close()
   }
   // A phone: the card fits, its buttons whole.
@@ -276,7 +276,7 @@ try {
   {
     const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
     await openAgents(p)
-    ok(!!(await until(async () => (await p.locator('.rec-starts').count()) > 0, 8000)), 'saved off from before: Settings › Agents still says what Claude Code starts with')
+    ok(!!(await until(async () => (await p.locator('.rec-starts').count()) > 0, 8000)), 'saved off from before: Settings › Agents & Models › Agents still says what Claude Code starts with')
     await p.locator('button[aria-label="Close settings"]').click()
     await p.locator('[data-tour="new-agent"]:visible, button[aria-label="Start something new"]:visible').first().click()
     await p.locator('.home-box textarea').waitFor({ timeout: 10000 })

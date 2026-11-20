@@ -445,7 +445,7 @@ try {
     const told = notes().slice(before)
     ok(told.some((n) => n.kind === 'share' && /20 wrong passwords/.test(n.title) && /locked for 15 minutes/.test(n.body)), 'your devices hear it was locked', told.map((n) => n.title))
     const listed = (await kit.api('/shares')).shares.find((x) => x.id === s.id)
-    ok(listed.locked > Date.now() && listed.opens.filter((o) => o.what === 'wrong password').length >= 15 && listed.opens[0]?.what === 'locked', 'Settings › Sharing has the wrong tries and the lock (its latest 20)', listed.opens.map((o) => o.what))
+    ok(listed.locked > Date.now() && listed.opens.filter((o) => o.what === 'wrong password').length >= 15 && listed.opens[0]?.what === 'locked', 'Settings › Devices & Access › Share Links has the wrong tries and the lock (its latest 20)', listed.opens.map((o) => o.what))
     const kept = fs.readFileSync(path.join(kit.data, 'shares.json'), 'utf8')
     ok(!kept.includes('right-horse-7') && /"N":/.test(kept), 'the password is kept only as a salted hash')
     await kit.api(`/shares/${s.id}/stop`, {})
@@ -504,7 +504,7 @@ try {
       v2.close()
     } finally { await accounts.mailFails('') }
     const listed = (await kit.api('/shares')).shares.find((x) => x.id === s.id)
-    ok(listed.opens.some((o) => o.what === 'opened' && o.email === 'ana@example.com') && listed.opens.some((o) => o.what === 'not on the list' && o.email === 'eve@example.com') && listed.opens.some((o) => o.what === 'wrong code'), 'Settings › Sharing has which email opened it, and the tries', listed.opens)
+    ok(listed.opens.some((o) => o.what === 'opened' && o.email === 'ana@example.com') && listed.opens.some((o) => o.what === 'not on the list' && o.email === 'eve@example.com') && listed.opens.some((o) => o.what === 'wrong code'), 'Settings › Devices & Access › Share Links has which email opened it, and the tries', listed.opens)
     await kit.api(`/shares/${s.id}/stop`, {})
     await sleep(500)
     const forgot = await until(async () => { const r = await accounts.call('POST', '/v1/share-code', { link: s.id, to: 'ana@example.com', code: '12345678' }, token); return r.code === 'not-named' ? r : null }, 8000)
@@ -601,7 +601,7 @@ try {
     const s2 = await share({ kind: 'folder', root: 'home', path: 'data' })
     const w = await viewer(s2.link)
     await frameOf(w.p, 'a[href="notes.txt"]')
-    ok((await kit.api('/shares')).shares.find((x) => x.id === s2.id)?.open === 1, 'Settings › Sharing says it\'s open on one device')
+    ok((await kit.api('/shares')).shares.find((x) => x.id === s2.id)?.open === 1, 'Settings › Devices & Access › Share Links says it\'s open on one device')
     await kit.api(`/shares/${s2.id}/stop`, {})
     ok(!!(await until(async () => /This link has ended/.test(await w.p.locator('#wait-title').innerText()) && /Tester stopped sharing it/.test(await w.p.locator('#wait-text').innerText()), 5000)), 'Stop Sharing: the open page ends at once, saying so')
     ok((await viewAs(s2.link)).refused?.why === 'no-share', 'and the link opens no more')
@@ -669,13 +669,13 @@ try {
     other.close()
     const w = await viewer(made.json.share.link, { phone: true })
     ok(!!(await frameOf(w.p, 'a[href="notes.txt"]')), 'a phone\'s browser opens it')
-    // Settings › Sharing at a phone's width: the link, and Stop Sharing.
+    // Settings › Devices & Access › Share Links at a phone's width: the link, and Stop Sharing.
     const p2 = await page(b, kit.url, { phone: true })
     await p2.p.waitForSelector('.tabbar button', { timeout: 20000 })
     await p2.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'sharing' } })))
     const row = p2.p.locator(`.share-row[data-share="${id}"]`)
     await row.waitFor({ timeout: 10000 })
-    ok(/Made on Phone/.test(await row.innerText()) && /Open on 1 device now/.test(await until(async () => { const x = await row.innerText(); return /Open on 1 device now/.test(x) ? x : null }, 8000) || ''), 'Settings › Sharing on a phone: the link, where it was made, and that it\'s open', await row.innerText())
+    ok(/Made on Phone/.test(await row.innerText()) && /Open on 1 device now/.test(await until(async () => { const x = await row.innerText(); return /Open on 1 device now/.test(x) ? x : null }, 8000) || ''), 'Settings › Devices & Access › Share Links on a phone: the link, where it was made, and that it\'s open', await row.innerText())
     const f = await phoneFaults(p2.p, '.modal.settings .shares')
     ok(!Object.keys(f).length, 'nothing wider than the phone, cut off, nor too small to tap', f)
     await shot(p2.p, `${tag}share-phone-settings`)
@@ -837,7 +837,7 @@ try {
     await d.p.waitForSelector('.rail-nav-btn', { timeout: 20000 })
     await d.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'sharing' } })))
     const said = await until(async () => { const x = await d.p.locator('.share-relay-limits').innerText().catch(() => ''); return x || null }, 10000)
-    ok(/60,000 messages in 8 hours and 250,000 a week/.test(said || ''), 'Settings › Sharing says it', said)
+    ok(/60,000 messages in 8 hours and 250,000 a week/.test(said || ''), 'Settings › Devices & Access › Share Links says it', said)
     await d.ctx.close()
     // Kim's links get their own codes to an address another account has used up (bo@example.com).
     const token = JSON.parse(fs.readFileSync(path.join(hk.data, 'account.json'), 'utf8')).deviceToken

@@ -48,7 +48,7 @@
 //     window opened fresh when asked, loaded again with a new token, or closed when it doesn't
 //     load or hangs, the app kept from napping meanwhile, the display woken and kept awake while
 //     viewed;
-//   in the browser (BRIDGE_TEST_BROWSER): Settings › Devices › Computers on Laptop, View screen, the
+//   in the browser (BRIDGE_TEST_BROWSER): Settings › Devices & Access › Computers on Laptop, View screen, the
 //     password asked for (a wrong one said), the pictures through the relay (said slower), filling the
 //     stage with their shape kept, another screen picked in the session, Control once Studio allows
 //     it, the pointer right in Fit and Actual Size on a 5K and a portrait screen; light and dark, the
@@ -223,7 +223,7 @@ async function through(v, pw = PW) {
 }
 // The newest line written for each pointer move since n.
 const movesSince = (f, n) => lines(f).slice(n).filter((x) => x.t === 'move')
-// Once the app is there (its top bar), Settings › Devices › Computers.
+// Once the app is there (its top bar), Settings › Devices & Access › Computers (or another place).
 const ready = (p) => p.locator('.settings-btn').waitFor({ timeout: 20000 })
 // One of the app's own events, sent again until what it opens is there: the app listens from an
 // effect, after it's first drawn, so one sent the moment the top bar shows can come before that.
@@ -233,7 +233,8 @@ const sendUntil = async (p, name, detail, shows) => {
     if (await p.locator(shows).first().waitFor({ timeout: 500 }).then(() => true, () => false)) return
   }
 }
-const devices = async (p) => { await ready(p); await sendUntil(p, 'bridge-open-settings', { section: 'machines' }, '.modal.settings') }
+// (section: Computers, else the Remote Access tab, 'remote', or Notifications, 'notifications'.)
+const devices = async (p, section = 'machines') => { await ready(p); await sendUntil(p, 'bridge-open-settings', { section }, '.modal.settings') }
 const lines = (f) => { try { return fs.readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) } catch { return [] } }
 
 // A tap between a phone and its relay: every message, both ways, as the relay carries it.
@@ -1590,7 +1591,7 @@ try {
     ok(!!(await until(async () => /Laptop (viewed|controlled) this screen for/.test(await notice.innerText().catch(() => '')), 8000)), 'and Studio says afterwards who looked, and for how long', await notice.innerText().catch(() => ''))
     await notice.getByRole('button', { name: 'Got it' }).click()
     ok(!!(await until(async () => !(await st.p.locator('.rs-here').count()), 6000)), 'Got it clears it')
-    await devices(st.p)
+    await devices(st.p, 'remote')
     const sec = st.p.locator('[data-setting=remote-access]')
     await sec.waitFor({ timeout: 10000 })
     ok(await sec.getByRole('switch', { name: /Let my other devices control this computer/ }).isChecked(), 'Studio\'s Settings: "Let my other devices control this computer", on')
@@ -1932,7 +1933,7 @@ try {
   await part('Remote Access in Studio\'s Settings, and shown from another computer\'s window', async () => {
     const { p, errors: e1 } = await page(b, studio.url)
     errors.push(...e1)
-    await devices(p)
+    await devices(p, 'remote')
     const sec = p.locator('[data-setting=remote-access]')
     await sec.waitFor({ timeout: 10000 })
     ok(/Set on /.test(await sec.locator('[data-setting=remote-password]').innerText()), 'the password: set, and when')
@@ -1964,12 +1965,13 @@ try {
     ok(!!(await until(async () => (await studio.api('/remote')).access.password && await sw.isEnabled(), 6000)), 'Set Password: set, and control can be turned on')
     await sec.getByRole('switch', { name: /^Ask Here First/ }).click()
     ok(!!(await until(async () => (await studio.api('/remote')).access.askFirst, 5000)), 'Ask Here First turned on there')
-    await sec.locator('.rs-devices').getByRole('checkbox', { name: 'Phone phone', exact: true }).click()
+    // Which Devices May Connect: its own block on the tab, after Remote Access.
+    await p.locator('[data-setting=remote-devices] .rs-devices').getByRole('checkbox', { name: 'Phone phone', exact: true }).click()
     ok(!!(await until(async () => (await studio.api('/remote')).access.devices.find((d) => d.name === 'Phone')?.allowed === false, 5000)), 'a device unticked there')
     await shot(p, `${tag}remote-screen-remote-access`)
     const dk = await page(b, studio.url, { mode: 'dark' })
     errors.push(...dk.errors)
-    await devices(dk.p)
+    await devices(dk.p, 'remote')
     await dk.p.locator('[data-setting=remote-access]').waitFor({ timeout: 10000 })
     await dk.p.locator('[data-setting=remote-access]').scrollIntoViewIfNeeded()
     await shot(dk.p, `${tag}remote-screen-remote-access-dark`)
@@ -1977,7 +1979,7 @@ try {
     // At a phone's width: the same block, nothing wider than the phone.
     const ph2 = await page(b, studio.url, { phone: true })
     errors.push(...ph2.errors)
-    await devices(ph2.p)
+    await devices(ph2.p, 'remote')
     const pa = ph2.p.locator('[data-setting=remote-access]')
     await pa.waitFor({ timeout: 10000 })
     await pa.scrollIntoViewIfNeeded()
@@ -1989,17 +1991,17 @@ try {
     const port = (await laptop.api('/machines')).machines.find((m) => m.id === S.id)?.port
     const el = await page(b, `http://127.0.0.1:${port}/m/${S.id}/`)
     errors.push(...el.errors)
-    await devices(el.p)
+    await devices(el.p, 'remote')
     const rs = el.p.locator('[data-setting=remote-access]')
     await rs.waitFor({ timeout: 15000 })
     const said = await rs.innerText()
     ok(/The password is set at Studio itself, never from another device/.test(said) && /Changed at Studio itself/.test(said) && !(await rs.getByRole('button', { name: /Set Password|Change Password/ }).count()) && await rs.getByRole('switch', { name: /^Ask Here First/ }).isDisabled() && await rs.getByRole('switch', { name: /^Ask Here First/ }).isChecked(), 'from another computer\'s window: shown as it is (Ask Here First on), nothing changed there, saying where it is', said.slice(0, 400))
-    ok(!(await rs.locator('.rs-devices').count()) && /Kept at Studio itself/.test(await el.p.locator('[data-setting=remote-sessions]').innerText()), 'Studio\'s devices and its record aren\'t shown there: they\'re Studio\'s own to see')
+    ok(!(await el.p.locator('[data-setting=remote-devices] .rs-devices').count()) && /Kept at Studio itself/.test(await el.p.locator('[data-setting=remote-sessions]').innerText()), 'Studio\'s devices and its record aren\'t shown there: they\'re Studio\'s own to see')
     await rs.scrollIntoViewIfNeeded()
     await shot(el.p, `${tag}remote-screen-remote-access-elsewhere`)
     await el.ctx.close()
     await sec.getByRole('switch', { name: /^Ask Here First/ }).click()
-    await sec.locator('.rs-devices').getByRole('checkbox', { name: 'Phone phone', exact: true }).click()
+    await p.locator('[data-setting=remote-devices] .rs-devices').getByRole('checkbox', { name: 'Phone phone', exact: true }).click()
     ok(!!(await until(async () => { const a = (await studio.api('/remote')).access; return !a.askFirst && a.devices.every((d) => d.allowed) }, 5000)), 'and back as they were')
     await p.context().close()
   })
@@ -2061,11 +2063,11 @@ try {
   await part('Screen Sharing Notifications in Settings, and never silent', async () => {
     const { p, errors: e1 } = await page(b, studio.url)
     errors.push(...e1)
-    await devices(p)
+    await devices(p, 'notifications')
     const sec = p.locator('[data-setting=remote-notify]')
     await sec.waitFor({ timeout: 10000 })
     const said = await sec.innerText()
-    ok(await sec.getByRole('switch', { name: /Screen Sharing Notifications/ }).isChecked() && /On this computer: (Studio browser, Phone|Phone, Studio browser)\./.test(said) && /Through Laptop: 2 devices\./.test(said), 'Settings › Remote Access: on, and where they go (this computer\'s devices, and Laptop\'s through it)', said)
+    ok(await sec.getByRole('switch', { name: /Screen Sharing Notifications/ }).isChecked() && /On this computer: (Studio browser, Phone|Phone, Studio browser)\./.test(said) && /Through Laptop: 2 devices\./.test(said), 'Settings › Notifications: on, and where they go (this computer\'s devices, and Laptop\'s through it)', said)
     await sec.scrollIntoViewIfNeeded()
     await shot(p, `${tag}remote-screen-notify-settings`)
     // Nobody set up anywhere: said, with the way to set one up, and a session still recorded.
@@ -2088,13 +2090,16 @@ try {
     await here.ctx.close()
     await v.close()
     await until(async () => !(await studio.api('/remote')).sessions.length, 5000, 100)
+    // (Screen Activity is the Remote Access tab's.)
+    await sendUntil(p, 'bridge-open-settings', { section: 'remote-sessions' }, '.modal.settings [data-setting=remote-sessions]')
     const rec = p.locator('[data-setting=remote-sessions]')
     ok(!!(await until(async () => /No notification went out: no notification channel is set up/.test(await rec.innerText()), 8000)) && /Notified 3 of your devices/.test(await rec.innerText()), 'Screen Activity says, for each session, how many of your devices were told, or that none were', (await rec.innerText()).slice(0, 500))
+    await sendUntil(p, 'bridge-open-settings', { section: 'remote-notify' }, '.modal.settings [data-setting=remote-notify]')
     await nowhere.getByRole('button', { name: 'Set Up Notifications' }).click()
-    ok(!!(await until(async () => p.locator('[data-setting=this-device]').isVisible(), 6000)), 'Set Up Notifications opens Settings › Notifications')
+    ok(!!(await until(async () => p.locator('[data-setting=this-device]').isVisible(), 6000)), 'Set Up Notifications goes to Notifications on this device, in the same section')
     const dk = await page(b, studio.url, { mode: 'dark' })
     errors.push(...dk.errors)
-    await devices(dk.p)
+    await devices(dk.p, 'notifications')
     await dk.p.locator('[data-setting=remote-notify]').scrollIntoViewIfNeeded()
     await shot(dk.p, `${tag}remote-screen-notify-nowhere-dark`)
     await dk.ctx.close()
@@ -2102,7 +2107,7 @@ try {
     const port = (await laptop.api('/machines')).machines.find((m) => m.id === S.id)?.port
     const el = await page(b, `http://127.0.0.1:${port}/m/${S.id}/`)
     errors.push(...el.errors)
-    await devices(el.p)
+    await devices(el.p, 'notifications')
     const rs = el.p.locator('[data-setting=remote-notify]')
     await rs.waitFor({ timeout: 15000 })
     ok(await rs.getByRole('switch', { name: /Screen Sharing Notifications/ }).isDisabled() && /Turned on and off at Studio itself/.test(await rs.innerText()) && !/On this computer:|No notification channel/.test(await rs.innerText()), 'from another computer\'s window: on, changed at Studio only, and not where they go', await rs.innerText())

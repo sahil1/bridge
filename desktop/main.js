@@ -775,7 +775,11 @@ async function checkForUpdates() {
   let u
   try { u = await fetch(`${URL_BASE}/api/updates?refresh=1`, { signal: AbortSignal.timeout(20000) }).then((r) => r.json()) } catch (e) { return say({ type: 'warning', message: 'Couldn\'t check for an update', detail: `${APP_NAME} isn't answering yet (${e.message}). Try again in a minute.` }) }
   if (u.error) return say({ type: 'warning', message: 'Couldn\'t check for an update', detail: u.error })
-  if (u.disabled) return say({ message: 'Checking for updates is turned off', detail: 'Turn it on in Settings › About.' })
+  if (u.disabled) {
+    // (Where Settings says it, from the one table: shared/places.js.)
+    const at = await import(require('node:url').pathToFileURL(path.join(ROOT, 'shared', 'places.js')).href).then((m) => m.placeEn('about'), () => 'Settings › About & Updates')
+    return say({ message: 'Checking for updates is turned off', detail: `Turn on Check for new versions in ${at}.` })
+  }
   // This app can be behind the server it shows: one run from your clone (npm start) is as new as the
   // clone, and the app around it only updates when asked. The app's own version counts too, and so
   // does the newest release's macOS minimum: a Mac that can't open it isn't offered it.

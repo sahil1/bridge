@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import Icon from '../components/Icon.jsx'
 import { api } from '../api.js'
 import { t } from '../i18n/index.js'
+import { where } from '../components/settings/search.js'
 
 // Tidy what I say (a trial: dictation-cleanup): what you say from another app, tidied by a model
 // before the dictation window pastes it (controller.js tidyWords, server/dictation.js tidy). What
@@ -44,7 +45,7 @@ export function TidyNeeds({ local, onReady, className = '', on = false, onProvid
   if (!l.offered) {
     return (
       <div className={`st-note tidy-needs${on ? ' warn' : ''} ${className}`} role="status">
-        <p><Icon name={on ? 'alert' : 'info'} size={13} /> {t('Tidying needs a model: add one in Settings › Model Providers (Ollama, LM Studio or a key).')}{meanwhile}</p>
+        <p><Icon name={on ? 'alert' : 'info'} size={13} /> {t('Tidying needs a model: add one in {place} (Ollama, LM Studio or a key).', { place: where('providers') })}{meanwhile}</p>
         {onProviders && <button type="button" className="btn small" onClick={onProviders}>{t('Open Model Providers')}</button>}
       </div>
     )

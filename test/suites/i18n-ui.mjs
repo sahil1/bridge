@@ -1,9 +1,9 @@
 // Bridge AI in other languages, in the browser named by BRIDGE_TEST_BROWSER. Every language's pack
 // (src/i18n/<code>.json) is valid and keeps each string's {placeholders} (scripts/i18n.js), and
-// Settings › Appearance offers every pack, named in its own words. Then each language: the page says which it is, the
-// sidebar, Settings' sections and Appearance are in its words, nothing is wider than the window (or
+// Settings › You offers every pack, named in its own words. Then each language: the page says which it is, the
+// sidebar, Settings' sections and its look (You) are in its words, nothing is wider than the window (or
 // a phone, for the longest), with no page errors; Match this computer follows the browser's
-// language; and picking one in Settings › Appearance switches to it, in another open window too.
+// language; and picking one in Settings › You switches to it, in another open window too.
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -60,16 +60,16 @@ try {
     }, 20000, 0)
     ok(!!opened, `${l}: Settings opens`)
     const secs = (await p.locator('.st-nav-item').allInnerTexts()).map((x) => x.trim())
-    ok(['General', 'Devices', 'Appearance'].every((en) => secs.includes(say(l, en))), `${l}: and Settings' sections`, secs)
-    ok(!!(await until(async () => (await p.locator('.appearance h4').allInnerTexts()).includes(say(l, 'Language')), 5000)), `${l}: and Appearance, with Language`)
+    ok(['You', 'Devices & Access', 'Notifications'].every((en) => secs.includes(say(l, en))), `${l}: and Settings' sections`, secs)
+    ok(!!(await until(async () => (await p.locator('.appearance h4').allInnerTexts()).includes(say(l, 'Language')), 5000)), `${l}: and You, with Language`)
     ok((await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 1, `${l}: nothing wider than the window`)
     await shot(p, `${tag}i18n-${l}`)
-    // Settings › General with no agent installed: the sentence around Install one, its link in place.
-    await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'general' } })))
+    // Settings › Agents & Models › Agents with no agent installed: the sentence around Install one, its link in place.
+    await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'agents' } })))
     const none = say(l, 'No agents installed yet. {install} to get started, or chat with any model through an API key: New chat, then Any model.').replace('{install}', say(l, 'Install one'))
     const warn = p.locator('[data-setting="default-agent"] .st-note.warn')
     const reads = () => warn.evaluate((e) => e.textContent.replace(/\s+/g, ' ').trim())
-    ok(!!(await until(async () => (await reads()) === none, 8000)) && (await warn.locator('button').innerText()) === say(l, 'Install one'), `${l}: Settings › General, a sentence with a link in it`, await reads().catch(() => ''))
+    ok(!!(await until(async () => (await reads()) === none, 8000)) && (await warn.locator('button').innerText()) === say(l, 'Install one'), `${l}: Settings › Agents & Models › Agents, a sentence with a link in it`, await reads().catch(() => ''))
     // The link sits in the sentence: what follows it goes on from beside it, not on a line of its own.
     const inline = await warn.evaluate((e) => {
       const b = e.querySelector('button'), after = b.nextSibling
@@ -123,7 +123,7 @@ try {
   ok((await fr.p.evaluate(() => document.documentElement.lang)) === 'fr' && (await fr.p.locator('.rail-nav-btn').allInnerTexts()).some((x) => x.includes(say('fr', 'Meetings'))), 'Match this computer: a French browser gets French')
   await fr.ctx.close()
 
-  // Picked in Settings › Appearance: the app starts again in it. English until then.
+  // Picked in Settings › You: the app starts again in it. English until then.
   const en = await page(b, kit.url)
   await en.p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
   ok((await en.p.evaluate(() => document.documentElement.lang)) === 'en', 'English until another is picked')
@@ -137,7 +137,7 @@ try {
   const offered = await pick.locator('option').evaluateAll((os) => os.map((o) => [o.value, o.textContent]))
   ok(LANGS.every((l) => offered.some(([v]) => v === l)) && offered.some(([v, n]) => v === 'ja' && n === '日本語') && offered.some(([v, n]) => v === 'zh-CN' && n === '简体中文'), 'Language offers every pack, each in its own words', offered)
   await pick.selectOption('ja')
-  ok(!!(await until(async () => (await en.p.evaluate(() => document.documentElement.lang).catch(() => '')) === 'ja' && (await en.p.locator('.rail-nav-btn').allInnerTexts().catch(() => [])).some((x) => x.includes(say('ja', 'Meetings'))), 15000)), 'picking 日本語 in Settings › Appearance switches to it')
+  ok(!!(await until(async () => (await en.p.evaluate(() => document.documentElement.lang).catch(() => '')) === 'ja' && (await en.p.locator('.rail-nav-btn').allInnerTexts().catch(() => [])).some((x) => x.includes(say('ja', 'Meetings'))), 15000)), 'picking 日本語 in Settings › You switches to it')
   ok(!!(await until(async () => (await other.evaluate(() => document.documentElement.lang).catch(() => '')) === 'ja', 15000)), 'and another window open at the time follows it')
   // WebKit cuts off the presence ping a page sends as it reloads, which isn't the app's error.
   ok(en.errors.filter((e) => !/\/api\/\S+ due to access control checks/.test(e)).length === 0, 'no page errors', en.errors)

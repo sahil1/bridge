@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import Icon from '../Icon.jsx'
 import { api, refetch } from '../../api.js'
 import { t, tx, locale } from '../../i18n/index.js'
+import { where } from '../settings/search.js'
 
 // Tools for meetings: how Memory groups its names, fixing a word everywhere in a meeting, and
 // transcribing a meeting again from its audio with another engine, model or language.
@@ -163,7 +164,7 @@ export function TranscribeAgain({ ids, onClose, onDone }) {
         <label><span>{t('With')}</span>
           <select value={pick} onChange={(e) => setPick(e.target.value)} aria-label={t('Transcribe with')}>
             {!sp && <option value="">{t('Loading…')}</option>}
-            {sp && !options.length && <option value="">{t('Nothing set up: Settings › Voice & Meetings')}</option>}
+            {sp && !options.length && <option value="">{t('Nothing set up: {place}', { place: where('voice') })}</option>}
             {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
           </select>
         </label>
@@ -172,7 +173,7 @@ export function TranscribeAgain({ ids, onClose, onDone }) {
             {LANGS.map(([v, l]) => <option key={v} value={v}>{t(l)}</option>)}
           </select>
         </label>
-        {sp && sp.local.models.some((x) => !x.have) && <p className="muted small">{t('More speech models are in Settings › Voice & Meetings.')}</p>}
+        {sp && sp.local.models.some((x) => !x.have) && <p className="muted small">{t('More speech models are in {place}.', { place: where('voice') })}</p>}
         {err && <p className="error-text small">{err}</p>}
         <div className="mt-dialog-acts"><button type="button" className="ghost-btn" onClick={onClose}>{t('Cancel')}</button><button type="button" className="btn primary small" disabled={busy || !pick} onClick={go}><Icon name="refresh" size={12} /> {t('Transcribe again')}</button></div>
       </div>

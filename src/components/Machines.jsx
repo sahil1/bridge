@@ -3,10 +3,10 @@ import Icon, { StatusDot } from './Icon.jsx'
 import { api, hostApi, machineId, machineUrl, apart, relayComputers, phoneApp, viaRelay } from '../api.js'
 import { passOn } from '../passed.js'
 import { t, tx, locale, tn } from '../i18n/index.js'
-import { useDevicesName } from './settings/search.js'
+import { where } from './settings/search.js'
 import { useTrial } from '../trials.js'
 import { viewScreen, canReach } from './remote/remote.js'
-import { RemoteSettings, KeptOut, useControl } from './remote/Settings.jsx'
+import { useControl } from './remote/Settings.jsx'
 import { canScan, scan } from '../scan.js'
 
 // Your other devices (server/machines.js): Macs, Windows and Linux computers running Bridge AI,
@@ -459,7 +459,6 @@ export const onFor = (s) => (s >= 86400 ? (Math.floor(s / 86400) === 1 ? t('{n} 
 // showing another device at its port only reads the links of the computer it runs on (that page
 // can't change them: server/machinepages.js), so it doesn't offer to.
 function DeviceDetails({ m, here = false, readOnly = false, onChanged }) {
-  const devices = useDevicesName()
   const [name, setName] = useState(m.name)
   const [st, setSt] = useState(null) // 'saving' | 'saved' | { error }
   useEffect(() => { if (st !== 'saving') setName(m.name) }, [m.name]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -505,7 +504,7 @@ function DeviceDetails({ m, here = false, readOnly = false, onChanged }) {
         {st?.error && <p className="error-text small">{st.error}</p>}
       </>}
       {rows.length > 0 && <dl className="mch-facts">{rows.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>}
-      {m.safety && <p className="muted small">{here ? t('Your other devices show this security code for this one. If one shows a different code, it isn\'t linked to this device.') : t('On {name}, Settings › {devices} › Computers › Details shows the same code. If it doesn\'t, link again.', { name: m.name, devices })}</p>}
+      {m.safety && <p className="muted small">{here ? t('Your other devices show this security code for this one. If one shows a different code, it isn\'t linked to this device.') : t('On {name}, {place} › Details shows the same code. If it doesn\'t, link again.', { place: where('machines'), name: m.name })}</p>}
     </div>
   )
 }
@@ -514,7 +513,6 @@ function DeviceDetails({ m, here = false, readOnly = false, onChanged }) {
 // embedded: its sections go straight into the Computers tab. focus: scrolled to on opening
 // (from the devices menu's Link a device…).
 export function MachinesSettings({ embedded = false, focus = false }) {
-  const devices = useDevicesName()
   const screens = useTrial('remote-screen')
   const { data, refresh } = useMachines(4000)
   const [link, setLink] = useState('')
@@ -611,7 +609,7 @@ export function MachinesSettings({ embedded = false, focus = false }) {
                 </small>
                 {m.state === 'asking' && m.code && <small>{tn('On {name}, allow it if it shows {code}.', { name: m.name, code: <b className="ask-code">{m.code}</b> })}</small>}
                 {m.error && m.state === 'linked' && !m.online && !fixes[m.id] && <small className="muted">{m.error}</small>}
-                {m.notLetIn && m.state === 'linked' && m.online && <small className="muted"><Icon name="lock" size={11} /> {t('{name} hasn\'t let {here} in. On {name}: Settings › Remote Access › Which Devices May Connect.', { name: m.name, here: data.here.name })}</small>}
+                {m.notLetIn && m.state === 'linked' && m.online && <small className="muted"><Icon name="lock" size={11} /> {t('{name} hasn\'t let {here} in. On {name}: {place}.', { place: where('remote-devices'), name: m.name, here: data.here.name })}</small>}
                 {m.state === 'changed' && <small className="muted">{t('{name} doesn\'t have the key it was linked with: it was set up again, or something is in between. On {name}, choose Pair a device and paste its link in Link a device below, to check it\'s really {name}.', { name: m.name })}</small>}
                 {m.state === 'removed' && <small className="muted">{t('{name} forgot this device. Link again asks it; allow it there after checking both show the same six digits.', { name: m.name })}</small>}
                 {newOf(m) && <small className="muted">{t('Linked with this device\'s code. Keep it if it\'s yours, and it meets your other computers too.')}</small>}
@@ -656,9 +654,6 @@ export function MachinesSettings({ embedded = false, focus = false }) {
         </div>
       </section>
 
-      <RemoteSettings />
-      <KeptOut />
-
       {!readOnly && phoneOthers.length > 0 && (
         <section className="st-sec">
           <h4>{t('Also on this phone')}</h4>
@@ -675,7 +670,7 @@ export function MachinesSettings({ embedded = false, focus = false }) {
 
       {!readOnly && <section className="st-sec" data-setting="link-device">
         <h4>{t('Link a device')}</h4>
-        <p className="muted small" title={t('On the other device, open Settings › {devices} and choose Pair a device. Paste its link here, or type its address and code. Its address alone asks instead, and waits for you to allow it there.', { devices })}>{canScan('link') ? t('On the other device, choose Pair a device in Settings › {devices}, then scan its QR code or paste its link here.', { devices }) : t('On the other device, choose Pair a device in Settings › {devices}, then paste its link here.', { devices })}</p>
+        <p className="muted small" title={t('On the other device, open {place} and choose Pair a device. Paste its link here, or type its address and code. Its address alone asks instead, and waits for you to allow it there.', { place: where('phone') })}>{canScan('link') ? t('On the other device, choose Pair a device in {place}, then scan its QR code or paste its link here.', { place: where('phone') }) : t('On the other device, choose Pair a device in {place}, then paste its link here.', { place: where('phone') })}</p>
         <form className="mch-add" onSubmit={add}>
           <input className="st-input" value={link} onChange={(e) => setLink(e.target.value)} placeholder={t('Link, or address and code')} aria-label={t("The other device's link")} />
           <button type="submit" className="btn primary" disabled={!link.trim() || !!busy}>{busy === 'add' ? t('Linking…') : t('Link')}</button>

@@ -25,6 +25,7 @@ import { spawn } from 'node:child_process'
 import { DATA, writeFileAtomic } from './paths.js'
 import { opens, kindOf } from './studio.js'
 import { mayLook } from './projects.js'
+import { placeEn } from '../shared/places.js'
 
 const DIR = path.join(DATA, 'studio')
 const FOUND = path.join(DIR, 'found.json')
@@ -347,7 +348,7 @@ export async function rewrite({ text, instruction, before = '', after = '', name
   if (!t.trim()) throw new Error('Pick the words to change first')
   if (!said) throw new Error('Say how to change them')
   if (t.length > REWRITE_MAX) throw new Error('That\'s more than Studio rewrites at once (20,000 characters). Pick less of it.')
-  if (!model) throw Object.assign(new Error('There\'s no model to write with. Sign in to an agent like Claude Code, or add a model in Settings › Model Providers.'), { code: 'no-model', status: 409 })
+  if (!model) throw Object.assign(new Error(`There's no model to write with. Sign in to an agent like Claude Code, or add a model in ${placeEn('providers')}.`), { code: 'no-model', status: 409 })
   const around = [
     name && `The document is ${String(name).slice(0, 200)}.`,
     before && `Just before the part:\n"""\n${String(before).slice(-1500)}\n"""`,

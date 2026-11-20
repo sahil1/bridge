@@ -56,6 +56,7 @@ import BackForward from './components/BackForward.jsx'
 import { start as navStart, stop as navStop, seen as navSeen, recheck as navRecheck, usePlaces, placeOf, placeLabel, showPlaceIn, replacedWith, renamedTab, slotOf } from './backForward.js'
 import { WHERE_KEY, SHELF } from './components/files/fsapi.js'
 import { t, tn, tx } from './i18n/index.js'
+import { where } from './components/settings/search.js'
 
 const MIN_PANE = 420
 const TOUR_ON_START = false
@@ -223,7 +224,7 @@ function TrialOff({ name }) {
     <div className="trial-off" role="status">
       <Icon name="layers" size={20} />
       <b>{t('{name} is a beta feature, off here.', { name })}</b>
-      <p className="muted small">{t('Turn it on in Settings › About & Updates › Beta Features.')}</p>
+      <p className="muted small">{t('Turn it on in {place}.', { place: where('beta') })}</p>
       <button type="button" className="btn small" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'about' } }))}>{t('Open Settings')}</button>
     </div>
   )

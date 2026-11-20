@@ -43,11 +43,11 @@ export default function BridgeServer({ here = true }) {
       <div className="mcp-self-head">
         <span className="mcp-self-mark" aria-hidden="true"><Icon name="link" size={15} /></span>
         <div className="mcp-self-title">
-          <h4 id="mcp-self-h">{t('Bridge AI as an MCP Server')} <span className="mcp-tag">{t('Beta')}</span></h4>
+          <h4 id="mcp-self-h">{t('Bridge AI as an MCP Server')} <span className="st-chip beta">{t('Beta')}</span></h4>
           <p className="muted small">{t('Let Claude Code, Claude Desktop, Cursor and Codex on this computer use your whiteboards, files and meeting summaries.')}</p>
         </div>
         <label className="mcp-switch">
-          <input type="checkbox" role="switch" checked={on} disabled={!d || !here || busy === 'on'} onChange={(e) => set('on', { trials: { 'mcp-server': e.target.checked } }, e.target.checked)} aria-label={t('Bridge AI as an MCP Server')} />
+          <input type="checkbox" role="switch" className="tg" checked={on} disabled={!d || !here || busy === 'on'} onChange={(e) => set('on', { trials: { 'mcp-server': e.target.checked } }, e.target.checked)} aria-label={t('Bridge AI as an MCP Server')} />
           <span>{on ? t('On') : t('Off')}</span>
         </label>
       </div>

@@ -11,6 +11,7 @@ import { useScreenAccess, useAllowCall, allowSteps } from './allowcall.jsx'
 import { cropKept } from './cropping.jsx'
 import { t, locale } from '../../i18n/index.js'
 import { Among, useCallEvents, MeetingName } from './cardparts.jsx'
+import { where as placeIn } from '../settings/search.js'
 import './meetings.css'
 
 // The top bar's pill says a long title in short, not cut off by the pill (the whole is in its tooltip).
@@ -175,7 +176,7 @@ export function MeetingsProvider({ children }) {
     // The demo has no computer behind it: say so before asking for the mic.
     if (import.meta.env.MODE === 'demo') throw new Error(t('Recording a meeting needs Bridge AI on your computer.'))
     if (!navigator.mediaDevices?.getUserMedia) throw new Error(window.bridgeNative || window.bridgeAndroid || matchMedia('(pointer: coarse)').matches
-      ? t('Recording from your phone needs a secure connection: open your computer through your relay (Settings › Devices on the computer), not its plain Tailscale address.')
+      ? t('Recording from your phone needs a secure connection: open your computer through your relay ({place} on the computer), not its plain Tailscale address.', { place: placeIn('phone') })
       : t('Recording needs the desktop app, or this page over HTTPS.'))
     room.current = inRoom()
     try { return await micWithin(() => microphone(undefined, { room: room.current })) } catch (e) {

@@ -17,6 +17,7 @@ import { whole } from './calendar.js'
 import * as meetings from './meetings.js'
 import * as meetWork from './meetwork.js'
 import * as insights from './meetinsights.js'
+import { placeEn } from '../shared/places.js'
 
 const FILE = cacheFile('meeting-prep.json')
 const DIR = path.join(DATA, 'meetings')
@@ -208,7 +209,7 @@ export function suggest(raw, { again = false } = {}) {
     const base = await gather(e)
     const { text, basis } = ask(e, base)
     const w = await writer(text, { strict: true })
-    if (!w) throw Object.assign(new Error('No model to write with. Sign in to an agent, or add an API key or a local model in Settings › Model Providers.'), { code: 'no_model' })
+    if (!w) throw Object.assign(new Error(`No model to write with. Sign in to an agent, or add an API key or a local model in ${placeEn('providers')}.`), { code: 'no_model' })
     const msgs = [{ role: 'user', text }]
     const o = { system: 'You help someone get ready for a meeting with a few sharp, specific goals and questions. You are brief and never make things up.', feature: 'assist' }
     const entry = { start: e.start, title: e.title, at: new Date().toISOString(), model: w.id, label: w.label, basis, items: [], error: null }

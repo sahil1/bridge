@@ -29,6 +29,7 @@ import { googleKeys } from '../sheetkeys.js'
 import { sheetCells, formulaErrorWords } from '../sheetcells.js'
 import { Threads, SAY, useAuthor } from '../doccomments.jsx'
 import { useSheetThreads, commentKey } from '../sheetcomments.jsx'
+import { where } from '../../settings/search.js'
 import '../sheet.css'
 
 // A sheet: Univer (Apache-2.0, what GenOffice's Sheets is built on too) with its ribbon, formula
@@ -591,7 +592,7 @@ function AskPanel({ hidden, preset, onShow, file, univer, sel, dark, onDirty, on
           </div>
         </form>
         {noModel
-          ? <p className="small sh-goes" role="note">{t('No model to answer with yet: sign in to an agent (Claude Code, Codex…) or add a key in Settings › Model Providers. Hand to an agent works without one.')} <button type="button" className="link-btn" onClick={openProviders}>{t('Model Providers')}</button></p>
+          ? <p className="small sh-goes" role="note">{t('No model to answer with yet: sign in to an agent (Claude Code, Codex…) or add a key in {place}. Hand to an agent works without one.', { place: where('providers') })} <button type="button" className="link-btn" onClick={openProviders}>{t('Model Providers')}</button></p>
           : goes && <p className="muted small sh-goes">{goes}</p>}
         <div className={`sh-hand${hand ? ' open' : ''}`}>
           <button type="button" className="link-btn sh-hand-toggle" onClick={() => setHand(!hand)} aria-expanded={hand}><Icon name="chevron" size={11} /> {t('Hand to an agent, for a bigger job')}</button>
@@ -841,7 +842,7 @@ function MakePanel({ hidden, preset, file, univer, onDirty, onMade, onShow, onCl
           </div>
         </form>
         {noModel
-          ? <p className="small sh-goes" role="note">{t('No model to answer with yet: sign in to an agent (Claude Code, Codex…) or add a key in Settings › Model Providers.')} <button type="button" className="link-btn" onClick={openProviders}>{t('Model Providers')}</button></p>
+          ? <p className="small sh-goes" role="note">{t('No model to answer with yet: sign in to an agent (Claude Code, Codex…) or add a key in {place}.', { place: where('providers') })} <button type="button" className="link-btn" onClick={openProviders}>{t('Model Providers')}</button></p>
           : goes && <p className="muted small sh-goes">{goes}</p>}
         {busy && <div className="sh-wait" role="status"><Icon name="refresh" size={13} className="spin" /><span>{t('Making it with {model}…', { model: model?.label || t('the model') })}</span></div>}
         {err && <div className="sh-wait bad" role="alert"><Icon name="alert" size={13} /><span>{err.message}{err.noModel && <> <button type="button" className="link-btn" onClick={openProviders}>{t('Model Providers')}</button></>}</span><button type="button" className="link-btn" onClick={() => setErr(null)}>{t('OK')}</button></div>}

@@ -143,10 +143,11 @@ const agentView = (v) => async (p) => {
   if (!(await p.locator(`.ws-tab[aria-selected="true"][data-pane="${pane}"]`).count())) { await send(p, { paneId: pane }); await sleep(200) }
   await send(p, { paneId: pane, view: v }, 'cc-set-view')
 }
-// (Voice & Meetings' tabs are read as places too, each by its id: Dictation, Speech to Text. What
-// marks one, accounts or mac, is up to its own end or its first tab: a section's first tab marked
-// accounts, Devices' Account, is that tab's, not its section's. One marked trial is a beta
-// feature's, there only when this kit has it on: TRIALS_ON.)
+// (A section's tabs are read as places too, each by its id: Meetings & Voice's Dictation and Speech
+// Models, Devices & Access's Remote Access and Share Links, and the rest. What marks one, accounts or
+// mac, is up to its own end or its first tab: a section's first tab marked accounts, Account &
+// Backup's Account, is that tab's, not its section's. A beta feature's section, Bots, is there on or
+// off, its switch in it; one marked trial would be there only when this kit has it on: TRIALS_ON.)
 const SECTIONS = [...(/export const SECTIONS = \[([\s\S]*?)\n\]/.exec(fs.readFileSync(path.join(ROOT, 'src', 'components', 'Settings.jsx'), 'utf8'))?.[1] || '').matchAll(/\{ id: '([\w-]+)', label: tx\('([^']+)'\)([^{}]*)/g)]
   .filter((m) => !/accounts: true/.test(m[3]) && (!/mac: true/.test(m[3]) || process.platform === 'darwin') && (!/trial: '/.test(m[3]) || TRIALS_ON.includes(/trial: '([\w-]+)'/.exec(m[3])[1]))).map((m) => ({ id: m[1], label: m[2] }))
 const PLACES = [

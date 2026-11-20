@@ -6,6 +6,7 @@ import { api, usePoll } from '../api.js'
 import { openSettings } from './SignIn.jsx'
 import { EffortChip, launchEffort } from './Recommended.jsx'
 import { t, tn, tx } from '../i18n/index.js'
+import { where } from './settings/search.js'
 import './home.css'
 
 // Home: "What should we build in <project>?" and one message box, like starting a thread in T3
@@ -87,7 +88,7 @@ export default function Home({ fleet, onLaunched, onMore, autoFocus = true }) {
     e?.preventDefault()
     const prompt = text.trim()
     if (!prompt || busy) return
-    if (kind === 'chat' && !model) { setErr(t('Add an API key or start a local model first (Settings › Model Providers).')); return }
+    if (kind === 'chat' && !model) { setErr(t('Add an API key or start a local model first ({place}).', { place: where('providers') })); return }
     setBusy(true); setErr(null)
     try {
       const out = project

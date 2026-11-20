@@ -24,6 +24,7 @@ import { startPcm, microphone, wav, RATE, micRefused, micBlocked } from '../audi
 import { clean, makeNames } from '../../shared/dictation/clean.js'
 import { defaultKey, keyLabel } from '../../shared/dictation/keys.js'
 import { t } from '../i18n/index.js'
+import { where } from '../components/settings/search.js'
 
 export const HOLD_MS = 300
 // The most it waits for the mic's first sound before listening all the same.
@@ -636,5 +637,5 @@ export async function answerOffer(yes) {
   await api('/settings', { method: 'PATCH', body: { dictation: { background: yes } } }).then(settingsChanged, () => {})
   if (!yes || !was) return
   const s = await window.bridgeApp?.dictateConfigure?.(cfg).catch(() => null)
-  if (s?.taken) set({ note: t('{key} is taken by another app. Pick another key in Settings › Voice & Meetings › Dictation.', { key: keyLabel(s.key, keysPlatform()) }) })
+  if (s?.taken) set({ note: t('{key} is taken by another app. Pick another key in {place}.', { place: where('dictation'), key: keyLabel(s.key, keysPlatform()) }) })
 }

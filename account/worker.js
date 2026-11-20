@@ -390,7 +390,7 @@ async function addDevice(env, acct, device, replace = null, claim = null) {
   if (list.length) {
     const at = new Date(now)
     const when = `${at.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })}, ${at.toISOString().slice(11, 16)} UTC`
-    await mail(env, acct.email, 'A new sign-in to your Bold Bridge account', `"${device.name}" (a ${device.kind}, ${device.platform}) was signed in to your Bold Bridge account (${acct.email}) on ${when}.\n\nIf that was you, there's nothing to do. If it wasn't, remove it in Bridge AI on one of your computers (Settings › Account & Devices), and change your email's password: whoever signed in had a code sent to this email, or one of your computers signed in already.\n\nBold Bridge`)
+    await mail(env, acct.email, 'A new sign-in to your Bold Bridge account', `"${device.name}" (a ${device.kind}, ${device.platform}) was signed in to your Bold Bridge account (${acct.email}) on ${when}.\n\nIf that was you, there's nothing to do. If it wasn't, remove it in Bridge AI on one of your computers (Settings › Account & Backup › Account), and change your email's password: whoever signed in had a code sent to this email, or one of your computers signed in already.\n\nBold Bridge`)
       .catch(() => noted(db, acct.id, 'service', `the email about ${device.name} signing in couldn't be sent`).run())
   }
   return { account: accountView(acct), device: deviceView({ id, ...device, created_at: now, last_seen: now }, id), deviceToken: token }
@@ -497,10 +497,10 @@ async function v1(req, env, url) {
     const device = deviceOf(b.device)
     const hash = await sha(`grant ${String(b.grant || '')}`)
     const g = await db.prepare('SELECT * FROM grants WHERE hash = ?').bind(hash).first()
-    if (!g || g.expires <= Date.now()) refuse(400, 'expired', `That sign-in from your other computer ran out (it lasts ${GRANT_MINUTES} minutes). Sign in here with your email instead, in Settings › Account & Devices.`)
+    if (!g || g.expires <= Date.now()) refuse(400, 'expired', `That sign-in from your other computer ran out (it lasts ${GRANT_MINUTES} minutes). Sign in here with your email instead, in Settings › Account & Backup › Account.`)
     const acct = await byId(db, g.account)
     if (!acct) refuse(400, 'expired', 'That account isn\'t there any more.')
-    const claim = async () => { if ((await db.prepare('DELETE FROM grants WHERE hash = ?').bind(hash).run())?.meta?.changes !== 1) refuse(400, 'expired', 'That sign-in from your other computer was used already. Sign in here with your email instead, in Settings › Account & Devices.') }
+    const claim = async () => { if ((await db.prepare('DELETE FROM grants WHERE hash = ?').bind(hash).run())?.meta?.changes !== 1) refuse(400, 'expired', 'That sign-in from your other computer was used already. Sign in here with your email instead, in Settings › Account & Backup › Account.') }
     return json(await addDevice(env, acct, device, b.replace, claim))
   }
   if (p === '/v1/me' && req.method === 'GET') {
@@ -776,7 +776,7 @@ async function change(env, acct, b, by, { invite = false } = {}) {
   let emailed = false
   if (gave.length) {
     const [subject, text] = invite
-      ? ['An invitation from Bold Bridge', `You're invited to ${gave.map((k) => WHAT[k]).join(' and ')}, for Bridge AI.\n\nTo start, open Bridge AI on your computer, go to Settings › Account & Devices and sign in with this email address (${acct.email}). There's no password: Bold Bridge emails you a code.\n\nNo Bridge AI yet? It's at https://boldbridge.ai\n\nBold Bridge`]
+      ? ['An invitation from Bold Bridge', `You're invited to ${gave.map((k) => WHAT[k]).join(' and ')}, for Bridge AI.\n\nTo start, open Bridge AI on your computer, go to Settings › Account & Backup › Account and sign in with this email address (${acct.email}). There's no password: Bold Bridge emails you a code.\n\nNo Bridge AI yet? It's at https://boldbridge.ai\n\nBold Bridge`]
       : gave.includes('early') && gave.includes('relay') ? ['Early Access and Bridge AI\'s relay are on for your account', `Early Access and Bridge AI's relay are on for your Bold Bridge account (${acct.email}).\n\n${EARLY_ON}\n\n${RELAY_ON}\n\nBold Bridge`]
         : gave.includes('early') ? ['Early Access is on for your Bold Bridge account', `Early Access is on for your Bold Bridge account (${acct.email}).\n\n${EARLY_ON}\n\nBold Bridge`]
           : ['Bridge AI\'s relay is on for your account', `Bridge AI's relay is on for your Bold Bridge account (${acct.email}).\n\n${RELAY_ON}\n\nBold Bridge`]
@@ -784,8 +784,8 @@ async function change(env, acct, b, by, { invite = false } = {}) {
   }
   return { account: accountView(after), emailed }
 }
-const EARLY_ON = 'Bridge AI on your computers picks it up by itself within a few hours, or straight away when you open Settings › Account & Devices: from then on they get new versions before everyone else. To leave, open Settings › About & Updates.'
-const RELAY_ON = 'Bridge AI on your computer starts using it by itself within half an hour (or when it next opens) if nothing else is set up there for your phone. Otherwise, open Settings › Account & Devices and choose Use it on this computer. Then pair your phone, right there.'
+const EARLY_ON = 'Bridge AI on your computers picks it up by itself within a few hours, or straight away when you open Settings › Account & Backup › Account: from then on they get new versions before everyone else. To leave, open Settings › About & Updates.'
+const RELAY_ON = 'Bridge AI on your computer starts using it by itself within half an hour (or when it next opens) if nothing else is set up there for your phone. Otherwise, open Settings › Account & Backup › Account and choose Use it on this computer. Then pair your phone, right there.'
 
 // For the relay: whether an account may use it ('gone': there's no such account any more), and with
 // d, whether that device is still on it (device: false once it's removed or signed out, so the relay

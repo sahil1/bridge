@@ -1,7 +1,7 @@
 @preconcurrency import AVFoundation
 import UIKit
 
-// Scans the pairing QR code Bridge AI shows on your computer (Settings › Devices › Pair a device).
+// Scans the pairing QR code Bridge AI shows on your computer (Settings › Devices & Access › Phone › Pair a device).
 final class ScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
     var onResult: ((String?) -> Void)?
     private let session = AVCaptureSession()

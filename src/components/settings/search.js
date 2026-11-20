@@ -1,67 +1,78 @@
 import { t, tx } from '../../i18n/index.js'
-import { cloudOnly, usePoll } from '../../api.js'
+import { cloudOnly, peek } from '../../api.js'
+import { placePath } from '../../../shared/places.js'
 
-// Every setting ⌘K finds (Palette.jsx), first in its section or under Advanced: its section, its
+// Every setting ⌘K finds (Palette.jsx), first in its section or under Advanced: where it is, its
 // name and the words it's looked for by. Its id is its data-setting there, and a link to it opens
-// Settings at it, Advanced too (Settings.jsx; bridge-open-settings with section: its id). near: what
-// to show instead when it isn't there just now (dictation's extras while dictation is off). when:
+// Settings at it, Advanced too (Settings.jsx; bridge-open-settings with section: its id). Every
+// data-setting Settings shows is one of these (test/suites/settings-ui.mjs checks), so nothing in
+// Settings is out of ⌘K's reach. near: what to show instead when it isn't there just now. when:
 // only in the desktop app ('desktop'), with the desktop's top bar ('wide'), or with a beta feature
-// on (its id, src/trials.js). Its section is where Settings opens for it: for Voice & Meetings and
-// Devices, the tab it's in (voice is Speech to Text, phone and machines Devices' Phone and Computers,
-// account its Account tab, there once Bold Bridge accounts exist).
+// on (its id, src/trials.js). Where it is: a section, or the tab it's in (shared/places.js).
 const at = (section, list) => list.map(([id, label, keywords = '', o = {}]) => ({ section, id, label, keywords, ...o }))
 
 export const SETTINGS = [
-  ...at('general', [
+  ...at('features', [
+    ['setup', tx('Set up'), 'setup install node homebrew developer tools speech model calendar mail full disk'],
+  ]),
+  ...at('you', [
+    ['beta-home', tx('Home'), 'beta home where bridge ai opens needs you start page'],
     ['name', tx('Your name'), 'first name call me morning brief'],
+    ['location', tx('Location'), 'city weather morning brief place where'],
+    ['layout', tx('Layout'), 'simple everything panels today board'],
+    ['color-mode', tx('Color Mode'), 'dark light system mode appearance'],
+    ['theme', tx('Theme'), 'theme colors accent frame appearance'],
+    ['text-size', tx('Text Size'), 'text size zoom bigger smaller'],
+    ['language', tx('Language'), 'language translate'],
+    ['density', tx('Density'), 'compact comfortable'],
+    ['font', tx('Font'), 'font typeface'],
+    ['share-theme', tx('Share a Theme'), 'copy paste theme'],
+    ['topbar', tx('In the Top Bar'), 'pin unpin top bar status weather clock usage sounds', { when: 'wide' }],
+    ['permissions', tx('Permissions'), 'allow access microphone accessibility calendars full disk files automation notifications privacy macos', { near: 'name' }],
+  ]),
+  ...at('agents', [
+    ['beta-routines', tx('Scheduled Routines'), 'beta routines schedule every weekday history commands'],
     ['default-agent', tx('Default agent'), 'claude codex gemini new agents chats routines'],
     ['default-model', tx('Default model'), 'model opus sonnet gpt flag', { near: 'default-agent' }],
-    ['layout', tx('Layout'), 'simple everything panels today board'],
-    ['location', tx('Location'), 'city weather morning brief place where'],
+    ['resume-work', tx('Pick up unfinished work after an update, a crash or a restart'), 'resume continue crash restart update', { near: 'default-agent' }],
     ['chief', tx('Chief of Staff runs on'), 'chief of staff agent'],
-    ['chief-helpers', tx('Helpers at once'), 'chief of staff helpers delegate parallel queue queued at once'],
-    ['chief-helpers-edit', tx('Helpers may edit in their own work folder'), 'chief of staff helpers edit permission ask work folder', { near: 'chief-helpers' }],
+    ['chief-helpers', tx('Helpers at once'), 'chief of staff helpers delegate parallel queue queued at once', { near: 'chief' }],
+    ['chief-helpers-edit', tx('Helpers may edit in their own work folder'), 'chief of staff helpers edit permission ask work folder', { near: 'chief' }],
+    ['consult', tx('Your Chief of Staff can consult'), 'consult second opinion bridge ask models', { near: 'chief' }],
+    ['agent-list', tx('Install an agent'), 'agents install sign in claude codex gemini copilot cursor opencode cli'],
     ['plan-usage', tx('Plan usage'), 'quota limits read sign-in anthropic'],
-    ['permissions', tx('Permissions'), 'allow access microphone accessibility calendars full disk files automation notifications privacy macos', { near: 'name' }],
     ['commands', tx('Command History'), 'history commands asked keep delete', { when: 'routines' }],
     ['terminal', tx('Terminal app'), 'open in terminal iterm ghostty warp attach'],
     ['runtime', tx('Where agents run'), 'herdr built in runtime session'],
     ['keep-agents', tx('Keep agents running when Bridge AI quits'), 'quit stop agents running', { near: 'runtime' }],
-    ['resume-work', tx('Pick up unfinished work after an update, a crash or a restart'), 'resume continue crash restart update', { near: 'default-agent' }],
-  ]),
-  ...at('sharing', [
-    ['shares', tx('Share Links'), 'share link sharing shared public url outside people password email code expire stop qr'],
-  ]),
-  ...at('agents', [
-    ['agent-list', tx('Install an agent'), 'agents install sign in claude codex gemini copilot cursor opencode cli'],
-    ['consult', tx('Your Chief of Staff can consult'), 'consult second opinion bridge ask models', { near: 'agent-list' }],
   ]),
   ...at('providers', [
+    ['beta-usage-everywhere', tx('Usage Across Every Provider'), 'beta usage tokens cost every provider today'],
     ['providers-labs', tx('API keys'), 'api key anthropic openai gemini xai grok mistral cohere perplexity meta'],
     ['accounts', tx('Accounts'), 'account switch work personal sign in login auto default', { near: 'providers-labs' }],
     ['providers-local', tx('Models on this computer'), 'local model ollama lm studio gemma offline download'],
-    ['model-jobs', tx('Models for Each Task'), 'model task job meeting notes ai assist mail titles diagrams live fallback auto cloud first together groq openrouter fireworks cerebras hugging face'],
     ['cloud', tx('Cloud Agents'), 'cloud agents cursor copilot jules claude managed keys'],
     ['providers-clouds', tx('Clouds'), 'azure aws bedrock vertex google cloud'],
     ['providers-hosted', tx('Hosted open models'), 'openrouter groq together fireworks cerebras hugging face'],
-    ['more-models', tx('Show more models (Qwen Code, DeepSeek, Kimi, GLM)'), 'qwen deepseek kimi glm more models'],
+    ['more-models', tx('More Models'), 'show more models qwen code deepseek kimi glm'],
     ['providers-speech', tx('Speech to text services'), 'deepgram assemblyai elevenlabs speech transcription keys'],
   ]),
-  ...at('voice', [
-    ['speech-model', tx('Speech Model'), 'speech to text model parakeet whisper transcribe download voice notes'],
-    ['spoken-answers', tx('Spoken Answers'), 'read aloud voice speed speak answers ask out loud'],
+  ...at('models', [
+    ['models-agents', tx('Agents and the Chief of Staff'), 'which model default agent model chief of staff runs on'],
+    ['model-jobs', tx('Models for Each Task'), 'model task job meeting notes ai assist mail titles diagrams live fallback auto cloud first together groq openrouter fireworks cerebras hugging face'],
+    ['models-elsewhere', tx('Speech and Dictation'), 'speech model parakeet whisper edit by voice tidy rewritten tidied'],
   ]),
-  ...at('dictation', [
-    ['dictation', tx('Dictation'), 'dictation key talk hold fn background paste where typing'],
-    ['edit-by-voice', tx('Edit by voice'), 'rewrite selection voice edit', { when: 'desktop', near: 'dictation' }],
-    ['tidy', tx('Tidy what I say'), 'tidy cleanup filler um model', { when: 'dictation-cleanup', near: 'dictation' }],
-    ['light-cleanup', tx('Light cleanup'), 'um uh capital full stop names', { near: 'dictation' }],
-    ['mention-files', tx('Mention files by saying them'), 'at file mention say', { near: 'dictation' }],
-    ['live-words', tx('Show the words as you talk'), 'live words as you talk', { near: 'dictation' }],
-    ['dictation-history', tx('Dictation History'), 'history keep recordings delete dictations', { near: 'dictation' }],
+  ...at('mcp', [
+    ['mcp-server', tx('Bridge AI as an MCP Server'), 'beta mcp server claude desktop cursor codex boards files meeting summaries'],
+    ['mcp-list', tx('MCP Servers'), 'mcp servers tools add install playwright github browser'],
   ]),
   ...at('meetings', [
+    ['beta-meeting-board', tx('Live Meeting Board'), 'beta live board whiteboard decisions timeline'],
+    ['beta-assist-answers', tx('Answers in AI Assist'), 'beta answers questions perplexity web'],
+    ['beta-meeting-insights', tx('Meeting Insights'), 'beta insights time people talk share'],
+    ['beta-call-video', tx("Speakers From the Call's Video"), 'beta video speakers faces mouth names', { when: 'mac' }],
     ['transcribe', tx('Transcribe with'), 'speech engine transcription service local apple'],
+    ['meetings-speech-model', tx('Speech models'), 'parakeet whisper download speech model', { near: 'transcribe' }],
     ['speech-services', tx('Speech Services'), 'openai groq deepgram assemblyai elevenlabs gemini service', { near: 'transcribe' }],
     ['meeting-language', tx('Meeting language'), 'language detect english spanish french'],
     ['names-terms', tx('Names and terms'), 'memory vocabulary words names spelling misheard'],
@@ -69,8 +80,12 @@ export const SETTINGS = [
     ['transcript-cleanup', tx('Clean up the transcript when a meeting ends'), 'clean up fix misheard words transcript'],
     ['name-speakers', tx('Name who spoke on the call'), 'speakers names them who said'],
     ['prep', tx('Prepare for each meeting'), 'prepare prep goals questions mail invite calendar', { near: 'notes-model' }],
-    ['meeting-remind', tx('Remind me before meetings'), 'remind reminder before meeting snooze later floating card join turn off', { when: 'desktop', near: 'calls' }],
+    ['meeting-board', tx('Keep a live board, in every meeting'), 'live board whiteboard every meeting', { when: 'meeting-board' }],
+    ['assist-answers', tx('Answers in AI Assist'), 'answers perplexity web questions', { when: 'assist-answers' }],
     ['calls', tx('Calls'), 'notice calls zoom meet teams record other side system audio stop'],
+    ['meeting-remind', tx('Remind me before meetings'), 'remind reminder before meeting snooze later floating card join turn off', { when: 'desktop', near: 'calls' }],
+    ['call-audio', tx('Record the other side of calls'), 'system audio zoom meet teams them', { near: 'calls' }],
+    ['crop-shots', tx("Crop pictures of a call to what's shared"), 'crop pictures screenshots slide shared', { near: 'calls' }],
     ['save-markdown', tx('Save every meeting as Markdown'), 'markdown obsidian save notes folder'],
     ['meeting-assist', tx('AI Assist in meetings'), 'ai assist suggest what to ask how often instructions summary'],
     ['who-spoke', tx('Who Spoke'), 'speakers voices room learn my voice remember voices names from the call screen recording', { near: 'meeting-assist' }],
@@ -78,12 +93,35 @@ export const SETTINGS = [
     ['float-card', tx('The floating card'), 'floating card menu bar pause stop hover screenshot screen sharing recording hidden', { when: 'desktop' }],
     ['save-notes', tx('Save notes as Markdown'), 'folder subfolders file name pattern front matter yaml speakers obsidian granola'],
   ]),
+  ...at('dictation', [
+    ['beta-dictation-cleanup', tx('Tidy what I say'), 'beta tidy cleanup filler um model'],
+    ['dictation', tx('Dictation'), 'dictation key talk hold fn background paste where typing'],
+    ['dictation-more', tx('Cleanup and Mentions'), 'cleanup mentions dictation extras', { near: 'dictation' }],
+    ['edit-by-voice', tx('Edit by voice'), 'rewrite selection voice edit', { when: 'desktop', near: 'dictation' }],
+    ['tidy', tx('Tidy what I say'), 'tidy cleanup filler um model', { when: 'dictation-cleanup', near: 'dictation' }],
+    ['light-cleanup', tx('Light cleanup'), 'um uh capital full stop names', { near: 'dictation' }],
+    ['mention-files', tx('Mention files by saying them'), 'at file mention say', { near: 'dictation' }],
+    ['live-words', tx('Show the words as you talk'), 'live words as you talk', { near: 'dictation' }],
+    ['dictation-history', tx('Dictation History'), 'history keep recordings delete dictations', { near: 'dictation' }],
+  ]),
+  ...at('voice', [
+    ['speech-model', tx('Speech Model'), 'speech to text model parakeet whisper transcribe download voice notes listening'],
+    ['whisper', tx('Whisper, for other languages'), 'whisper whisper.cpp languages', { near: 'speech-model' }],
+  ]),
+  ...at('spoken', [
+    ['spoken-answers', tx('Spoken Answers'), 'read aloud voice speed speak answers ask out loud speaking'],
+  ]),
   ...at('mail', [
     ['how-you-write', tx('How You Write'), 'tone voice profile replies drafts learn'],
     ['mail-learn', tx('Learn it again now and then'), 'learn how you write again weekly profile'],
-    ['find-a-time', tx('Find a Time'), 'working days hours schedule meeting times'],
+    ['find-a-time', tx('Find a Time'), 'working days hours schedule meeting times calendar'],
     ['find-a-time-more', tx('Kept clear around meetings'), 'buffer travel how many times offer'],
     ['mail-read-only', tx('Read-Only'), 'mail never changes send'],
+  ]),
+  ...at('bots', [
+    ['bots-beta', tx('Bots'), 'beta bots slack discord teams bot'],
+    ['bots-open', tx('Open Bots'), 'bots connections who can ask instructions reads from answers limits channels scheduled posts export activity memory pause tokens socket mode manifest'],
+    ['beta-bots-start', tx('Set up a bot'), 'set up a bot first bot', { when: 'slack-bot' }],
   ]),
   ...at('phone', [
     ['relay', tx('From anywhere'), 'relay phone cloudflare pair a device remote away'],
@@ -93,13 +131,25 @@ export const SETTINGS = [
   ...at('machines', [
     ['machines', tx('Your Devices'), 'devices computers other computers'],
     ['link-device', tx('Link a device'), 'link pair computer address code'],
-    ['remote-access', tx('Remote Access'), 'remote access password screen control lock locked out unlock ask here first allow deny which devices', { when: 'remote-screen' }],
-    ['remote-notify', tx('Screen Sharing Notifications'), 'screen sharing notifications notify phone told stop block', { when: 'remote-screen', near: 'remote-access' }],
+  ]),
+  ...at('remote', [
+    ['beta-remote-screen', tx('Remote Screen and Preview'), 'beta remote screen view control preview'],
+    ['remote-devices', tx('Which Devices May Connect'), 'which devices may connect allow untick keep out block phone computer kept out'],
+    ['remote-screen', tx("This Computer's Screen"), 'screen viewing who is looking stop screen recording', { when: 'remote-screen' }],
+    ['remote-access', tx('Remote Access'), 'remote access password screen control lock locked out unlock', { when: 'remote-screen' }],
+    ['remote-password', tx('Remote Access Password'), 'password remote set change remove', { when: 'remote-screen', near: 'remote-access' }],
+    ['remote-control', tx('Let my other devices control this computer'), 'control mouse keyboard accessibility', { when: 'remote-screen', near: 'remote-access' }],
+    ['remote-ask-first', tx('Ask Here First'), 'ask here first allow deny', { when: 'remote-screen', near: 'remote-access' }],
     ['remote-sessions', tx('Screen Activity'), 'screen activity record sessions who viewed controlled lockout denied', { when: 'remote-screen' }],
+  ]),
+  ...at('sharing', [
+    ['shares', tx('Share Links'), 'share link sharing shared public url outside people password email code expire stop qr'],
   ]),
   ...at('notifications', [
     ['this-device', tx('Notifications on this device'), 'notifications push turn on test'],
     ['notify', tx('What to notify about'), 'notify needs you finished usage low'],
+    ['notify-sounds', tx('Notification sounds'), 'sound sounds silent mute speaker'],
+    ['remote-notify', tx('Screen Sharing Notifications'), 'screen sharing notifications notify phone told stop block remote'],
     ['notify-more', tx('Answer buttons for simple questions (yes or no, or two short choices)'), 'answer buttons phone at computer muted unmute', { near: 'notify' }],
     ['notify-devices', tx('Devices getting notifications'), 'devices notifications remove', { near: 'notify' }],
   ]),
@@ -108,68 +158,50 @@ export const SETTINGS = [
     ['hosted-relay', tx('Bridge AI\'s Relay'), 'relay hosted phone allowance request access use it on this computer pair a phone', { near: 'bold-bridge' }],
     ['delete-account', tx('Delete account…'), 'delete account bold bridge'],
   ]),
-  ...at('slack-bot', [
-    ['slack-status', tx('Bots'), 'slack bot bots questions answers connect tokens socket mode manifest name', { when: 'slack-bot' }],
-    ['bots-connections-chip', tx('Connections'), 'slack discord teams connection connections shared app one app tokens routing channel default bot command webhook', { when: 'slack-bot' }],
-    ['slack-askers', tx('Who Can Ask'), 'slack people askers members refuse guests everyone channels', { when: 'slack-bot' }],
-    ['slack-instructions', tx('Instructions'), 'slack bot instructions markdown file bot.md steer', { when: 'slack-bot' }],
-    ['slack-folders', tx('Reads From'), 'slack folders read only reads from', { when: 'slack-bot' }],
-    ['slack-replies', tx('Answers'), 'slack review answer without asking auto agent terms account agents status stream', { when: 'slack-bot' }],
-    ['slack-pause', tx('Pause'), 'slack bot pause resume stop answering', { when: 'slack-bot', near: 'slack-status' }],
-    ['slack-owner', tx('You in Slack'), 'slack me owner direct message approve drafts phone send edit discard', { when: 'slack-bot' }],
-    ['slack-changes', tx('Changes'), 'slack bot changes pull request pr draft diff git worktree branch gh suggest', { when: 'slack-bot' }],
-    ['slack-limits', tx('Limits'), 'slack bot limits per person day at once minutes run', { when: 'slack-bot' }],
-    ['slack-channels', tx('Channels'), 'slack bot channels without mention listen muted mute unmute', { when: 'slack-bot' }],
-    ['slack-scheduled', tx('Scheduled Posts'), 'slack bot scheduled posts routines weekly status summary channel', { when: 'slack-bot' }],
-    ['slack-export', tx('Export'), 'slack bot export import file docker another computer', { when: 'slack-bot', near: 'slack-status' }],
-    ['slack-activity', tx('Activity'), 'slack bot activity record trace history export audit conversations', { when: 'slack-bot' }],
-  ]),
-  ...at('appearance', [
-    ['color-mode', tx('Color Mode'), 'dark light system mode'],
-    ['theme', tx('Theme'), 'theme colors accent frame'],
-    ['text-size', tx('Text Size'), 'text size zoom bigger smaller'],
-    ['language', tx('Language'), 'language translate'],
-    ['density', tx('Density'), 'compact comfortable'],
-    ['font', tx('Font'), 'font typeface'],
-    ['share-theme', tx('Share a Theme'), 'copy paste theme'],
-    ['topbar', tx('In the Top Bar'), 'pin unpin top bar status weather clock usage sounds', { when: 'wide' }],
-  ]),
-  ...at('config', [
-    ['config-file', tx('config.json'), 'json config file edit'],
-    ['config-effective', tx('Effective Settings and Defaults'), 'effective defaults json'],
+  ...at('backup', [
+    ['backup', tx('Back Up & Move'), 'backup back up restore move new computer migrate transfer passphrase bots connections tokens'],
+    ['backup-what', tx('What Goes'), 'what goes backup included keys settings', { near: 'backup' }],
   ]),
   ...at('about', [
     ['version', tx('Check for new versions'), 'version update check'],
     ['auto-update', tx("Update by itself while you're away"), 'auto update automatic', { when: 'desktop', near: 'version' }],
     ['channel', tx('Update Channel'), 'channel stable early access beta pre-release nightly testers'],
-    ['beta', tx('Beta Features'), 'beta trials home routines insights usage tidy board answers mcp slack'],
+    ['beta', tx('Beta Features'), 'beta trials home routines insights usage tidy board answers mcp slack bots remote screen'],
+    ['usage-counts', tx('Usage Counts'), 'telemetry analytics anonymous share privacy', { near: 'privacy' }],
+    ['crash-reports', tx('Crash Reports'), 'crash reports send privacy', { near: 'privacy' }],
+    ['privacy', tx('Privacy'), 'privacy usage counts crash reports what is sent'],
     ['report', tx('Report a problem'), 'bug issue github idea feedback'],
-    ['usage-counts', tx('Usage Counts'), 'telemetry analytics anonymous share', { near: 'report' }],
-    ['crash-reports', tx('Crash Reports'), 'crash reports send', { near: 'report' }],
+    ['report-details', tx('Details for a Report'), 'diagnostics details version system', { near: 'report' }],
     ['tour', tx('Take the tour'), 'tour help'],
     ['license', tx('License and Credits'), 'license terms privacy notices star'],
-  ]),
-  ...at('backup', [
-    ['backup', tx('Back Up & Move'), 'backup back up restore move new computer migrate transfer passphrase bots connections tokens'],
+    ['config-file', tx('Config File'), 'json config file edit config.json'],
+    ['config-effective', tx('Effective Settings and Defaults'), 'effective defaults json'],
   ]),
 ]
 
-// Each tab's section, by its name; Devices' tabs by devicesName (below).
-const PLACES = {
-  general: tx('General'), agents: tx('Agents'), providers: tx('Model Providers'), voice: tx('Voice & Meetings'), dictation: tx('Voice & Meetings'), meetings: tx('Voice & Meetings'), mail: tx('Mail'),
-  mcp: tx('MCP Servers'), 'slack-bot': tx('Bots'), sharing: tx('Sharing'), backup: tx('Back Up & Move'), appearance: tx('Appearance'), config: tx('Config File'), about: tx('About & Updates'),
-}
-const DEVICES = ['phone', 'machines', 'notifications', 'account']
-export const placeOf = (x) => (DEVICES.includes(x.section) ? devicesName(x) : t(PLACES[x.section]))
+// The ones that show when they can't be seen from anywhere else: the agents' rows and the provider
+// groups, by the start of their data-setting.
+export const FAMILIES = ['agent-', 'providers-']
 
-// What Settings calls the section with your devices, for a sentence that points there: Account &
-// Devices once Bold Bridge accounts exist (it has their Account tab: Settings.jsx), else Devices.
-export const devicesName = (conf) => (conf?.accounts ? t('Account & Devices') : t('Devices'))
-export const useDevicesName = () => devicesName(usePoll(cloudOnly ? null : '/config', 10 * 60 * 1000).data)
+// Bold Bridge accounts exist (so Account & Backup has its Account tab), as the app last heard.
+const accountsNow = () => !!peek('/config')?.accounts
+
+// Where something is in Settings, in your language, for a sentence that sends you there:
+// where('remote-devices') is "Settings › Devices & Access › Remote Access › Which Devices May
+// Connect". By a section's, a tab's or a setting's id (shared/places.js); a setting the server
+// never names comes from SETTINGS above.
+export function where(id, { accounts = accountsNow() } = {}) {
+  let parts = placePath(id, { accounts })
+  const own = parts.length === 1 && SETTINGS.find((x) => x.id === id)
+  if (own) parts = [...placePath(own.section, { accounts }), own.label].filter((x, i, l) => i < 2 || x !== l[i - 1])
+  return parts.map((x) => t(x)).join(' › ')
+}
+// The same, without "Settings ›": a setting's section and tab, as ⌘K says it (Settings › {section}).
+export const placeOf = (x) => placePath(x.section, { accounts: !!x.accounts }).slice(1).map((p) => t(p)).join(' › ')
 
 // The ones that can show here: Mail's where Mail is read, Account's once Bold Bridge accounts exist,
-// the desktop app's in it, the top bar's with it, and a beta feature's while it's on. (Each says
-// whether there are accounts, for its section's name.)
-export const findable = (conf) => SETTINGS.filter((x) => (x.section !== 'mail' || conf?.mail) && (x.section !== 'account' || conf?.accounts)
-  && (x.when !== 'desktop' || !!window.bridgeApp?.desktop) && (x.when !== 'wide' || matchMedia('(min-width: 900px)').matches)
-  && (!x.when || ['desktop', 'wide'].includes(x.when) || conf?.trials?.[x.when] === true)).map((x) => ({ ...x, accounts: !!conf?.accounts }))
+// the desktop app's in it, the top bar's with it, a Mac's on one, and a beta feature's while it's on.
+// (Each says whether there are accounts, for its section's name.)
+export const findable = (conf) => (cloudOnly ? [] : SETTINGS.filter((x) => (x.section !== 'mail' || conf?.mail) && (x.section !== 'account' || conf?.accounts)
+  && (x.when !== 'desktop' || !!window.bridgeApp?.desktop) && (x.when !== 'wide' || matchMedia('(min-width: 900px)').matches) && (x.when !== 'mac' || conf?.platform === 'darwin')
+  && (!x.when || ['desktop', 'wide', 'mac'].includes(x.when) || conf?.trials?.[x.when] === true)).map((x) => ({ ...x, accounts: !!conf?.accounts })))

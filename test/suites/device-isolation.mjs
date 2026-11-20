@@ -21,7 +21,7 @@
 //   out of reach; a dictation message from anything but that tab is ignored, and one from it starts
 //   nothing unless you're in it; the tab still works, the words reach it and only the words. A window
 //   switched to Desk: at Desk's port, with Studio's look passed to it, the devices menu and Settings ›
-//   Devices from Studio (read only there, saying where to change them), and back to Studio's own
+//   Devices & Access from Studio (read only there, saying where to change them), and back to Studio's own
 //   page; Studio's agent in a tab there offers to switch instead.
 import fs from 'node:fs'
 import path from 'node:path'
@@ -410,7 +410,7 @@ try {
     await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'machines' } })))
     const note = p.locator('#st-machines p.small', { hasText: 'can\'t change them' })
     await note.waitFor({ timeout: 15000 })
-    ok(/These are the links of Studio/.test(await note.innerText()) && !(await p.locator('#st-machines button', { hasText: 'Unlink' }).count()) && !(await p.locator('.mch-add').count()), 'Settings › Devices there: Studio\'s links to read, saying where to change them, with nothing offered that can\'t work', await note.innerText())
+    ok(/These are the links of Studio/.test(await note.innerText()) && !(await p.locator('#st-machines button', { hasText: 'Unlink' }).count()) && !(await p.locator('.mch-add').count()), 'Settings › Devices & Access there: Studio\'s links to read, saying where to change them, with nothing offered that can\'t work', await note.innerText())
     await shot(p, `${tag}device-isolation-settings`)
     await note.locator('button', { hasText: 'Go to Studio' }).click()
     ok(!!(await until(() => p.url().startsWith(`http://127.0.0.1:${port}/`), 20000, 100)), 'and Go to Studio: Studio\'s own page, at its own address', p.url())

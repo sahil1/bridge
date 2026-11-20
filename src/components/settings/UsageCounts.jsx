@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
 import { api } from '../../api.js'
+import { More } from './Advanced.jsx'
 import { t } from '../../i18n/index.js'
 import './counts.css'
 
@@ -16,7 +17,7 @@ export default function UsageCounts() {
   const [doc, setDoc] = useState(null)
   useEffect(() => { api('/counts').then(setS, () => setS(null)) }, [])
   // (An address set for them that isn't one is said, rather than the section just not showing.)
-  if (s?.problem) return <section className="st-sec"><h4>{t('Usage Counts')}</h4><p className="st-note bad"><Icon name="alert" size={13} /> {t('Usage counts and crash reports can\'t be sent: {why}', { why: s.problem })}</p></section>
+  if (s?.problem) return <div className="ab-priv"><h5>{t('Usage Counts')}</h5><p className="st-note bad"><Icon name="alert" size={13} /> {t('Usage counts and crash reports can\'t be sent: {why}', { why: s.problem })}</p></div>
   if (!s || (!s.available && !s.refused)) return null
   const show = async (what) => {
     if (open === what) { setOpen(null); return }
@@ -29,12 +30,12 @@ export default function UsageCounts() {
     setBusy(false)
   }
   return (
-    <section className="st-sec">
-      <h4>{t('Usage Counts')}</h4>
+    <div className="ab-priv">
+      <h5>{t('Usage Counts')}</h5>
       {s.refused ? <p className="muted small">{t('Off on this computer: {setting} is set.', { setting: s.refused })}</p> : (
         <>
           <label className="ph-check" data-setting="usage-counts"><input type="checkbox" checked={!!s.share} disabled={busy} onChange={toggle} /> {t('Share anonymous usage counts')}</label>
-          <p className="muted small" title={`${t('Once a week: which features are on and how often you used them, how long Bridge AI was in use, and this computer\'s system, chip, memory and cores, as ranges; and each day, its version and whether it crashed. Sent to {host}. No names, paths, prompts or anything you typed or said, and no ID for you or this computer. On unless you turn it off; turning it off stops it at once and forgets what wasn\'t sent.', { host: s.to })} ${t('Both also say its update channel and its rollout bucket: a number from 0 to 99, picked at random once, that lets a new version reach a few computers at a time.')} ${t('Among what\'s counted: the family of each model that answered (Claude Sonnet, GPT-5; never its name), and each day, how long it was in use, as a range.')} ${t('And once, soon after Bridge AI first runs on a computer: that there\'s a new install, with its version, system and chip.')}`}>{t('Weekly, to {host}: the features you used and this computer\'s kind, as ranges. Nothing you typed or said, and no ID.', { host: s.to })}</p>
+          <p className="muted small">{t('Weekly, to {host}: the features you used and this computer\'s kind, as ranges. Nothing you typed or said, and no ID.', { host: s.to })} <More>{`${t('Once a week: which features are on and how often you used them, how long Bridge AI was in use, and this computer\'s system, chip, memory and cores, as ranges; and each day, its version and whether it crashed. Sent to {host}. No names, paths, prompts or anything you typed or said, and no ID for you or this computer. On unless you turn it off; turning it off stops it at once and forgets what wasn\'t sent.', { host: s.to })} ${t('Both also say its update channel and its rollout bucket: a number from 0 to 99, picked at random once, that lets a new version reach a few computers at a time.')} ${t('Among what\'s counted: the family of each model that answered (Claude Sonnet, GPT-5; never its name), and each day, how long it was in use, as a range.')} ${t('And once, soon after Bridge AI first runs on a computer: that there\'s a new install, with its version, system and chip.')}`}</More></p>
           {s.stopped && <p className="st-note"><Icon name="info" size={13} /><span>{t('The project asked Bridge AI to stop sharing: {why}', { why: s.stopped })}</span></p>}
           <div className="st-row">
             <button type="button" className="btn small" aria-expanded={open === 'preview'} onClick={() => show('preview')}><Icon name="eye" size={13} /> {t('See exactly what would be sent')}</button>
@@ -57,6 +58,6 @@ export default function UsageCounts() {
           {err && <p className="st-note bad"><Icon name="alert" size={13} /> {err}</p>}
         </>
       )}
-    </section>
+    </div>
   )
 }

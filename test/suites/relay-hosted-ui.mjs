@@ -1,7 +1,7 @@
 // Bridge AI's hosted relay in the app, in the browser named by BRIDGE_TEST_BROWSER, with the real
 // Worker and the real accounts service stood in for on this computer (stand-ins/hosted-relay.mjs,
 // stand-ins/accounts.mjs): MAX_ACCOUNTS at 1 with another account on it already, and a window of 50
-// messages. Settings › Account & Devices › Phone: Bridge AI's relay needs a Bold Bridge account and
+// messages. Settings › Devices & Access › Phone: Bridge AI's relay needs a Bold Bridge account and
 // says what's missing with the button that fixes it: signed out, the sign-in right there; signed in
 // without it, Request access; asked, that it's waiting. Approved while it's full: Use Bridge AI's relay says it's
 // full for now and that the phone can still reach the computer, with your own Cloudflare and
@@ -22,8 +22,9 @@
 // so; one on a relay of its own moves with Use Bridge AI's relay instead, and a computer linked to
 // it says which relay it uses.
 // First-run setup on a new computer asks for nothing: with the hosted relay there, it says Settings ›
-// Account & Devices sets the phone up, and nothing is asked of the relay or the accounts service;
-// with no hosted relay, it says nothing about it, and nor does Settings › Devices once set up.
+// Devices & Access › Phone sets the phone up, and nothing is asked of the relay or the accounts
+// service; with no hosted relay, it says nothing about it, and nor do Settings › Devices & Access and
+// Notifications once set up.
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -55,7 +56,7 @@ try {
   ok(first.status === 200 && !!first.id, 'the hosted relay takes one account, and has one', first)
   ok((await hr.register()).status === 401, 'and takes no computer without an account\'s relay token')
 
-  // ---------- Settings › Devices: what the relay needs ----------
+  // ---------- Settings › Devices & Access › Phone: what the relay needs ----------
   const k = await startKit('relay-hosted-ui', { env, config: { relay: { hostedUrl: hr.url }, account: acc.accountConfig } })
   kits.push(k)
   await k.api('/setup', { name: 'Tester' })
@@ -148,14 +149,16 @@ try {
   ok(!!(await until(async () => (await s.p.locator('.ph-pair .ph-qr').count()) === 1, 15000)), 'and once it\'s connected the pairing code shows, without Pair a device being clicked')
   // The account's use is said once, on the Account tab; the Phone tab points there.
   ok(!(await s.p.locator('.acct-use').count()) && await s.p.locator('button', { hasText: 'Your account\'s allowance, on the Account tab' }).count() === 1, 'the Phone tab doesn\'t say the allowance again: it points to the Account tab')
-  const tab = (pg, name) => pg.locator('.st-tabs [role="tab"]', { hasText: name }).click()
-  await tab(s.p, 'Account')
+  // (Account is Account & Backup's tab, Phone Devices & Access': each section opens at it.)
+  const tab = (pg, name) => pg.locator('.st-nav-item', { hasText: name === 'Account' ? 'Account & Backup' : 'Devices & Access' }).click()
+  await s.p.locator('button', { hasText: 'Your account\'s allowance, on the Account tab' }).click()
+  ok(!!(await until(async () => (await s.p.locator('.st-tabs [aria-selected="true"]').innerText().catch(() => '')) === 'Account' && (await s.p.locator('.st-head h3').innerText()) === 'Account & Backup', 5000)), 'and that button goes there: Account & Backup, at Account')
   const use = s.p.locator('.acct-relay .acct-use')
   ok(!!(await until(async () => { const x = await use.innerText(); return /8-hour window/i.test(x) && /this week/i.test(x) && /100%/.test(x) }, 15000)) && /On for this computer/.test(await s.p.locator('.acct-here').innerText()), 'the Account tab shows the account\'s use, the 8-hour window and the week, as the usage chip shows a plan\'s, and that the relay is on for this computer', await s.p.locator('.acct-relay').innerText().catch(() => ''))
   await tab(s.p, 'Phone')
   // The phone page it serves to browsers, checked against this version's (server/relaycheck.js).
   const check = s.p.locator('[data-check="page"]')
-  ok(!!(await until(async () => /phone page is Bridge AI [\d.]+(-[\w.]+)?'s, unchanged \(checked /.test(await check.innerText().catch(() => '')), 15000)), 'Settings › Devices says the phone page the relay serves is this version\'s, unchanged, and when it checked', await check.innerText().catch(() => ''))
+  ok(!!(await until(async () => /phone page is Bridge AI [\d.]+(-[\w.]+)?'s, unchanged \(checked /.test(await check.innerText().catch(() => '')), 15000)), 'Settings › Devices & Access › Phone says the phone page the relay serves is this version\'s, unchanged, and when it checked', await check.innerText().catch(() => ''))
   const shellJs = fs.readFileSync(path.join(ROOT, 'relay', 'web', 'shell.js'), 'utf8')
   await hr.page({ name: 'shell.js', text: `${shellJs}\n// changed for everyone\n` })
   await check.locator('button', { hasText: 'Check again' }).click()
@@ -215,14 +218,14 @@ try {
   const here = a.p.locator('.acct-here')
   await here.waitFor({ timeout: 10000 })
   const where = async (pg) => ({ section: (await pg.locator('.st-nav-item.on').innerText().catch(() => '')).trim(), tab: (await pg.locator('.st-tabs [aria-selected="true"]').innerText().catch(() => '')).trim() })
-  const onAccount = async (pg) => { const w = await where(pg); return w.section === 'Account & Devices' && w.tab === 'Account' }
-  ok(await onAccount(a.p) && await here.locator('button', { hasText: 'Use it on this computer' }).count() === 1, 'Settings › Account & Devices › Account: approved, with Use it on this computer right under the allowance', { ...(await where(a.p)), here: await here.innerText() })
+  const onAccount = async (pg) => { const w = await where(pg); return w.section === 'Account & Backup' && w.tab === 'Account' }
+  ok(await onAccount(a.p) && await here.locator('button', { hasText: 'Use it on this computer' }).count() === 1, 'Settings › Account & Backup › Account: approved, with Use it on this computer right under the allowance', { ...(await where(a.p)), here: await here.innerText() })
   await hr.vars({ MAX_ACCOUNTS: '1' })
   await here.locator('button', { hasText: 'Use it on this computer' }).click()
   const fullHere = here.locator('.hosted-full')
   ok(!!(await fullHere.waitFor({ timeout: 15000 }).then(() => true, () => false)) && /full for now/.test(await fullHere.innerText()) && await fullHere.locator('button', { hasText: 'Use your own Cloudflare' }).count() === 1 && await fullHere.locator('button', { hasText: 'Try again' }).count() === 1 && !(await a.p.locator('.acct-here-bad').count()) && await onAccount(a.p), 'full for now: said right there, once, with the other ways and Try again, still on the Account tab', await here.innerText().catch(() => ''))
   await fullHere.locator('button', { hasText: 'Use your own Cloudflare' }).click()
-  ok(!!(await until(async () => (await where(a.p)).tab === 'Phone' && /Your own Cloudflare/.test(await a.p.locator('.ph-way.on').innerText().catch(() => '')) && await a.p.locator('button', { hasText: 'Sign in with Cloudflare' }).count() === 1, 8000)), 'Use your own Cloudflare: the Phone tab, with it picked and Sign in with Cloudflare', await where(a.p))
+  ok(!!(await until(async () => (await where(a.p)).section === 'Devices & Access' && (await where(a.p)).tab === 'Phone' && /Your own Cloudflare/.test(await a.p.locator('.ph-way.on').innerText().catch(() => '')) && await a.p.locator('button', { hasText: 'Sign in with Cloudflare' }).count() === 1, 8000)), 'Use your own Cloudflare: the Phone tab, with it picked and Sign in with Cloudflare', await where(a.p))
   await hr.vars({ MAX_ACCOUNTS: '5' })
   await hr.down()
   await tab(a.p, 'Account')
@@ -250,9 +253,9 @@ try {
   const u = await page(b, au.url, { mode: 'light', theme: 'sky' })
   pages.push(u)
   await u.p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
-  await u.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'devices' } })))
+  await u.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'account-backup' } })))
   const urow = u.p.locator('.acct-relay')
-  ok(!!(await until(async () => /starts using it by itself/.test(await urow.innerText().catch(() => '')), 10000)) && await onAccount(u.p), 'Account & Devices opens at its Account tab; asked for, the relay says this computer starts using it by itself', await urow.innerText().catch(() => ''))
+  ok(!!(await until(async () => /starts using it by itself/.test(await urow.innerText().catch(() => '')), 10000)) && await onAccount(u.p), 'Account & Backup opens at its Account tab; asked for, the relay says this computer starts using it by itself', await urow.innerText().catch(() => ''))
   await acc.admin('POST', `/admin/accounts/${(await au.api('/account')).account.id}`, { relay: 'approved' })
   await u.p.evaluate(() => window.dispatchEvent(new Event('focus')))
   const uhere = u.p.locator('.acct-here')
@@ -323,7 +326,7 @@ try {
   await f.p.waitForSelector('.wiz-levels, .sa-all', { timeout: 20000 })
   const note = f.p.locator('.wiz-phone')
   await note.waitFor({ timeout: 10000 })
-  ok(/Use Bridge AI on your phone/.test(await note.innerText()) && /Settings › Account & Devices/.test(await note.innerText()) && !(await note.locator('input').count()), 'first-run setup says where to set up the phone (Settings › Account & Devices), with nothing to tick', await note.innerText())
+  ok(/Use Bridge AI on your phone/.test(await note.innerText()) && /Settings › Devices & Access › Phone/.test(await note.innerText()) && !(await note.locator('input').count()), 'first-run setup says where to set up the phone (Settings › Devices & Access › Phone), with nothing to tick', await note.innerText())
   await shot(f.p, `${tag}relay-hosted-setup`)
   await level(f.p)
   await f.p.click('.wiz-foot .btn.primary')
@@ -339,18 +342,20 @@ try {
   await h.p.waitForSelector('.wiz-levels, .sa-all', { timeout: 20000 })
   await h.p.waitForTimeout(1500)
   ok(!(await h.p.locator('.wiz-phone').count()) && !(await none.api('/relay')).hostedAvailable && !(await none.api('/account')).available, 'with no hosted relay and no accounts, first-run setup says nothing about it', null)
-  // Nor does Settings › Devices, all of it, Link a device included, once set up.
+  // Nor do Settings › Devices & Access, all of it, Link a device included, and Notifications, once set up.
   await none.api('/setup', { name: 'Tester' })
   await h.p.reload()
   await h.p.waitForSelector('.rail-nav-btn', { timeout: 20000 })
   // (Each of its tabs, one after the other.)
   await devices(h.p)
   let devText = ''
-  for (const [tab, re] of [['Phone', /Sign in with Cloudflare/], ['Computers', /Link a device[\s\S]*isn't set up yet/], ['Notifications', /What to notify about/]]) {
+  for (const [tab, re] of [['Phone', /Sign in with Cloudflare/], ['Computers', /Link a device[\s\S]*isn't set up yet/], ['Remote Access', /Which Devices May Connect/], ['Share Links', /Share Links|shared/]]) {
     await h.p.locator('.st-tabs [role="tab"]', { hasText: tab }).click()
     devText += (await until(async () => { const x = await h.p.locator('.modal.settings').innerText().catch(() => ''); return re.test(x) && x }, 10000)) || `(${tab} never showed)`
   }
-  ok(!/never showed/.test(devText) && !/Bridge AI's relay|Bold Bridge/.test(devText) && /sign in to Cloudflare in the Phone tab/.test(devText), 'and Settings › Devices names no hosted relay and no account anywhere, Link a device included', devText && devText.slice(-600))
+  await h.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'notifications' } })))
+  devText += (await until(async () => { const x = await h.p.locator('.modal.settings').innerText().catch(() => ''); return /What to notify about/.test(x) && x }, 10000)) || '(Notifications never showed)'
+  ok(!/never showed/.test(devText) && !/Bridge AI's relay|Bold Bridge/.test(devText) && /sign in to Cloudflare in the Phone tab/.test(devText), 'and Settings › Devices & Access and Notifications name no hosted relay and no account anywhere, Link a device included', devText && devText.slice(-600))
   ok(!(await h.p.locator('[data-check="page"]').count()) && (await none.api('/relay/pagecheck')).on === false, 'nor checks a phone page: there\'s no hosted relay in use', await none.api('/relay/pagecheck'))
   const noAcc = await fresh('noacc', { relay: { hostedUrl: hr.url } })
   ok(!(await noAcc.api('/relay')).hostedAvailable, 'and a hosted relay with no Bold Bridge accounts isn\'t offered at all (it can\'t work without one)')

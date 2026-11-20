@@ -143,9 +143,9 @@
 .rs-step-body > b { line-height: 22px; }
 .rs-step.off .rs-control b { color: var(--ink-2); }
 .rs-more { min-width: 0; }
-.rs-more summary { cursor: pointer; width: fit-content; font-size: 12px; color: var(--ink-2); min-height: 24px; display: flex; align-items: center; gap: 4px; list-style: none; }
+.rs-more summary { cursor: pointer; width: fit-content; font-size: 12px; font-weight: 500; color: var(--accent); min-height: 24px; display: flex; align-items: center; gap: 4px; list-style: none; }
 .rs-more summary::-webkit-details-marker { display: none; }
-.rs-more summary .icon { color: var(--ink-3); transition: transform .15s; }
+.rs-more summary .icon { color: var(--accent); transition: transform .15s; }
 .rs-more[open] > summary .icon { transform: rotate(90deg); }
 .rs-more > p { margin: 4px 0 0; }
 .rs-steps > .rs-more { margin-left: 32px; }

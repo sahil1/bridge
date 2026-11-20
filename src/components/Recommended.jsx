@@ -4,6 +4,7 @@ import { api, settingsChanged, usePoll } from '../api.js'
 import { modelLabel } from './ModelChip.jsx'
 import { EFFORTS, EFFORT_LABEL, EFFORT_NOTE, suggestEffort } from '../recommended.js'
 import { t, midSentence } from '../i18n/index.js'
+import { where as placeIn } from './settings/search.js'
 import './recommended.css'
 
 // Recommended Settings (src/recommended.js has the table and the reasons): what
@@ -184,7 +185,7 @@ export function EffortChip({ kind, label, text, value, onPick, className = '', u
       {open && (
         <div ref={popRef} className={`eff-pop ${upward ? 'up' : ''}`} role="menu" aria-label={t('Effort for this task')}>
           <button type="button" role="menuitemradio" aria-checked={!level} className={!level ? 'on' : ''} onClick={() => pick('usual')}>
-            <span className="eff-main"><b>{t('Usual')}</b><small>{usual ? t('{effort}, as set in Settings › Agents.', { effort: effortName(usual) }) : t('{agent} decides, as when you start it yourself.', { agent: label })}</small></span>
+            <span className="eff-main"><b>{t('Usual')}</b><small>{usual ? t('{effort}, as set in {place}.', { place: placeIn('agents'), effort: effortName(usual) }) : t('{agent} decides, as when you start it yourself.', { agent: label })}</small></span>
           </button>
           {EFFORTS.map((e) => (
             <button type="button" key={e} role="menuitemradio" aria-checked={level === e} className={level === e ? 'on' : ''} onClick={() => pick(e)}>

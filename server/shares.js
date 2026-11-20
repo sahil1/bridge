@@ -38,6 +38,7 @@ import { safePath } from './files.js'
 import { newShareSecret, shareId } from '../relay/web/link.js'
 import { LASTS, LAST_DEFAULT, LIMITS, cleanEmail, isEmail } from '../shared/shares.js'
 import { plainName } from '../shared/remote.js'
+import { placeEn } from '../shared/places.js'
 
 const FILE = dataFile('shares.json')
 // An hour, as links count it (tests make it seconds).
@@ -100,9 +101,9 @@ const linkOf = (s) => `${s.at}/v/${s.id}#s=${s.secret}${hooks.owner() ? `&n=${en
 // Whether a link can be made here now, and why not.
 export function can() {
   const at = hooks.shareAt()
-  if (at.why === 'relay') return { ok: false, why: 'relay', text: 'Share Links go through a relay. Set one up in Settings › Devices first.' }
-  if (at.why === 'hosted') return { ok: false, why: 'hosted', text: 'Bridge AI\'s relay doesn\'t open Share Links yet: links work there once it\'s updated. A relay on your own Cloudflare account opens them now (Settings › Devices).' }
-  if (at.why === 'update') return { ok: false, why: 'update', text: `Your relay needs updating for Share Links: Update relay, in Settings › Devices.${at.error ? ` (Last try: ${at.error})` : ''}` }
+  if (at.why === 'relay') return { ok: false, why: 'relay', text: `Share Links go through a relay. Set one up in ${placeEn('phone')} first.` }
+  if (at.why === 'hosted') return { ok: false, why: 'hosted', text: `Bridge AI's relay doesn't open Share Links yet: links work there once it's updated. A relay on your own Cloudflare account opens them now (${placeEn('phone')}).` }
+  if (at.why === 'update') return { ok: false, why: 'update', text: `Your relay needs updating for Share Links: Update relay, in ${placeEn('phone')}.${at.error ? ` (Last try: ${at.error})` : ''}` }
   if (active().length >= LIMITS.shares) return { ok: false, why: 'full', text: `${LIMITS.shares} links are shared at once already. Stop one first.` }
   return { ok: true, scripts: !!at.content }
 }
@@ -307,7 +308,7 @@ function letIn(s, v) {
     s.first = now()
     save()
     const where = countryName(v.country)
-    hooks.notify({ kind: 'share', title: `${s.title} was opened`, body: `${v.email || 'Someone with the link'}${where ? ` in ${where}` : ''} opened it. Stop Sharing is in Settings › Sharing.`, url: '/?settings=sharing', tag: `share-${s.id}` })
+    hooks.notify({ kind: 'share', title: `${s.title} was opened`, body: `${v.email || 'Someone with the link'}${where ? ` in ${where}` : ''} opened it. Stop Sharing is in ${placeEn('sharing')}.`, url: '/?settings=sharing', tag: `share-${s.id}` })
   }
 }
 const countryName = (c) => { if (!c) return null; try { return new Intl.DisplayNames(['en'], { type: 'region' }).of(c) || c } catch { return c } }
@@ -351,7 +352,7 @@ function checkPassword(s, v, pw) {
       t.until = now() + L.lockMinutes * 60000
       save()
       opened(s, v, 'locked')
-      hooks.notify({ kind: 'share', title: `${s.title}: ${L.linkTries} wrong passwords`, body: `It's locked for ${L.lockMinutes} minutes. If that wasn't someone you shared it with, Stop Sharing in Settings › Sharing.`, url: '/?settings=sharing', tag: `share-lock-${s.id}` })
+      hooks.notify({ kind: 'share', title: `${s.title}: ${L.linkTries} wrong passwords`, body: `It's locked for ${L.lockMinutes} minutes. If that wasn't someone you shared it with, Stop Sharing in ${placeEn('sharing')}.`, url: '/?settings=sharing', tag: `share-lock-${s.id}` })
       return { locked: t.until, link: true }
     }
     save()

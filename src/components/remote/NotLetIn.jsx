@@ -8,6 +8,7 @@ import Icon from '../Icon.jsx'
 import { notLetIn, phoneApp, machineId, hostApi } from '../../api.js'
 import { goMachine } from '../Machines.jsx'
 import { t } from '../../i18n/index.js'
+import { where } from '../settings/search.js'
 
 const AGAIN_MS = 4000
 
@@ -41,7 +42,7 @@ export default function NotLetIn({ children }) {
           : <>
             <h1>{out.through ? t('{computer} hasn\'t let {through} in', { computer, through: out.through }) : t('{computer} hasn\'t let this device in', { computer })}</h1>
             {out.through && <p className="muted">{t('This device comes through {through}.', { through: out.through })}</p>}
-            <p>{t('On {computer}: Settings › Remote Access › Which Devices May Connect.', { computer })}</p>
+            <p>{t('On {computer}: {place}.', { place: where('remote-devices'), computer })}</p>
             <p className="muted small">{t('This opens by itself once it does.')}</p>
           </>}
         <div className="crash-acts">

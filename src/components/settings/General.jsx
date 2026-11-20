@@ -1,21 +1,18 @@
 import { useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
 import AgentMark from './agentMark.jsx'
-import LocationPicker from './LocationPicker.jsx'
 import { USAGE_OFF_WHY } from '../Usage.jsx'
 import { t, tn, tx } from '../../i18n/index.js'
 import { api, settingsChanged, refetch } from '../../api.js'
 import { useTrial } from '../../trials.js'
 import { askRestart, useRecheck } from '../PermissionFix.jsx'
-import SetupAll from '../SetupAll.jsx'
-import Permissions from './Permissions.jsx'
-import { Advanced, Line } from './Advanced.jsx'
+import { Advanced, Line, More } from './Advanced.jsx'
 
-// Settings › General: who you are, which agent and model to use by default, picking up unfinished
-// work (it has agents carry on by themselves), the layout and where you are; under Advanced, the Chief of Staff's agent, plan usage, what Bridge AI is allowed on this
-// computer (Permissions), Command History, and the terminal and where agents run. The Chief of
-// Staff's helpers (server/delegate.js) are with its agent: how many work at once, and whether they
-// may edit in their own work folder, offered only when an agent here can be started that way.
+// What every part of Settings shares (useSettings: the settings, and saving a change; SaveNote: what
+// saving said), and the parts of Settings › Agents & Models › Agents that were General's: the
+// default agent and its model, picking up unfinished work (it has agents carry on by themselves),
+// the Chief of Staff's agent and helpers (server/delegate.js), and under Advanced, plan usage,
+// Command History, the terminal and where agents run.
 export function useSettings() {
   const [s, setS] = useState(null)
   const [note, setNote] = useState(null)
@@ -45,132 +42,117 @@ export function SaveNote({ note }) {
   return <p className="st-note ok"><Icon name="check" size={13} /> {t('Saved')}</p>
 }
 
-export default function General({ onGo, onOpenAgent }) {
-  const { s, save, note } = useSettings()
-  const [agents, setAgents] = useState(null)
-  const [name, setName] = useState('')
-  useEffect(() => { api('/agents/catalog').then(setAgents).catch(() => setAgents([])) }, [])
-  useEffect(() => { if (s) setName(s.effective.name || '') }, [s])
-  const commandsOn = useTrial('routines')
-  if (!s) return <div className="skeleton-rows"><div /><div /><div /></div>
-
+// The default agent, and the model it starts with: Settings › Agents & Models › Agents, first.
+export function DefaultAgent({ s, save, agents, onMore }) {
   const eff = s.effective
   const installed = (agents || []).filter((a) => a.installed)
   const def = eff.defaultAgent || 'claude'
   const defAgent = (agents || []).find((a) => a.kind === def)
   const model = eff.agents?.[def]?.model || ''
+  return (
+    <section className="st-sec" data-setting="default-agent">
+      <Line label={t('Default agent')} hint={t('New agents, chats, routines and mail tasks start with it.')} />
+      {agents && !installed.length && <p className="st-note warn"><span>{tn('No agents installed yet. {install} to get started, or chat with any model through an API key: New chat, then Any model.', { install: <button className="link-btn" onClick={onMore}>{t('Install one')}</button> })}</span></p>}
+      <div className="st-agent-grid">
+        {installed.map((a) => (
+          <button key={a.kind} type="button" className={`st-agent ${def === a.kind ? 'on' : ''}`} aria-pressed={def === a.kind} onClick={() => save({ defaultAgent: a.kind })}>
+            <AgentMark kind={a.kind} label={a.label} size={30} />
+            <span>{a.label}</span>
+            {def === a.kind && <Icon name="check" size={13} className="st-agent-check" />}
+          </button>
+        ))}
+        <button type="button" className="st-agent ghost" onClick={onMore}><Icon name="plus" size={14} /><span>{t('More agents')}</span></button>
+      </div>
+      {defAgent && (defAgent.modelFlag
+        ? <Line setting="default-model" label={t('Default model for {agent}', { agent: defAgent.label })} hint={t("Empty: {agent}'s own default.", { agent: defAgent.label })}
+            title={eff.runtime === 'herdr' ? t("Any model name the CLI accepts works. With herdr, agents herdr starts itself (Claude, Codex, Gemini, Grok, Cursor) use the model set in the agent's own settings.") : t('Any model name the CLI accepts works.')}>
+            <ModelField key={def} value={model} models={defAgent.models} onSave={(v) => save({ agents: { ...(eff.agents || {}), [def]: { ...(eff.agents?.[def] || {}), model: v || undefined } } })} />
+          </Line>
+        : <p className="muted small" data-setting="default-model">{t("{agent} picks its model in its own settings; Bridge AI can't set it from here yet.", { agent: defAgent.label })}</p>)}
+      {/* On unless turned off, and it has an agent carry on by itself: said here, not under Advanced. */}
+      {eff.runtime !== 'herdr' && (
+        <label className="st-check" data-setting="resume-work">
+          <input type="checkbox" checked={eff.resumeWork !== false} onChange={(e) => save({ resumeWork: e.target.checked })} />
+          <span><b>{t('Pick up unfinished work after an update, a crash or a restart')}</b> <span className="muted small">{t('The agent is told to carry on, on its own plan or key.')} <More>{t('An agent stopped in the middle of something (an update that had to restart its terminal, a crash, the computer restarting) reopens its conversation and is told to carry on from where it left off. Off: it reopens and waits for you.')}</More></span></span>
+        </label>
+      )}
+    </section>
+  )
+}
+
+// The Chief of Staff: which agent it runs on, how many helpers work at once, and whether they may
+// edit in their own work folder (offered only when an agent here can be started that way); the
+// models it can consult come after it (Agents.jsx).
+export function ChiefOfStaff({ s, save, agents, children }) {
+  const eff = s.effective
+  const installed = (agents || []).filter((a) => a.installed)
   const helpers = eff.chief?.helpers || {}
+  const kind = eff.chief?.kind || 'claude'
   const setHelpers = (patch) => save({ chief: { helpers: { ...helpers, ...patch } } })
   // The agents that can be told to edit without asking (agents.js access()); the rest always ask.
   const canEdit = installed.filter((a) => a.access).map((a) => a.label)
+  return (
+    <section className="st-sec" data-setting="chief">
+      <h4>{t('Chief of Staff')}</h4>
+      <Line label={t('Runs on')} hint={t('One with a chat view (Claude Code or Codex) works best.')} title={t('The agent you talk to, which hands work to the others.')}>
+        <select className="st-input" value={kind} onChange={(e) => save({ chief: { kind: e.target.value } })} aria-label={t('Chief of Staff runs on')}>
+          {installed.map((a) => <option key={a.kind} value={a.kind}>{a.label}{a.caps?.chat ? '' : ` ${t('(terminal only)')}`}</option>)}
+          {!installed.some((a) => a.kind === kind) && <option value={kind}>{t('{agent} (not installed)', { agent: (agents || []).find((a) => a.kind === kind)?.label || kind })}</option>}
+        </select>
+      </Line>
+      <Line setting="chief-helpers" label={t('Helpers at once')} hint={t('How many helpers work together. More wait their turn.')}>
+        <select className="st-input st-input-short" value={Math.max(1, Math.min(10, Number(helpers.max) || 3))} onChange={(e) => setHelpers({ max: Number(e.target.value) })} aria-label={t('Helpers at once')}>
+          {[1, 2, 3, 4, 5, 6, 8, 10].map((n) => <option key={n} value={n}>{n}</option>)}
+        </select>
+      </Line>
+      {canEdit.length > 0 && (
+        <label className="st-check" data-setting="chief-helpers-edit">
+          <input type="checkbox" checked={helpers.editOwnFolder === true} onChange={(e) => setHelpers({ editOwnFolder: e.target.checked })} />
+          <span><b>{t('Helpers may edit in their own work folder')}</b> <span className="muted small">{t('Off: they ask before each change, as agents do.')} <More>{t('A helper the Chief of Staff starts in its task\'s own folder (work/<task> in its folder) changes files there without asking. A helper working in one of your folders still asks before each change. For helpers on {agents}; others always ask.', { agents: canEdit.join(', ') })}</More></span></span>
+        </label>
+      )}
+      {children}
+    </section>
+  )
+}
+
+// Under the Agents tab's Advanced: plan usage, Command History (with Scheduled Routines on), the
+// terminal and where agents run. For people who live in a terminal.
+export function AgentsAdvanced({ s, save }) {
+  const eff = s.effective
+  const commandsOn = useTrial('routines')
   const seg = (label, value, options, onPick) => (
     <div className="seg ap-seg" role="radiogroup" aria-label={t(label)}>
       {options.map(([v, l]) => <button key={l} type="button" role="radio" aria-checked={value === v} className={value === v ? 'on' : ''} onClick={() => onPick(v)}>{t(l)}</button>)}
     </div>
   )
-
   return (
-    <div className="st-sections">
-      <SaveNote note={note} />
-      <SetupAll onOpen={onOpenAgent} />
-
-      <section className="st-sec" data-setting="name">
-        <Line label={t('Your name')} hint={t('What the Chief of Staff and the morning brief call you.')}>
-          <input className="st-input" value={name} onChange={(e) => setName(e.target.value)} onBlur={() => name !== (eff.name || '') && save({ name: name.trim() })}
-            onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }} placeholder={t('First name')} aria-label={t('Your name')} maxLength={60} />
-        </Line>
-      </section>
-
-      <section className="st-sec" data-setting="default-agent">
-        <h4>{t('Default agent')}</h4>
-        <p className="muted small">{t('New agents, chats, routines and mail tasks start with it unless you pick another.')}</p>
-        {agents && !installed.length && <p className="st-note warn"><span>{tn('No agents installed yet. {install} to get started, or chat with any model through an API key: New chat, then Any model.', { install: <button className="link-btn" onClick={() => onGo('agents')}>{t('Install one')}</button> })}</span></p>}
-        <div className="st-agent-grid">
-          {installed.map((a) => (
-            <button key={a.kind} type="button" className={`st-agent ${def === a.kind ? 'on' : ''}`} aria-pressed={def === a.kind} onClick={() => save({ defaultAgent: a.kind })}>
-              <AgentMark kind={a.kind} label={a.label} size={30} />
-              <span>{a.label}</span>
-              {def === a.kind && <Icon name="check" size={13} className="st-agent-check" />}
-            </button>
-          ))}
-          <button type="button" className="st-agent ghost" onClick={() => onGo('agents')}><Icon name="plus" size={14} /><span>{t('More agents')}</span></button>
-        </div>
-        {defAgent && (defAgent.modelFlag
-          ? <Line setting="default-model" label={t('Default model for {agent}', { agent: defAgent.label })} hint={t("Empty: {agent}'s own default.", { agent: defAgent.label })}
-              title={s.effective.runtime === 'herdr' ? t("Any model name the CLI accepts works. With herdr, agents herdr starts itself (Claude, Codex, Gemini, Grok, Cursor) use the model set in the agent's own settings.") : t('Any model name the CLI accepts works.')}>
-              <ModelField key={def} value={model} models={defAgent.models} onSave={(v) => save({ agents: { ...(eff.agents || {}), [def]: { ...(eff.agents?.[def] || {}), model: v || undefined } } })} />
-            </Line>
-          : <p className="muted small">{t("{agent} picks its model in its own settings; Bridge AI can't set it from here yet.", { agent: defAgent.label })}</p>)}
-      </section>
-
-      {/* On unless turned off, and it has an agent carry on by itself: said here, not under Advanced. */}
-      {eff.runtime !== 'herdr' && (
-        <section className="st-sec">
-          <label className="st-check" data-setting="resume-work" title={t('An agent stopped in the middle of something (an update that had to restart its terminal, a crash, the computer restarting) reopens its conversation and is told to carry on from where it left off. Off: it reopens and waits for you.')}>
-            <input type="checkbox" checked={eff.resumeWork !== false} onChange={(e) => save({ resumeWork: e.target.checked })} />
-            <span><b>{t('Pick up unfinished work after an update, a crash or a restart')}</b> <span className="muted small">{t('The agent is told to carry on, on its own plan or key.')}</span></span>
-          </label>
-        </section>
-      )}
-
-      <section className="st-sec" data-setting="layout">
-        <Line label={t('Layout')} hint={t('Simple: your Chief of Staff and your agents. Everything: every panel.')}
-          title={t('Simple keeps the screen to your chief of staff and your agents: the Today panel waits behind one button, and the Agents board shows up once you have agents. Everything shows every panel.')}>
-          {seg('Layout', !!eff.simple, [[true, tx('Simple')], [false, tx('Everything')]], (on) => save({ simple: on }))}
-        </Line>
-      </section>
-
-      <section className="st-sec" data-setting="location">
-        <h4>{t('Location')}</h4>
-        <p className="muted small">{t('For the weather and the morning brief. Only the place you pick is saved, on this computer.')}</p>
-        <LocationPicker value={eff.location} onChange={(loc) => save({ location: loc })} />
-      </section>
-
-      <Advanced order={10}>
-        <section className="st-sec" data-setting="chief">
-          <Line label={t('Chief of Staff runs on')} hint={t('One with a chat view (Claude Code or Codex) works best.')} title={t('The agent you talk to, which hands work to the others.')}>
-            <select className="st-input" value={eff.chief?.kind || 'claude'} onChange={(e) => save({ chief: { kind: e.target.value } })} aria-label={t('Chief of Staff runs on')}>
-              {installed.map((a) => <option key={a.kind} value={a.kind}>{a.label}{a.caps?.chat ? '' : ` ${t('(terminal only)')}`}</option>)}
-            </select>
-          </Line>
-          <Line setting="chief-helpers" label={t('Helpers at once')} hint={t('How many helpers the Chief of Staff has at work together. More wait their turn and start as one finishes.')}>
-            <select className="st-input" value={Math.max(1, Math.min(10, Number(helpers.max) || 3))} onChange={(e) => setHelpers({ max: Number(e.target.value) })} aria-label={t('Helpers at once')}>
-              {[1, 2, 3, 4, 5, 6, 8, 10].map((n) => <option key={n} value={n}>{n}</option>)}
-            </select>
-          </Line>
-          {canEdit.length > 0 && (
-            <label className="st-check" data-setting="chief-helpers-edit" title={t('A helper the Chief of Staff starts in its task\'s own folder (work/<task> in its folder) changes files there without asking. A helper working in one of your folders still asks before each change.')}>
-              <input type="checkbox" checked={helpers.editOwnFolder === true} onChange={(e) => setHelpers({ editOwnFolder: e.target.checked })} />
-              <span><b>{t('Helpers may edit in their own work folder')}</b> <span className="muted small">{t('Off: they ask before each change, as agents do. For helpers on {agents}; others always ask.', { agents: canEdit.join(', ') })}</span></span>
-            </label>
-          )}
-        </section>
+    <>
+      <Advanced order={20}>
         <section className="st-sec" data-setting="plan-usage">
-          <Line label={t('Plan usage')} hint={t("Read with your agents' own sign-ins, which some providers, Anthropic among them, don't allow.")} title={t(USAGE_OFF_WHY)}>
+          <Line label={t('Plan usage')} hint={t("Read with your agents' own sign-ins, which some providers don't allow.")} title={t(USAGE_OFF_WHY)}>
             {seg('Plan usage', !!eff.quota?.read, [[false, 'Off'], [true, 'On']], (on) => save({ quota: { read: on } }))}
           </Line>
         </section>
       </Advanced>
-      <Advanced order={20}><Permissions /></Advanced>
       {commandsOn && <Advanced order={30}><CommandHistory value={eff.commands || {}} save={save} /></Advanced>}
-      {/* For people who live in a terminal. */}
       <Advanced order={40}>
         <TerminalApp value={eff.terminal?.app || 'auto'} onSave={(app) => save({ terminal: { ...(eff.terminal || {}), app } })} />
         <section className="st-sec" data-setting="runtime">
-          <Line label={t('Where agents run')} hint={t('herdr, installed separately, adds its own terminal and split panes. Applies after a restart.')}
+          <Line label={t('Where agents run')} hint={t('herdr, installed separately, adds its own terminal and split panes.')}
             title={t('Built in needs nothing else. herdr (optional, installed separately) adds its own terminal UI, split panes and the live Herdr view; your agents then share your herdr session. Applies after a restart.')}>
             {seg(tx('Runtime'), eff.runtime === 'herdr' ? 'herdr' : 'builtin', [['builtin', tx('Built in')], ['herdr', 'herdr']], (id) => save({ runtime: id }))}
           </Line>
           {eff.runtime === 'herdr' && <HerdrSession value={eff.herdr?.session || ''} onSave={(session) => save({ herdr: { ...(eff.herdr || {}), session: session || null } })} />}
           {eff.runtime !== 'herdr' && (
-            <>
-              <label className="ph-check small" data-setting="keep-agents" title={t('They carry on through updates and restarts, and Bridge AI picks them up as they are when it starts. Off: they stop with it, and Claude Code and Codex resume their conversations next time.')}>
-                <input type="checkbox" checked={eff.keepAgents !== false} onChange={(e) => save({ keepAgents: e.target.checked })} /> {t('Keep agents running when Bridge AI quits')}</label>
-            </>
+            <label className="st-check" data-setting="keep-agents">
+              <input type="checkbox" checked={eff.keepAgents !== false} onChange={(e) => save({ keepAgents: e.target.checked })} />
+              <span><b>{t('Keep agents running when Bridge AI quits')}</b> <span className="muted small">{t('Off: they stop with it, and resume next time.')} <More>{t('They carry on through updates and restarts, and Bridge AI picks them up as they are when it starts. Off: they stop with it, and Claude Code and Codex resume their conversations next time.')}</More></span></span>
+            </label>
           )}
         </section>
       </Advanced>
-    </div>
+    </>
   )
 }
 
@@ -249,7 +231,7 @@ function CommandHistory({ value, save }) {
     <section className="st-sec" id="commands" data-setting="commands">
       <h4>{t('Command History')}</h4>
       <label className="st-check"><input type="checkbox" checked={on} onChange={(e) => set({ history: e.target.checked })} />
-        <span title={t('In History › Commands: what you send your agents and Chief of Staff from their message boxes, New and the Tasks panel, to find again or make a routine of, and to suggest a routine when you ask the same thing on a schedule. Only on this computer; what agents send each other isn\'t kept.')}><b>{t('Keep a history of what you ask')}</b> <span className="muted small">{t('In History › Commands, on this computer only.')}</span></span></label>
+        <span><b>{t('Keep a history of what you ask')}</b> <span className="muted small">{t('In History › Commands, on this computer only.')} <More>{t('In History › Commands: what you send your agents and Chief of Staff from their message boxes, New and the Tasks panel, to find again or make a routine of, and to suggest a routine when you ask the same thing on a schedule. Only on this computer; what agents send each other isn\'t kept.')}</More></span></span></label>
       {on && (
         <div className="st-row st-radios" role="radiogroup" aria-label={t('Keep them for')}><span>{t('Keep them for')}</span>
           <span className="st-choices st-choices-row">{KEEP.map(([v, l]) => (

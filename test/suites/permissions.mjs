@@ -10,7 +10,7 @@
 //   this one (the app's own feed hears it); Reset with a stand-in tccutil; Automation asked of
 //   Finder first; and the Permissions list answering at once with Desktop, Documents and Downloads
 //   acting like macOS's protected folders (scripts/tcc-sim.mjs), so opening it asks nothing.
-//   Settings › General › Permissions, with stand-ins for the desktop app (window.bridgeApp) and for
+//   Settings › You › Permissions, with stand-ins for the desktop app (window.bridgeApp) and for
 //   the server's answers: macOS's question first, noticed with no click, stuck then Reset and ask
 //   again, Restart to apply and back to where you were, Windows, a browser, Linux; another device's
 //   page shown in this window (Ask that device, never this window's app); and a desktop app older
@@ -209,7 +209,7 @@ try {
     ok((await kit.api('/fix/check?pane=automation')).state === 'ok', 'turned on: noticed (asking again asks nothing once it\'s answered)')
   } catch (e) { ok(false, `crashed: ${String(e.message).split('\n')[0]}`) }
 
-  // ---------- Settings › General › Permissions ----------
+  // ---------- Settings › You › Permissions ----------
   await kit.api('/setup', { name: 'Tester' })
   // The server's answers stood in (a Mac's, whatever these tests run on), and the desktop app too:
   // macOS simulated in the page (window.__perm), every ask, open, reset and tile logged.
@@ -218,7 +218,8 @@ try {
   const ALL = ['microphone', 'accessibility', 'calendars', 'full-disk', 'files', 'automation', 'notifications']
   const settings = async (p) => {
     await p.locator('button[aria-label="Settings"]').first().click()
-    // Under General's Advanced.
+    // Under You's Advanced (Settings opens on Your Features).
+    await p.locator('.st-nav-item', { has: p.locator('span', { hasText: /^You$/ }) }).click()
     await advanced(p).catch(() => {})
     const s = p.locator('.st-perms')
     await s.waitFor({ timeout: 10000 }).catch(() => {})
@@ -290,7 +291,7 @@ try {
     const d = await open({ list: rows(ALL, { calendars: 'ok', 'full-disk': 'denied' }), app: {} })
     const s = await settings(d.p)
     const shown = await s.locator('.perm-row').evaluateAll((els) => els.map((e) => e.dataset.pane))
-    ok(shown.join() === ALL.join(), 'Settings › General › Permissions: each one Bridge AI may use on this Mac', shown)
+    ok(shown.join() === ALL.join(), 'Settings › You › Permissions: each one Bridge AI may use on this Mac', shown)
     ok(/Voice notes, dictation and meeting notes/.test(await row(s, 'microphone').innerText()) && /On/.test(await row(s, 'calendars').innerText()) && /Not asked yet/.test(await row(s, 'microphone').innerText()), 'what each is for, and whether it\'s on', await s.innerText())
     await s.scrollIntoViewIfNeeded().catch(() => {}); await shot(d.p, `${tag}permissions-list`)
     await row(s, 'microphone').locator('button', { hasText: 'Allow' }).click()
@@ -371,7 +372,9 @@ try {
     await br.ctx.close()
     const lx = await open({ list: { items: [] }, fix: { mac: false, win: false }, app: null })
     await lx.p.locator('button[aria-label="Settings"]').first().click()
-    await lx.p.locator('.st-sections').first().waitFor({ timeout: 8000 })
+    await lx.p.locator('.st-nav-item', { has: lx.p.locator('span', { hasText: /^You$/ }) }).click()
+    await lx.p.locator('.st-sections.st-you').first().waitFor({ timeout: 8000 })
+    await advanced(lx.p).catch(() => {})
     await sleep(800)
     ok(await lx.p.locator('.st-perms').count() === 0, 'Linux (and Docker): no Permissions at all, nothing asks there')
     await lx.ctx.close()
@@ -445,7 +448,7 @@ try {
     const q = await device(false)
     const s2 = await settings(q.p)
     const m2 = row(s2, 'microphone')
-    ok(!!(await until(async () => /On Studio Mac, open Bridge AI and allow it in Settings › General › Permissions/.test(await m2.innerText()), 8000, 200)) && await m2.locator('button').count() === 0, 'a device whose app can\'t be asked: what to do there, and no button', await m2.innerText().catch(() => ''))
+    ok(!!(await until(async () => /On Studio Mac, open Bridge AI and allow it in Settings › You › Permissions/.test(await m2.innerText()), 8000, 200)) && await m2.locator('button').count() === 0, 'a device whose app can\'t be asked: what to do there, and no button', await m2.innerText().catch(() => ''))
     await q.ctx.close()
   } catch (e) { ok(false, `crashed: ${String(e.message).split('\n')[0]}`) }
 } catch (e) {

@@ -21,7 +21,7 @@
 // a link shows is at <id>-<8 letters>.<SHARE_DOMAIN>, apart from the page holding the link's secret,
 // and may run its scripts there.
 //
-// Deployed by Bridge AI (Settings › Devices), as one module: FILES is filled in then.
+// Deployed by Bridge AI (Settings › Devices & Access › Phone), as one module: FILES is filled in then.
 //
 // The same code also runs Bridge AI's hosted relay, for people who'd rather not set up their own:
 // with HOSTED=1 it serves many computers, one per subdomain, each with its own Hub and its own
@@ -289,7 +289,7 @@ function limits(env) {
 // The kill switch: HOSTED_OFF=1 (or a message of your own) refuses new computers and connections.
 // (Said to a phone, it also says where to change that: on the computer.)
 const OFF_TEXT = 'Bridge AI\'s relay is switched off for now. To keep using your phone, put a relay on your own Cloudflare account, or use Tailscale'
-const offText = (env, phone) => (!env.HOSTED_OFF || env.HOSTED_OFF === '0' || env.HOSTED_OFF === 'false' ? null : on(env.HOSTED_OFF) ? `${OFF_TEXT}${phone ? ' (Settings › Devices, on the computer)' : ' instead'}.` : String(env.HOSTED_OFF).slice(0, 300))
+const offText = (env, phone) => (!env.HOSTED_OFF || env.HOSTED_OFF === '0' || env.HOSTED_OFF === 'false' ? null : on(env.HOSTED_OFF) ? `${OFF_TEXT}${phone ? ' (Settings › Devices & Access › Phone, on the computer)' : ' instead'}.` : String(env.HOSTED_OFF).slice(0, 300))
 
 // What a phone (and the computer) is told when the relay stops carrying it for now, with when it
 // can go on (`end`). The account's own: window, week, and the account itself (suspended, relay,
@@ -297,8 +297,8 @@ const offText = (env, phone) => (!env.HOSTED_OFF || env.HOSTED_OFF === '0' || en
 const ACCOUNT_WHY = new Set(['suspended', 'relay', 'deleted', 'token'])
 const REFUSED_MS = 10 * 60000 // how long a computer whose account is stopped waits before it asks again
 const linkFull = `As many people as the relay takes for one link are opening this link right now (${VIEW_HELD_PER_LINK} at once, besides the ${VIEWERS_PER_LINK} it lets in). This page tries again in a minute.`
-const OWN = 'For no limits, put the relay on your own Cloudflare account (Settings › Devices, on the computer).'
-const OTHER = 'A relay on your own Cloudflare account, or Tailscale, still works (Settings › Devices, on the computer).'
+const OWN = 'For no limits, put the relay on your own Cloudflare account (Settings › Devices & Access › Phone, on the computer).'
+const OTHER = 'A relay on your own Cloudflare account, or Tailscale, still works (Settings › Devices & Access › Phone, on the computer).'
 function limitText(why, l, end) {
   const n = (x) => x.toLocaleString('en-US')
   const d = new Date(end)
@@ -307,7 +307,7 @@ function limitText(why, l, end) {
   return {
     window: `This computer's Bold Bridge account has used its allowance on Bridge AI's relay for now (${n(l.windowMessages)} messages in ${l.windowHours} hours). It resets at ${when}. ${OWN}`,
     week: `This computer's Bold Bridge account has used this week's allowance on Bridge AI's relay (${n(l.weekMessages)} messages a week). It resets on ${when}. ${OWN}`,
-    all: `Bridge AI's relay has carried all it can for today, for every computer on it. It starts again at ${at} UTC. For no limits, put the relay on your own Cloudflare account (Settings › Devices, on the computer), or use Tailscale.`,
+    all: `Bridge AI's relay has carried all it can for today, for every computer on it. It starts again at ${at} UTC. For no limits, put the relay on your own Cloudflare account (Settings › Devices & Access › Phone, on the computer), or use Tailscale.`,
     shut: `Bridge AI's relay let this computer go until ${when}: it kept sending after its phones were stopped (over ${n(HOST_SLACK)} messages that had nowhere to go). Phones can connect again then. ${OWN}`,
     rate: 'Too much at once for Bridge AI\'s relay. Connecting again in a moment.',
     size: `That was too big for Bridge AI's relay (over ${l.messageKB} KB at once). Connecting again in a moment.`,
@@ -319,7 +319,7 @@ function limitText(why, l, end) {
     suspended: `This computer's Bold Bridge account is suspended, so Bridge AI's relay doesn't carry it for now. ${OTHER}`,
     relay: `This computer's Bold Bridge account doesn't have Bridge AI's relay any more. ${OTHER}`,
     deleted: `This computer's Bold Bridge account was deleted, so Bridge AI's relay doesn't carry it any more. ${OTHER}`,
-    token: 'Bridge AI\'s relay needs this computer signed in to a Bold Bridge account that may use it (Settings › Account, on the computer). It connects again once it is.',
+    token: 'Bridge AI\'s relay needs this computer signed in to a Bold Bridge account that may use it (Settings › Account & Backup › Account, on the computer). It connects again once it is.',
   }[why]
 }
 
@@ -486,10 +486,10 @@ async function hosted(req, env) {
 // register at once): its account's first takes one of MAX_ACCOUNTS places. A refusal says why ({
 // error, why }), and the app shows it.
 const NO_TOKEN = {
-  none: 'Bridge AI\'s relay needs this computer signed in to a Bold Bridge account that may use it (Settings › Account).',
-  forged: 'That pass for Bridge AI\'s relay doesn\'t check out. Sign in to your Bold Bridge account again (Settings › Account).',
+  none: 'Bridge AI\'s relay needs this computer signed in to a Bold Bridge account that may use it (Settings › Account & Backup › Account).',
+  forged: 'That pass for Bridge AI\'s relay doesn\'t check out. Sign in to your Bold Bridge account again (Settings › Account & Backup › Account).',
   expired: 'This computer\'s pass for Bridge AI\'s relay ran out. Bridge AI gets a new one from your Bold Bridge account by itself; try again in a minute.',
-  removed: 'This computer isn\'t on your Bold Bridge account any more (it was removed, or signed out). Sign in again (Settings › Account).',
+  removed: 'This computer isn\'t on your Bold Bridge account any more (it was removed, or signed out). Sign in again (Settings › Account & Backup › Account).',
 }
 const FULL = 'Bridge AI\'s relay is full for now: it has as many accounts as it can take. Put a relay on your own Cloudflare account instead (it\'s free), or use Tailscale.'
 async function register(req, env, url) {
@@ -585,7 +585,7 @@ const LANDING = `<!doctype html><html lang="en"><head><meta charset="utf-8"><met
 body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--ink);font:15px/1.55 system-ui,-apple-system,sans-serif}main{max-width:460px;padding:32px 20px}h1{font-size:20px;margin:14px 0 8px}p{color:var(--ink2);margin:0 0 12px}a{color:inherit}</style></head>
 <body><main><img src="/mark.svg" alt="" width="44" height="44"><h1>Bridge AI relay</h1>
 <p>This relay lets Bridge AI on a phone reach Bridge AI on a computer, from anywhere. Everything between them is end-to-end encrypted, so the relay passes it on without being able to read it.</p>
-<p>There's nothing to do here: Bridge AI sets it up for you (Settings › Devices), for a Bold Bridge account that may use it. To run your own relay instead, see <a href="https://github.com/sahil1/bridge">github.com/sahil1/bridge</a>.</p>
+<p>There's nothing to do here: Bridge AI sets it up for you (Settings › Devices &amp; Access › Phone), for a Bold Bridge account that may use it. To run your own relay instead, see <a href="https://github.com/sahil1/bridge">github.com/sahil1/bridge</a>.</p>
 <p>Each computer on it has an address of its own here, and what that address shows comes from that computer. To report one that's misused (phishing, malware): <a href="mailto:abuse@boldbridge.ai">abuse@boldbridge.ai</a>.</p></main></body></html>`
 
 // One per relay: holds your computer's connection and the phones'. Uses WebSocket hibernation,

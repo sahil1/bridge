@@ -17,6 +17,7 @@ import { BASE, machineId } from '../../api.js'
 import { onComputer, REVEAL, fileOp } from '../FileExtras.jsx'
 import { fmtSize as sizeOf } from './fsapi.js'
 import { t, tx, locale } from '../../i18n/index.js'
+import { where as placeIn } from '../settings/search.js'
 import './assist.css'
 
 const enc = encodeURIComponent
@@ -404,8 +405,8 @@ function AskAI({ scan, machine, where, onScan }) {
             : <p className="fa-privacy"><Icon name="info" size={13} /> <span>{info.models.length
               ? machine ? t('Pick the model to ask. One on {computer} keeps the names there; one elsewhere gets them over the internet.', { computer: place || t('that computer') })
                 : t('Pick the model to ask. One on this computer keeps the names here; one elsewhere gets them over the internet.')
-              : machine ? t('No model to ask on {computer} yet. Download the local model built in there, or add one, in its Settings › Model Providers.', { computer: place || t('that computer') })
-                : t('No model to ask yet. Download the local model built in, or add one, in Settings › Model Providers.')}</span></p>}
+              : machine ? t('No model to ask on {computer} yet. Download the local model built in there, or add one, in its {place}.', { place: placeIn('providers'), computer: place || t('that computer') })
+                : t('No model to ask yet. Download the local model built in, or add one, in {place}.', { place: placeIn('providers') })}</span></p>}
           {info.missing && <p className="small muted">{t('The model picked before ({model}) isn\'t available any more.', { model: info.missing })}</p>}
           {info.models.length > 0 && (
             <label className="fa-pick">

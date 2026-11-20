@@ -17,6 +17,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { dataFile, ensureDir, writeFileAtomic, loadConfig } from './paths.js'
+import { placeEn } from '../shared/places.js'
 
 // Where the accounts service is. Empty, nothing about accounts shows anywhere (Settings, the relay,
 // the command line), and Early Access and the relay work as they do without one. One computer can point at another with "account": { "url":
@@ -191,7 +192,7 @@ export const grant = () => call('POST', '/v1/grant')
 export async function redeem({ grant: g, by, replace }) {
   if (!available()) return { ok: false, why: 'none', text: 'This Bridge AI has no Bold Bridge accounts.' }
   if (conf.deviceToken && conf.account) return { ok: false, why: 'signed-in', text: `Signed in already, as ${conf.account.email}.` }
-  if (conf.declined) return { ok: false, why: 'declined', text: 'It said not to sign it in from your other computers. Sign in there by hand, in Settings › Account & Devices.' }
+  if (conf.declined) return { ok: false, why: 'declined', text: `It said not to sign it in from your other computers. Sign in there by hand, in ${placeEn('account', { accounts: true })}.` }
   try {
     const r = await call('POST', '/v1/redeem', { grant: g, device: device(), ...(replace ? { replace } : {}) }, null)
     conf = { deviceToken: r.deviceToken }

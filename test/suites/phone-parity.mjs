@@ -15,13 +15,14 @@
 // with its icon and what's in it), a section opens full width under ‹ Settings and its name, with
 // one close for the whole of Settings, and ‹ Settings goes back to the list. Opened at a section
 // (a link to it, ⌘K, a link from inside Settings, even to the section it opened at), it lands there
-// with ‹ Settings. Nothing wider than the phone, cut off or smaller than a 40 px target. On a
-// desktop it's as it was: General, with the sections down the left.
+// with ‹ Settings. Nothing wider than the phone, cut off or smaller than a 40 px target. A beta
+// feature's section (Bots) is listed, marked Beta, whether it's on or not. On a desktop it's as it
+// is there: Your Features, with the sections down the left.
 //
 // A path is what's tapped, from the tab bar: a tab (Chief, Agents, Meetings, Today, More), then the
 // buttons in it by name. A beta feature's paths (trial: its id) are followed with it on; with Home
 // on, Home is the first tab and Today is in More, which is checked then too. One marked mac (Mail,
-// its ⌘K actions and Settings › Mail) is only there, and followed, on a Mac. "Search › x" types x in the top bar's search, which must offer it (for
+// its ⌘K actions and Settings › Mail & Calendar) is only there, and followed, on a Mac. "Search › x" types x in the top bar's search, which must offer it (for
 // actions rather than places); "Settings › x" is the top bar's Settings, then its section x.
 import fs from 'node:fs'
 import path from 'node:path'
@@ -61,18 +62,19 @@ const PATHS = {
   'a:chat': { phone: 'Search › New chat' },
   'a:terminal': { phone: 'Search › New terminal' },
   'a:settings': { phone: 'More › Settings', shows: '.modal.settings' },
-  'a:providers': { phone: 'Settings › Model Providers' },
-  'a:accounts': { phone: 'Settings › Model Providers' },
+  'a:providers': { phone: 'Settings › Agents & Models › Model Providers' },
+  'a:accounts': { phone: 'Settings › Agents & Models › Model Providers' },
   'a:add-account': { phone: 'Search › Add another account' },
-  'a:mcp': { phone: 'Settings › MCP Servers' },
+  'a:mcp': { phone: 'Settings › Agents & Models › MCP Servers' },
   // A beta feature's (Bots): a phone's way to them is More › Bots, its three tabs and New bot.
   'a:bots': { phone: 'More › Bots', shows: '[data-setting="phone-bots"]', trial: 'slack-bot' },
   'a:new-bot': { phone: 'More › Bots', shows: '[data-setting="phone-bots"]', trial: 'slack-bot' },
-  'a:config': { phone: 'Settings › Config File' },
+  // The config file is About & Updates', under Advanced.
+  'a:config': { phone: 'Settings › About & Updates' },
   'a:mate': { phone: 'Chief', shows: '.mate-hero, .console' },
   'a:view': { none: 'The live Herdr view needs a wide screen; a phone has every terminal in More › Terminals' },
   'a:rail': { none: 'The sidebar is the desktop\'s; on a phone its rows are the tabs and More' },
-  'a:appearance': { phone: 'Settings › Appearance' },
+  'a:appearance': { phone: 'Settings › You' },
   'a:topbar': { none: 'What\'s pinned to the desktop\'s top bar; a phone\'s bar keeps to what needs you now, the rest in Today and a line under it' },
   'a:theme': { phone: 'Search › Color mode' },
   'a:ideas': { phone: 'Search › Add an idea' },
@@ -89,31 +91,33 @@ const PATHS = {
   'a:usage': { phone: 'More › Usage', shows: '.m-more-view .ustats' },
   'a:stats': { phone: 'More › Usage', shows: '.m-more-view .ustats' },
   'a:tour': { phone: 'Search › Take the tour' },
-  // Settings' sections (Settings.jsx SECTIONS).
-  'settings:general': { phone: 'Settings › General' },
-  'settings:agents': { phone: 'Settings › Agents' },
-  'settings:providers': { phone: 'Settings › Model Providers' },
-  // Voice & Meetings, and its tabs (their ids open it at each).
-  'settings:voice-meetings': { phone: 'Settings › Voice & Meetings' },
-  'settings:meetings': { phone: 'Settings › Voice & Meetings › Meetings' },
-  'settings:dictation': { phone: 'Settings › Voice & Meetings › Dictation' },
-  'settings:voice': { phone: 'Settings › Voice & Meetings › Speech to Text' },
-  'settings:mail': { phone: 'Settings › Mail', mac: true },
-  'settings:mcp': { phone: 'Settings › MCP Servers' },
-  // A beta feature's, there only while it's on (slack-bot follows it on a phone).
-  'settings:slack-bot': { phone: 'Settings › Bots', trial: 'slack-bot' },
-  // Devices, and its tabs (Account & Devices once Bold Bridge accounts exist).
-  'settings:devices': { phone: 'Settings › Devices' },
-  'settings:phone': { phone: 'Settings › Devices › Phone' },
-  'settings:machines': { phone: 'Settings › Devices › Computers' },
-  'settings:notifications': { phone: 'Settings › Devices › Notifications' },
-  // (Its Account tab, there only once Bold Bridge accounts exist, server/account.js: account-ui
-  // follows it on a phone, and each way into the section and its tabs.)
-  'settings:account': { phone: 'Settings › Account & Devices › Account', accounts: true },
-  'settings:sharing': { phone: 'Settings › Sharing' },
+  // Settings' sections and their tabs (Settings.jsx SECTIONS); a tab's id opens its section at it.
+  'settings:features': { phone: 'Settings › Your Features' },
+  'settings:you': { phone: 'Settings › You' },
+  'settings:agents-models': { phone: 'Settings › Agents & Models' },
+  'settings:agents': { phone: 'Settings › Agents & Models › Agents' },
+  'settings:providers': { phone: 'Settings › Agents & Models › Model Providers' },
+  'settings:models': { phone: 'Settings › Agents & Models › Which Model Does What' },
+  'settings:mcp': { phone: 'Settings › Agents & Models › MCP Servers' },
+  'settings:meetings-voice': { phone: 'Settings › Meetings & Voice' },
+  'settings:meetings': { phone: 'Settings › Meetings & Voice › Meetings' },
+  'settings:dictation': { phone: 'Settings › Meetings & Voice › Dictation' },
+  'settings:voice': { phone: 'Settings › Meetings & Voice › Speech Models' },
+  'settings:spoken': { phone: 'Settings › Meetings & Voice › Spoken Answers' },
+  'settings:mail': { phone: 'Settings › Mail & Calendar', mac: true },
+  // A beta feature's section: there, marked Beta, on or off (its switch is in it).
+  'settings:bots': { phone: 'Settings › Bots' },
+  'settings:devices': { phone: 'Settings › Devices & Access' },
+  'settings:phone': { phone: 'Settings › Devices & Access › Phone' },
+  'settings:machines': { phone: 'Settings › Devices & Access › Computers' },
+  'settings:remote': { phone: 'Settings › Devices & Access › Remote Access' },
+  'settings:sharing': { phone: 'Settings › Devices & Access › Share Links' },
+  'settings:notifications': { phone: 'Settings › Notifications' },
+  // Account & Backup: Back Up & Move until Bold Bridge accounts exist, its Account tab theirs
+  // (server/account.js: account-ui follows it on a phone, and each way into the section and its tabs).
+  'settings:account-backup': { phone: 'Settings › Back Up & Move' },
+  'settings:account': { phone: 'Settings › Account & Backup › Account', accounts: true },
   'settings:backup': { phone: 'Settings › Back Up & Move' },
-  'settings:appearance': { phone: 'Settings › Appearance' },
-  'settings:config': { phone: 'Settings › Config File' },
   'settings:about': { phone: 'Settings › About & Updates' },
   // The sidebar's rows and tools, by their names (Rail.jsx).
   'rail:Home': { phone: 'Home', shows: '.hm', trial: 'home' },
@@ -140,13 +144,16 @@ const views = Object.keys(Function(`return ${/const VIEWS = (\{[^\n]*\})\n/.exec
 const actions = [...app.matchAll(/\{ id: '(a:[\w-]+)'/g)].map((m) => m[1])
 const settings = source('src', 'components', 'Settings.jsx')
 const sections = [...(/export const SECTIONS = \[([\s\S]*?)\n\]/.exec(settings)?.[1] || '').matchAll(/\{ id: '([\w-]+)'/g)].map((m) => `settings:${m[1]}`)
-// Each section's name and what's in it, as the phone's list of them shows them.
-// (One marked mac, Mail, is there only where Apple Mail can be read; one marked trial only while
-// that beta feature is on, which none here is.)
-const named = [...(/export const SECTIONS = \[([\s\S]*?)\n\]/.exec(settings)?.[1] || '').matchAll(/label: tx\('([^']+)'\), icon: '[\w-]+', hint: tx\('([^']+)'\)(, mac: true)?(, trial: '[\w-]+')?/g)].filter((m) => (!m[3] || IS_MAC) && !m[4]).map((m) => ({ name: m[1], hint: m[2] }))
+// Each section's name and what's in it, as the phone's list of them shows them. (One marked mac,
+// Mail & Calendar, is there only where Apple Mail can be read; one with tabs marked accounts goes by
+// its other name, NO_ACCOUNTS, until Bold Bridge accounts exist, which none here do.)
+const unq = (x) => x.replace(/\\'/g, "'")
+const noAccounts = Object.fromEntries([...(/const NO_ACCOUNTS = \{([^\n]*)\n/.exec(settings)?.[1] || '').matchAll(/'([\w-]+)': \{ label: tx\('((?:[^'\\]|\\.)+)'\), hint: tx\('((?:[^'\\]|\\.)+)'\)/g)].map((m) => [m[1], { name: unq(m[2]), hint: unq(m[3]) }]))
+const named = [...(/export const SECTIONS = \[([\s\S]*?)\n\]/.exec(settings)?.[1] || '').matchAll(/\{ id: '([\w-]+)', label: tx\('((?:[^'\\]|\\.)+)'\), icon: '[\w-]+', hint: tx\('((?:[^'\\]|\\.)+)'\)(, mac: true)?(, beta: true)?/g)]
+  .filter((m) => !m[4] || IS_MAC).map((m) => ({ name: unq(m[2]), hint: unq(m[3]), beta: !!m[5], ...noAccounts[m[1]] }))
 ok(views.length >= 5 && views.includes('view:studio') && !views.includes('view:dictations') && !views.includes('view:whiteboards') && !views.includes('view:files'), 'the desktop\'s views are read from App.jsx (Dictations a tab of Meetings, whiteboards and Folders in Studio: no views of their own)', views)
 ok(actions.length >= 30 && actions.includes('a:boards') && !actions.includes('a:files'), 'and ⌘K\'s actions (Studio\'s one entry for your files, no Folders)', actions.length)
-ok(sections.length >= 8, 'and Settings\' sections', sections)
+ok(sections.length >= 8 && named.length >= 9 && named.some((x) => x.beta), 'and Settings\' sections, a beta feature\'s marked', { sections, named })
 const missing = (ids) => ids.filter((id) => !PATHS[id])
 for (const [what, ids] of [['view', views], ['⌘K action', actions], ['Settings section', sections]]) {
   ok(!missing(ids).length, `every desktop ${what} has a way in on a phone, or says why not (add it to PATHS here)`, missing(ids))
@@ -177,10 +184,10 @@ try {
   const shown = await desk.p.evaluate(() => [...document.querySelectorAll('.pal-item[data-id^="a:"]')].map((e) => e.dataset.id))
   ok(shown.length >= 20 && !missing(shown).length, 'and every action ⌘K offers on the desktop', missing(shown))
   await desk.p.keyboard.press('Escape')
-  // Settings on the desktop, to see it's as it was: General, with the sections down the left.
+  // Settings on the desktop, to see it's as it is there: Your Features, with the sections down the left.
   await desk.p.locator('.settings-btn').click()
   await desk.p.locator('.modal.settings .st-nav').waitFor({ timeout: 8000 })
-  const deskSettings = await desk.p.evaluate(() => ({ title: document.querySelector('.st-head h3')?.innerText.trim(), nav: [...document.querySelectorAll('.st-nav .st-nav-item')].map((e) => e.innerText.trim()), bar: !!document.querySelector('.st-bar, .st-back, .st-list') }))
+  const deskSettings = await desk.p.evaluate(() => ({ title: document.querySelector('.st-head h3')?.innerText.trim(), nav: [...document.querySelectorAll('.st-nav .st-nav-item')].map((e) => e.querySelector(':scope > span:not(.st-chip)')?.innerText.trim()), bar: !!document.querySelector('.st-bar, .st-back, .st-list') }))
   await desk.p.keyboard.press('Escape')
   ok(!desk.errors.length, 'no page errors on the desktop', desk.errors)
   await desk.ctx.close()
@@ -198,7 +205,7 @@ try {
     }
     if (first === 'Settings') {
       await p.locator('.settings-btn').click()
-      const row = p.locator('.modal.settings .st-list').getByText(rest[0], { exact: true })
+      const row = p.locator('.modal.settings .st-list-row', { has: p.locator('b', { hasText: new RegExp(`^${rest[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s*beta)?$`, 'i') }) })
       if (!(await row.first().waitFor({ timeout: 4000 }).then(() => true, () => false))) return `Settings lists no "${rest[0]}"`
       await row.first().click()
       return (await at(p, rest[0], 4000)) ? null : `Settings doesn't open at "${rest[0]}" with ‹ Settings`
@@ -273,23 +280,23 @@ try {
         tabs: !!m?.querySelector('.st-nav-item'),
         full: !!r && Math.round(r.left) === 0 && Math.round(r.width) === innerWidth,
         lede: m?.querySelector('.st-lede')?.innerText.trim() || null,
-        rows: [...(m?.querySelectorAll('.st-list-row') || [])].map((e) => { const b = e.getBoundingClientRect(); return { name: e.querySelector('b')?.innerText.trim(), hint: e.querySelector('.m-more-text > span')?.innerText.trim(), icon: !!e.querySelector('.m-more-ico svg'), h: Math.round(b.height), inside: b.left >= 0 && b.right <= innerWidth } }),
+        rows: [...(m?.querySelectorAll('.st-list-row') || [])].map((e) => { const b = e.getBoundingClientRect(); const n = e.querySelector('b'); return { name: [...(n?.childNodes || [])].filter((c) => !c.classList?.contains('st-chip')).map((c) => c.textContent).join('').trim(), beta: !!n?.querySelector('.st-chip.beta'), hint: e.querySelector('.m-more-text > span')?.innerText.trim(), icon: !!e.querySelector('.m-more-ico svg'), h: Math.round(b.height), inside: b.left >= 0 && b.right <= innerWidth } }),
       }
     })
     const list = await sheet()
-    const listed = list.rows.length === named.length && named.every((s, i) => list.rows[i].name === s.name && list.rows[i].hint === s.hint)
-    const desktopAsBefore = deskSettings.title === 'General' && deskSettings.nav.join('|') === named.map((s) => s.name).join('|') && !deskSettings.bar
-    ok(listed && list.rows.every((x) => x.icon && x.h >= 44 && x.inside) && list.title === 'Settings' && !list.back && list.closes === 1 && !list.tabs && list.full && desktopAsBefore,
-      `${width}: Settings opens at the list of its sections in Title Case, a whole row each (44 px or more) with its icon and what's in it, under Settings and its one close, rather than a strip of tabs (on a desktop: General, with the sections down the left, as before)`, { list, named, deskSettings })
+    const listed = list.rows.length === named.length && named.every((s, i) => list.rows[i].name === s.name && list.rows[i].hint === s.hint && list.rows[i].beta === s.beta)
+    const desktopAsThere = deskSettings.title === 'Your Features' && deskSettings.nav.join('|') === named.map((s) => s.name).join('|') && !deskSettings.bar
+    ok(listed && list.rows.every((x) => x.icon && x.h >= 44 && x.inside) && list.title === 'Settings' && !list.back && list.closes === 1 && !list.tabs && list.full && desktopAsThere,
+      `${width}: Settings opens at the list of its sections in Title Case (the same ones as on a desktop, a beta feature's marked Beta), a whole row each (44 px or more) with its icon and what's in it, under Settings and its one close, rather than a strip of tabs (on a desktop: Your Features, with the sections down the left)`, { list, named, deskSettings })
     let f = await phoneFaults(ph.p, '.modal.settings')
     ok(!Object.keys(f).length, `${width}: the list fits the phone (nothing wider, past its edge, sideways or cut off; each target 40 px and uncovered)`, f)
     await shot(ph.p, `${tag}phone-settings-${width}`)
     // (Each tap gives up after a moment, so a missing control fails its own check below.)
     const tap = (l) => l.click({ timeout: 4000 }).catch(() => {})
-    await tap(ph.p.locator('.modal.settings .st-list').getByText('Agents', { exact: true }))
-    await at(ph.p, 'Agents', 4000)
+    await tap(ph.p.locator('.modal.settings .st-list').getByText('You', { exact: true }))
+    await at(ph.p, 'You', 4000)
     const voice = await sheet()
-    ok(voice.title === 'Agents' && voice.back === 'Settings' && voice.closes === 1 && !voice.rows.length && !voice.tabs && voice.full && voice.lede === named.find((s) => s.name === 'Agents')?.hint,
+    ok(voice.title === 'You' && voice.back === 'Settings' && voice.closes === 1 && !voice.rows.length && !voice.tabs && voice.full && voice.lede === named.find((s) => s.name === 'You')?.hint,
       `${width}: a section opens full width, its name over it with ‹ Settings beside and the same one close, and what's in it at the top`, voice)
     f = await phoneFaults(ph.p, '.modal.settings .st-bar')
     ok(!Object.keys(f).length, `${width}: its bar fits the phone (‹ Settings, the name and the close, each a whole target, nothing cut off)`, f)
@@ -303,7 +310,7 @@ try {
 
     // Opened at a section: there, with ‹ Settings back to the list. A link to it (from Meetings, the
     // tour, a fix), ⌘K, a link from inside Settings, and a link to the section it opened at.
-    const deep = [['voice', 'Voice & Meetings'], ['dictation', 'Voice & Meetings'], ['accounts', 'Model Providers'], ['machines', 'Devices'], ['notify', 'Devices'], ['permissions', 'General'], ['about', 'About & Updates']]
+    const deep = [['voice', 'Meetings & Voice'], ['dictation', 'Meetings & Voice'], ['accounts', 'Agents & Models'], ['machines', 'Devices & Access'], ['remote-devices', 'Devices & Access'], ['notify', 'Notifications'], ['permissions', 'You'], ['general', 'You'], ['about', 'About & Updates']]
     const missed = []
     const open = (section) => ph.p.evaluate((section) => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section } })), section)
     for (const [section, name] of deep) {
@@ -314,8 +321,8 @@ try {
       await open(section)
       if (!(await at(ph.p, name, 4000))) missed.push(`${section}, again from the list: ${JSON.stringify(await sheet())}`)
       // A link from inside Settings, to another section.
-      await open('mcp')
-      if (!(await at(ph.p, 'MCP Servers', 4000))) missed.push(`${section}, then a link to MCP Servers: ${JSON.stringify(await sheet())}`)
+      await open('bots')
+      if (!(await at(ph.p, 'Bots', 4000))) missed.push(`${section}, then a link to Bots: ${JSON.stringify(await sheet())}`)
       await tap(ph.p.locator('.modal.settings [aria-label="Close settings"]'))
       await until(async () => !(await ph.p.locator('.modal.settings').count()), 4000)
     }
@@ -323,7 +330,7 @@ try {
     await tap(ph.p.locator('.search-btn'))
     await ph.p.locator('.palette input').fill('Model Providers', { timeout: 4000 }).catch(() => {})
     await tap(ph.p.locator('.pal-item[data-id="a:providers"]'))
-    if (!(await at(ph.p, 'Model Providers', 4000))) missed.push(`⌘K's Model Providers: ${JSON.stringify(await sheet())}`)
+    if (!(await at(ph.p, 'Agents & Models', 4000)) || (await ph.p.locator('.modal.settings .st-tabs [role="tab"][aria-selected="true"]').innerText().catch(() => '')) !== 'Model Providers') missed.push(`⌘K's Model Providers: ${JSON.stringify(await sheet())}`)
     ok(!missed.length, `${width}: Settings opened at a section lands on it with ‹ Settings (a link to it, again from the list, a link from inside Settings, ⌘K)`, missed)
     await shot(ph.p, `${tag}phone-settings-providers-${width}`)
 

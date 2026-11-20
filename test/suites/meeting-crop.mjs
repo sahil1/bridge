@@ -10,8 +10,8 @@
 // picture of it backs the first up; a dark slide gets the crop the slides before it had.
 // In the app: a meeting's pictures from before are cropped as its page opens, and each is shown,
 // read (by a stand-in for native/bridgeocr, not on Windows) and saved in its notes as its crop.
-// Whole screen on one puts it back and Crop crops it again, with no reading again; Settings › Voice
-// & Meetings turns it off, and then a crop is kept aside and offered. While it records (Chromium,
+// Whole screen on one puts it back and Crop crops it again, with no reading again; Settings ›
+// Meetings & Voice › Meetings turns it off, and then a crop is kept aside and offered. While it records (Chromium,
 // with its fake mic): Capture on a watched call window keeps a cropped picture.
 import fs from 'node:fs'
 import path from 'node:path'
@@ -175,13 +175,13 @@ try {
     const w2 = await until(async () => { const w = await p.locator('.mt-pic-img img').first().evaluate((e) => e.complete && e.naturalWidth); return w === caps[0].crop.rect.x1 - caps[0].crop.rect.x0 && w }, 6000)
     ok(!!again && !!w2 && (IS_WIN || /-crop\.jpg/.test(again.text)), 'Crop crops it again', again?.text)
 
-    // Off in Settings › Voice & Meetings: a new picture stays whole, its crop offered.
+    // Off in Settings › Meetings & Voice › Meetings: a new picture stays whole, its crop offered.
     await p.locator('button[aria-label="Settings"]').first().click()
     await p.waitForSelector('.modal.settings', { timeout: 5000 }).catch(() => {})
-    await p.locator('.st-nav-item', { hasText: 'Meetings' }).click()
+    await p.locator('.st-nav-item', { hasText: 'Meetings & Voice' }).click()
     const box = p.locator('[data-setting="crop-shots"] input[type="checkbox"]')
     await box.waitFor({ timeout: 6000 }).catch(() => {})
-    ok(await box.isChecked().catch(() => false), 'Settings › Voice & Meetings: Crop pictures of a call to what\'s shared, on', await p.locator('[data-setting="crop-shots"]').innerText().catch(() => 'not there'))
+    ok(await box.isChecked().catch(() => false), 'Settings › Meetings & Voice › Meetings: Crop pictures of a call to what\'s shared, on', await p.locator('[data-setting="crop-shots"]').innerText().catch(() => 'not there'))
     await box.click()
     ok(!!(await until(async () => (await api('/settings')).effective?.meetings?.cropShots === false, 5000)), 'and turned off there', (await api('/settings')).effective?.meetings)
     await p.locator('.modal.settings button[aria-label="Close settings"]').click()

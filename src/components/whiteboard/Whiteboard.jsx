@@ -26,6 +26,7 @@ import AiAssist from '../AiAssist.jsx'
 import { useBusy } from '../../busy.js'
 import { Threads, SAY, useAuthor } from '../studio/doccomments.jsx'
 import { useBoardThreads } from './boardcomments.jsx'
+import { where } from '../settings/search.js'
 import './whiteboard.css'
 
 // Whiteboards: the list (WhiteboardsHome), one board (WhiteboardPage), and a diagram file in an
@@ -664,7 +665,7 @@ export function WhiteboardsHome({ onOpen, tap = false, keys = null, focus = null
           <button type="submit" className="btn small primary" disabled={busy || !text.trim() || (m.loaded && !m.models.length)}><Icon name="wand" size={12} /> {t('Draw')}</button>
         </div>
         {m.loaded && !m.models.length
-          ? <p className="small muted">{t('No model to draw with yet: sign in to an agent (Claude Code, Codex…) or add a key in Settings › Model Providers. You can still draw by hand.')}</p>
+          ? <p className="small muted">{t('No model to draw with yet: sign in to an agent (Claude Code, Codex…) or add a key in {place}. You can still draw by hand.', { place: where('providers') })}</p>
           : m.model && <p className="small muted">{m.model.via === 'local' ? t('Drawn by {model}, on this computer.', { model: m.model.label }) : t('Drawn by {model}: your words go to {provider}.', { model: m.model.label, provider: m.model.provider || m.model.label })} {t("To draw from a meeting, a project or an agent's work, use Draw this on a board.")}</p>}
       </form>
       {(err || (error && !data)) && <p className="error-text small" role="alert">{err || error}</p>}

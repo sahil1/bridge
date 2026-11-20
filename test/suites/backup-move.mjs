@@ -1,4 +1,4 @@
-// Back Up & Move (server/backup.js, Settings › Back Up & Move), with three Bridge AIs: Studio, whose
+// Back Up & Move (server/backup.js, Settings › Back Up & Move, Account & Backup once Bold Bridge accounts exist), with three Bridge AIs: Studio, whose
 // setup moves; Laptop, linked with it (each on its own relay, stand-ins/relay.mjs), where it moves
 // to; and Spare, where a backup is restored (its data folder in its home, as an install has it, and
 // its Chief of Staff's folder somewhere of its own). One stand-in Slack (stand-ins/slack.mjs) has the
@@ -121,7 +121,7 @@ try {
     const { ctx, p, errors } = await page(b, studio.url)
     await openSettings(p, 'backup', '.modal.settings [data-setting="backup"]')
     const sec = p.locator('[data-setting="backup"]')
-    ok(/arrives paused until the computer it came from has stopped its bots/.test(await sec.innerText()), 'Settings says what comes arrives paused')
+    ok(/Bots arrive paused, until the computer they came from has stopped them\./.test(await sec.innerText()), 'Settings says what comes arrives paused')
     await p.locator('.modal.settings details.st-adv[data-section="backup"] > summary').click()
     const words = await p.locator('[data-setting="backup-what"]').innerText()
     ok(/What Goes/.test(words) && /In it:/.test(words) && /with their tokens/.test(words) && /Left out:/.test(words) && /meetings and recordings/.test(words), 'and, under Advanced, exactly what goes and what\'s left out', words.slice(0, 900))

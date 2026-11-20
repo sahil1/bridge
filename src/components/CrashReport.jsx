@@ -4,6 +4,7 @@ import CopyButton from './CopyButton.jsx'
 import { api } from '../api.js'
 import { t } from '../i18n/index.js'
 import { reportText, scrub, issueLink } from '../../shared/crashreport.js'
+import { where as placeIn } from './settings/search.js'
 import './crashReport.css'
 
 // Report a crash on GitHub: the issue Bridge AI would file, shown in full to read and change, then
@@ -53,7 +54,7 @@ export default function CrashReport({ crash, onClose, onSent }) {
             {sent === 'sent' && (
               <p className="cr-long cr-sent" role="status"><Icon name="check" size={13} /><span>{t('Sent to Bold Bridge. Thank you.')}</span>
                 {!server?.send && <button type="button" className="link-btn small" onClick={() => api('/crashes/sending', { method: 'POST', body: { send: true } }).then(setServer, () => {})}>{t('Send them by themselves from now on')}</button>}
-                {server?.send && <span className="muted small">{t('Crash reports now go by themselves (Settings › About & Updates).')}</span>}
+                {server?.send && <span className="muted small">{t('Crash reports now go by themselves ({place}).', { place: placeIn('crash-reports') })}</span>}
               </p>
             )}
             {sent && sent !== 'sent' && sent !== 'sending' && <p className="cr-long bad" role="alert"><Icon name="alert" size={13} /><span>{sent}</span></p>}
@@ -101,7 +102,7 @@ export function CrashNotice() {
           <Icon name="alert" size={15} />
           <div className="crash-notice-text">
             <b>{SAID[c.kind]()}</b>
-            <span className="muted small">{c.sent ? t('Its report went to Bold Bridge by itself (Settings › About & Updates). Reporting it on GitHub too lets you follow the fix.') : t('Reporting it on GitHub helps get it fixed. You see the whole report first, and nothing is sent by itself.')}</span>
+            <span className="muted small">{c.sent ? t('Its report went to Bold Bridge by itself ({place}). Reporting it on GitHub too lets you follow the fix.', { place: placeIn('crash-reports') }) : t('Reporting it on GitHub helps get it fixed. You see the whole report first, and nothing is sent by itself.')}</span>
           </div>
           <div className="crash-notice-acts">
             <button type="button" className="btn small" onClick={() => setOpen(true)}><Icon name="flag" size={12} /> {t('Report on GitHub')}</button>

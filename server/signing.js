@@ -12,6 +12,7 @@ import { PDFDocument, StandardFonts, PDFSignature, PDFTextField, PDFName, PDFRef
 import { DATA, writeFileAtomic } from './paths.js'
 import { safePath } from './files.js'
 import { shownSize, fitImage, dateSize, dateSpot, toUser, KINDS } from '../shared/signmarks.js'
+import { placeEn } from '../shared/places.js'
 
 const DIR = path.join(DATA, 'studio', 'signatures')
 const INDEX = path.join(DIR, 'index.json')
@@ -236,7 +237,7 @@ export async function explain(root, rel, { pages: given, total, model, lang } = 
   if (path.extname(real).toLowerCase() !== '.pdf') throw new Error('Only a PDF can be read for signing')
   let pages = (Array.isArray(given) ? given : []).slice(0, 2000).map((p, i) => ({ n: Number(p?.n) || i + 1, text: String(p?.text || '').slice(0, 60_000) }))
   const info = await modelInfo(model, pages.map((p) => p.text).join('\n').slice(0, 400_000), { strict: true })
-  if (!info) throw Object.assign(new Error('No model to read it with. Sign in to an agent, or add an API key or a local model in Settings › Model Providers.'), { code: 'no_model' })
+  if (!info) throw Object.assign(new Error(`No model to read it with. Sign in to an agent, or add an API key or a local model in ${placeEn('providers')}.`), { code: 'no_model' })
   let scanned = false
   // Pictures of pages with no text: read them on a Mac, else say so.
   if (pages.reduce((n, p) => n + p.text.trim().length, 0) < 40) {

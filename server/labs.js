@@ -1,3 +1,4 @@
+import { placeEn } from '../shared/places.js'
 // More models, off to start with: Alibaba's Qwen (and Qwen Code), DeepSeek, Moonshot's Kimi, Zhipu's
 // GLM (Z.ai), and the like served by hosts like OpenRouter or run in Ollama (MiniMax, Hunyuan, ERNIE,
 // ...). Left out everywhere (the agents to start, Settings › Model Providers, the models a chat,
@@ -23,4 +24,4 @@ export function hiddenModel(id) {
   const model = rest.join(':')
   return PROVIDERS.has(route) || (route === 'cli' && AGENTS.has(model)) || MODEL.test(model)
 }
-export const OFF = 'That one is off to start with. Turn it on in Settings › Model Providers › Show more models.'
+export const OFF = `That one is off to start with. Turn it on in ${placeEn('more-models')}.`

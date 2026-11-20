@@ -12,8 +12,8 @@
 // name. Turned off: refused, saying where to turn it on. Bridge AI not running: each tool says so.
 // /mcp over HTTP: only with the key, never from a page, headers checked, 405 for GET. Added in one
 // click to Claude Code, Claude Desktop, Cursor and Codex (their configs in a stand-in home,
-// BRIDGE_MCP_HOME), each as its docs say, and the command it's given answers. And Settings › MCP
-// Servers' card in the browser (BRIDGE_TEST_BROWSER), light and dark, and a suggestion in Needs You.
+// BRIDGE_MCP_HOME), each as its docs say, and the command it's given answers. And Settings › Agents
+// & Models › MCP Servers' card in the browser (BRIDGE_TEST_BROWSER), light and dark, and a suggestion in Needs You.
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
@@ -224,7 +224,7 @@ try {
   // ---------- Off, and not running ----------
   await kit.api('/settings', { trials: { 'mcp-server': false } }, 'PATCH')
   const offRead = await c.call('bridge_find', {})
-  ok(offRead.isError && /turned off/.test(offRead.text) && /Settings › MCP Servers/.test(offRead.text), 'turned off: each call refused, saying where to turn it on', offRead.text)
+  ok(offRead.isError && /turned off/.test(offRead.text) && /Settings › Agents & Models › MCP Servers › Bridge AI as an MCP Server/.test(offRead.text), 'turned off: each call refused, saying where to turn it on', offRead.text)
   await kit.api('/settings', { trials: { 'mcp-server': true } }, 'PATCH')
   const away = client({ BRIDGE_PORT: '9' })
   await away.rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'x', version: '1' } }, { modern: false })
@@ -291,12 +291,13 @@ try {
   const tag = which === 'webkit' ? 'webkit-' : ''
   // A suggestion waiting, for Needs You.
   await c.call('bridge_suggest_change', { address: addr('plan.md'), summary: 'Name the owner in full', edits: [{ find: 'Owner: Priya.', replace: 'Owner: Priya Shah.' }] })
-  // Settings › MCP Servers, as a click opens it.
+  // Settings › Agents & Models › MCP Servers, as clicks open it.
   const mcpSettings = async (p) => {
     await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
     await p.locator('button[aria-label="Settings"]').first().click()
     await p.waitForSelector('.st-nav-item', { timeout: 8000 })
-    await p.locator('.st-nav-item', { hasText: 'MCP Servers' }).first().click()
+    await p.locator('.st-nav-item', { hasText: 'Agents & Models' }).first().click()
+    await p.locator('.st-tabs [role="tab"]', { hasText: 'MCP Servers' }).click()
   }
   for (const mode of ['light', 'dark']) {
     const { ctx, p, errors } = await page(b, kit.url, { mode })

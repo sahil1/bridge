@@ -1,6 +1,6 @@
 # Bridge AI for iPhone and Android
 
-The phone apps show Bridge AI from your computer through your own relay (Settings › Devices on the
+The phone apps show Bridge AI from your computer through your own relay (Settings › Devices & Access on the
 computer), the same way the relay's page does in Safari or Chrome, end-to-end encrypted. Both carry
 their own copy of the relay's phone page (`relay/web`), so pairing and the link work the same
 everywhere, and the code that does the encrypting never comes from the relay: a relay (or whoever
@@ -70,7 +70,7 @@ Try the demo has made-up cloud agents too, one per provider.
 ## Several computers
 
 Each computer running Bridge AI has its own relay and its own pairing, and one app can be paired
-with all of them. Add one in Settings › Devices › Your computers › Add a computer (or scan its code
+with all of them. Add one in Settings › Devices & Access › Phone › Your Computers › Add a computer (or scan its code
 from the pairing screen, or with Scan QR code in the computer name menu at the top), and switch there.
 Link a device has Scan QR code too: what the app scans goes back to that page, only a pairing link,
 as if pasted. Forget removes a computer from the phone, and removes
@@ -366,7 +366,7 @@ Apple gives.
 > sent only to that provider; the demo has made-up cloud agents to look at without a key.
 >
 > To pair a real computer: install Bridge AI from https://boldbridge.ai/, open
-> Settings › Devices › Pair a device, and scan the QR code. A video of that is attached.
+> Settings › Devices & Access › Phone › Pair a device, and scan the QR code. A video of that is attached.
 >
 > Permissions are asked when first used, never at launch: the camera when you tap Scan the QR code
 > (or take a photo to attach), the microphone when you first hold the mic button, record a voice note
@@ -398,7 +398,7 @@ minutes, so a picture of one is no use to a reviewer. For them there's a review 
 days and pairs 25 phones (`--days` up to 90, `--uses` up to 100; on a code that works they change that code, so its QR code stays good, and `--new` makes another), is kept through restarts, and
 exists only on a Bridge AI started with `BRIDGE_REVIEW_PAIRING=1` (`server/relay.js`; elsewhere
 `bridge-ai pair --review` is refused, and one copied into another computer's `relay.json` doesn't
-work). The phones it pairs show in Settings › Devices as any phone paired with a code does, to
+work). The phones it pairs show in Settings › Devices & Access as any phone paired with a code does, to
 keep or remove.
 
 Run it in Docker on a computer with nothing of yours on it, ideally a small cloud server: anyone

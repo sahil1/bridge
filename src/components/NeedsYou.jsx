@@ -8,6 +8,7 @@ import { sentTo } from '../sendbox.js'
 import { guardWhy } from './bots/access.js'
 import { split, reason, isQuiet, activeAt, projectOf, QUIET_DAYS, TOP } from '../../shared/focus.js'
 import { FileRow } from './bots/BotFiles.jsx'
+import { where as placeIn } from './settings/search.js'
 import './needsyou.css'
 
 // The needs-you inbox: everything waiting on you, on this computer, your other devices and the
@@ -346,7 +347,7 @@ export function OutsideItem({ it, onDone, setNote }) {
         <span className="ny-kind">{send ? t('Send to an agent') : t('Suggested change')}</span>
         <span className="ny-age" title={new Date(it.at).toLocaleString()}>{ago(it.at)}</span>
         <span className="ny-grow" />
-        <span className="ny-device here" title={t('Through Bridge AI as an MCP Server (Settings › MCP Servers)')}><Icon name="link" size={11} />{app}</span>
+        <span className="ny-device here" title={t('Through Bridge AI as an MCP Server ({place})', { place: placeIn('mcp') })}><Icon name="link" size={11} />{app}</span>
       </div>
       <p className="ny-text">{what}{send && it.target?.folder ? ` (${it.target.folder})` : ''}.</p>
       {!send && it.summary && <p className="ny-said">“{it.summary}”</p>}
@@ -487,7 +488,7 @@ function ShareOf({ it, onDone, setNote }) {
       <p className="ny-said">“{sh.title}”</p>
       <p className="muted small ny-from mono"><Icon name={sh.kind === 'folder' ? 'folder' : 'file'} size={11} /> {sh.from}</p>
       <p className="muted small ny-from">{t('For {who}, for {lasts}', { who: sh.whoSaid || '', lasts })}{sh.mode === 'link' ? ` ${t('(with a password, sent to each of them)')}` : ''}</p>
-      <p className="muted small ny-from"><Icon name="info" size={11} /> {t('Approve, and Bridge AI makes an end-to-end encrypted link through your relay and posts it where it was asked. Stop it any time in Settings › Sharing.')}</p>
+      <p className="muted small ny-from"><Icon name="info" size={11} /> {t('Approve, and Bridge AI makes an end-to-end encrypted link through your relay and posts it where it was asked. Stop it any time in {place}.', { place: placeIn('sharing') })}</p>
       {problem && <p className="ny-problem" role="alert"><Icon name="alert" size={12} />{problem}</p>}
       <div className="ny-acts">
         <button type="button" className="btn small primary" disabled={busy} onClick={() => go(true)}><Icon name="check" size={12} /> {t('Approve the link')}</button>
@@ -754,7 +755,7 @@ export function LetInItem({ it, onDone, setNote }) {
     try {
       await onDevice(null, '/remote/devices', { id: it.id, allowed })
       onDone(it)
-      setNote({ text: allowed ? t('{name} may use this computer now', { name: it.name }) : t('{name} stays out. Settings › Remote Access lets it in later.', { name: it.name }) })
+      setNote({ text: allowed ? t('{name} may use this computer now', { name: it.name }) : t('{name} stays out. {place} lets it in later.', { place: placeIn('remote-devices'), name: it.name }) })
     } catch (e) { setProblem(e.message) } finally { setBusy(false) }
   }
   return (
@@ -764,7 +765,7 @@ export function LetInItem({ it, onDone, setNote }) {
         <span className="ny-kind">{t('New device')}</span>
         {it.paired && <span className="ny-age" title={new Date(it.paired).toLocaleString()}>{ago(it.paired)}</span>}
         <span className="ny-grow" />
-        <span className="ny-device here" title={t('Settings › Remote Access › Which Devices May Connect')}><Icon name="lock" size={11} />{t('Remote Access')}</span>
+        <span className="ny-device here" title={placeIn('remote-devices')}><Icon name="lock" size={11} />{t('Remote Access')}</span>
       </div>
       <p className="ny-text">{it.through
         ? t('{name} ({kind}) comes through {computer} and waits to be let in here. Until you allow it, it can\'t use this computer at all.', { name: it.name, kind, computer: it.through })

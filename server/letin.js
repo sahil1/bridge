@@ -22,6 +22,7 @@
 import { WebSocketServer } from 'ws'
 import { builtFile } from './apiauth.js'
 import { plainName } from '../shared/remote.js'
+import { placeEn } from '../shared/places.js'
 
 // The answer's code, which the app shows as its card (src/components/remote/NotLetIn.jsx).
 const CODE = 'notLetIn'
@@ -66,7 +67,7 @@ export function makeLetIn({ shutFor, turnedAway = () => {}, deviceOf, versionOf 
       const v = versionOf(o.hop?.id) || ''
       return { error: `Update Bridge AI on ${through} to use ${computer} from its devices.${v ? ` It has ${v}.` : ''}`, code: CODE, computer, through, update: v }
     }
-    const where = `On ${computer}: Settings › Remote Access › Which Devices May Connect.`
+    const where = `On ${computer}: ${placeEn('remote-devices')}.`
     return { error: through ? `${computer} hasn't let ${through} in, which this device comes through. ${where}` : `${computer} hasn't let this device in. ${where}`, code: CODE, computer, ...(through ? { through } : {}) }
   }
   const page = (req) => (req.method === 'GET' || req.method === 'HEAD') && (req.path === '/' || req.path === '/api/health' || (STATIC.test(req.path) && builtFile(ui(), req.path)))

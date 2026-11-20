@@ -10,6 +10,7 @@ import { keyLabel } from '../../shared/dictation/keys.js'
 import { LiveWords } from '../dictation/Pill.jsx'
 import { useDictation, registerBox, noteBoxFocus, press, release, finish, cancel, dismiss, retry, settings, keysPlatform, dictationKey, listeningHint, eventTime } from '../dictation/controller.js'
 import { useBusy } from '../busy.js'
+import { where as placeIn } from './settings/search.js'
 
 // Drafts survive navigation and reloads: one per agent, kept in this browser.
 const draftKey = (id) => `cc-draft-${id}`
@@ -92,8 +93,8 @@ export function VoiceSetup({ initial, onReady, onClose }) {
   else if (whisper && brewing && v.installCommand) { text = t('Homebrew is in. One more step: whisper.cpp.'); actions = <button className="btn small primary" onClick={() => { setBrewing(false); setup() }}>{t('Set up')}</button> }
   else if (whisper && brewing) text = t('Installing Homebrew in a terminal tab, in the Setup space. It asks for your Mac password there.')
   else if (whisper && started && v.installCommand) text = t('Installing whisper.cpp in a terminal tab, in the Setup space. If it asks for your password, answer it there.')
-  else if (whisper && v.needsBrew) { text = t("{model} needs whisper.cpp, which comes from Homebrew, and Homebrew isn't on this Mac yet. Or pick Parakeet in Settings › Voice & Meetings: nothing to install.", { model: model.label }); actions = <button className="btn small primary" onClick={installBrew}>{t('Install Homebrew')}</button> }
-  else if (whisper && !v.installCommand) text = t('{model} needs whisper.cpp: install whisper-cli on your computer, then tap the mic again. Or pick Parakeet in Settings › Voice & Meetings: nothing to install.', { model: model.label })
+  else if (whisper && v.needsBrew) { text = t("{model} needs whisper.cpp, which comes from Homebrew, and Homebrew isn't on this Mac yet. Or pick Parakeet in {place}: nothing to install.", { place: placeIn('voice'), model: model.label }); actions = <button className="btn small primary" onClick={installBrew}>{t('Install Homebrew')}</button> }
+  else if (whisper && !v.installCommand) text = t('{model} needs whisper.cpp: install whisper-cli on your computer, then tap the mic again. Or pick Parakeet in {place}: nothing to install.', { place: placeIn('voice'), model: model.label })
   else if (whisper) { text = t('{model} needs whisper.cpp, a free program. It installs in a minute.', { model: model.label }); actions = <button className="btn small primary" onClick={setup}>{t('Install it')}</button> }
   else {
     // In your language from what's needed; else the server's own words from its answer.

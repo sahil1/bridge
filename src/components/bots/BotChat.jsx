@@ -6,6 +6,7 @@ import { BotReach } from './Connections.jsx'
 import { ConnectionCard } from './ConnectionCard.jsx'
 import { api } from '../../api.js'
 import { t } from '../../i18n/index.js'
+import { where } from '../settings/search.js'
 import './bots-page.css'
 
 // AI Assist's chat for a bot (server/botsetup.js): a new one (id null) asks what it should do and who
@@ -41,7 +42,7 @@ function noteOf(m) {
   const v = m.vars || {}
   const names = (l) => (l || []).join(', ')
   switch (m.kind) {
-    case 'no-model': return t('There\'s no model for AI Assist to set it up with: sign in to an agent like Claude Code, or add a model in Settings › Model Providers. Or set it up yourself with the form.')
+    case 'no-model': return t('There\'s no model for AI Assist to set it up with: sign in to an agent like Claude Code, or add a model in {place}. Or set it up yourself with the form.', { place: where('providers') })
     case 'failed': return t('AI Assist couldn\'t answer: {why}', { why: v.why || '' })
     case 'unreadable': return t('AI Assist\'s answer couldn\'t be read as a bot. Say it again in other words, or set it up with the form.')
     case 'left': return [v.folders?.length ? t('Left out {folders}: not among the folders Bridge AI knows. Add a folder by its path if you meant one.', { folders: names(v.folders) }) : null, v.mcp?.length ? t('Left out {servers}: not among your MCP servers in Claude Code.', { servers: names(v.mcp) }) : null].filter(Boolean).join(' ')
@@ -255,7 +256,7 @@ function ProposalCard({ p, options, onEdit, onCreate, onDiscard, busy, error }) 
         <span className="bc-label">{t('MCP Servers')}</span>
         {(options?.mcp || []).length
           ? <div className="bc-checks">{options.mcp.map((m) => <label key={m} className="st-check"><input type="checkbox" checked={p.mcp.includes(m)} onChange={(e) => onEdit({ mcp: e.target.checked ? [...p.mcp, m] : p.mcp.filter((x) => x !== m) })} /><span className="small">{m}</span></label>)}</div>
-          : <p className="small sb-none">{t('None: Claude Code has no MCP servers of yours (Settings › MCP Servers).')}</p>}
+          : <p className="small sb-none">{t('None: Claude Code has no MCP servers of yours ({place}).', { place: where('mcp') })}</p>}
         {p.mcp.length > 0 && <p className="muted small">{t('Tools that only read, for anyone who may ask; the others only when you, or someone you named, asks.')}</p>}
       </div>
       <div className="bc-part">
@@ -427,9 +428,9 @@ export default function BotChat({ id = null, draft = false, phone = false, d = n
         </li>
         {noModel && !msgs.some((m) => m.kind === 'no-model') && (
           <li className="bc-msg bc-note bad" data-kind="no-model">
-            <p>{!id ? t('There\'s no model for AI Assist to set it up with: sign in to an agent like Claude Code, or add a model in Settings › Model Providers. Or set it up yourself with the form.')
-              : draft ? t('There\'s no model for AI Assist to answer with: sign in to an agent like Claude Code, or add a model in Settings › Model Providers. You can still set it up on the card below.')
-                : t('There\'s no model for AI Assist to answer with: sign in to an agent like Claude Code, or add a model in Settings › Model Providers. Change it by hand under Set Up meanwhile.')}</p>
+            <p>{!id ? t('There\'s no model for AI Assist to set it up with: sign in to an agent like Claude Code, or add a model in {place}. Or set it up yourself with the form.', { place: where('providers') })
+              : draft ? t('There\'s no model for AI Assist to answer with: sign in to an agent like Claude Code, or add a model in {place}. You can still set it up on the card below.', { place: where('providers') })
+                : t('There\'s no model for AI Assist to answer with: sign in to an agent like Claude Code, or add a model in {place}. Change it by hand under Set Up meanwhile.', { place: where('providers') })}</p>
             {s.assist?.why && <p className="muted small">{s.assist.why}</p>}
           </li>
         )}

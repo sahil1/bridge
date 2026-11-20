@@ -8,6 +8,7 @@ import { memoryAll, setMemoryAll } from './open.js'
 import { openMeeting } from '../meetings/recording.jsx'
 import { openDictations } from '../dictations/shared.jsx'
 import { useMachines } from '../Machines.jsx'
+import { where } from '../settings/search.js'
 import '../meetings/meetings.css'
 import './memory.css'
 
@@ -119,7 +120,7 @@ export default function Memory({ from = 'meetings' }) {
               </div>
             </div>
           )}
-          {data && !data.dictationsKept && (all || from === 'dictations') && <p className="mm-note muted small" role="status"><Icon name="info" size={13} /> {t('Dictation history is off, so the names you say in dictations aren\'t counted here. Turn it on in Settings › Voice & Meetings › Dictation.')}</p>}
+          {data && !data.dictationsKept && (all || from === 'dictations') && <p className="mm-note muted small" role="status"><Icon name="info" size={13} /> {t('Dictation history is off, so the names you say in dictations aren\'t counted here. Turn it on in {place}.', { place: where('dictation-history') })}</p>}
           {err && <p className="error-text small" role="alert">{err}</p>}
           {/* Memory couldn't be read (the computer this window shows is away, say): said, with Try
               again. Once it's been read, a look that fails says so above what it showed. */}
@@ -302,7 +303,7 @@ function AboutYou({ a, me, elsewhere, scoped, onChange }) {
         {!on ? t('Off: no model and not Chief of Staff is given it.')
           : elsewhere ? t('While it\'s on, the models you use for meetings (notes, Who spoke, cleanup, AI Assist and your questions) and the one that tidies your dictation are given it, and Chief of Staff reads it. It\'s made and kept on {name}.', { name: elsewhere })
             : t('While it\'s on, the models you use for meetings (notes, Who spoke, cleanup, AI Assist and your questions) and the one that tidies your dictation are given it, and Chief of Staff reads it. It\'s made and kept on this computer.')}
-        {!me && ` ${t('Your name, in Settings › General, starts it off.')}`}
+        {!me && ` ${t('Your name, in {place}, starts it off.', { place: where('name') })}`}
       </p>
       {err && <p className="error-text small" role="alert">{err}</p>}
       <div className="mm-acts">

@@ -24,6 +24,8 @@
 import fs from 'node:fs'
 import { writeFileAtomic } from './paths.js'
 import * as conns from './connections.js'
+import { available as accountsOn } from './account.js'
+import { placeEn } from '../shared/places.js'
 import { bare, platformOf, PLATFORMS } from './connector.js'
 import { connectionManifest, manifest as slackManifest, commandOf } from './slackbot.js'
 
@@ -64,9 +66,9 @@ export function makeConnCheck({ hubs, desk, bots, you = () => 'the owner', name 
     const ready = list.find((e) => !e.why)
     const reads = (v.folders || []).filter((f) => f.ok).map((f) => f.shown)
     const where = reads.length ? `reads ${reads.slice(0, 3).join(', ')}${reads.length > 3 ? ` and ${reads.length - 3} more` : ''}` : 'no folders: it answers from an empty one'
-    if (!ready) return { id: `bot:${b.id}`, label, state: 'fail', detail: `Nothing here can answer for it: ${(claude || list[0])?.why || 'Claude Code isn\'t installed here'}`, fix: 'Install Claude Code and sign in to it (Settings › Agents)' }
+    if (!ready) return { id: `bot:${b.id}`, label, state: 'fail', detail: `Nothing here can answer for it: ${(claude || list[0])?.why || 'Claude Code isn\'t installed here'}`, fix: `Install Claude Code and sign in to it (${placeEn('agents')})` }
     if (gone.length) return { id: `bot:${b.id}`, label, state: 'fail', detail: `${gone.map((f) => `${f.shown}: ${f.problem || 'not there'}`).join('; ')}`, fix: 'Pick its folders again on its page' }
-    if (!claude || claude.why) return { id: `bot:${b.id}`, label, state: 'warn', detail: `It ${where}; ${claude?.why || 'Claude Code isn\'t installed here'}, so ${ready.label} answers, one run for each message, with no live session`, fix: 'Install Claude Code and sign in to it (Settings › Agents)' }
+    if (!claude || claude.why) return { id: `bot:${b.id}`, label, state: 'warn', detail: `It ${where}; ${claude?.why || 'Claude Code isn\'t installed here'}, so ${ready.label} answers, one run for each message, with no live session`, fix: `Install Claude Code and sign in to it (${placeEn('agents')})` }
     return { id: `bot:${b.id}`, label, state: 'ok', detail: `It ${where}; Claude Code answers`, fix: null }
   }
 
@@ -80,7 +82,7 @@ export function makeConnCheck({ hubs, desk, bots, you = () => 'the owner', name 
       const on = conns.botsOn(c, bots())
       const checks = []
       // Here, not paused nor moved.
-      if (c.paused) checks.push({ id: 'here', label: 'Running here', state: 'fail', detail: c.pausedWhy || `${c.name} is paused on this computer`, fix: /move|moved/i.test(String(c.pausedBy || '')) ? 'It runs on the computer it moved to: start it there, or take it back in Settings › Back Up & Move' : 'Start it in Settings › Back Up & Move' })
+      if (c.paused) checks.push({ id: 'here', label: 'Running here', state: 'fail', detail: c.pausedWhy || `${c.name} is paused on this computer`, fix: /move|moved/i.test(String(c.pausedBy || '')) ? `It runs on the computer it moved to: start it there, or take it back in ${placeEn('backup', { accounts: accountsOn() })}` : `Start it in ${placeEn('backup', { accounts: accountsOn() })}` })
       else if (!hubs.started(c.id) && !on.length) checks.push({ id: 'here', label: 'Running here', state: 'warn', detail: 'No bot is on it, so it isn\'t connected', fix: 'Put a bot on it' })
       else checks.push({ id: 'here', label: 'Running here', state: 'ok', detail: `${PLATFORMS[c.platform]}, on this computer` })
       // The platform's own.

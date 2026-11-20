@@ -177,7 +177,7 @@ try {
     const sec = p.locator('.modal.settings')
     await sec.locator('.st-dictation').waitFor({ timeout: 10000 })
     const box = sec.locator('label.st-check', { hasText: 'Show the words as you talk' })
-    ok(!!(await until(() => box.isVisible(), 5000, 100)) && await box.locator('input').isChecked(), 'Settings › Voice & Meetings › Advanced: "Show the words as you talk", on')
+    ok(!!(await until(() => box.isVisible(), 5000, 100)) && await box.locator('input').isChecked(), 'Settings › Meetings & Voice › Dictation › Advanced: "Show the words as you talk", on')
     await box.locator('input').click()
     ok(!!(await until(async () => (await kit.api('/dictation/live')).why === 'off', 5000, 100)), 'turned off: kept')
     await ctx.close()

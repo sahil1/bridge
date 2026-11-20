@@ -427,7 +427,7 @@ try {
     const ran = await until(() => { const t = fs.existsSync(marker) ? fs.readFileSync(marker, 'utf8') : ''; return /project/.test(t) && /local/.test(t) ? t : null }, 15000)
     ok(!!ran, 'an agent of your own in that folder loads its settings as before (their hooks run)', ran)
     if (l?.tabId) await kit.api(`/tabs/${encodeURIComponent(l.tabId)}/close`, {}).catch(() => {})
-    // Claude Code older than 2.1.257 (Settings › Agents looks again): no run starts, and it says why.
+    // Claude Code older than 2.1.257 (Settings › Agents & Models › Agents looks again): no run starts, and it says why.
     fs.writeFileSync(path.join(home, 'claude-version'), '2.1.200')
     await kit.api('/agents/catalog')
     const n = logOf('helpers-started.log').length
