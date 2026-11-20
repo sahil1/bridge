@@ -196,6 +196,17 @@ export async function isAncestor(c0, a, b) {
   if (!c.admin || !/^[0-9a-f]{40,64}$/.test(String(a || '')) || !/^[0-9a-f]{40,64}$/.test(String(b || ''))) return false
   return (await wt(c, ['merge-base', '--is-ancestor', a, b])).ok
 }
+// What its branch has, at commit `at`, past where its pull request would go from: the files and the
+// short stat, as you're shown them when it asks to push that commit.
+export async function sinceBase(c0, at) {
+  const c = { ...c0, admin: c0.admin || await adminOf(c0.top, c0.dir) }
+  if (!c.admin || !c.from || !/^[0-9a-f]{40,64}$/.test(String(at || ''))) return { files: [], stat: '' }
+  await trusted(c)
+  const range = `${c.from}...${at}`
+  const files = (await wt(c, ['diff', '--no-ext-diff', '--no-textconv', '--name-only', range])).out.split('\n').filter(Boolean)
+  const stat = (await wt(c, ['diff', '--no-ext-diff', '--no-textconv', '--shortstat', range])).out
+  return { files, stat }
+}
 // Whether its branch has commits past where its pull request would go from: something to push.
 export async function ahead(c0) {
   const c = { ...c0, admin: c0.admin || await adminOf(c0.top, c0.dir) }
@@ -206,11 +217,14 @@ export async function ahead(c0) {
 
 // The branch pushed (that branch only, never forced) and a draft pull request opened with your gh,
 // or the one this branch has already: { url, number, again }.
-export async function publish(c, { title, body }) {
+// sha: the commit you approved (a session's push): that one is pushed as the branch, never what the
+// branch has come to since.
+export async function publish(c, { title, body, sha = null }) {
   if (!c.branch.startsWith('bot/') || c.branch === c.base) throw Object.assign(new Error(`Won't push ${c.branch}`), { step: 'push' })
   if (!c.remote) throw Object.assign(new Error('The repository has no remote to push the branch to'), { step: 'push' })
+  if (sha != null && !/^[0-9a-f]{40,64}$/.test(String(sha))) throw Object.assign(new Error('That isn\'t a commit to push'), { step: 'push' })
   // (Pushed from your repository, which has the branch: nothing in the worktree is read for it.)
-  const pushed = await git(c.top, ['push', '--quiet', '-u', c.remote, `refs/heads/${c.branch}:refs/heads/${c.branch}`], { timeout: 120000 })
+  const pushed = await git(c.top, ['push', '--quiet', ...(sha ? [] : ['-u']), c.remote, `${sha || `refs/heads/${c.branch}`}:refs/heads/${c.branch}`], { timeout: 120000 })
   if (!pushed.ok) throw Object.assign(new Error(`Couldn't push ${c.branch}: ${firstLine(pushed.err)}`), { step: 'push' })
   const PATH = await loginPath()
   const gh = await which('gh', PATH)

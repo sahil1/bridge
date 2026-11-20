@@ -58,13 +58,19 @@ const ASK = {
 }
 const TOOLS = [...(push ? [PUSH] : []), ...(roster.length ? [HAND, ASK] : [])]
 
+// (At most 20 asks a turn: counted in the file, which Bridge AI takes and empties as each turn ends
+// (botsessions.js takeRequests), so the count is this turn's, however long this server runs.)
+const ASKS_MAX = 20
 let asked = 0
 function note(o) {
   if (!file || !keyFile) throw new Error('This session has nowhere to ask from')
   let key = ''
   try { key = fs.readFileSync(keyFile, 'utf8').trim() } catch { /* none */ }
   if (!/^[0-9a-f]{64}$/.test(key)) throw new Error('This session has no key to ask with')
-  if (++asked > 20) throw new Error('That\'s as many as one turn may ask')
+  let pending = 0
+  try { pending = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).length } catch { pending = 0 }
+  if (pending >= ASKS_MAX) throw new Error('That\'s as many as one turn may ask')
+  asked++
   const line = { ...o, at: new Date().toISOString(), n: asked }
   fs.appendFileSync(file, `${JSON.stringify({ ...line, mac: macOf(key, line) })}\n`, { mode: 0o600 })
 }

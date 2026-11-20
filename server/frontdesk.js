@@ -202,6 +202,10 @@ const STREAM_MAX = 12000 // what a stream may hold (Slack)
 const HOLD_MS = Number(process.env.BRIDGE_BOT_HOLD_MS) || 2 * 60 * 1000
 const GUARD_WAIT_MS = 10 * 60 * 1000 // a run that changed files, ended and never heard: its checks' folder goes then
 const MINUTE_MS = Number(process.env.BRIDGE_BOT_MINUTE_MS) || 60 * 1000
+// The most a session works in a day, all its turns told (its Longest Run is each turn's): 8 hours.
+const SESSION_DAY_MS = Number(process.env.BRIDGE_SESSION_DAY_MS) || 8 * 3600000
+const today = () => new Date().toISOString().slice(0, 10)
+const dayPlus = (s, ms) => (s?.day?.date === today() ? { date: today(), ms: (Number(s.day.ms) || 0) + (Number(ms) || 0) } : { date: today(), ms: Number(ms) || 0 })
 // How soon after a conversation's last word the same person asking again there carries it on
 // (bots.js CARRY_ON_MIN; tests that ask one question after another, each its own, make it 0).
 const CARRY_MS = /^\d+$/.test(process.env.BRIDGE_BOT_CARRY_MS || '') ? Number(process.env.BRIDGE_BOT_CARRY_MS) : store.CARRY_ON_MIN * 60000
@@ -560,6 +564,10 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   // pane (the runtime's: Esc to stop a turn), given once the server has it (useRuntime).
   const sessions = botsessions.makeStore()
   let keysOf = null
+  let pidOf = null
+  // (Its agent's commands still running, ended: botsessions.js stopShells. Only a session that runs
+  // commands has any.)
+  const stopShellsOf = async (s) => { if (s?.bash?.on && s.paneId && pidOf) await botsessions.stopShells(pidOf(s.paneId)).catch(() => 0) }
   const going = () => sessions.all().filter((s) => s.state !== 'closed')
   // The desk's own task list for its helpers, as many at once as its bots allow (2 unless set).
   delegate.list('desk', { tasks, dir: ensureDir(ANSWERS), also: [CHANGES, WRITES, FILES, BRIEFS, botmcp.RUNS, botfiles.OUTBOX, ensureDir(SESSIONS)], max: () => Math.max(1, Math.min(5, ...[...bots.keys()].map((id) => botOf(id)?.max || 2))), heard: (h) => heard(h) })
@@ -592,7 +600,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       st.convs.set(e.conv, c)
       const had = st.questions.get(e.q)
       if (had) { had.more.push({ person: e.person, text: e.text || '', ts: e.ts, at: e.at, files: e.files || [], ...(e.flags ? { flags: e.flags } : {}) });return }
-      st.questions.set(e.q, { id: e.q, bot: e.bot, conv: e.conv, how: e.how, from: e.person || null, text: e.text || '', channel: e.channel, place: e.place || null, thread: e.thread_ts || null, ts: e.ts, reply: e.reply || null, at: e.asked || e.at, heardAt: e.at, late: !!e.late, migrated: !!e.migrated, state: e.how === 'command' ? 'command' : 'received', more: [], runs: [], files: e.files || [], try: !!e.try, routine: e.routine || null, carried: !!e.carried, ...(e.consult ? { consult: e.consult } : {}), ...(e.how === 'steer' ? { steer: true } : {}) })
+      st.questions.set(e.q, { id: e.q, bot: e.bot, conv: e.conv, how: e.how, from: e.person || null, text: e.text || '', channel: e.channel, place: e.place || null, thread: e.thread_ts || null, ts: e.ts, reply: e.reply || null, at: e.asked || e.at, heardAt: e.at, late: !!e.late, migrated: !!e.migrated, state: e.how === 'command' ? 'command' : 'received', more: [], runs: [], files: e.files || [], try: !!e.try, routine: e.routine || null, carried: !!e.carried, ...(e.consult ? { consult: e.consult } : {}), ...(e.how === 'steer' ? { steer: true } : {}), ...((e.consult || e.handed)?.people ? { chiefPeople: (e.consult || e.handed).people } : {}) })
       c.questions.push(e.q)
       return
     }
@@ -645,7 +653,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       case 'limit.carried': Object.assign(q, { ask: null, until: e.until || q.until, limitCarried: true }); break
       // A push it asked for (pushAct), and what came of it.
       case 'push.requested': q.push = { id: e.push, title: e.title || '', summary: e.summary || '', head: e.head || null, branch: e.branch || null, files: e.files || [], stat: e.stat || '', state: 'waiting', at: e.at, by: null, pr: null, error: null, handles: [] }; break
-      case 'push.moved': if (q.push) q.push.head = e.head || q.push.head; break
+      case 'push.moved': if (q.push) Object.assign(q.push, { head: e.head || q.push.head, ...(e.files ? { files: e.files, stat: e.stat || '' } : {}) }); break
       case 'push.approved': if (q.push) Object.assign(q.push, { state: 'pushed', by: e.by || null, pr: e.url ? { url: e.url, number: e.number || null } : null, error: null }); break
       case 'push.declined': if (q.push) Object.assign(q.push, { state: 'denied', by: e.by || null }); break
       case 'push.failed': if (q.push) q.push.error = e.error || null; break
@@ -676,7 +684,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       case 'write.failed': { const w = e.change ? st.writes.get(e.change) : null; if (w && w.state !== 'applied') Object.assign(w, { state: 'failed', error: e.error || null }) } break
       // (A bot that only reads, handing a change to files on to the bot that makes them.)
       case 'handed': Object.assign(q, { state: 'handed', handed: e.to || null }); break
-      case 'change.proposed': q.change = { mode: e.mode, branch: e.branch, base: e.base, files: e.files || [], stat: e.stat || '', diffFile: e.diffFile || null, diff: e.diff || '', dir: e.dir || null, top: e.top || null, remote: e.remote || null, from: e.from || null, pr: null, sid: e.sid || null, before: e.before || null }; break
+      case 'change.proposed': q.change = { mode: e.mode, branch: e.branch, base: e.base, files: e.files || [], stat: e.stat || '', diffFile: e.diffFile || null, diff: e.diff || '', dir: e.dir || null, top: e.top || null, remote: e.remote || null, from: e.from || null, pr: null, sid: e.sid || null, before: e.before || null, head: e.head || null }; break
       case 'change.approved': if (q.change) q.change.approved = { by: e.by, at: e.at }; break
       case 'change.failed': if (q.change) q.change.failed = e.error; q.problem = oneLine(e.error, 300); break
       case 'pr.opened': if (q.change) q.change.pr = { url: e.url, number: e.number || null }; break
@@ -922,6 +930,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   const dropMcp = (hid) => { botmcp.drop(mcpDirs.get(hid)); mcpDirs.delete(hid) }
   // (A session's folder stays while it may go on: its own, not a run's.)
   botmcp.sweep({ keep: new Set(going().map((s) => s.id)) })
+  botsessions.sweepTmp({ keep: new Set(going().map((s) => s.id)) })
   // A run's staging copy of the folders it changes files in (botwrite.js stage), by its helper: what
   // it was as it was made stays here, never where its agent works; gone once what changed is taken.
   const stages = new Map()
@@ -1046,8 +1055,8 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       ...(m.via ? { via: m.via } : {}), ...(m.try ? { try: true } : { platform: m.platform || platOf(m.channel) }), ...(m.routine ? { routine: m.routine } : {}),
       ...(m.attached?.length ? { notRead: m.attached.slice(0, 10).map((x) => clip(x, 120)) } : {}),
       ...(m.routed?.by ? { routed: m.routed } : {}), ...(goesOn ? { carried: true } : {}),
-      ...(m.handed?.by ? { handed: { by: m.handed.by, name: clip(m.handed.name, 80) } } : {}),
-      ...(m.consult?.by ? { consult: { by: m.consult.by, name: clip(m.consult.name, 80), q: String(m.consult.q || ''), conv: String(m.consult.conv || '') } } : {}),
+      ...(m.handed?.by ? { handed: { by: m.handed.by, name: clip(m.handed.name, 80), ...(m.handed.people ? { people: peopleIn(m.handed.people) } : {}) } } : {}),
+      ...(m.consult?.by ? { consult: { by: m.consult.by, name: clip(m.consult.name, 80), q: String(m.consult.q || ''), conv: String(m.consult.conv || ''), ...(m.consult.people ? { people: peopleIn(m.consult.people) } : {}) } } : {}),
       ...(m.steer ? { steer: { session: String(m.steer.session || '') } } : {}),
     }
     // Someone else's "continue" where a question of theirs, or of this conversation, waits at its
@@ -1401,7 +1410,8 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     // (Its session, when this conversation has one going: what it may do is the lowest of everyone
     // who has spoken in it, this turn's words too, never more than before: tierOf.)
     const sess0 = !resume ? sessionFor(id, q) : null
-    const tier = tierOf(bot, sess0, speakersOf(q))
+    // (Asked or handed this by a Chief: no more than the least of everyone its session had heard.)
+    const tier = tierOf(bot, sess0, [...speakersOf(q), ...(q.chiefPeople || []).map(asPerson)])
     const wantsChange = editing || (!q.try && !q.routine && !q.consult && tier.change)
     // (Neither, when your Claude Code's managed settings turn off the hook every such run needs.)
     const managed = editing || wantsChange ? hooksOff() : null
@@ -1443,14 +1453,24 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       record(id, 'queued', at(q, { ahead: 0, atOnce: bot.limits.atOnce, sid: s.id }))
       return
     }
+    // (A session someone who may do less has spoken in: ended, and the conversation goes on in a new
+    // one at what they may do, which has none of what the wider one read or ran: never --resume.)
+    let narrowedFrom = null
+    if (s && ((s.tier?.all && !tier.all) || (s.tier?.change && !tier.change))) {
+      narrowedFrom = s
+      await endSession(s, { why: 'Someone who may do less spoke in it: the conversation goes on in a new session' })
+      s = null
+    }
+    // (Its hours at work in this conversation today, all told: past SESSION_DAY_MS, no more today.)
+    if (s && s.day?.date === today() && Number(s.day.ms) >= SESSION_DAY_MS) { next(id); return toYou(id, q, `It has worked ${Math.round(SESSION_DAY_MS / 3600000)} hours in this conversation today, as long as one conversation may in a day`) }
     if (s && await turnInto(id, q, s, { pending, entry, pickd, tier, unable: noChange, consulted })) return
     // (Being started again: a message meanwhile waits for it, sessionBusy.)
     if (s) sessions.patch(s.id, { state: 'starting', lastAt: now() })
-    const bash = kind === 'claude' && !resume ? await bashFor(bot, tier) : { on: false, why: null }
+    const bash = kind === 'claude' && !resume ? await bashOf(bot, tier, q) : { on: false, why: null }
     const roster = kind === 'claude' && !resume ? chiefRoster(id, q) : null
     if (kind === 'claude' && !resume && !s) {
-      s = sessions.add({ bot: id, convs: [q.conv], channel: q.channel, place: q.place || null, reply: q.reply || null, thread: q.reply?.thread || q.thread || null, dm: q.place?.kind === 'dm', person: q.from?.id || null, try: !!q.try, tier })
-      record(id, 'session.started', at(q, { sid: s.id, tier, bash: bash.on, ...(bash.why ? { bashWhy: bash.why } : {}), ...(roster ? { chief: roster.map((x) => x.id) } : {}) }))
+      s = sessions.add({ bot: id, convs: [q.conv], channel: q.channel, place: q.place || null, reply: q.reply || null, thread: q.reply?.thread || q.thread || null, dm: q.place?.kind === 'dm', person: q.from?.id || null, try: !!q.try, tier, ...(narrowedFrom ? { people: narrowedFrom.people || [], from: narrowedFrom.id } : {}) })
+      record(id, 'session.started', at(q, { sid: s.id, tier, bash: bash.on, ...(bash.why ? { bashWhy: bash.why } : {}), ...(roster ? { chief: roster.map((x) => x.id) } : {}), ...(narrowedFrom ? { from: narrowedFrom.id } : {}) }))
     }
     const n = s ? (s.turns || 0) + 1 : 0
     // A change someone who may ask for one could be asking for: its own copy of the repository; or,
@@ -1502,7 +1522,10 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     // (A bot that changes files has a new copy each run, made from the folders as they are: it starts
     // afresh there, given what was said before from the record. A session goes on from its own
     // conversation, never a copy of one: --resume, below.)
-    const goOn = kind !== 'model' && !stage && !s?.claudeSession && !!(was?.id && was.cwd && adapter(was.kind).fork && adapter(was.kind).caps?.fork && readOnly(was.kind) && have.has(was.kind)
+    // (Never a copy of a conversation a wider session of this one had: what it read or ran there
+    // isn't for someone who may do less.)
+    const widerBefore = !!narrowedFrom || sessions.all().some((x) => x.bot === id && x.state === 'closed' && (x.convs || []).includes(q.conv) && ((x.tier?.all && !tier.all) || (x.tier?.change && !tier.change)))
+    const goOn = kind !== 'model' && !stage && !s?.claudeSession && !widerBefore && !!(was?.id && was.cwd && adapter(was.kind).fork && adapter(was.kind).caps?.fork && readOnly(was.kind) && have.has(was.kind)
       && (was.kind === kind || c?.route?.to === 'agent') && (tree ? was.cwd === tree.dir : (paths.some((p) => inside(was.cwd, p)) || inside(was.cwd, ANSWERS))))
     const resumed = !!(resume?.session && goOn && was.id === resume.session)
     let route
@@ -1543,6 +1566,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       const since = route.resume ? s.upTo || null : route.followUp && c?.session?.upTo ? c.session.upTo : null
       try { ctx = await chan(b, q).context({ channel: q.channel, thread: q.reply?.thread && q.reply.thread !== q.ts ? q.reply.thread : null, ts: q.ts, since, dm: q.place?.kind === 'dm' }) } catch (err) { ctx = { kind: q.thread ? 'thread' : 'channel', messages: [], pins: [], problem: `Couldn't read the conversation: ${err.message}` } }
       if (!q.routine) record(id, 'context', at(q, { kind: ctx.kind, since, messages: ctx.messages || [], pins: ctx.pins || [], problem: ctx.problem || null }))
+      ctx = heardFrom(bot, ctx)
     }
     // The files attached, copied into a folder of its own for the agent to read (as data).
     const attached = []
@@ -1590,7 +1614,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     let mcp = null
     // (Its MCP tools that do more than read: for everyone whose words it answers, and in a session
     // everyone who has spoken in it.)
-    const all = tier.all && mayAct(bot, q.from)
+    const all = tier.all && mayAct(bot, q.from) && !q.consult
     // (A run that changes files has delete_file and move_file in its copy, and the hook that checks
     // every path it writes: botmcp.js.)
     // (A run in a copy of a repository has the hook too, with git's own files and Claude Code's out of
@@ -1602,7 +1626,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     const own = [route.cwd, ...route.dirs, ...(BRIEF_FILE && kind !== 'model' ? [path.join(BRIEFS, `${q.id}-${q.runs.length + 1}`)] : [])].filter(Boolean)
     // (A session's folder holds its own server, its sandbox for commands where it may run them, and
     // its hook on them: botmcp.js runFolder session. Made again each time it's started.)
-    const sessionOpts = s ? { push: !!tree, roster, who: ownerName(bot), bash: bash.on ? { domains: bot.domains || [], cwd: route.cwd, dirs: route.dirs, writable: !!(stage || tree) || route.to === 'throwaway' } : null } : null
+    const sessionOpts = s ? { push: !!tree, roster, who: ownerName(bot), bash: bash.on ? { domains: bot.domains || [], cwd: route.cwd, dirs: route.dirs, writable: !!(stage || tree) || route.to === 'throwaway', tmp: botsessions.tmpOf(s.id) } : null } : null
     if ((bot.mcp?.length || outbox || guarded || s) && route.kind === 'claude') {
       try { mcp = await botmcp.runFolder(bot, { all, key: s ? s.id : `${q.id}-${q.runs.length + 1}`, outbox, write: guarded, attach: attachFrom, reads, own, session: sessionOpts }) } catch (e) { mcp = { dir: null, servers: [], missing: [], problem: oneLine(e.message, 200) } }
       // (Without its hook, it doesn't run: nothing that changes files starts unchecked.)
@@ -1668,8 +1692,10 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       : await delegate.add(launchOf = {
         list: 'desk', role: 'answer', title: `${bot.name}: ${s ? `session ${s.id.slice(1)}` : `question ${q.id.replace(/^.*q/, '')}`}`, kind: route.kind, readOnly: !tree && !stage, change: !!tree || !!stage, space: SPACE, from: id,
         ...(route.cwd ? { cwd: route.cwd } : {}), ...(route.fork ? { fork: route.fork } : {}), ...(route.resume ? { resume: route.resume } : {}), ...(route.dirs.length ? { dirs: route.dirs } : {}), brief, ...(entry.model && route.kind === entry.agent ? { model: entry.model } : {}),
-        // (What its hook needs to run, where its agent has to give it: botmcp.js runFolder.)
+        // (What its hook needs to run, where its agent has to give it: botmcp.js runFolder. And a
+        // session's own temporary folder and git settings, botsessions.js envOf.)
         ...(mcp?.agentEnv && (tree || stage || mcp.bash) ? { env: mcp.agentEnv } : {}),
+        ...(s ? { env: { ...(mcp?.agentEnv && (tree || stage || mcp.bash) ? mcp.agentEnv : {}), ...botsessions.envOf(s.id, { name: bot.name, bash: !!mcp?.bash }) } } : {}),
         ...(s ? { session: s.id } : {}),
       })
     const h = chat ? { cwd: route.cwd } : delegate.get(out.helper.id) || {}
@@ -1861,7 +1887,9 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     const asked = q.ask
     const took = s ? Date.now() - Date.parse(run.at) : h.startedAt ? Date.now() - Date.parse(h.startedAt) : null
     record(id, 'run.finished', at(q, { helper: h.id, end: h.end, error: h.error || null, took, session: h.sessionId || null, agent: h.kind, ...(h.chat ? { model: h.model } : {}), cwd: h.cwd, upTo, transcript: keepTranscript(b, q, h), ...(s ? { sid: s.id, turn: run.turn || null } : {}) }))
-    if (s) sessions.patch(s.id, { claudeSession: h.sessionId || s.claudeSession, upTo, lastAt: now(), ran: (s.ran || 0) + (took || 0), paneId: h.paneId || s.paneId })
+    if (s) sessions.patch(s.id, { claudeSession: h.sessionId || s.claudeSession, upTo, lastAt: now(), ran: (s.ran || 0) + (took || 0), day: dayPlus(s, took), paneId: h.paneId || s.paneId })
+    // (Its turn over: a command it left running is ended.)
+    if (s) await stopShellsOf(s)
     if (asked) settleLimit(id, asked.handle, 'It finished before you decided: nothing to do')
     setStatus(id, q, false)
     const tree = run.change ? { ...(s?.tree || {}), ...run.change, dir: h.cwd } : null
@@ -1956,7 +1984,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
         const got = await changes.collect({ ...tree, dir: h.cwd || tree.dir }, { checked, message: `${bot.name}: ${oneLine(q.text, 60)}\n\nAsked by ${q.from?.name || 'someone'} in ${where(q.place)} (${labelOf(q)}), made by ${bot.name}, ${ownerName(bot)}'s bot in Bridge AI.` })
         if (got.changed) {
           const diffFile = b.trace.keep('changes', `${q.id}-${q.runs.length}.diff`, got.diff)
-          record(id, 'change.proposed', at(q, { mode: bot.changes, branch: tree.branch, base: tree.base, files: got.files.slice(0, 200), stat: got.stat, diffFile, diffHash: keyOf(got.diff), diff: clip(got.diff, 4000), dir: h.cwd || tree.dir, top: tree.top, remote: tree.remote, from: tree.from, ...(s ? { sid: s.id, before: run.change?.start || null } : {}) }))
+          record(id, 'change.proposed', at(q, { mode: bot.changes, branch: tree.branch, base: tree.base, files: got.files.slice(0, 200), stat: got.stat, diffFile, diffHash: keyOf(got.diff), diff: clip(got.diff, 4000), dir: h.cwd || tree.dir, top: tree.top, remote: tree.remote, from: tree.from, ...(s ? { sid: s.id, before: run.change?.start || null, head: got.head || null } : {}) }))
           holdChange = true
         } else if (!s) await changes.tidy({ ...tree, dir: h.cwd || tree.dir })
       } catch (e) {
@@ -2011,7 +2039,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     // (In a session, an earlier answer still waiting for you gives way to this one, as an earlier
     // change does to a newer.)
     if (s && !q.steer) {
-      for (const x of questionsIn(s).filter((y) => y !== q && y.state === 'draft' && !y.steer && !y.needsOwner && !sending(y) && y.write?.state !== 'waiting')) {
+      for (const x of questionsIn(s).filter((y) => y !== q && y.state === 'draft' && !y.steer && !y.needsOwner && !sending(y) && y.write?.state !== 'waiting' && !(y.change && !y.change.approved) && y.push?.state !== 'waiting')) {
         record(id, 'discarded', at(x, { by: 'Bridge AI', why: 'A newer answer in this conversation took its place' }))
         settleOwner(id, x, 'A newer answer took its place')
         react(id, x, x.ts, 'hourglass_flowing_sand', true)
@@ -2033,12 +2061,17 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   // Whether an answer goes without asking you, where nothing holds it: everyone whose words it
   // answers is you; or it's a direct message or a private channel; or you said it may (auto).
   // (A post a routine scheduled isn't an answer to anyone: it waits for you unless you said it may go.)
+  // (Everyone who has spoken in its session counts, and a Chief's that asked or handed it this: you
+  // alone, it goes. A private channel shared with another organization (Slack Connect), or a Teams
+  // group chat, counts as public: it waits.)
   function goesNow(bot, q) {
     if (q.how === 'scheduled' || q.routine) return bot?.auto === true
-    const people = [q.from, ...q.more.map((x) => x.person)].filter(Boolean)
+    const s = q.session ? sessions.get(q.session) : null
+    const people = [q.from, ...q.more.map((x) => x.person), ...(s?.people || []).map(asPerson), ...(q.chiefPeople || []).map(asPerson)].filter(Boolean)
     if (people.length && people.every((p) => isOwner(bot, p))) return true
     const place = q.place || {}
-    if (place.kind === 'dm' || (place.kind === 'channel' && place.private === true && !isPublic(place))) return true
+    const plat = q.try ? 'slack' : platOf(q)
+    if (place.kind === 'dm' || (place.kind === 'channel' && place.private === true && place.shared !== true && plat !== 'teams' && !isPublic(place))) return true
     return bot?.auto === true
   }
   // What a run left in its outbox, and the files it attached from its folders: { files, refused,
@@ -2121,8 +2154,15 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     const ch = q.change
     if (!ch) return null
     const c = { dir: ch.dir, branch: ch.branch, base: ch.base, remote: ch.remote, top: ch.top, from: ch.from }
+    // (A session's change: its own commit pushed, as you were shown it, never what its branch has come
+    // to since; and not while another change on its branch still waits for you, which would go too.)
+    const cs = ch.sid ? sessions.get(ch.sid) : null
+    if (cs && questionsIn(cs).some((x) => x !== q && x.change && !x.change.approved && !x.change.pr && x.state === 'draft' && !sending(x))) {
+      record(id, 'change.failed', at(q, { step: 'pr', error: 'Another change on its branch still waits for you: decide that one first' }))
+      return null
+    }
     try {
-      const pr = await changes.publish(c, { title: `${bot.name}: ${oneLine(q.text, 70)}`, body: `Asked by ${q.from?.name || 'someone'} in ${where(q.place)} (${labelOf(q)}), made by ${bot.name}, ${ownerName(bot)}'s bot in Bridge AI. A draft: look it over before it's merged.\n\n> ${oneLine(q.text, 600)}\n\n${clip(text, 4000)}` })
+      const pr = await changes.publish(c, { ...(ch.sid && ch.head ? { sha: ch.head } : {}), title: `${bot.name}: ${oneLine(q.text, 70)}`, body: `Asked by ${q.from?.name || 'someone'} in ${where(q.place)} (${labelOf(q)}), made by ${bot.name}, ${ownerName(bot)}'s bot in Bridge AI. A draft: look it over before it's merged.\n\n> ${oneLine(q.text, 600)}\n\n${clip(text, 4000)}` })
       record(id, 'pr.opened', at(q, { url: pr.url, number: pr.number, branch: ch.branch, draft: true, again: !!pr.again }))
       if (!ch.sid) await changes.tidy(c)
       else { const cs = sessions.get(ch.sid); const head = cs?.tree ? await changes.headOf(cs.tree).catch(() => null) : null; if (head) sessions.patch(ch.sid, { pushed: head }) }
@@ -2660,7 +2700,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     if (h && h.state !== 'ended') await delegate.drop(h.id).catch(() => {})
     // (What it changed before it stopped stays in its copy, taken with its next turn's.)
     const s = sessions.get(run.session)
-    if (s) { const g = botsessions.guardOf(s.mcpDir); if (g && !s.stage && !s.tree) await botwrite.guardTurn(g.log, g.key).catch(() => {}); await botsessions.takeRequests(s.mcpDir).catch(() => []); sessions.patch(s.id, { lastAt: now(), ran: (s.ran || 0) + (run?.at ? Date.now() - Date.parse(run.at) : 0) }) }
+    if (s) { const g = botsessions.guardOf(s.mcpDir); if (g && !s.stage && !s.tree) await botwrite.guardTurn(g.log, g.key).catch(() => {}); await botsessions.takeRequests(s.mcpDir).catch(() => []); sessions.patch(s.id, { lastAt: now(), ran: (s.ran || 0) + (run?.at ? Date.now() - Date.parse(run.at) : 0), day: dayPlus(s, run?.at ? Date.now() - Date.parse(run.at) : 0) }); await stopShellsOf(s) }
     setStatus(id, q, false)
     react(id, q, q.ts, 'eyes', true)
     if (asked) settleLimit(id, asked.handle, why === 'longest' ? `Stopped after ${mins(ran)}, its Longest Run` : why === 'paused' ? `${bot?.name || 'The bot'} was paused` : `Stopped${by ? ` by ${by}` : ''}`)
@@ -3175,7 +3215,30 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   const TOP = { owner: true, all: true, change: true, trusted: true }
   const tierFor = (bot, p) => ({ owner: isOwner(bot, p), all: mayAct(bot, p), change: mayChange(bot, p), trusted: trusted(bot, p) })
   const lower = (a, b) => ({ owner: !!(a.owner && b.owner), all: !!(a.all && b.all), change: !!(a.change && b.change), trusted: !!(a.trusted && b.trusted) })
-  const speakersOf = (q) => [q.from, ...q.more.map((x) => x.person)].filter((p) => p?.id || p?.you)
+  // (Each with what the platform said of them: a guest, someone from another organization.)
+  const speakersOf = (q) => [q.from && { ...q.from, ...(q.asker?.id && q.asker.id === q.from.id ? flagsOf(q.asker) || {} : {}) }, ...q.more.map((x) => x.person && { ...x.person, ...(flagsOf(x.flags) || {}) })].filter((p) => p?.id || p?.you)
+  // (A session's people as kept: you as 'you'.)
+  const asPerson = (p) => (p?.id === 'you' ? { you: true, name: p.name || null } : p)
+  const peopleIn = (list) => (Array.isArray(list) ? list : []).slice(0, 50).map((p) => ({ id: clip(String(p?.id || ''), 80) || null, name: p?.name ? clip(String(p.name), 80) : null, ...(flagsOf(p) || {}) })).filter((p) => p.id)
+  // Everyone a Chief's conversation has heard (its session's people, and this turn's): a bot it asks or
+  // hands to must answer each of them, or it isn't asked; and does no more than the least of them may.
+  function heardBy(id, q) {
+    const cs = q.session ? sessions.get(q.session) : sessionFor(id, q)
+    const all = [...(cs?.people || []).map(asPerson), ...speakersOf(q)]
+    return [...new Map(all.filter((p) => p?.you || p?.id).map((p) => [p.you ? 'you' : p.id, p])).values()].slice(0, 50)
+  }
+  const keptPeople = (list) => list.map((p) => ({ id: p.you ? 'you' : p.id, name: p.name || null, ...(flagsOf(p) || {}) }))
+  // (A bot a Chief asks only answers: no commands.)
+  const bashOf = (bot, tier, q) => (q.consult ? { on: false, why: 'A bot a Chief asks only answers' } : bashFor(bot, tier))
+  // Context from someone who may not ask this bot isn't given to its agent: in its place, that there
+  // was a message. Only theirs who may ask it, its own and other bots' (the record keeps them all).
+  const MASKED = '[a message from someone who can\'t ask me]'
+  const heardFrom = (bot, ctx) => {
+    if (!ctx || bot.who === 'channels') return ctx
+    const may = (m) => m.you || m.bot === true || /^B[A-Z0-9]{6,}$/.test(String(m.person?.id || '')) || (!!m.person && !refusal(bot, m.person))
+    const mask = (list) => (list || []).map((m) => (may(m) ? m : { ...m, text: MASKED, files: [] }))
+    return { ...ctx, messages: mask(ctx.messages), pins: mask(ctx.pins) }
+  }
   function tierOf(bot, s, people) {
     let t = s?.tier ? { ...TOP, ...s.tier } : TOP
     for (const p of people) t = lower(t, tierFor(bot, p))
@@ -3232,6 +3295,8 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   async function refreshStage(id, s) {
     const st = botsessions.readStage(s.id)
     if (!st || !fs.existsSync(st.dir)) return null
+    // (Nothing of its agent's still running while its copy is written in: botwrite.js refresh.)
+    await stopShellsOf(s)
     if (st.pending) {
       const c = await botwrite.load(writesDir(id), st.pending)
       if (c?.state === 'applied') await botwrite.rebase(st, c)
@@ -3300,7 +3365,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     const b = bots.get(id)
     const h = s.helper ? delegate.get(s.helper) : null
     if (!h?.paneId || h.state !== 'ended' || !s.claudeSession) return false
-    const bash = await bashFor(bot, tier)
+    const bash = await bashOf(bot, tier, q)
     const roster = chiefRoster(id, q)
     const narrowed = (s.tier?.all && !tier.all) || (s.tier?.change && !tier.change)
     const sig = sigOf(bot, tier, { bash: bash.on, roster })
@@ -3322,6 +3387,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     if (!pending && !consulted && !q.steer && !q.consult) {
       try { ctx = await chan(b, q).context({ channel: q.channel, thread: q.reply?.thread && q.reply.thread !== q.ts ? q.reply.thread : null, ts: q.ts, since: s.upTo || null, dm: q.place?.kind === 'dm' }) } catch (err) { ctx = { kind: q.thread ? 'thread' : 'channel', messages: [], pins: [], problem: `Couldn't read the conversation: ${err.message}` } }
       if (!q.routine) record(id, 'context', at(q, { kind: ctx.kind, since: s.upTo || null, messages: ctx.messages || [], pins: [], problem: ctx.problem || null }))
+      ctx = heardFrom(bot, ctx)
     }
     const { attached, problems } = await attachTurn(id, q, s, n, pending)
     // (A turn under way: its copy of a repository's commit now, so the change this turn makes is taken.)
@@ -3359,7 +3425,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   const sessionBusy = (s, q) => (s.state === 'starting' && Date.now() - Date.parse(s.lastAt || s.startedAt || 0) < 120000) || questionsIn(s).some((x) => x !== q && (x.state === 'answering' || x.state === 'starting' || x.state === 'consulting'))
   // A Chief's turn with the answer it asked for, waiting for its session's turn under way.
   const consultWaits = new Map()
-  const peopleOf = (s, q) => [...new Map([...(s.people || []), ...speakersOf(q).map((p) => ({ id: p.id || 'you', name: p.name || null }))].map((p) => [p.id, p])).values()].slice(0, 50)
+  const peopleOf = (s, q) => [...new Map([...(s.people || []), ...speakersOf(q).map((p) => ({ id: p.id || 'you', name: p.name || null, ...(flagsOf(p) || {}) }))].map((p) => [p.id, p])).values()].slice(0, 50)
   // Put away: its pane closed, its copies and folder gone; not to be gone on with again.
   async function endSession(s, { why = 'Ended', by = null } = {}) {
     if (!s || s.state === 'closed') return false
@@ -3374,7 +3440,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     if (s.mcpDir) botmcp.drop(s.mcpDir)
     if (s.outbox) botfiles.drop(s.outbox)
     // (Its own folders: the files attached to its turns, long turns, an empty folder of its own.)
-    for (const d of [path.join(SESSIONS, s.id), path.join(ANSWERS, s.id)]) { try { fs.rmSync(d, { recursive: true, force: true }) } catch { /* in use: swept later */ } }
+    for (const d of [path.join(SESSIONS, s.id), path.join(ANSWERS, s.id), botsessions.tmpOf(s.id)].filter(Boolean)) { try { fs.rmSync(d, { recursive: true, force: true }) } catch { /* in use: swept later */ } }
     sessions.patch(s.id, { state: 'closed', paneId: null, ended: { at: now(), why, by } })
     if (bots.has(s.bot)) record(s.bot, 'session.ended', { sid: s.id, why, by })
     changed()
@@ -3431,7 +3497,9 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     if (!head || !ahead) { record(id, 'push.failed', at(q, { error: 'Its branch has nothing new to push' })); return }
     if (q.push?.state === 'waiting') settlePush(id, q, 'A newer push took its place')
     const pid = `p${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`
-    record(id, 'push.requested', at(q, { push: pid, title: oneLine(ask.title, 200), summary: clip(ask.summary, 2000), head, branch: s.tree.branch, files: (q.change?.files || []).slice(0, 200), stat: q.change?.stat || '' }))
+    // (What you're shown: all its branch has at that commit, from where its pull request goes from.)
+    const since = await changes.sinceBase(s.tree, head).catch(() => ({ files: [], stat: '' }))
+    record(id, 'push.requested', at(q, { push: pid, title: oneLine(ask.title, 200), summary: clip(ask.summary, 2000), head, branch: s.tree.branch, files: since.files.slice(0, 200), stat: since.stat || '' }))
     const n = numOf(q)
     const text = `I'd like to push my changes (${s.tree.branch}) and open a draft pull request: “${oneLine(ask.title, 120)}”. That waits for ${ownerName(bot)}.`
     if (!q.try) {
@@ -3469,11 +3537,20 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     }
     const s = q.session ? sessions.get(q.session) : null
     if (!s?.tree || !fs.existsSync(s.tree.dir)) throw Object.assign(new Error('Its copy of the repository isn\'t there any more'), { status: 409 })
+    // (Not while a change on its branch still waits for you: that would go with it, unapproved.)
+    if (questionsIn(s).some((x) => x.change && !x.change.approved && x.state === 'draft' && !sending(x))) throw Object.assign(new Error('A change on its branch still waits for you: approve or discard it first'), { status: 409 })
+    // (Moved on since you were shown it: asked again, with what its branch has now, and this one
+    // refused. Only the commit you approve is pushed: botchanges.js publish sha.)
     const head = await changes.headOf(s.tree).catch(() => null)
-    if (head && head !== p.head) record(id, 'push.moved', at(q, { push: p.id, head }))
-    if (!hash || !head || hash !== head) throw Object.assign(new Error('That isn\'t the commit waiting now: look at it again'), { status: 409 })
+    if (head && head !== p.head) {
+      const since = await changes.sinceBase(s.tree, head).catch(() => ({ files: [], stat: '' }))
+      record(id, 'push.moved', at(q, { push: p.id, head, files: since.files.slice(0, 200), stat: since.stat || '' }))
+      await requestPush(id, q, s, { title: p.title, summary: p.summary })
+      throw Object.assign(new Error('Its branch has moved on since: look at it again'), { status: 409 })
+    }
+    if (!hash || !head || hash !== head || hash !== p.head) throw Object.assign(new Error('That isn\'t the commit waiting now: look at it again'), { status: 409 })
     try {
-      const pr = await changes.publish(s.tree, { title: `${bot.name}: ${oneLine(p.title, 150)}`, body: `Asked for by ${bot.name}, ${ownerName(bot)}'s bot in Bridge AI, in ${where(q.place)} (${labelOf(q)}), for ${q.from?.name || 'someone'}; pushed once ${by} approved it. A draft: look it over before it's merged.\n\n${clip(p.summary, 3000)}` })
+      const pr = await changes.publish(s.tree, { sha: head, title: `${bot.name}: ${oneLine(p.title, 150)}`, body: `Asked for by ${bot.name}, ${ownerName(bot)}'s bot in Bridge AI, in ${where(q.place)} (${labelOf(q)}), for ${q.from?.name || 'someone'}; pushed once ${by} approved it. A draft: look it over before it's merged.\n\n${clip(p.summary, 3000)}` })
       record(id, 'push.approved', at(q, { push: p.id, by, via, url: pr.url, number: pr.number || null, head }))
       sessions.patch(s.id, { pushed: head })
       settlePush(id, q, `Pushed by ${by}: ${pr.url}`)
@@ -3498,13 +3575,18 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     next(id)
     if (!to || to.draft || !bots.has(to.id)) return toYou(id, q, `It wanted to hand this to ${oneLine(ask.bot, 40)}, which isn't one of the bots on its connection`)
     if (q.try) { record(id, 'draft', at(q, { text: `(Test) ${bot.name} hands this to ${to.name}${ask.note ? `: ${oneLine(ask.note, 300)}` : ''}.`, auto: false })); changed(); return }
+    // (Only to a bot that answers everyone this conversation has heard; it takes it at the least of
+    // what they may.)
+    const people = heardBy(id, q)
+    const no = people.map((p) => ({ p, why: refusal(to, p) })).find((x) => x.why)
+    if (no) return toYou(id, q, `It wanted to hand this to ${to.name}, which doesn't answer ${no.p.you ? ownerName(bot) : no.p.name || 'someone'}, who has spoken in this conversation`)
     const asker = q.asker || (q.from?.id ? { id: q.from.id, name: q.from.name || null, unknown: true } : { id: null, unknown: true })
     record(id, 'handed', at(q, { to: { id: to.id, name: to.name }, ...(ask.note ? { note: clip(ask.note, 1000) } : {}), by: 'chief' }))
     react(id, q, q.ts, 'eyes', true)
     done(q)
     changed()
     const also = q.more.filter((x) => x.person?.id).map((x) => ({ person: { id: x.person.id, name: x.person.name || null }, text: x.text || '', ts: x.ts, at: x.at, ...(flagsOf(x.flags) ? { flags: flagsOf(x.flags) } : {}) }))
-    await hear(to.id, { ts: q.ts, channel: q.channel, thread: q.thread, mention: true, dm: q.place?.kind === 'dm', from: asker, text: ask.note ? `${q.text}\n\n(${bot.name} handed this to you: ${oneLine(ask.note, 600)})` : q.text, place: q.place, at: q.at, late: false, reply: q.reply, platform: platOf(q), handed: { by: id, name: bot.name, also } })
+    await hear(to.id, { ts: q.ts, channel: q.channel, thread: q.thread, mention: true, dm: q.place?.kind === 'dm', from: asker, text: ask.note ? `${q.text}\n\n(${bot.name} handed this to you: ${oneLine(ask.note, 600)})` : q.text, place: q.place, at: q.at, late: false, reply: q.reply, platform: platOf(q), handed: { by: id, name: bot.name, also, people: keptPeople(people) } })
   }
   // ask_bot: one of the bots on its connection asked, as whoever asked the Chief (their rights, that
   // bot's rules), in a session of its own for this conversation; its answer goes nowhere but back to
@@ -3515,11 +3597,19 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     const to = roster.some((x) => x.id === ask.bot) ? botOf(ask.bot) : null
     if (!to || to.draft || !bots.has(to.id)) { next(id); return toYou(id, q, `It wanted to ask ${oneLine(ask.bot, 40)}, which isn't one of the bots on its connection`) }
     const asker = q.asker || (q.from?.id ? { id: q.from.id, name: q.from.name || null } : { id: null, unknown: true })
-    record(id, 'consult.asked', at(q, { to: { id: to.id, name: to.name }, question: clip(ask.question, 2000) }))
+    // (Only a bot that answers everyone this conversation has heard, at the least of what they may.)
+    const people = heardBy(id, q)
+    const no = people.map((p) => ({ p, why: refusal(to, p) })).find((x) => x.why)
+    record(id, 'consult.asked', at(q, { to: { id: to.id, name: to.name }, question: clip(ask.question, 2000), ...(no ? { refused: { why: no.why, person: { id: no.p.you ? 'you' : no.p.id, name: no.p.name || null } } } : {}) }))
     next(id)
     changed()
+    if (no) {
+      const said = `(${to.name} wasn't asked: it doesn't answer ${no.p.you ? ownerName(bot) : no.p.name || 'someone'}, who has spoken in this conversation. Answer without it.)`
+      await answer(id, q, { consulted: { id: to.id, name: to.name, text: said } }).catch((e) => toYou(id, q, `It couldn't go on: ${e.message}`))
+      return
+    }
     const ts = (Date.now() / 1000).toFixed(6)
-    await hear(to.id, { ts, channel: q.channel, thread: null, mention: true, dm: false, from: asker, text: ask.question, place: q.place, at: now(), late: false, reply: null, platform: platOf(q), ...(q.try ? { try: true } : {}), consult: { by: id, name: bot.name, q: q.id, conv: q.conv } })
+    await hear(to.id, { ts, channel: q.channel, thread: null, mention: true, dm: false, from: asker, text: ask.question, place: q.place, at: now(), late: false, reply: null, platform: platOf(q), ...(q.try ? { try: true } : {}), consult: { by: id, name: bot.name, q: q.id, conv: q.conv, people: keptPeople(people) } })
   }
   // A bot asked by a Chief has its answer (or couldn't: why): to the Chief, as its next turn.
   async function consultDone(id, q, { text = null, why = null }) {
@@ -4087,7 +4177,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     // Sessions, for Bots' Sessions (botsessions.js routes).
     sessions: sessionsApi,
     // The runtime's keys, for Esc into a session's pane: given once the server has it.
-    useRuntime: ({ keys }) => { keysOf = keys },
+    useRuntime: ({ keys, pidOf: pid }) => { keysOf = keys; pidOf = pid || null },
     // Your decision about a request held before it started (Needs You, on a computer or the phone).
     screenAct,
     // A bot's changes to files, the latest first, for Activity; one undone (Activity, or its reply's

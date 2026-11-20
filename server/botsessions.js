@@ -30,6 +30,7 @@
 //   IDLE_MS is closed, and stays resumable for KEEP_MS (7 days), then it's put away. Only a turn at
 //   work counts toward a bot's at-once and the desk's limits.
 import fs from 'node:fs'
+import { execFile } from 'node:child_process'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { dataFile, writeFileAtomic, HOME } from './paths.js'
@@ -49,6 +50,60 @@ const KEPT = 500 // sessions remembered, the latest; the ones still going are al
 const SID = /^s\d{1,7}$/
 const clean = (s, n) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, n)
 export const dirOf = (sid) => (SID.test(String(sid)) ? path.join(DIR, String(sid)) : null)
+// A session's own temporary folder (CLAUDE_CODE_TMPDIR and TMPDIR: Claude Code's own files and its
+// commands' go in it, code.claude.com/docs/en/env-vars), apart from its folder, which its commands
+// may only read; nobody else's temporary files are readable to it (botmcp.js sandboxOf). Gone with it.
+export const TMP = dataFile('front-desk', 'tmp')
+export const tmpOf = (sid) => (SID.test(String(sid)) ? path.join(TMP, String(sid)) : null)
+// What a session's agent starts with besides what it keeps of yours (botenv.js): its temporary
+// folder; git's settings of its own, its name as the author and nothing of yours (your ~/.gitconfig,
+// its includes and credential helpers, the system's: GIT_CONFIG_GLOBAL, GIT_CONFIG_NOSYSTEM), in its
+// folder, readable to it and not written; and, with commands, Claude Code stripping credentials from
+// all it starts (CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, as its settings file says too: botmcp.js).
+export function envOf(sid, { name = 'A bot', bash = false } = {}) {
+  const dir = dirOf(sid)
+  const tmp = tmpOf(sid)
+  if (!dir || !tmp) return {}
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
+  fs.mkdirSync(tmp, { recursive: true, mode: 0o700 })
+  const who = String(name).replace(/[^\w .'-]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60) || 'A bot'
+  const gitconfig = path.join(dir, 'gitconfig')
+  fs.writeFileSync(gitconfig, `[user]\n\tname = ${who} (Bridge AI)\n\temail = bot@bridge-ai.invalid\n[credential]\n\thelper =\n[core]\n\thooksPath = ${path.join(dir, 'no-hooks').replace(/\\/g, '/')}\n`, { mode: 0o600 }) // private-ok: a placeholder address (.invalid) for a bot's commits, nobody's
+  return { CLAUDE_CODE_TMPDIR: tmp, TMPDIR: tmp, GIT_CONFIG_GLOBAL: gitconfig, GIT_CONFIG_NOSYSTEM: '1', ...(bash ? { CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1' } : {}) }
+}
+// Its agent's commands still running (a background job, or one a stopped turn left): ended, with
+// everything they started, before Bridge AI brings the real folders into its copy (a command can't
+// swap a folder there for a link meanwhile: botwrite.js refresh) and when a turn is stopped. They're
+// the shells below its agent's process (Claude Code runs each command in one, its sandbox around it),
+// found by the system's process list; its MCP servers and Claude Code itself are left. Off Windows
+// (where a bot runs no commands); with herdr, whose panes Bridge AI doesn't start, none are found.
+const SHELL = /(^|\/)-?(sh|bash|zsh|dash|ksh|fish|sandbox-exec|bwrap)$/
+export async function stopShells(pid) {
+  if (!pid || process.platform === 'win32') return 0
+  const out = await new Promise((resolve) => execFile('/bin/ps', ['-A', '-o', 'pid=,ppid=,comm='], { timeout: 10000, maxBuffer: 8 * 1024 * 1024 }, (err, so) => resolve(err ? '' : String(so))))
+  const kids = new Map()
+  const comm = new Map()
+  for (const line of out.split('\n')) {
+    const m = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line)
+    if (!m) continue
+    const [p, pp] = [Number(m[1]), Number(m[2])]
+    comm.set(p, m[3].trim())
+    if (!kids.has(pp)) kids.set(pp, [])
+    kids.get(pp).push(p)
+  }
+  const under = (p, acc = []) => { for (const k of kids.get(p) || []) { acc.push(k); under(k, acc) } return acc }
+  const doomed = new Set()
+  for (const p of under(Number(pid))) if (SHELL.test(comm.get(p) || '')) { doomed.add(p); for (const k of under(p)) doomed.add(k) }
+  for (const p of doomed) { try { process.kill(p, 'SIGKILL') } catch { /* gone */ } }
+  return doomed.size
+}
+
+// Temporary folders of sessions that aren't going on: gone (keep: the ids of those that are).
+export function sweepTmp({ keep = new Set() } = {}) {
+  let names = []
+  try { names = fs.readdirSync(TMP) } catch { return }
+  for (const n of names) if (!keep.has(n)) { try { fs.rmSync(path.join(TMP, n), { recursive: true, force: true }) } catch { /* in use */ } }
+}
 
 export function makeStore() {
   let data = { next: 1, sessions: [] }
@@ -124,7 +179,7 @@ export function guardOf(dir) {
 // rt: the runtime (keys); connect(id): a bot's channel made, for a new bot; view(b): a bot as
 // Settings shows it; you(): your name.
 export function makeBotSessions({ desk, rt, guard, wrap, connect = () => {}, resolve, view = (b) => b, you = () => 'the owner', changed = () => {} }) {
-  desk.useRuntime?.({ keys: (paneId, k) => rt.keys(paneId, k) })
+  desk.useRuntime?.({ keys: (paneId, k) => rt.keys(paneId, k), pidOf: (paneId) => rt.pidOf?.(paneId) || null })
   const bad = (msg, status = 400) => Object.assign(new Error(msg), { status })
   return {
     routes(app) {
@@ -191,7 +246,12 @@ export function makeBotSessions({ desk, rt, guard, wrap, connect = () => {}, res
           if (x.domains !== undefined) {
             const list = Array.isArray(x.domains) ? x.domains : String(x.domains || '').split(/[\s,]+/)
             const out = []
-            for (const d of list.map(String).filter((y) => y.trim())) { const v = store.domainOf(d); if (!v) throw bad(`${clean(d, 80)} isn't a domain (example.com, or *.example.com)`); out.push(v) }
+            for (const d of list.map(String).filter((y) => y.trim())) {
+              const v = store.domainOf(d)
+              if (!v) throw bad(`${clean(d, 80)} isn't a domain (example.com, or *.example.com)`)
+              if (store.githubLike(v)) throw bad(`A bot's commands never reach GitHub (${v}): a push or a pull request goes through Bridge AI, once you approve it`)
+              out.push(v)
+            }
             if (out.length > store.DOMAINS_MAX) throw bad(`At most ${store.DOMAINS_MAX} domains`)
             patch.domains = [...new Set(out)]
           }

@@ -782,11 +782,61 @@ export async function guardTurn(log, key) {
 // what git ignores stays out, as it did when it was made.)
 const statAt = async (p) => { const s = await fs.promises.lstat(p).catch(() => null); return s?.isFile() ? statOf(s) : null }
 const sameStat = (a, b) => (!a && !b) || (!!a && !!b && a.size === b.size && a.mtimeMs === b.mtimeMs)
-async function copyIn(from, to) {
-  await fs.promises.mkdir(path.dirname(to), { recursive: true })
-  const tmp = `${to}.bridge-${crypto.randomBytes(4).toString('hex')}`
-  await fs.promises.copyFile(from, tmp)
-  await fs.promises.rename(tmp, to)
+// (Bridge AI writes in the copy itself, with your rights and no sandbox, while its agent may have
+// left a link in it (ln -s, with commands; or a background job, after its turn's changes were taken).
+// So nothing is written, taken away or looked at through one: each folder on the way down from the
+// copy's top is looked at (lstat) and must be a folder, not a link (one missing is made, and looked at
+// again), the folder it ends in must really be inside the copy, a new file goes in beside it with a
+// name of its own (made only if nothing is there, never through a link) and is renamed over it, and
+// a rename or unlink touches the link itself, never what it points to. The copy's links are swept
+// first, and its agent's background commands are stopped before (frontdesk.js refreshStage), so
+// nothing swaps a folder for a link meanwhile.)
+async function inCopy(root, rel, { make = false } = {}) {
+  if (!okRel(rel)) throw fail(`${rel} isn't a path inside the copy`, 'path')
+  const parts = rel.split(SEP)
+  if (parts.some((x) => !x || x === '.' || x === '..')) throw fail(`${rel} isn't a path inside the copy`, 'path')
+  let at = root
+  for (const x of parts.slice(0, -1)) {
+    at = path.join(at, x)
+    let s = await fs.promises.lstat(at).catch(() => null)
+    if (!s && make) {
+      await fs.promises.mkdir(at).catch((e) => { if (e.code !== 'EEXIST') throw e })
+      s = await fs.promises.lstat(at).catch(() => null)
+    }
+    if (!s) return null
+    if (s.isSymbolicLink() || !s.isDirectory()) throw fail(`${relOf(root, at)} in its copy is a link or isn't a folder: nothing is written through it`, 'path')
+  }
+  await within(root, at)
+  return path.join(at, parts.at(-1))
+}
+async function within(root, dir) {
+  const top = await fs.promises.realpath(root)
+  const real = await fs.promises.realpath(dir)
+  if (real !== top && !real.startsWith(top + path.sep)) throw fail(`${relOf(root, dir)} isn't inside its copy`, 'path')
+}
+// A file of its copy as it is there, or null; looked at only where nothing on the way is a link.
+async function statIn(root, rel) {
+  const at = await inCopy(root, rel)
+  return at ? statAt(at) : null
+}
+async function copyIn(root, from, rel) {
+  const to = await inCopy(root, rel, { make: true })
+  const s = await fs.promises.lstat(to).catch(() => null)
+  if (s && !s.isFile() && !s.isSymbolicLink()) throw fail(`${rel} in its copy isn't a file`, 'path')
+  const tmp = path.join(path.dirname(to), `.bridge-${crypto.randomBytes(6).toString('hex')}.tmp`)
+  await fs.promises.copyFile(from, tmp, fs.constants.COPYFILE_EXCL)
+  try {
+    await within(root, path.dirname(to))
+    await fs.promises.rename(tmp, to)
+  } catch (e) { await fs.promises.unlink(tmp).catch(() => {}); throw e }
+}
+async function removeIn(root, rel) {
+  const at = await inCopy(root, rel)
+  if (!at) return
+  const s = await fs.promises.lstat(at).catch(() => null)
+  if (!s) return
+  if (s.isDirectory() && !s.isSymbolicLink()) throw fail(`${rel} in its copy is a folder`, 'path')
+  await fs.promises.unlink(at).catch((e) => { if (e.code !== 'ENOENT') throw e })
 }
 export async function refresh(st, { waiting = null } = {}) {
   const pulled = []
@@ -796,6 +846,8 @@ export async function refresh(st, { waiting = null } = {}) {
     const real = new Map(p.real)
     const now = await stats(p.folder, CLONE_FILES).catch(() => null)
     if (!now) continue
+    // (Links its agent made in its copy since: taken out before anything is brought in.)
+    await sweep(p.copy).catch(() => [])
     const rels = new Set([...now.keys(), ...real.keys()])
     for (const rel of rels) {
       const r = now.get(rel) || null
@@ -803,14 +855,14 @@ export async function refresh(st, { waiting = null } = {}) {
       // (A file git ignores, not in a copy made from git: left out, as it was.)
       if (p.how === 'git' && !base.has(rel)) { if (r) real.set(rel, r); else real.delete(rel); continue }
       if (!okRel(rel)) continue
-      const at = onDisk(p.copy, rel)
-      const mine = !sameStat(await statAt(at), base.get(rel) || null)
+      let mine = true
+      try { mine = !sameStat(await statIn(p.copy, rel), base.get(rel) || null) } catch { mine = true }
       if (mine || waiting?.has(`${p.folder}\n${rel}`)) { conflicts.push(`${p.shown}/${rel}`); continue }
       try {
-        if (r) await copyIn(onDisk(p.folder, rel), at)
-        else await fs.promises.rm(at, { force: true })
+        if (r) await copyIn(p.copy, onDisk(p.folder, rel), rel)
+        else await removeIn(p.copy, rel)
       } catch { conflicts.push(`${p.shown}/${rel}`); continue }
-      const c = await statAt(at)
+      const c = await statIn(p.copy, rel).catch(() => null)
       if (c) base.set(rel, c); else base.delete(rel)
       if (r) real.set(rel, r); else real.delete(rel)
       for (let d = path.posix.dirname(rel); d && d !== '.'; d = path.posix.dirname(d)) if (!p.dirs.includes(d)) p.dirs.push(d)
@@ -830,7 +882,7 @@ export async function rebase(st, c) {
     const base = new Map(p.base)
     const real = new Map(p.real)
     for (const rel of [e.rel, e.from].filter(Boolean)) {
-      const b = await statAt(onDisk(p.copy, rel))
+      const b = await statIn(p.copy, rel).catch(() => null)
       const r = await statAt(onDisk(p.folder, rel))
       if (b) base.set(rel, b); else base.delete(rel)
       if (r) real.set(rel, r); else real.delete(rel)
@@ -852,13 +904,12 @@ export async function reset(st) {
     for (const rel of new Set([...after.keys(), ...base.keys()])) {
       if (sameStat(after.get(rel) || null, base.get(rel) || null)) continue
       if (!okRel(rel)) continue
-      const at = onDisk(p.copy, rel)
       const r = await statAt(onDisk(p.folder, rel))
       try {
-        if (r && base.has(rel)) await copyIn(onDisk(p.folder, rel), at)
-        else await fs.promises.rm(at, { force: true })
+        if (r && base.has(rel)) await copyIn(p.copy, onDisk(p.folder, rel), rel)
+        else await removeIn(p.copy, rel)
       } catch { continue }
-      const c = await statAt(at)
+      const c = await statIn(p.copy, rel).catch(() => null)
       if (c) base.set(rel, c); else base.delete(rel)
       if (r) real.set(rel, r); else real.delete(rel)
       back.push(`${p.shown}/${rel}`)
