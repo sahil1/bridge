@@ -609,12 +609,12 @@ try {
   const SHELL = (await studio.api('/agents/launch', { kind: 'shell', cwd: shellDir, label: 'Shell' })).paneId
   const ATTACH = `/api/panes/${encodeURIComponent(SHELL)}/attach?cols=80&rows=24`
   // Studio's answer to a device it hasn't let in: which computer and where, nothing more.
-  const shut = (r, computer = 'Studio') => r.status === 403 && r.json?.code === 'notLetIn' && r.json.computer === computer && /hasn't let/.test(r.json.error) && /Settings › Remote Access › Which Devices May Connect/.test(r.json.error)
+  const shut = (r, computer = 'Studio') => r.status === 403 && r.json?.code === 'notLetIn' && r.json.computer === computer && /hasn't let/.test(r.json.error) && /Settings › Devices & Access › Remote Access › Which Devices May Connect/.test(r.json.error)
 
   await part('unticked, a device gets nothing of this computer\'s: agents, terminals, files, events, previews', async () => {
     await studio.api('/remote/devices', { id: PHONE2, allowed: false })
     const launch = await ph2.request('POST', '/api/agents/launch', { kind: 'shell', cwd: shellDir, label: 'Unticked try' })
-    ok(shut(launch) && launch.json.error === "Studio hasn't let this device in. On Studio: Settings › Remote Access › Which Devices May Connect.", 'launch: refused, saying Studio hasn\'t let it in and where that\'s changed', launch.json)
+    ok(shut(launch) && launch.json.error === "Studio hasn't let this device in. On Studio: Settings › Devices & Access › Remote Access › Which Devices May Connect.", 'launch: refused, saying Studio hasn\'t let it in and where that\'s changed', launch.json)
     ok(!JSON.stringify(await studio.api('/fleet')).includes('Unticked try'), 'and nothing was launched')
     const t = ph2.socket(ATTACH, { term: true })
     await t.wait((x) => x.closed, 6000)
@@ -1153,7 +1153,7 @@ try {
       const card = f.locator('.letin-screen')
       await card.waitFor({ timeout: 30000 })
       const said = (await card.innerText()).replace(/\s+/g, ' ')
-      ok(/Studio hasn't let this device in/.test(said) && /On Studio: Settings › Remote Access › Which Devices May Connect\./.test(said), `${which}: the phone's page is one card, saying Studio hasn't let it in and where that's changed`, said)
+      ok(/Studio hasn't let this device in/.test(said) && /On Studio: Settings › Devices & Access › Remote Access › Which Devices May Connect\./.test(said), `${which}: the phone's page is one card, saying Studio hasn't let it in and where that's changed`, said)
       ok(!(await f.locator('.settings-btn, .error-text').count()), 'and none of the app behind it, nor its panels failing')
       const d = (await studio.api('/remote')).access.devices.filter((x) => x.fresh && !x.allowed && x.kind === 'phone' && !x.through).at(-1)
       const s = await page(b, studio.url)
@@ -1166,20 +1166,21 @@ try {
       ok(!!(await f.locator('.settings-btn').waitFor({ timeout: 20000 }).then(() => true, () => false)), 'and the phone\'s page opens Bridge AI by itself')
       // A computer on an older Bridge AI, paired with Studio: Settings says its devices can't be kept out apart from it.
       const older = over(await linkAs(ra.url, { code: (await studio.api('/relay/pair', {})).pairing.code, name: 'OldBox2', about: { name: 'OldBox2', kind: 'computer', version: '3.21.0' }, hello: { kind: 'computer' } }))
-      await s.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'machines' } })))
+      await s.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'remote-devices' } })))
       const list = s.p.locator('[data-setting="remote-devices"]')
       const oldSaid = /OldBox2 runs an older Bridge AI: devices reaching this computer through it can't be told apart from OldBox2 itself, so the list can't keep them out separately\. Update Bridge AI on OldBox2\./
-      ok(!!(await until(async () => oldSaid.test((await list.innerText().catch(() => '')).replace(/\s+/g, ' ')), 15000, 300)), 'Settings › Remote Access says a computer on an older Bridge AI can\'t have its devices kept out apart from it', (await list.innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 600))
+      ok(!!(await until(async () => oldSaid.test((await list.innerText().catch(() => '')).replace(/\s+/g, ' ')), 15000, 300)), 'Settings › Devices & Access › Remote Access says a computer on an older Bridge AI can\'t have its devices kept out apart from it', (await list.innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 600))
       // Unticked, then Remote Screen and Preview turned off at Studio: it stays out, and Studio's
-      // Settings lists it with Allow where the Beta Feature's settings were.
+      // Settings › Devices & Access › Remote Access still has Which Devices May Connect (it's never
+      // behind the Beta Feature), with it unticked, to tick again.
       await studio.api('/remote/devices', { id: d.id, allowed: false })
       await studio.api('/settings', { trials: { 'remote-screen': false } }, 'PATCH')
-      await s.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'machines' } })))
-      const kept = s.p.locator('[data-setting="remote-kept-out"]')
+      await s.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'remote-devices' } })))
+      const kept = s.p.locator('[data-setting="remote-devices"] li', { hasText: d.name }).first()
       await kept.waitFor({ timeout: 15000 })
-      ok((await kept.innerText()).includes(d.name), 'with Remote Screen and Preview off, Studio\'s Settings lists it as kept out', (await kept.innerText()).replace(/\s+/g, ' '))
-      await kept.locator('li', { hasText: d.name }).getByRole('button', { name: 'Allow' }).click()
-      ok(!!(await until(async () => !(await studio.api('/remote')).access.devices.find((x) => x.id === d.id)?.out, 5000, 100)), 'and Allow there lets it back in')
+      ok(!!(await until(async () => !(await s.p.locator('.modal.settings [data-setting="beta-remote-screen"] input[role="switch"]').isChecked()) && !(await kept.locator('input[type="checkbox"]').isChecked()), 8000, 200)), 'with Remote Screen and Preview off, Studio\'s Settings still lists it in Which Devices May Connect, unticked', (await kept.innerText()).replace(/\s+/g, ' '))
+      await kept.locator('input[type="checkbox"]').click()
+      ok(!!(await until(async () => !(await studio.api('/remote')).access.devices.find((x) => x.id === d.id)?.out, 5000, 100)), 'and ticking it there lets it back in')
       const od2 = (await studio.api('/remote')).access.devices.find((x) => x.name === 'OldBox2')
       if (od2) await older.request('DELETE', `/api/relay/devices/${encodeURIComponent(od2.id)}`)
       older.stop()

@@ -13,7 +13,7 @@
 // first run said, gone from the suggestions), another dismissed for good (after a reload). A
 // message sent in an agent's chat made a routine from its Routine button (its words, folder, agent
 // and the time it was sent). History › Commands: that message, where it went and from which box,
-// searched, Make a routine, deleted; Settings › General › Command History off, said there.
+// searched, Make a routine, deleted; Settings › Agents & Models › Agents › Command History off, said there.
 // ⌘K: New routine… and a routine's next run. Light and dark, and on a 390 phone (the form, the
 // dialog and History fit, whole targets, fields at 16 px).
 import fs from 'node:fs'
@@ -246,12 +246,12 @@ try {
     await item.getByRole('button', { name: 'Delete from your history' }).click()
     ok(!!(await until(async () => !(await p.locator('.cmd-item').count()) && !(await kit.api('/command-history')).items.some((r) => r.text === said), 5000)), 'deleted: gone from the list and the computer')
     await p.keyboard.press('Escape')
-    // Settings › General › Command History off: History says so.
+    // Settings › Agents & Models › Agents › Command History off: History says so.
     await settingsAt(p, 'commands')
     const sec = p.locator('#commands')
     await sec.waitFor({ timeout: 8000 })
     await sec.locator('.st-check', { hasText: 'Keep a history of what you ask' }).locator('input').uncheck()
-    ok(!!(await until(async () => (await kit.api('/settings')).effective.commands?.history === false, 5000)), 'Command History turned off in Settings › General')
+    ok(!!(await until(async () => (await kit.api('/settings')).effective.commands?.history === false, 5000)), 'Command History turned off in Settings › Agents & Models › Agents')
     await closeSettings(p)
     await p.keyboard.press('ControlOrMeta+Shift+KeyF')
     await p.locator('.hist-tabs button', { hasText: 'Commands' }).click()

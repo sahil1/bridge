@@ -1,4 +1,4 @@
-// Settings › Voice & Meetings and the mic's first use, in the browser named by BRIDGE_TEST_BROWSER, with a
+// Settings › Meetings & Voice › Speech Models and the mic's first use, in the browser named by BRIDGE_TEST_BROWSER, with a
 // stand-in for sherpa-onnx's addon and a small fake model served from this computer
 // (harness.startSpeechModels), in a light and a dark theme.
 //   This computer: the speech models it can run, Parakeet first and recommended, with their sizes,
@@ -38,7 +38,7 @@ try {
     const t = look.theme
     const { ctx, p, errors } = await page(b, kit.url, look)
     await openVoice(p)
-    ok((await p.locator('.st-nav-item.on').innerText().catch(() => '')).trim() === 'Voice & Meetings' && (await p.locator('.st-head .st-tabs [aria-selected="true"]').innerText().catch(() => '')) === 'Speech to Text', `${t}: Settings › Voice & Meetings at Speech to Text`)
+    ok((await p.locator('.st-nav-item.on').innerText().catch(() => '')).trim() === 'Meetings & Voice' && (await p.locator('.st-head .st-tabs [aria-selected="true"]').innerText().catch(() => '')) === 'Speech Models', `${t}: Settings › Meetings & Voice at Speech Models`)
     const ids = await p.locator('.st-voice li[data-model]').evaluateAll((l) => l.map((x) => x.dataset.model))
     ok(ids[0] === 'parakeet-v3' && ids[1] === 'parakeet-en' && ids.includes('large-v3-turbo-q5_0') && !ids.includes('apple'), `${t}: the models this computer runs, Parakeet first (no Mac speech here)`, ids)
     // Folded away until it's wanted (later, a Whisper download that failed keeps it open, to say why).

@@ -20,10 +20,11 @@
 //   llama-server: started on first use, on 127.0.0.1 with a key in its environment (not on its
 //   command line), thinking off, kept a while and let go when idle, started again when it stops,
 //   and a request it stopped in the middle of asked again. Remove stops it and takes the file away.
-//   Settings › Model Providers: the one recommended and why, a row for each model this computer
-//   runs with its size and what it's good for, Download with progress, In use and Remove; where each
-//   task runs (Models for Each Task), with what Auto does now; none of it on a computer with 4 GB of
-//   memory, where the tasks have no On this computer to put them on.
+//   Settings › Agents & Models › Model Providers: the one recommended and why, a row for each model
+//   this computer runs with its size and what it's good for, Download with progress, In use and
+//   Remove; and the next tab, Which Model Does What: where each task runs (Models for Each Task),
+//   with what Auto does now; none of it on a computer with 4 GB of memory, where the tasks have no
+//   On this computer to put them on.
 // BRIDGE_REAL_LLAMA=1: also the real thing, once, by hand: this computer's llama-server (node
 // scripts/llama.js native/llama puts it there) and the real Gemma 4 E2B (downloaded from Hugging Face
 // into test/.out/real-models, kept for next time), asked to rewrite a sentence and for JSON.
@@ -134,7 +135,7 @@ ok(r.id === 'cli:claude' && !r.auto, 'Cloud first: Claude, as before', r)
 r = jobs.route({ ...both, set: 'local', need: 90000 })
 ok(r.id === here.id && r.kept, 'On this computer: the local model, however long', r)
 r = jobs.route({ ...both, set: 'local', local: null, missing: { code: 'not_downloaded', why: 'Gemma 4 E4B isn\'t downloaded yet' } })
-ok(r.error?.code === 'local_missing' && r.error.message === 'Meeting notes is set to run on this computer, but Gemma 4 E4B isn\'t downloaded yet. Download it in Settings › Model Providers, or set Meeting notes to Auto there.', 'On this computer with the model not downloaded: an error that says so, and what to do', r.error?.message)
+ok(r.error?.code === 'local_missing' && r.error.message === 'Meeting notes is set to run on this computer, but Gemma 4 E4B isn\'t downloaded yet. Download it in Settings › Agents & Models › Model Providers, or set Meeting notes to Auto in Settings › Agents & Models › Which Model Does What.', 'On this computer with the model not downloaded: an error that says so, and what to do', r.error?.message)
 r = jobs.route({ ...both, job: 'mail', set: 'local', local: null, missing: { code: 'not_here', why: 'Gemma 4 E2B needs 8 GB of memory; this computer has 4 GB' } })
 ok(/^Mail is set to run on this computer, but Gemma 4 E2B needs 8 GB of memory; this computer has 4 GB\. Set Mail to Auto/.test(r.error?.message || ''), 'and on a computer it can\'t run on, why not', r.error?.message)
 
@@ -240,7 +241,7 @@ try {
   // Meeting notes set to stay here, with nothing here: why it didn't run, and no going elsewhere.
   await kit.api('/settings', { modelJobs: { notes: 'local' } }, 'PATCH')
   const kept = await notesBy(kit)
-  ok(kept.error === 'Meeting notes is set to run on this computer, but Gemma 4 E4B isn\'t downloaded yet. Download it in Settings › Model Providers, or set Meeting notes to Auto there.' && kept.model === null, 'Meeting notes set to On this computer, with no model here: the meeting says why they weren\'t written', kept)
+  ok(kept.error === 'Meeting notes is set to run on this computer, but Gemma 4 E4B isn\'t downloaded yet. Download it in Settings › Agents & Models › Model Providers, or set Meeting notes to Auto in Settings › Agents & Models › Which Model Does What.' && kept.model === null, 'Meeting notes set to On this computer, with no model here: the meeting says why they weren\'t written', kept)
   const jobsHere = await kit.api('/model-jobs')
   ok(jobsHere.jobs.length === (process.platform === 'darwin' ? 6 : 5) && jobsHere.jobs.find((j) => j.id === 'notes').set === 'local' && jobsHere.jobs.filter((j) => j.id !== 'notes').every((j) => j.set === 'cloud') && jobsHere.missing?.code === 'not_downloaded' && jobsHere.offered, 'Settings is told which jobs are set how (the rest Cloud first, the default), and what\'s missing here', jobsHere)
   await kit.api('/settings', { modelJobs: null }, 'PATCH')
@@ -335,7 +336,7 @@ try {
   const jobsNow = await kit.api('/model-jobs')
   ok(jobsNow.local?.id === 'bridge:gemma-4-e2b' && /^openai:/.test(jobsNow.cloud?.id || '') && jobsNow.limit?.minutes === 50, 'Settings is told what Auto does here: the local model up to about 50 minutes, the key\'s model after', jobsNow)
   const listed2 = await kit.api('/chat/models')
-  ok(/^openai:/.test(listed2.automatic || '') && listed2.short?.id === 'bridge:gemma-4-e2b' && listed2.short.minutes === 50, 'and Voice & Meetings: notes by the key\'s model, short ones by the local model', { automatic: listed2.automatic, short: listed2.short })
+  ok(/^openai:/.test(listed2.automatic || '') && listed2.short?.id === 'bridge:gemma-4-e2b' && listed2.short.minutes === 50, 'and Meetings & Voice: notes by the key\'s model, short ones by the local model', { automatic: listed2.automatic, short: listed2.short })
   await kit.api('/settings', { modelJobs: { notes: 'cloud' } }, 'PATCH')
   ok(/^openai:/.test((await notesBy(kit)).model || ''), 'Meeting notes set to Cloud first: a short one by the key\'s model, as before Auto')
   await kit.api('/settings', { modelJobs: { notes: 'local' } }, 'PATCH')
@@ -428,7 +429,7 @@ try {
   ok(/Not enough free space: Gemma 4 E4B needs 4791 MB, and there's 5 MB free/.test(e || '') && files.asked.length === n, 'too little free space: said before anything downloads (the one recommended, as none was named)', e)
 } finally { tight.stop() }
 
-// ---------- Settings › Model Providers ----------
+// ---------- Settings › Agents & Models: Model Providers, and Which Model Does What ----------
 const ui = await startKit('builtin-ui', { env: kitEnv() })
 const small = await startKit('builtin-ui-small', { env: kitEnv({ machine: { memGB: 4 } }) })
 const { b, which } = await browser()
@@ -438,6 +439,11 @@ const openProviders = async (p) => {
     if (!(await p.locator('.modal.settings').count())) await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'providers' } })))
     return (await p.locator('.pv-card').count()) > 0
   }, 45000, 1500)
+}
+// Agents & Models' tabs: Model Providers (providers) or Which Model Does What (models).
+const tab = async (p, id) => {
+  await p.locator(`.modal.settings .st-tabs [data-tab="${id}"]`).click()
+  await p.locator(id === 'models' ? '[data-model-jobs]' : '.pv-card').first().waitFor({ timeout: 10000 }).catch(() => {})
 }
 try {
   await ui.api('/setup', { name: 'Tester' })
@@ -450,16 +456,26 @@ try {
   const small2 = row.locator('[data-llm="gemma-4-e2b"]')
   ok(/Local model on this computer/.test(text) && /Recommended here: Gemma 4 E4B \(16 GB of memory\)/.test(text) && /Gemma 4 E2B\s+By Google, 2\.8 GB, Apache-2\.0/.test(await small2.innerText()) && /By Google, 4\.6 GB, Apache-2\.0/.test(await row.locator('[data-llm="gemma-4-e4b"]').innerText()) && !/26B/.test(text) && /Download \(2\.8 GB\)/.test(await small2.innerText()), 'Settings › Model Providers: "Local model on this computer", the one recommended here and why, each model this computer can run with its size, licence and Download (not the 32 GB one)', text)
   ok(/Recommended/.test(await row.locator('[data-llm="gemma-4-e4b"]').innerText()), 'the recommended one marked')
-  // What it's good for on hover; that it downloads only when asked, and stays private, in a line.
-  const more = () => row.locator('p[title]').first().getAttribute('title').catch(() => '')
+  // What it's good for, the rest of its line (on hover, or under More); that it downloads only when
+  // asked, and stays private, in the line.
+  const more = async () => {
+    const t0 = await row.locator('p[title]').first().getAttribute('title', { timeout: 1000 }).catch(() => null)
+    if (t0) return t0
+    const btn = row.locator('.st-more[aria-expanded="false"]').first()
+    if (await btn.count()) await btn.click()
+    return row.locator('.st-more-text').first().innerText({ timeout: 2000 }).catch(() => '')
+  }
   ok(/rewriting text, Edit by voice, questions about a meeting/.test(await more()) && /only when you click Download/.test(text) && /never leaves this computer/.test(text), 'with what it\'s good for, and that it downloads only when asked', [text, await more()])
-  // Which jobs run here: each kind, Auto, and what Auto does with no model here yet.
+  await row.scrollIntoViewIfNeeded()
+  await shot(p, `${which}-builtin-1-offered`)
+  // Which jobs run here, the next tab: each kind, Auto, and what Auto does with no model here yet.
+  await tab(p, 'models')
   const jobsBox = p.locator('[data-model-jobs]')
   await jobsBox.waitFor({ timeout: 10000 })
   ok((await jobsBox.locator('li[data-job]').count()) === (IS_MAC ? 6 : 5) && (await jobsBox.locator('li[data-job] select').evaluateAll((s) => s.every((x) => x.value === 'cloud'))) && /Meeting notes/.test(await jobsBox.innerText()) && /Diagrams/.test(await jobsBox.innerText()), 'Models for Each Task: each kind (Mail where there\'s Mail, a Mac), each on Cloud first to start', await jobsBox.innerText())
   ok((await jobsBox.locator('li[data-job="live"] option[value="local"]').count()) === 1, 'On this computer offered for live suggestions here (it has a GPU)')
-  await row.scrollIntoViewIfNeeded()
-  await shot(p, `${which}-builtin-1-offered`)
+  await tab(p, 'providers')
+  await row.waitFor({ timeout: 10000 })
   files.slow = 40
   await small2.getByRole('button', { name: /Download/ }).click()
   ok(!!(await until(async () => /Downloading \d+%/.test(await small2.innerText()) && (await small2.locator('[role=progressbar]').count()) === 1, 10000, 100)), 'Download: its progress shows', await row.innerText())
@@ -467,16 +483,19 @@ try {
   files.slow = 0
   text = await row.innerText()
   ok(/Remove/.test(await small2.innerText()) && /Gemma 4 E2B is in use, in every model list/.test(text) && /With Auto, Bridge AI runs short jobs on it/.test(await more()), 'with Remove, and how it\'s used: in every list, short jobs on Auto', [text, await more()])
+  await row.scrollIntoViewIfNeeded()
+  await shot(p, `${which}-builtin-2-ready`)
+  await tab(p, 'models')
   await jobsBox.locator('li[data-job="notes"] select').selectOption('auto')
   ok(!!(await until(async () => /Gemma 4 E2B, on this computer: there's no other model/.test(await jobsBox.locator('li[data-job="notes"]').innerText()), 10000, 200)), 'Which jobs run here says what Auto does now: with no other model, everything here', await jobsBox.innerText())
   await jobsBox.locator('li[data-job="notes"] select').selectOption('local')
   ok(!!(await until(async () => (await ui.api('/settings')).user.modelJobs?.notes === 'local' && /Always on this computer, with Gemma 4 E2B/.test(await jobsBox.locator('li[data-job="notes"]').innerText()), 10000, 200)), 'Meeting notes set to On this computer, there and in the settings', (await ui.api('/settings')).user.modelJobs)
-  await row.scrollIntoViewIfNeeded()
-  await shot(p, `${which}-builtin-2-ready`)
   await jobsBox.scrollIntoViewIfNeeded()
   await shot(p, `${which}-builtin-3-jobs`)
+  await tab(p, 'providers')
   await small2.getByRole('button', { name: /Remove/ }).click()
   ok(!!(await until(async () => /Download \(2\.8 GB\)/.test(await small2.innerText()), 10000, 200)), 'Remove: back to Download')
+  await tab(p, 'models')
   ok(!!(await until(async () => /Set to stay here, but Gemma 4 E4B isn't downloaded yet/.test(await jobsBox.locator('li[data-job="notes"]').innerText()), 10000, 200)), 'and a job set to stay here says why it can\'t run now', await jobsBox.locator('li[data-job="notes"]').innerText())
   await ui.api('/settings', { modelJobs: null }, 'PATCH')
   ok(!errors.length, 'no page errors', errors)
@@ -484,9 +503,12 @@ try {
   const s2 = await page(b, small.url)
   await openProviders(s2.p)
   await s2.p.locator('.pv-group', { hasText: /run locally/i }).first().waitFor({ timeout: 10000 }).catch(() => {})
+  await sleep(800)
+  const noRow = (await s2.p.locator('[data-builtin-model]').count()) === 0
+  await tab(s2.p, 'models')
   await s2.p.locator('[data-model-jobs] li[data-job]').first().waitFor({ timeout: 10000 }).catch(() => {})
   await sleep(800)
-  ok((await s2.p.locator('[data-builtin-model]').count()) === 0 && (await s2.p.locator('[data-model-jobs] li[data-job]').count()) === (IS_MAC ? 6 : 5) && (await s2.p.locator('[data-model-jobs] select').count()) === 0, 'a computer with 4 GB of memory: no row for it at all, and the tasks with no On this computer to put them on')
+  ok(noRow && (await s2.p.locator('[data-model-jobs] li[data-job]').count()) === (IS_MAC ? 6 : 5) && (await s2.p.locator('[data-model-jobs] select').count()) === 0, 'a computer with 4 GB of memory: no row for it at all, and the tasks with no On this computer to put them on')
   await s2.ctx.close()
 } finally {
   await b.close()

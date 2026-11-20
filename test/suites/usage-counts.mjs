@@ -226,11 +226,17 @@ try {
     const { ctx, p, text } = await about(later, /Share anonymous usage counts/)
     const box = p.locator('label', { hasText: 'Share anonymous usage counts' }).locator('input')
     ok(/Usage Counts/.test(text) && await box.count() === 1 && !(await box.isChecked()), 'with an endpoint: the switch, off', text.slice(-600))
-    // Where they go and what they carry, in a line; all of it on hover.
-    const all = await p.locator('label', { hasText: 'Share anonymous usage counts' }).locator('xpath=following-sibling::p[1]').getAttribute('title').catch(() => '')
-    ok(/127\.0\.0\.1/.test(text) && /update channel and its rollout bucket/.test(all), 'saying where a report goes, and on hover all it carries, its update channel and rollout bucket too', [text.slice(-900), all])
+    // Where they go and what they carry, in a line; all of it under More.
+    const line = p.locator('label', { hasText: 'Share anonymous usage counts' }).locator('xpath=following-sibling::p[1]')
+    const before = /update channel and its rollout bucket/.test(await line.innerText().catch(() => ''))
+    await line.locator('.st-more').click()
+    const all = await line.locator('.st-more-text').innerText().catch(() => '')
+    ok(/127\.0\.0\.1/.test(text) && !before && /update channel and its rollout bucket/.test(all), 'saying where a report goes, and under More all it carries, its update channel and rollout bucket too', [text.slice(-900), all])
+    // In About & Updates' order: the betas, then Privacy (usage counts and crash reports in it), then
+    // reporting a problem; the rest under Advanced.
     const heads = await p.evaluate(() => [...document.querySelectorAll('.st-body .st-sec > h4')].filter((h) => !h.closest('.st-adv')).map((h) => h.innerText.trim()))
-    ok(heads.at(-1) === 'Beta Features', 'Beta Features is the last thing on the page, before Advanced', heads)
+    const inPrivacy = await p.locator('.st-body [data-setting="privacy"] h5').allInnerTexts()
+    ok(JSON.stringify(heads.slice(-3)) === JSON.stringify(['Beta Features', 'Privacy', 'Report a problem or suggest something']) && inPrivacy.map((x) => x.trim()).includes('Usage Counts'), 'Beta Features, then Privacy with Usage Counts in it, then reporting a problem, before Advanced', { heads, inPrivacy })
     await p.locator('button', { hasText: 'See exactly what would be sent' }).click()
     const shown = await until(async () => { const x = await p.locator('.counts-doc').innerText().catch(() => ''); return /Nothing is counted while this is off/.test(x) && /"counts": \{\}/.test(x) && x }, 5000)
     ok(!!shown, 'See exactly what would be sent: nothing is counted while it\'s off, and the report it would be', await p.locator('.counts-doc').innerText().catch(() => ''))

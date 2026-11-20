@@ -1,4 +1,4 @@
-// Settings › Devices, in the browser named by BRIDGE_TEST_BROWSER, with two Bridge AIs ("Studio"
+// Settings › Devices & Access, in the browser named by BRIDGE_TEST_BROWSER, with two Bridge AIs ("Studio"
 // and "Desk") on relays of their own (stand-ins/relay.mjs). Pair a device shows a QR code, the
 // address and the code; a phone app paired with both offers to link them, and the whole thing is
 // done from the phone (the app is stood in for: the page it shows Bridge AI in, with the computers
@@ -65,7 +65,7 @@ const kitWith = async (name, rel) => {
   return k
 }
 const other = async (k, name) => (await k.api('/machines')).machines.find((m) => m.name === name) || null
-// Settings › Devices (at one of its tabs), asked again if it doesn't open: just after a reload the
+// Settings › Devices & Access (at one of its tabs), asked again if it doesn't open: just after a reload the
 // page can show its tabs a moment before it listens for this (once in CI's macOS WebKit, after
 // "after a reload, Desk's agent is still in its tab", Settings never opened in 10 s).
 const devices = async (p, tab = 'machines') => {
@@ -106,7 +106,7 @@ try {
   await devices(fp)
   const setRow = fp.locator('#st-machines .mch-row', { hasText: 'Laptop' })
   await setRow.waitFor({ timeout: 10000 }).catch(() => {})
-  ok(/Online/.test(await setRow.innerText().catch(() => '')), 'and so does Settings › Devices')
+  ok(/Online/.test(await setRow.innerText().catch(() => '')), 'and so does Settings › Devices & Access')
   await fp.locator('button[aria-label="Close settings"]').click()
   // An answer the sidebar can't draw (agents not a list).
   serve = { counts: { working: 1 }, agents: 5 }
@@ -149,7 +149,7 @@ try {
   await shot(s.p, `${tag}devices-new-device`)
   // (Settings is open over the notice: its list of phones offers Keep too.)
   const listed = s.p.locator('.ph-devices li', { hasText: 'Pocket' })
-  ok(/New/.test(await listed.innerText().catch(() => '')) && await listed.locator('button', { hasText: 'Keep' }).count() === 1, 'Settings › Devices lists it as new, with Keep beside Remove', await listed.innerText().catch(() => ''))
+  ok(/New/.test(await listed.innerText().catch(() => '')) && await listed.locator('button', { hasText: 'Keep' }).count() === 1, 'Settings › Devices & Access lists it as new, with Keep beside Remove', await listed.innerText().catch(() => ''))
   await listed.locator('button', { hasText: 'Keep' }).click()
   ok(!!(await until(async () => !(await told.count()) && !(await a.api('/relay')).devices.find((d) => d.name === 'Pocket')?.fresh && !(await listed.locator('button', { hasText: 'Keep' }).count()), 10000)), 'Keep: it stays, and the notice goes')
   await another.click()
@@ -215,7 +215,7 @@ try {
   const linkSec = app.locator('[data-setting="link-device"]')
   const scanBtn = linkSec.locator('button', { hasText: 'Scan QR code' })
   await scanBtn.waitFor({ timeout: 10000 }).catch(() => {})
-  ok(await scanBtn.count() === 1 && /then scan its QR code or paste its link here/.test(await linkSec.innerText()), 'Settings › Devices › Link a device: Scan QR code beside the link', await linkSec.innerText().catch(() => ''))
+  ok(await scanBtn.count() === 1 && /then scan its QR code or paste its link here/.test(await linkSec.innerText()), 'Settings › Devices & Access › Link a device: Scan QR code beside the link', await linkSec.innerText().catch(() => ''))
   await scanBtn.click()
   await until(() => ph.p.evaluate(() => window.scans.includes('link')), 3000, 100)
   await ph.p.waitForTimeout(500)
@@ -225,11 +225,11 @@ try {
   await scanBtn.click()
   ok(!!(await until(async () => /Linked with Studio\./.test(await linkSec.innerText()), 20000, 200)), 'Studio\'s code scanned: Desk links with it as with its link pasted (they\'re linked, so it says so)', await linkSec.innerText())
   await shot(ph.p, `${tag}devices-phone-scan`)
-  // Settings › Devices › Phone, the app's computers: Scan QR code beside Add a computer too.
+  // Settings › Devices & Access › Phone, the app's computers: Scan QR code beside Add a computer too.
   await app.locator('[role="tab"][data-tab="phone"]').click()
   const theirs = app.locator('[data-setting="relay"] button', { hasText: 'Scan QR code' })
   await theirs.waitFor({ timeout: 10000 }).catch(() => {})
-  ok(await theirs.count() === 1 && /Add a computer/.test(await app.locator('[data-setting="relay"]').innerText()), 'Settings › Devices › Phone: Scan QR code beside Add a computer', await app.locator('[data-setting="relay"]').innerText().catch(() => ''))
+  ok(await theirs.count() === 1 && /Add a computer/.test(await app.locator('[data-setting="relay"]').innerText()), 'Settings › Devices & Access › Phone: Scan QR code beside Add a computer', await app.locator('[data-setting="relay"]').innerText().catch(() => ''))
   await theirs.click()
   ok(!!(await until(() => ph.p.evaluate(() => window.scans.filter((x) => x === 'pair').length === 2), 3000, 100)), 'which opens the app\'s scanner to pair, as the menu\'s does', await ph.p.evaluate(() => window.scans))
   await inApp.evaluate(() => document.querySelector('button[aria-label="Close settings"]')?.click())
@@ -289,7 +289,7 @@ try {
   // ---------- Details, and a new name ----------
   const deskRow = s.p.locator('#st-machines .mch-row', { hasText: 'Desk' })
   // What the window showed if Desk's details don't open (once, on CI's macOS WebKit runner, they
-  // didn't in 10 seconds; here they show in well under a second): whether Settings › Devices is
+  // didn't in 10 seconds; here they show in well under a second): whether Settings › Devices & Access is
   // still open, Desk's row and whether its Details says it's open, a section that broke, and what
   // the window wrote down or threw.
   const detailsShown = async () => ({

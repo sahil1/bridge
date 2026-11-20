@@ -352,18 +352,21 @@ try {
     await send.api('/ui-error', { where: 'Board', message: 'TypeError: y is null', stack: 'TypeError: y is null\n    at Board (/x.js:1:1)' })
     await send.api('/ui-error', { where: 'Board', message: 'TypeError: y is null', stack: 'TypeError: y is null\n    at Board (/x.js:1:1)' })
     ok(await until(() => got.length === 2, 8000) && (await new Promise((r) => setTimeout(r, 800)), got.length === 2) && /y is null/.test(got[1]?.body || ''), 'on: a crash sends itself, and the same crash only once', got.length)
-    // Settings › About & Updates.
+    // Settings › About & Updates › Privacy.
     const { ctx: c2, p: p2 } = await page(b, send.url)
     await p2.locator('.topbar .search-btn').waitFor({ timeout: 15000 }).catch(() => {})
     await p2.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'about' } })))
     await until(async () => /Crash Reports/.test(await p2.locator('.st-body').innerText().catch(() => '')), 8000)
     const box = p2.locator('label', { hasText: 'Send crash reports by themselves' }).locator('input')
-    // Where they go and for how long, in a line; all of it on hover.
+    // Where they go and for how long, in a line; all of it under More.
+    const part = p2.locator('[data-setting="privacy"] .ab-priv:has(h5:text("Crash Reports"))')
     const text = await p2.locator('.st-body').innerText().catch(() => '')
-    const all = await p2.locator('.st-sec:has(h4:text("Crash Reports")) p[title]').first().getAttribute('title').catch(() => '')
-    ok(await box.isChecked().catch(() => false) && /Kept for 90 days/.test(text) && new RegExp(`127\\.0\\.0\\.1:${port}`).test(text) && /On unless you turn it off/.test(all) && /update channel/.test(all), 'Settings › About & Updates: Crash reports, on, saying where they go and for how long, and on hover what they carry (the update channel too) and that they\'re on unless turned off', [text.slice(-700), all])
-    await p2.locator('.st-sec:has(h4:text("Crash Reports")) .link-btn').first().click()
-    const doc = await until(async () => { const x = await p2.locator('.st-sec:has(h4:text("Crash Reports")) .counts-doc').innerText().catch(() => ''); return /"kind": "ui"/.test(x) && x }, 5000)
+    const before = /On unless you turn it off/.test(await part.innerText().catch(() => ''))
+    await part.locator('.st-more').first().click()
+    const all = await part.locator('.st-more-text').first().innerText().catch(() => '')
+    ok(await box.isChecked().catch(() => false) && /Kept for 90 days/.test(text) && new RegExp(`127\\.0\\.0\\.1:${port}`).test(text) && !before && /On unless you turn it off/.test(all) && /update channel/.test(all), 'Settings › About & Updates › Privacy: Crash reports, on, saying where they go and for how long, and under More what they carry (the update channel too) and that they\'re on unless turned off', [text.slice(-700), all])
+    await part.locator('.link-btn').first().click()
+    const doc = await until(async () => { const x = await part.locator('.counts-doc').innerText().catch(() => ''); return /"kind": "ui"/.test(x) && x }, 5000)
     ok(!!doc && /y is null/.test(doc), 'each report sent can be read there, as it went', doc)
     await box.click()
     ok(await until(async () => (await send.api('/crashes/sending')).send === false, 5000), 'and turned off there')

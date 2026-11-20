@@ -10,7 +10,7 @@
 // terminal tab puts what it was installing back to Not set up; Try again once nothing's going).
 // The next steps say how far it is and link back to what needs you; closing setup shows the tab
 // when it still waits for the password, and the top bar says "Setting up · n of N" (or that it
-// needs you) until it's done, one click from what needs you. Settings › General keeps the same list.
+// needs you) until it's done, one click from what needs you. Settings › Your Features keeps the same list.
 // Nothing real runs: the kit's stand-in installer runs instead of setup-mac.sh (and asks for a
 // password as it does), xcode-select is a stand-in, and Node.js and the model have nowhere to
 // download from, so they say they didn't work.
@@ -162,12 +162,12 @@ try {
   ok(/^Setup needs you · \d of \d$/.test((await until(async () => { const x = await chip(p); return /needs you/.test(x) && !(await kit.api('/setup/plan')).running && x }, 20000)) || ''), 'nothing going and some of it left: the top bar says so', await chip(p))
   const shown = !!(await p.$('.setup-chip'))
   if (shown) await p.click('.setup-chip')
-  else await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'general' } })))
+  else await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'setup' } })))
   await p.waitForSelector('#st-setup .sa-item', { timeout: 10000 })
-  ok(shown && !!(await until(async () => !(await p.$('.setup-chip')), 5000)), 'one click opens Settings › General\'s Set up list, and the top bar\'s goes')
+  ok(shown && !!(await until(async () => !(await p.$('.setup-chip')), 5000)), 'one click opens Settings › Your Features\' Set up list, and the top bar\'s goes')
 
-  // Settings › General: the same list, and Set up everything that's left.
-  ok(await p.locator('#st-setup .sa-item').count() === names.length, 'Settings › General has the same list')
+  // Settings › Your Features: the same list, and Set up everything that's left.
+  ok(await p.locator('#st-setup .sa-item').count() === names.length, 'Settings › Your Features has the same list')
   ok(/^(Set up everything that's left|Setting up…)$/.test((await p.locator('#st-setup .btn.primary').innerText().catch(() => '')).trim()), 'and one button for what\'s left (Setting up… while it goes)', await p.locator('#st-setup .btn.primary').innerText().catch(() => ''))
   await shot(p, `${tag}setup-all-settings`)
   ok(errors.length === 0, 'no page errors', errors)

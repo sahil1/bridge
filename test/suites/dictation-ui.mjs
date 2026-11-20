@@ -8,7 +8,7 @@
 //   Esc throws it away. The mic button held, and clicked then ✓. With nothing focused: the agent's
 //   message box. A search field (⌘K): no capital or full stop. The agent's Terminal tab and a New
 //   terminal: typed without Enter. On a phone: the mic button held with a finger.
-//   Settings › Voice & Meetings: the Dictation section, a new key picked by pressing it (and working), turned
+//   Settings › Meetings & Voice: the Dictation section, a new key picked by pressing it (and working), turned
 //   off (the key does nothing); in a browser, no "from other apps" options. With the desktop app
 //   simulated (window.bridgeApp): the key from any app off until you say yes, asked once after the
 //   first words in Bridge AI (Turn on, Not now); what's shown for a key held from any app, tapped
@@ -32,6 +32,8 @@
 //   into, then "Pasted"; refused (a password field, a key still held) and not yet allowed (the text to copy, with why);
 //   another app in front by then (the words edited on the card, and ⌘↩ pastes them, that app brought back first);
 //   asked once after a Copy (Paste it picks it and asks for Accessibility; Not now is kept).
+//   Edit by voice in Settings (a Mac): off until turned on, the model said to keep the text here or
+//   send it out; not offered on Windows yet; greyed with Turn On while the key from other apps is off.
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -258,13 +260,13 @@ try {
   ok(!!line && !r.split('\n').some((l) => l.trim() === 'dictated-words'), 'a New terminal: typed at its prompt, not run', r.slice(-300))
   await shot(p, `${tag}dictation-terminal`)
 
-  // ---------- Settings › Voice & Meetings ----------
+  // ---------- Settings › Meetings & Voice ----------
   await p.locator('button[aria-label="Settings"]').first().click()
-  await p.locator('.st-nav-item', { hasText: 'Voice & Meetings' }).click(); await p.locator('.st-tabs [role="tab"]', { hasText: 'Dictation' }).click()
+  await p.locator('.st-nav-item', { hasText: 'Meetings & Voice' }).click(); await p.locator('.st-tabs [role="tab"]', { hasText: 'Dictation' }).click()
   const sec = p.locator('.st-dictation')
   await sec.waitFor({ timeout: 8000 })
   const label = mac ? '⌥Space' : 'Ctrl+Alt+Space'
-  ok((await sec.locator('.dict-key').innerText()).trim() === label, `Settings › Voice & Meetings: Dictation, with the key (${label})`, await sec.innerText())
+  ok((await sec.locator('.dict-key').innerText()).trim() === label, `Settings › Meetings & Voice: Dictation, with the key (${label})`, await sec.innerText())
   ok(!/in the background/i.test(await sec.innerText()) && /In the desktop app, the key works from other apps too/.test(await sec.innerText()), 'in a browser: no "from other apps" options, one quiet line about the desktop app')
   await shot(p, `${tag}settings-voice`)
   await sec.locator('button', { hasText: 'Change' }).click()
@@ -308,7 +310,7 @@ try {
       window.bridgeApp = { platform: navigator.platform.startsWith('Mac') ? 'darwin' : 'linux', desktop: true, dictateStatus: async () => s, dictateConfigure: async (x) => { window.__configured.push(x); return s } }
     }, status)
   } })
-  const voice = async (pg) => { await pg.locator('button[aria-label="Settings"]').first().click(); await pg.locator('.st-nav-item', { hasText: 'Voice & Meetings' }).click(); await pg.locator('.st-tabs [role="tab"]', { hasText: 'Dictation' }).click(); const s = pg.locator('.st-dictation'); await s.waitFor({ timeout: 8000 }); await sleep(300); return s }
+  const voice = async (pg) => { await pg.locator('button[aria-label="Settings"]').first().click(); await pg.locator('.st-nav-item', { hasText: 'Meetings & Voice' }).click(); await pg.locator('.st-tabs [role="tab"]', { hasText: 'Dictation' }).click(); const s = pg.locator('.st-dictation'); await s.waitFor({ timeout: 8000 }); await sleep(300); return s }
   {
     const d = await desktop({ mode: 'hold', via: 'bridgekeys', key: 'Alt+Space', active: true })
     let s = await voice(d.p)
@@ -587,6 +589,17 @@ try {
     const ws = await advanced(w.p)
     ok(await ws.locator('.dict-edit').count() === 0, 'Windows (not yet): not offered')
     await w.ctx.close()
+    // On a Mac with the key from other apps off, Edit by voice (which needs it) is still there,
+    // greyed, saying what it needs, with Turn On: not gone until then.
+    await kit.api('/settings', { dictation: { background: false } }, 'PATCH')
+    const g = await editApp({ ...HELD, platform: 'darwin', background: false, paste: { can: true, via: 'bridgekeys', asks: 'accessibility', allowed: true }, edit: { can: true, via: 'bridgekeys', asks: 'accessibility', on: false } })
+    await voice(g.p)
+    const gs = await advanced(g.p)
+    const needs = gs.locator('.st-needs-line', { hasText: 'Works while Bridge AI is in the background' })
+    ok(await gs.locator('.dict-edit').count() === 1 && await gs.locator('.dict-edit').evaluate((e) => !!e.closest('[inert]')) && await needs.isVisible(), 'a Mac, the key from other apps off: Edit by voice greyed, saying it needs that on', await gs.innerText())
+    await needs.locator('button', { hasText: 'Turn On' }).click()
+    ok(!!(await until(async () => (await kit.api('/settings')).effective?.dictation?.background === true && !(await needs.count()), 4000, 100)), 'and Turn On turns it on, Edit by voice usable')
+    await g.ctx.close()
   }
   await kit.api('/settings', { dictation: { edit: null, editModel: null, background: null } }, 'PATCH')
 
@@ -746,7 +759,7 @@ try {
     await key(h, 'cancel')
     await sleep(600)
     ok(sent.length === ns, 'Esc while listening: nothing sent')
-    // Settings › Voice & Meetings says Ask each time (changed since the window opened): nobody picked, no Send yet.
+    // Settings › Meetings & Voice says Ask each time (changed since the window opened): nobody picked, no Send yet.
     await kit.api('/settings', { dictation: { to: 'ask' } }, 'PATCH')
     said.push('who is this for')
     await key(h, 'down'); await listens(h); await sleep(1300); await key(h, 'up')

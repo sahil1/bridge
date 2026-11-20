@@ -277,9 +277,9 @@ try {
   await box2.fill('@bridge make this shorter')
   await box2.press(`${MOD}+Enter`)
   const ask = p.locator('.sd-threads .sd-thread', { hasText: 'what they come back for' })
-  ok(!!(await until(async () => /no model for AI Assist to answer with[\s\S]*Settings › Model Providers/.test(await ask.locator('.sd-thread-ai.bad').innerText().catch(() => '')), 10000, 200)) && (await ask.locator('button', { hasText: 'Open Model Providers' }).count()) === 1, 'your own @bridge with no model: the thread says there\'s none and how to add one, with Open Model Providers', await ask.innerText().catch(() => ''))
+  ok(!!(await until(async () => /no model for AI Assist to answer with[\s\S]*Settings › Agents & Models › Model Providers/.test(await ask.locator('.sd-thread-ai.bad').innerText().catch(() => '')), 10000, 200)) && (await ask.locator('button', { hasText: 'Open Model Providers' }).count()) === 1, 'your own @bridge with no model: the thread says there\'s none and how to add one, with Open Model Providers', await ask.innerText().catch(() => ''))
   await ask.locator('button', { hasText: 'Open Model Providers' }).click()
-  ok(!!(await until(async () => /Model Providers/.test(await p.locator('.modal.settings').innerText().catch(() => '')), 5000, 100)), 'which opens Settings › Model Providers')
+  ok(!!(await until(async () => (await p.locator('.modal.settings .st-tabs [role="tab"][aria-selected="true"]').innerText().catch(() => '')).trim() === 'Model Providers', 5000, 100)), 'which opens Settings › Agents & Models › Model Providers')
   await p.keyboard.press('Escape')
   await p.locator('.modal.settings').waitFor({ state: 'detached', timeout: 5000 }).catch(() => {})
   // A model: AI Assist's reply in the thread, its change a suggestion on the words.
