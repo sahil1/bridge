@@ -600,8 +600,22 @@ export async function page(b, url, { mode = 'light', theme = 'sky', width = 1440
   // A page whose process crashed is closed, and every call on it fails as "Target page, context or
   // browser has been closed" (dictation-cleanup in WebKit, once in CI): the log says so, and where.
   p.on('crash', () => console.log(`the page crashed (${b.browserType().name()}): ${p.url()}`))
-  await p.goto(url, { waitUntil })
+  try {
+    await p.goto(url, { waitUntil })
+  } catch (e) {
+    // Windows' "no buffer space" for a connection (scroll-ui, once on CI, 19 Nov): what the
+    // computer's TCP connections were then, by state, and the ports it hands out, for the log.
+    if (IS_WIN && /ERR_NO_BUFFER_SPACE|ERR_ADDRESS_(IN_USE|UNREACHABLE)/.test(e.message)) console.log(`TCP connections as it failed: ${socketsNow()}`)
+    throw e
+  }
   return { ctx, p, errors }
+}
+// Windows: this computer's TCP connections by state, and the range of ports it hands out.
+function socketsNow() {
+  const by = {}
+  for (const l of String(spawnSync('netstat', ['-an', '-p', 'tcp'], { encoding: 'utf8', windowsHide: true, timeout: 20000 }).stdout || '').split(/\r?\n/)) { const st = l.trim().split(/\s+/)[3]; if (/^[A-Z_]+$/.test(st || '')) by[st] = (by[st] || 0) + 1 }
+  const range = String(spawnSync('netsh', ['int', 'ipv4', 'show', 'dynamicport', 'tcp'], { encoding: 'utf8', windowsHide: true, timeout: 20000 }).stdout || '').replace(/\s+/g, ' ').trim()
+  return `${JSON.stringify(by)}; ${range}`
 }
 // A page's errors besides what WebKit reports for requests it couldn't make (offline, a reload, the
 // server starting again): each call to the API ("… due to access control checks"), and each of the
