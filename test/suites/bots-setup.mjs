@@ -298,7 +298,8 @@ try {
 
   // ---------- A test session, as it goes (asked once, where there are no sessions) ----------
   await part('a test session live', async () => {
-    await openBot(p, { name: 'Pricing Desk', tab: 'overview' })
+    await openBot(p, 'Pricing Desk')
+    await p.locator('.bp-main .sb-tabs [data-tab="overview"]').click()
     const form = p.locator('.bp [data-setting="bot-test"] [data-setting="test-session"]')
     await form.locator('textarea').fill('Hi [answer Hello, I\'m Pricing Desk.] [work 6] [peek]')
     await form.locator('button[type="submit"]').click()
