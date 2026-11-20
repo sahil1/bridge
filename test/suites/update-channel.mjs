@@ -12,19 +12,40 @@
 // switched on there by hand says so, with Leave Nightly. In light and dark, on a computer and on a
 // phone (nothing wider than the screen, each choice a whole 40 px target there). And `bridge-ai
 // channel` (with `bridge-ai nightly off` going back to the channel under it).
+// The update card in the top bar (src/components/UpdateChip.jsx), with each channel's release and
+// notes as they're made (a nightly's by scripts/nightly.js from a nightly's commits, a release's and
+// a beta's from CHANGELOG.md by scripts/release.js): the version short on one line (Bridge AI 99.0.0,
+// 99.1.0 · Beta 2, 99.1.0 · Nightly 7), when it came out and the version you have under it, at most
+// four highlights of at most two lines each (the label on the first) and none about the tests,
+// Update now and What's new, Update settings
+// last; in light and dark, in German and Japanese, inside the window; the Status menu's row and the
+// phone's line with the short name too.
 import fs from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
-import { execFile } from 'node:child_process'
-import { ROOT, startKit, checks, until, browser, page, shot, freePort, noServiceWorker } from '../lib/harness.mjs'
+import { execFile, spawnSync } from 'node:child_process'
+import { ROOT, OUT, startKit, checks, until, browser, page, shot, freePort, noServiceWorker } from '../lib/harness.mjs'
 
 const { ok, done } = checks('update-channel')
 const HOUR = 60 * 60 * 1000
+const nj = await import('../../scripts/nightly.js')
+
+// Each release's notes, as they're made: the nightly's from a nightly's commits (tests, CI and docs
+// among them), the beta's and the release's from this version's CHANGELOG.md section.
+const COMMITS = JSON.parse(fs.readFileSync(path.join(ROOT, 'test', 'fixtures', 'nightly-commits.json'), 'utf8'))
+const NIGHTLY_NOTES = nj.notesFor({ version: '99.1.0-nightly.20261116.7', sha: 'abcdef1234567', since: '99.1.0-nightly.20261115.6', changes: COMMITS, mac: '14.0' })
+fs.mkdirSync(OUT, { recursive: true })
+const notesFile = path.join(OUT, `update-channel-notes-${process.pid}.md`)
+const env = { ...process.env }
+delete env.GITHUB_REF_NAME // CI's branch, which release.js would take for the tag
+const wrote = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'release.js'), '--notes', notesFile], { cwd: ROOT, env, encoding: 'utf8' })
+const RELEASE_NOTES = wrote.status === 0 ? fs.readFileSync(notesFile, 'utf8') : 'Notes\n\n<!-- macOS 14.0 or later -->\n'
+ok(wrote.status === 0 && /^- \*\*/m.test(RELEASE_NOTES), 'a release\'s notes, as scripts/release.js makes them from CHANGELOG.md', wrote.stderr)
 
 // GitHub, stood in for: its list of releases (newest first) and its latest (the newest that isn't a
 // pre-release).
-const rel = (tag, o = {}) => ({ tag_name: tag, html_url: `https://github.com/sahil1/bridge/releases/tag/${tag}`, prerelease: !!o.pre, draft: false, body: 'Notes\n\n<!-- macOS 14.0 or later -->\n', published_at: new Date(Date.now() - 30 * HOUR).toISOString() })
-const LIST = [rel('v99.1.0-nightly.20261116.7', { pre: true }), rel('v99.1.0-beta.2', { pre: true }), rel('v99.0.0'), rel('v98.0.0')]
+const rel = (tag, o = {}) => ({ tag_name: tag, html_url: `https://github.com/sahil1/bridge/releases/tag/${tag}`, prerelease: !!o.pre, draft: false, body: o.body || 'Notes\n\n<!-- macOS 14.0 or later -->\n', published_at: new Date(Date.now() - 30 * HOUR).toISOString() })
+const LIST = [rel('v99.1.0-nightly.20261116.7', { pre: true, body: NIGHTLY_NOTES }), rel('v99.1.0-beta.2', { pre: true, body: RELEASE_NOTES }), rel('v99.0.0', { body: RELEASE_NOTES }), rel('v98.0.0')]
 const gh = http.createServer((req, res) => {
   const at = new URL(req.url, 'http://x').pathname
   const out = at.endsWith('/releases/latest') ? LIST.find((x) => !x.prerelease) : at.endsWith('/releases') ? LIST : null
@@ -212,6 +233,102 @@ try {
     await shot(p, `${tag}channel-docker-nightly`)
     await sec(p).locator('button', { hasText: 'Leave Nightly' }).click()
     ok(!!(await until(async () => !user(d).updates?.nightly && await sec(p).locator('.ab-channel-why').count() === 1, 8000)), 'Leave Nightly: switched off, and the note as before')
+    ok(errors.length === 0, 'no page errors', errors)
+    await ctx.close()
+  }
+
+  // ---------- The update card ----------
+  const card = await kitAs('card', 'app')
+  await card.api('/updates?refresh=1')
+  const here = (await card.api('/updates')).current
+  // What the card shows, and how it sits: how many lines each takes (its height against its line
+  // height: the title and the line under it one each, a highlight at most two, its label all on
+  // its first), what's cut short, and anything outside the card or the window.
+  const look = (p, sel) => p.locator(sel).evaluate((pop) => {
+    const box = pop.getBoundingClientRect()
+    const lh = (el) => { const cs = getComputedStyle(el); return parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.3 }
+    const rows = (el) => (el ? Math.round(el.getBoundingClientRect().height / lh(el)) : 0)
+    const text = (el) => el?.innerText.trim() || ''
+    const items = [...pop.querySelectorAll('.update-list > li')]
+    const labelFirst = (li) => { const b = li.querySelector('b'); return !b || (b.getClientRects().length === 1 && b.getBoundingClientRect().top - li.getBoundingClientRect().top < lh(li) / 2) }
+    return {
+      title: text(pop.querySelector('.update-title')), meta: text(pop.querySelector('.update-meta')),
+      items: items.map(text), labels: items.map((li) => text(li.querySelector('b')).replace(/:$/, '')),
+      rows: items.map(rows),
+      lines: rows(pop.querySelector('.update-title')) === 1 && rows(pop.querySelector('.update-meta')) === 1 && items.every((li) => rows(li) >= 1 && rows(li) <= 2 && labelFirst(li)),
+      titleCut: (() => { const el = pop.querySelector('.update-title'); return !!el && el.scrollWidth > el.clientWidth + 1 })(),
+      acts: [...pop.querySelectorAll('.update-acts > *')].map(text), foot: text(pop.querySelector('.update-foot')),
+      inside: box.left >= -1 && box.right <= window.innerWidth + 1 && (!!pop.closest('.status-pop') || box.bottom <= window.innerHeight + 1) && [...pop.querySelectorAll('*')].every((x) => { const r = x.getBoundingClientRect(); return !r.width || (r.left >= box.left - 1 && r.right <= box.right + 1) }),
+      last: pop.lastElementChild?.className || '',
+    }
+  })
+  const openCard = async (p) => {
+    const chip = p.locator('.topbar .x-update .update-chip')
+    await chip.waitFor({ timeout: 15000 }).catch(() => {})
+    await chip.click({ timeout: 3000 }).catch(() => {})
+    await p.locator('.topbar .update-pop').waitFor({ timeout: 5000 }).catch(() => {})
+    await p.waitForTimeout(300) // its fade-in
+  }
+  const groups = nj.grouped(COMMITS).map((g) => g.label)
+  const CARDS = [
+    ['stable', 'Bridge AI 99.0.0', null],
+    ['early', 'Bridge AI 99.1.0 · Beta 2', 'Early Access'],
+    ['nightly', 'Bridge AI 99.1.0 · Nightly 7', null],
+  ]
+  for (const [channel, title, kind] of CARDS) {
+    await card.api('/updates/channel', { channel })
+    for (const [what, o] of [['light', { mode: 'light', theme: 'sky' }], ['dark', { mode: 'dark', theme: 'midnight' }]]) {
+      const { ctx, p, errors } = await page(b, card.url, { ...o, before: desktop })
+      await openCard(p)
+      await shot(p, `${tag}update-card-${channel}-${what}`)
+      const c = await look(p, '.topbar .update-pop').catch((e) => ({ error: e.message }))
+      ok(c.title === title && !c.titleCut && c.lines, `the card (${channel}, ${what}): ${title}, on one line, cut short nowhere; each highlight at most two lines, its label on the first`, c)
+      ok(new RegExp(`^\\w{3} \\d{1,2} · ${kind ? `${kind} · ` : ''}you have ${here.replace(/\./g, '\\.')}$`).test(c.meta), `under it: the day it came out, ${kind ? 'Early Access, ' : ''}and the version you have`, c.meta)
+      ok(c.items?.length >= 1 && c.items.length <= 4 && c.items.every((x) => !/\bTests?\b|\bCI\b|~\\|\.mjs\b|[0-9a-f]{7}/.test(x)), 'at most four highlights, none about the tests or a commit', c.items)
+      if (channel === 'nightly') ok(JSON.stringify(c.labels) === JSON.stringify(groups.slice(0, c.items.length)) && c.items.length === Math.min(4, groups.length) && c.rows.includes(2), 'a nightly\'s: its first parts, each its label and first line, a long one on a second line rather than cut at the first', { shown: c.labels, groups, rows: c.rows })
+      ok(/^Update now/.test(c.acts?.[0] || '') && c.acts?.[1] === "What's new" && c.foot === 'Update settings' && /update-foot/.test(c.last), 'then Update now and What\'s new, and Update settings last, on its own', c)
+      ok(c.inside, 'nothing outside the card or the window', c)
+      ok(errors.length === 0, 'no page errors', errors)
+      await ctx.close()
+    }
+  }
+  // In German and Japanese, longer and shorter: the same lines, nothing outside the card.
+  for (const lang of ['de', 'ja']) {
+    const { ctx, p, errors } = await page(b, card.url, { mode: lang === 'ja' ? 'dark' : 'light', theme: lang === 'ja' ? 'midnight' : 'sky', store: { 'cc-lang': lang }, before: desktop })
+    await openCard(p)
+    await shot(p, `${tag}update-card-nightly-${lang}`)
+    const c = await look(p, '.topbar .update-pop').catch((e) => ({ error: e.message }))
+    const want = lang === 'de' ? 'Bridge AI 99.1.0 · Nightly 7' : 'Bridge AI 99.1.0 · ナイトリー 7'
+    ok(c.title === want && !c.titleCut && c.lines && c.inside && c.items?.length === Math.min(4, groups.length), `in ${lang === 'de' ? 'German' : 'Japanese'}: ${want}, highlights at most two lines each, nothing outside the card`, c)
+    ok(c.foot === (lang === 'de' ? 'Update-Einstellungen' : 'アップデートの設定') && /^(Jetzt aktualisieren|今すぐアップデート)/.test(c.acts?.[0] || ''), 'its words in that language', c)
+    ok(errors.length === 0, 'no page errors', errors)
+    await ctx.close()
+  }
+  {
+    // The Status menu's row: the short name, and the same card under it.
+    const { ctx, p, errors } = await page(b, card.url, { mode: 'light', theme: 'sky', before: desktop })
+    await p.locator('.topbar .status-btn').click({ timeout: 15000 }).catch(() => {})
+    const row = p.locator('.status-list .update-row')
+    const said = await until(async () => (await row.innerText().catch(() => '')).trim(), 8000)
+    await row.click({ timeout: 3000 }).catch(() => {})
+    await p.locator('.status-list .update-pop').waitFor({ timeout: 5000 }).catch(() => {})
+    await p.waitForTimeout(300) // the arrow turning
+    await shot(p, `${tag}update-card-status-row`)
+    const c = await look(p, '.status-list .update-pop').catch((e) => ({ error: e.message }))
+    const turned = await row.locator('.status-go').evaluate((el) => getComputedStyle(el).transform).catch(() => '')
+    ok(said === 'Bridge AI Nightly 7 is available' && c.title === 'Bridge AI 99.1.0 · Nightly 7' && c.lines && c.inside, 'the Status menu: "Bridge AI Nightly 7 is available", the card under it, highlights at most two lines each', { said, c })
+    ok(/^matrix\(0, 1, -1, 0|^matrix\((-?[\d.e-]+), 1, -1, \1/.test(turned), 'its arrow turned to point at it', turned)
+    ok(errors.length === 0, 'no page errors', errors)
+    await ctx.close()
+  }
+  for (const mode of ['light', 'dark']) {
+    // A phone: the line under the top bar, with the short name, on one line.
+    const { ctx, p, errors } = await page(b, card.url, { mode, theme: mode === 'dark' ? 'midnight' : 'sky', phone: true })
+    const line = p.locator('.top-notes .update-note')
+    const said = await until(async () => (await line.innerText().catch(() => '')).trim(), 15000)
+    const one = await line.locator('.top-note-text').evaluate((el) => { const cs = getComputedStyle(el); return el.getBoundingClientRect().height <= (parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.3) * 1.5 && document.documentElement.scrollWidth <= window.innerWidth + 1 }).catch(() => false)
+    await shot(p, `${tag}update-card-phone-${mode}`)
+    ok(said === 'Bridge AI Nightly 7 is available' && one, `a phone (${mode}): "Bridge AI Nightly 7 is available", on one line`, said)
     ok(errors.length === 0, 'no page errors', errors)
     await ctx.close()
   }
