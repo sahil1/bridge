@@ -360,7 +360,11 @@ try {
     ok(!fs.existsSync(H('sneaky.md')) && !fs.existsSync(H('GIT~1')), 'nothing of it in ~/Hiring')
     const hooks = logOf('hooks.log')
     ok(hooks.some((x) => x.status === 2 && /\.claude\/settings\.local\.json$/.test(slashed(x.path))) && hooks.some((x) => x.status === 2 && /GIT~1\/config$/.test(slashed(x.path))),'its hook refuses Claude Code\'s own settings beside its copy, and GIT~1', hooks.filter((x) => x.status === 2).map((x) => x.path))
-    ok(tries().some((x) => x.try === 'force-write' && !x.done), 'and nothing new can be made beside its copy at all (its top is read-only)')
+    ok(tries().some((x) => x.try === 'force-write' && !x.done), 'and nothing new can be made beside its copy at all (its top is read-only)', { tries: tries().filter((x) => x.try === 'force-write'), ...(IS_WIN ? { rights: logOf('rights.log').slice(-1) } : {}) })
+    // (On Windows, closed by its access list, which a program with Windows' backup and restore rights
+    // on passes: its agent runs without them, taken out of Bridge AI's own, as Git Bash turns them on
+    // for an administrator, and as this test is run.)
+    if (IS_WIN) { const rights = logOf('rights.log'); ok(rights.length && rights.every((x) => x.on && x.backup !== x.on && x.restore !== x.on), 'its agent runs without Windows\' backup and restore rights on, even where Bridge AI was started with them', rights.slice(-2)) }
     // (On a Mac and Linux a command for sh; on Windows the program and its arguments, started with no
     // shell, as Git Bash and PowerShell each quote their own way.)
     const ran = hooks.filter((x) => x.command)

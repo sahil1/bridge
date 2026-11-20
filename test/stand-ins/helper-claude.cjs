@@ -209,6 +209,15 @@ const denied = (p) => { const f = path.resolve(p).replace(/\\/g, '/').replace(/^
 // (What --settings gave it, as it read it: the run's file goes once the run has, so it's kept here.)
 const given = flagSettings ? loaded.findLast((x) => x.file === flagSettings)?.s || null : null
 if (message) note('helpers-started.log', { args, cwd: process.cwd(), message, secrets, settings: loaded.map((x) => x.file), given, ...(pointed ? { briefFile: pointed[1] } : {}) })
+// (On Windows, a run that changes files: whether it has Windows' backup and restore rights on, which
+// make a file past any folder's access list, in ~/rights.log, each as whoami says it, beside the
+// state of one everyone has on.)
+if (message && process.platform === 'win32' && allowed.some((x) => /^Edit\(\.\/\*\*\)$/.test(x))) {
+  const r = require('node:child_process').spawnSync(path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'whoami.exe'), ['/priv', '/fo', 'csv', '/nh'], { encoding: 'utf8', windowsHide: true })
+  const rows = String(r.stdout || '').split(/\r?\n/).map((l) => l.trim().replace(/^"|"$/g, '').split('","'))
+  const state = (n) => rows.find((c) => c[0] === n)?.[2] || null
+  note('rights.log', { cwd: process.cwd(), backup: state('SeBackupPrivilege'), restore: state('SeRestorePrivilege'), on: state('SeChangeNotifyPrivilege') })
+}
 // Their SessionStart hooks' commands, run as it starts (once its folder is trusted, as Claude Code holds them till then).
 const sessionStart = () => {
   for (const x of loaded) {
