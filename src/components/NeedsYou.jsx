@@ -378,7 +378,7 @@ const timeOf = (iso) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', 
 // a change to files with a draft shows in it, with Approve and Send or Deny while it waits, and Undo
 // once it's made.
 export function SlackItem(props) {
-  return props.it.kind === 'push' || props.it.push?.state === 'waiting' ? <PushItem {...props} /> : props.it.state === 'screened' ? <ScreenItem {...props} /> : props.it.limit?.phase === 'asking' ? <LimitItem {...props} /> : <DraftItem {...props} />
+  return props.it.kind === 'push' ? <PushItem {...props} /> : props.it.state === 'screened' ? <ScreenItem {...props} /> : props.it.limit?.phase === 'asking' ? <LimitItem {...props} /> : <DraftItem {...props} />
 }
 
 // The bot a card is from, which opens its session (Bots › Sessions) or, with none, its page; in the
@@ -394,20 +394,9 @@ function BotLink({ it, bot }) {
 // and Approve (Bridge AI pushes a branch and opens a draft pull request with your gh; never a
 // merge) or Deny (it's told). Nothing leaves this computer until you approve.
 export function PushItem({ it, onDone, setNote }) {
-  const [busy, setBusy] = useState(false)
-  const [problem, setProblem] = useState(null)
-  const p = it.push || {}
   const who = it.from?.name || t('Someone')
   const bot = it.bot?.name || t('Your bot')
-  const go = async (approve) => {
-    setBusy(true)
-    setProblem(null)
-    try {
-      const out = await onDevice(null, `/bots/questions/${encodeURIComponent(it.id)}/push`, { act: approve ? 'approve' : 'deny', hash: p.hash || null })
-      onDone(it)
-      setNote({ text: out.already ? t('That isn\'t waiting any more') : approve ? t('Approved: Bridge AI pushes it and opens a draft pull request with your gh.') : t('Denied: nothing is pushed, and {bot} is told.', { bot }) })
-    } catch (e) { setProblem(e.message) } finally { setBusy(false) }
-  }
+  const p = it.push || {}
   return (
     <article className="ny-item t-slack t-push yours" aria-label={t('{bot} asks to push its work {where}', { bot, where: whereOf(it) })} data-setting="ny-push">
       <div className="ny-top">
@@ -418,10 +407,33 @@ export function PushItem({ it, onDone, setNote }) {
         <BotLink it={it} bot={bot} />
       </div>
       <p className="ny-text">{t('{bot} asks to push its work for {name} {where}:', { bot, name: who, where: whereOf(it) })}</p>
+      <PushOf it={it} onDone={onDone} setNote={setNote} />
+    </article>
+  )
+}
+// What a push would send, and Approve (by the head it would push: a branch that moved on is shown
+// again) or Deny: a card of its own, or part of a draft that waits too.
+function PushOf({ it, onDone, setNote }) {
+  const [busy, setBusy] = useState(false)
+  const [problem, setProblem] = useState(null)
+  const p = it.push || {}
+  const bot = it.bot?.name || t('Your bot')
+  const go = async (approve) => {
+    setBusy(true)
+    setProblem(null)
+    try {
+      const out = await onDevice(null, `/bots/questions/${encodeURIComponent(it.id)}/push`, approve ? { act: 'approve', hash: p.head || p.hash || null } : { act: 'deny' })
+      onDone(it)
+      setNote({ text: out.already ? t('That isn\'t waiting any more') : approve ? t('Approved: Bridge AI pushes it and opens a draft pull request with your gh.') : t('Denied: nothing is pushed, and {bot} is told.', { bot }) })
+    } catch (e) { setProblem(e.message) } finally { setBusy(false) }
+  }
+  const files = Array.isArray(p.files) ? p.files.map((f) => f.path || f).filter(Boolean) : []
+  return (
+    <div className="ny-push" data-setting="ny-push-of">
       {p.title && <p className="ny-said">“{p.title}”</p>}
       {p.summary && <p className="muted small ny-from">{p.summary}</p>}
       {p.branch && <p className="muted small ny-from mono"><Icon name="branch" size={11} /> {p.branch}</p>}
-      {p.stat && <p className="muted small ny-from mono">{p.stat}</p>}
+      {p.stat ? <p className="muted small ny-from mono">{p.stat}</p> : files.length > 0 && <p className="muted small ny-from mono">{files.slice(0, 6).join(', ')}{files.length > 6 ? ` ${t('and {n} more', { n: files.length - 6 })}` : ''}</p>}
       {p.diff && <pre className="ny-change" aria-label={t('The diff')}>{p.diff}</pre>}
       <p className="muted small ny-from"><Icon name="info" size={11} /> {t('Approve, and Bridge AI pushes a branch and opens a draft pull request with your gh. It never merges.')}</p>
       {problem && <p className="ny-problem" role="alert"><Icon name="alert" size={12} />{problem}</p>}
@@ -429,7 +441,7 @@ export function PushItem({ it, onDone, setNote }) {
         <button type="button" className="btn small primary" disabled={busy} onClick={() => go(true)}><Icon name="check" size={12} /> {t('Approve the push')}</button>
         <button type="button" className="btn small" disabled={busy} onClick={() => go(false)}><Icon name="x" size={12} /> {t('Deny')}</button>
       </div>
-    </article>
+    </div>
   )
 }
 
@@ -617,6 +629,7 @@ function DraftItem({ it, onDone, setNote }) {
         </>
       )}
       <WriteOf it={it} onUndo={undo} busy={busy} whole={whole} onMore={more} />
+      {it.push?.state === 'waiting' && <PushOf it={it} onDone={onDone} setNote={setNote} />}
       {it.ownerAsked && <p className="muted small ny-from"><Icon name="chat" size={11} /> {t('Also in your Slack direct messages: answer it there or here.')}</p>}
       <textarea className="ny-draft" value={text} onChange={(e) => setText(e.target.value)} rows={Math.min(8, Math.max(3, text.split('\n').length + 1))} placeholder={t('Write the reply…')} aria-label={t('Reply to {name}', { name: who })} disabled={busy || limit.busy} />
       {(problem || limit.problem) && <p className="ny-problem" role="alert"><Icon name="alert" size={12} />{problem || limit.problem}</p>}

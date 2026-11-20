@@ -4508,7 +4508,7 @@ async function botView(b, { brief = false } = {}) {
   const routinesNow = await routines.list().catch(() => ({ routines: [] }))
   return {
     ...base, ...v,
-    settings: { who: b.who, askers: b.askers, others: b.others, readsFrom: b.readsFrom, instructionsFile: b.instructionsFile, agent: b.agent, auto: b.auto, agentCopies: b.agentCopies, retention: b.retention, max: b.max, owner: b.owner, owners: b.owners, changes: b.changes, repo: b.repo, writesTo: b.writesTo, trustYou: b.trustYou, trusted: b.trusted, handsTo: b.handsTo, limits: b.limits, memory: b.memory, paused: b.paused, muted: b.muted, listen: b.listen, agentsStatus: b.agentsStatus, mcp: b.mcp, answerers: b.answerers, fallback: b.fallback, answerIn: b.answerIn, attachAuto: b.attachAuto, attachConfig: b.attachConfig, bash: b.bash, domains: b.domains },
+    settings: { who: b.who, askers: b.askers, others: b.others, readsFrom: b.readsFrom, instructionsFile: b.instructionsFile, agent: b.agent, auto: b.auto, agentCopies: b.agentCopies, retention: b.retention, max: b.max, owner: b.owner, owners: b.owners, changes: b.changes, repo: b.repo, writesTo: b.writesTo, trustYou: b.trustYou, trusted: b.trusted, handsTo: b.handsTo, limits: b.limits, memory: b.memory, paused: b.paused, muted: b.muted, listen: b.listen, agentsStatus: b.agentsStatus, mcp: b.mcp, answerers: b.answerers, fallback: b.fallback, answerIn: b.answerIn, attachAuto: b.attachAuto, attachConfig: b.attachConfig },
     // (Its other bots, to hand a change to files to: each, and whether it changes files.)
     otherBots: botsStore.live().filter((x) => x.id !== b.id).map((x) => ({ id: x.id, name: x.name, description: x.description, edits: x.changes === 'edit', writesTo: x.writesTo })),
     carryOn: botsStore.CARRY_ON_MIN,

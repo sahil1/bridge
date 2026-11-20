@@ -22,8 +22,10 @@ import './bots-home.css'
 //     starts it again with what it remembers.
 // The same on a phone, through the relay.
 
-const isWaiting = (x) => ['draft', 'screened'].includes(x.state) || x.limit?.phase === 'asking' || x.push?.state === 'waiting'
-const asItem = (x, s) => ({ ...x, id: x.q || x.id, bot: s.bot, place: s.place, inSession: true, draft: typeof x.draft === 'string' ? x.draft : '', ...(x.push?.state === 'waiting' ? { kind: 'push' } : {}) })
+// (Your own step in's answer, a draft that never goes by itself, is a turn with Post to thread.)
+const isWaiting = (x) => (x.state === 'draft' && !x.steer) || x.state === 'screened' || x.limit?.phase === 'asking' || x.push?.state === 'waiting'
+const pushOnly = (x) => x.push?.state === 'waiting' && x.state !== 'draft' && x.state !== 'screened' && x.limit?.phase !== 'asking'
+const asItem = (x, s) => ({ ...x, id: x.q || x.id, bot: s.bot, place: s.place, session: s.id, inSession: true, draft: typeof x.draft === 'string' ? x.draft : '', ...(pushOnly(x) ? { kind: 'push' } : {}) })
 const viewKey = (sid) => `cc-session-view-${sid}`
 
 export default function SessionView({ sid, phone = false, fleet = null }) {
@@ -102,7 +104,7 @@ function Thread({ s, turns, reload, setNote, pane }) {
         {turns.map((x, i) => (
           <li key={x.q || i} className={`bh-turn${isWaiting(x) ? ' waiting' : ''}`} data-turn={x.q || i} data-state={x.state || ''}>
             {isWaiting(x)
-              ? (x.push?.state === 'waiting' ? <PushItem it={asItem(x, s)} onDone={done} setNote={setNote} /> : <SlackItem it={asItem(x, s)} onDone={done} setNote={setNote} />)
+              ? (pushOnly(x) ? <PushItem it={asItem(x, s)} onDone={done} setNote={setNote} /> : <SlackItem it={asItem(x, s)} onDone={done} setNote={setNote} />)
               : <TurnBody x={x} s={s} onDone={done} setNote={setNote} />}
           </li>
         ))}
@@ -126,6 +128,13 @@ function TurnBody({ x, s, onDone, setNote }) {
     try { await api(`/bots/${encodeURIComponent(s.bot?.id || '')}/writes/${encodeURIComponent(x.write.id)}/undo`, { method: 'POST' }); setNote({ text: t('Undone: the files are back as they were.') }); onDone() } catch (e) { setNote({ bad: true, text: e.message }) }
     setBusy(false)
   }
+  // (Your step in's answer, kept here: Post to thread sends it where the session is.)
+  const post = async () => {
+    setBusy(true)
+    try { await api(`/bots/questions/${encodeURIComponent(x.q)}`, { method: 'POST', body: { send: true, text: x.draft } }); setNote({ text: t('Posted to the thread.') }); onDone() } catch (e) { setNote({ bad: true, text: e.message }) }
+    setBusy(false)
+  }
+  const nameOf = (v) => (typeof v === 'string' ? v : v?.name || v?.bot?.name || v?.to?.name || '')
   return (
     <>
       <div className="bh-turn-head">
@@ -141,8 +150,12 @@ function TurnBody({ x, s, onDone, setNote }) {
         </div>
       )}
       {!reply && OUTCOME()[state] && <p className="muted small">{OUTCOME()[state]}</p>}
+      {x.steer && x.state === 'draft' && x.draft && <div className="st-row"><button type="button" className="btn small" disabled={busy} onClick={post} data-setting="session-post"><Icon name="send" size={12} /> {t('Post to thread')}</button><span className="muted small">{t('Its answer to you stays here until you post it.')}</span></div>}
+      {x.consulting && <p className="muted small"><Icon name="working" size={11} /> {t('Waiting on {bot}, which it asked', { bot: nameOf(x.consulting) })}</p>}
+      {x.handed && <p className="muted small"><Icon name="bot" size={11} /> {t('Handed to {bot}', { bot: nameOf(x.handed) })}</p>}
+      {x.problem && <p className="error-text small">{x.problem}</p>}
       {x.write && <ul className="sb-writes"><WriteRow w={x.write} busy={busy} onUndo={x.write.state === 'applied' ? undo : null} /></ul>}
-      {x.push && x.push.state !== 'waiting' && <p className="muted small" data-push={x.push.state}><Icon name="branch" size={11} /> {x.push.state === 'approved' || x.push.pr ? t('Pushed as a draft pull request.') : x.push.state === 'denied' ? t('Its push was denied.') : t('A push: {state}', { state: x.push.state })}{x.push.pr?.url && <> <a href={x.push.pr.url} target="_blank" rel="noreferrer">{x.push.pr.url}</a></>}</p>}
+      {x.push && x.push.state !== 'waiting' && <p className="muted small" data-push={x.push.state}><Icon name="branch" size={11} /> {x.push.state === 'pushed' || x.push.state === 'approved' || x.push.pr ? t('Pushed as a draft pull request.') : x.push.state === 'denied' ? t('Its push was denied.') : x.push.error ? t('Its push couldn\'t go through: {why}', { why: x.push.error }) : t('A push: {state}', { state: x.push.state })}{x.push.pr?.url && <> <a href={x.push.pr.url} target="_blank" rel="noreferrer">{x.push.pr.url}</a></>}</p>}
       {x.limit?.carried && <p className="muted small"><Icon name="clock" size={11} /> {t('Nobody answered at its time limit, so it carried on.')}</p>}
       {x.limit?.phase === 'stopped' && <p className="muted small"><Icon name="clock" size={11} /> {t('Stopped at its Longest Run. Say “carry on” in the thread to go on.')}</p>}
     </>
@@ -155,7 +168,7 @@ function TurnBody({ x, s, onDone, setNote }) {
 function LivePane({ s, pane, fleet, phone, act, busy }) {
   const paneId = pane?.paneId || s.paneId || null
   const known = Array.isArray(fleet?.botSessions)
-  const a = known && paneId ? fleet.botSessions.find((x) => x.paneId === paneId) || null : null
+  const a = known ? fleet.botSessions.find((x) => (paneId && x.paneId === paneId) || x.helper?.session === s.id) || null : null
   if (a) {
     return (
       <div className="bh-live" data-setting="session-live">

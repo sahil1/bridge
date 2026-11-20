@@ -1497,8 +1497,9 @@ function Commands({ d, save }) {
   const s = d.settings
   const conf = usePoll('/config', 10 * 60 * 1000).data
   const win = conf?.platform === 'win32'
-  const bash = s.bash === 'sandboxed' ? 'sandboxed' : 'off'
-  const domains = Array.isArray(s.domains) ? s.domains : []
+  // (Read back from what the server says of its commands; what was just changed, at once.)
+  const bash = (s.bash ?? d.commands?.bash) === 'sandboxed' ? 'sandboxed' : 'off'
+  const domains = Array.isArray(s.domains) ? s.domains : Array.isArray(d.commands?.domains) ? d.commands.domains : []
   const [add, setAdd] = useState('')
   const keep = (e) => { e.preventDefault(); const x = add.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, ''); if (x && !domains.includes(x)) save({ domains: [...domains, x] }); setAdd('') }
   return (
@@ -1512,6 +1513,7 @@ function Commands({ d, save }) {
       <p className="muted small">{win ? t('Not on Windows: there\'s no Bash for it here.') : bash === 'sandboxed'
         ? t('It runs commands in Claude Code\'s sandbox, in its own copy of the folder, with no network but the domains below. git push, gh and changing a remote are always refused: a push waits for you.')
         : t('It runs no commands: it reads, and edits files where it may.')}</p>
+      {bash === 'sandboxed' && d.commands?.problem && <p className="st-note warn" role="status"><Icon name="alert" size={13} /><span>{t('It can\'t run commands here yet: {why}', { why: d.commands.problem })}</span></p>}
       {bash === 'sandboxed' && !win && (
         <>
           {domains.length > 0
@@ -1624,6 +1626,8 @@ function eventLine(e) {
                 : e.how === 'scheduled' ? t('A scheduled post: “{text}”', { text })
                   : e.how === 'try' ? t('{name} asked in Try It: “{text}”', { name: who, text })
                     : e.how === 'command' ? t('{name} gave it a command: {text}', { name: who, text })
+                      : e.how === 'steer' ? t('You stepped in: “{text}”', { text })
+                        : e.consult ? t('Asked by {bot} for {name}: “{text}”', { bot: e.consult.by?.name || e.consult.name || '', name: who, text })
                       : t('{name} mentioned it: “{text}”', { name: who, text })
       const on = e.carried ? `${line} ${t('(carrying on the conversation)')}` : line
       return e.files?.length ? `${on} ${t('(with {files})', { files: e.files.map((f) => f.name).join(', ') })}` : on
@@ -1633,6 +1637,7 @@ function eventLine(e) {
     case 'context': return e.problem ? t('Read the conversation: {why}', { why: e.problem }) : t('Read {n} earlier messages and {pins} pinned, as context', { n: e.messages?.length || 0, pins: e.pins?.length || 0 })
     case 'run.started': return t('{agent} started, reading {folders}{from}; instructions {version} from {source}', { agent: e.answerer?.label || (e.agent === 'codex' ? 'Codex' : e.agent === 'model' ? e.model || '' : 'Claude Code'), folders: e.folders?.length ? e.folders.join(', ') : t('no folders'), from: e.from ? t(', going on from its earlier conversation') : '', version: e.instructions?.hash || '', source: e.instructions?.source === 'file' ? e.instructions.path : t('Settings') }) + (e.instructions?.problem ? ` (${e.instructions.problem})` : '') + (e.earlier?.problem ? ` (${e.earlier.problem})` : '')
         + (e.notRead?.length ? ` ${t('(not reading {folders})', { folders: e.notRead.map((x) => `${x.folder}: ${x.why}`).join('; ') })}` : '')
+        + (e.typed ? ` ${t('(typed into its live session)')}` : '')
         + (e.resumed ? ` ${e.resumed.how === 'session' ? t('(picking up where it stopped at its time limit, for {n} minutes)', { n: e.resumed.minutes }) : e.resumed.how === 'messages' ? t('(starting again after its time limit with what it had so far, for {n} minutes)', { n: e.resumed.minutes }) : t('(starting again after its time limit, for {n} minutes)', { n: e.resumed.minutes })}` : '')
     case 'limit.asked': return t('At its time limit, after {n} minutes: asked you whether it may carry on ({doing})', { n: e.ran ?? '?', doing: e.doing || '' })
     case 'limit.continued': {
@@ -1640,6 +1645,22 @@ function eventLine(e) {
       const from = fromSaid(e)
       return `${line}${e.resumed ? ` ${t('(after it was stopped)')}` : ''}${from ? ` (${from})` : ''}`
     }
+    case 'limit.carried': return t('Nobody answered at its time limit, so it carried on.')
+    case 'stopped': return e.why === 'longest' ? t('Stopped its turn at its Longest Run; the session stays') : t('Stopped: {why}', { why: e.why || '' })
+    // (A session: a live Claude Code for the conversation, its turns typed into it.)
+    case 'session.started': return t('Its session started')
+    case 'session.restarted': return t('Its session picked up again, remembering the thread')
+    case 'session.idle': return t('Its session went idle: its pane closed, the thread kept')
+    case 'session.ended': return e.by ? t('{name} ended its session', { name: e.by }) : t('Its session ended: {why}', { why: e.why || '' })
+    case 'session.steered': return t('{name} stepped in', { name: by })
+    case 'session.held': return t('Its session was held for you: {why}', { why: e.why || '' })
+    case 'push.requested': return t('Asked to push its work: “{title}”', { title: e.title || '' })
+    case 'push.moved': return t('Its branch moved on before the push was approved: asked again')
+    case 'push.approved': return t('{name} approved the push', { name: by }) + (e.pr?.url ? ` (${e.pr.url})` : '')
+    case 'push.declined': return t('{name} denied the push: nothing was pushed', { name: by })
+    case 'push.failed': return t('The push couldn\'t go through: {why}', { why: e.error || '' })
+    case 'consult.asked': return t('Asked {bot}: “{text}”', { bot: e.bot?.name || e.to?.name || '', text: e.question || e.text || '' })
+    case 'consult.answered': return t('{bot} answered it', { bot: e.bot?.name || e.from?.name || '' })
     case 'limit.stopped': { const from = fromSaid(e); return `${t('{name} stopped it at its time limit, after {n} minutes', { name: by, n: e.ran ?? '?' })}${from ? ` (${from})` : ''}` }
     case 'run.read': return t('Opened {files}', { files: (e.files || []).map((f) => f.what).join(', ') })
     case 'run.tools': return t('Used the MCP tools {tools}', { tools: (e.tools || []).map((x) => `${x.server}: ${x.tool}${x.n > 1 ? ` ×${x.n}` : ''}`).join(', ') })
@@ -1706,7 +1727,7 @@ function eventLine(e) {
     case 'write.undone': { const from = fromSaid(e); return `${t('{name} undid the change: {files}', { name: by, files: filesLine(e.files) })}${from ? ` (${from})` : ''}` }
     case 'write.replaced': return t('A newer change in this conversation took its place')
     case 'write.failed': return t('The change couldn\'t be made ({step}): {why}', { step: e.step || '', why: e.error || '' })
-    case 'handed': return t('Handed it on to {name}, which takes it from there under its own rules', { name: e.to?.name || '' })
+    case 'handed': return (e.by === 'chief' ? t('The Chief handed it to {name}, which takes it from there under its own rules', { name: e.to?.name || '' }) : t('Handed it on to {name}, which takes it from there under its own rules', { name: e.to?.name || '' })) + (e.note ? ` (“${e.note}”)` : '')
     case 'files.made': {
       // (A file it attached from its folders, with where it came from.)
       const made = (e.files || []).filter((f) => !f.from)
@@ -1726,7 +1747,7 @@ function eventLine(e) {
     default: return e.type
   }
 }
-const isBad = (e) => e.ok === false || ['posted.failed', 'refused', 'approval.failed', 'change.failed', 'write.failed', 'write.screened', 'run.skipped', 'run.passed'].includes(e.type) || (e.type === 'run.finished' && e.end === 'timeout') || (e.type === 'write.proposed' && e.refused?.length > 0)
+const isBad = (e) => e.ok === false || ['push.failed', 'posted.failed', 'refused', 'approval.failed', 'change.failed', 'write.failed', 'write.screened', 'run.skipped', 'run.passed'].includes(e.type) || (e.type === 'run.finished' && e.end === 'timeout') || (e.type === 'write.proposed' && e.refused?.length > 0)
 
 // A conversation's events, in order, as kept.
 function Events({ d, events }) {

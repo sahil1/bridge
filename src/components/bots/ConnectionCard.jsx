@@ -5,7 +5,7 @@ import { api } from '../../api.js'
 import { Guide, Status, UpdateApp, Connect, Owner, DiscordSetup, TeamsSetup, PLATFORMS, platName } from '../settings/Bots.jsx'
 import { STATE, asD, said, MakeShared, Defaults, Routed } from './Connections.jsx'
 import TestConnection from './TestConnection.jsx'
-import { openBot, refreshBots } from './bots.js'
+import { openBot, refreshBots, chiefIdOf } from './bots.js'
 import { t } from '../../i18n/index.js'
 import './bots-home.css'
 
@@ -53,7 +53,9 @@ export function ConnectionCard({ c, reload, open = null }) {
         <span className="sb-tag cn-kind">{c.shared ? t('Shared') : t('{bot}\'s own', { bot: c.own?.name || '' })}</span>
       </header>
       <p className={`st-note ${STATE[c.state] || 'warn'} cn-state`} role="status"><Icon name={c.state === 'connected' ? 'check' : c.state === 'error' ? 'alert' : 'info'} size={13} /><span className="sb-status-text">{said(c)}</span>{['error', 'reconnecting'].includes(c.state) && <button type="button" className="link-btn" onClick={again}>{t('Connect again')}</button>}</p>
-      {c.numConnections > 1 && <p className="st-note warn" role="status" data-setting="connection-copies"><Icon name="alert" size={13} /><span>{t('Another copy of Bridge AI is connected to this app too ({n} in all), so each message reaches only one of them. Disconnect the other copy, or give it an app of its own.', { n: c.numConnections })}</span></p>}
+      {(c.others || c.numConnections > 1) && <p className="st-note warn" role="status" data-setting="connection-copies"><Icon name="alert" size={13} /><span>{t('Another copy of Bridge AI is connected to this app too ({n} in all), so each message reaches only one of them. Disconnect the other copy, or give it an app of its own.', { n: Math.max(2, c.numConnections || 0, (c.others?.n || 0) + 1) })}</span></p>}
+      {c.limited && <p className="st-note warn" role="status" data-setting="connection-limited"><Icon name="clock" size={13} /><span>{t('{platform} is making it wait before it reads more ({n} s): answers that need the thread come a little later.', { platform: label, n: Math.round(Number(c.limited.wait) || 0) })}</span></p>}
+      {c.catchingUp && <p className="st-note" role="status" data-setting="connection-catching-up"><Icon name="refresh" size={13} /><span>{t('Catching up on what was asked while it was away: {done} of {of}.', { done: c.catchingUp.done || 0, of: c.catchingUp.of || 0 })}</span></p>}
       {!setUp && (
         <div className="bh-setup" data-setting="connection-setup">
           <Guide key={`${c.id}-guide`} d={d} platform={c.platform} />
@@ -70,6 +72,7 @@ export function ConnectionCard({ c, reload, open = null }) {
         {setUp && appSteps}
         {setUp && <Guide key={`${c.id}-guide`} d={d} platform={c.platform} />}
         {c.platform === 'slack' && <Owner d={d} save={save} />}
+        {c.platform === 'slack' && <ManifestLink c={c} />}
         {c.shared && c.platform === 'slack' && (
           <label className="st-check cn-part" data-setting="connection-perbot">
             <input type="checkbox" checked={!!c.perBot} onChange={(e) => patch({ perBot: e.target.checked })} />
@@ -110,12 +113,14 @@ function YouHere({ c, reload }) {
     return () => clearInterval(every)
   }, [code, linked]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (linked) setCode(null) }, [linked])
+  const [until, setUntil] = useState(null)
   const link = async () => {
     setBusy(true)
     setError(null)
-    try { const r = await api(`/connections/${c.id}/link`, { method: 'POST' }); setCode(r.code || null) } catch (e) { if (e.status === 404) setMissing(true); else setError(e.message) }
+    try { const r = await api(`/connections/${c.id}/link`, { method: 'POST' }); setCode(r.code || null); setUntil(r.expiresAt || null) } catch (e) { if (e.status === 404) setMissing(true); else setError(e.message) }
     setBusy(false)
   }
+  const at = (iso) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
   return (
     <div className="cn-part bh-you" data-setting="connection-you">
       <div className="st-row">
@@ -130,9 +135,10 @@ function YouHere({ c, reload }) {
         <div className="bh-code" role="status">
           <p className="small">{t('Send this code to {app} in a direct message:', { app })}</p>
           <div className="st-row"><code className="bh-code-text" data-setting="connection-link-code">{code}</code><CopyButton text={code} label={t('Copy the code')} className="btn small" size={12} /></div>
-          <p className="muted small">{t('Waiting for it… this card ticks itself once the app has it.')}</p>
+          <p className="muted small">{t('Waiting for it… this card ticks itself once the app has it.')}{until ? ` ${t('The code works until {time}.', { time: at(until) })}` : ''}</p>
         </div>
       )}
+      {!code && !linked && c.linking?.expiresAt && <p className="muted small">{t('A code is waiting for you to send it, until {time}. Lost it? Link me gives you a new one.', { time: at(c.linking.expiresAt) })}</p>}
       {missing && !linked && <p className="muted small">{t('Pick yourself from its people under Advanced.')}</p>}
       {error && <p className="error-text small" role="alert">{error}</p>}
     </div>
@@ -153,14 +159,14 @@ function Reach({ c, patch }) {
   }
   const bots = c.bots || []
   const chiefs = c.chief !== undefined
-  const chief = chiefs ? bots.find((b) => b.id === c.chief) || null : null
+  const chief = chiefs ? bots.find((b) => b.id === chiefIdOf(c)) || null : null
   const specialists = bots.filter((b) => b.id !== chief?.id)
   return (
     <div className="cn-part bh-reach" data-setting="connection-bots">
       {chiefs && bots.length > 0 && (
         <label className="sb-field bh-chief" data-setting="connection-chief">
           <span>{t('Chief')}</span>
-          <select className="st-input" value={c.chief || ''} onChange={(e) => patch({ chief: e.target.value || null })}>
+          <select className="st-input" value={chiefIdOf(c) || ''} onChange={(e) => patch({ chief: e.target.value || null })}>
             <option value="">{t('None: it asks them which bot')}</option>
             {bots.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
@@ -195,7 +201,7 @@ export function ConnectionsList({ phone = false }) {
   return (
     <div className={`cn sb bh-conns${phone ? ' phone' : ''}`} data-setting="bots-connections">
       {list.filter((c) => c.shared).map((c) => <ConnectionCard key={c.id} c={c} reload={load} />)}
-      {(missing.length > 0 || true) && (
+      {(
         <section className="st-sec cn-new" data-setting="connections-new">
           <h4>{list.some((c) => c.shared) ? t('Add a Connection') : t('Make Your First Connection')}</h4>
           {!list.length && <p className="muted small">{t('One app on Slack, Discord or Microsoft Teams for all your bots: made once, and each new bot is reached through it.')}</p>}
@@ -205,11 +211,29 @@ export function ConnectionsList({ phone = false }) {
               <MakeShared platform={k} suggested={r.suggested} onMade={() => load()} />
             </details>
           ))}
-          <p className="muted small bh-soon" data-platform="telegram"><Icon name="clock" size={12} /> {t('Telegram: coming')}</p>
+          {(r.coming?.length ? r.coming : [{ id: 'telegram', name: 'Telegram' }]).map((x) => <p key={x.id} className="muted small bh-soon" data-platform={x.id}><Icon name="clock" size={12} /> {t('{platform}: coming', { platform: x.name })}</p>)}
         </section>
       )}
       {list.some((c) => !c.shared) && <h4 className="cn-own-head">{t('Bots\' Own Connections')}</h4>}
       {list.filter((c) => !c.shared).map((c) => <ConnectionCard key={c.id} c={c} reload={load} />)}
+    </div>
+  )
+}
+
+// Its app's App Manifest page on Slack, where the manifest is pasted to update the app (the server
+// knows it once it has the app's id); nothing when it doesn't, or can't say.
+function ManifestLink({ c }) {
+  const [x, setX] = useState(null)
+  useEffect(() => {
+    let live = true
+    api(`/connections/${c.id}/manifest-url`).then((r) => live && setX(r), () => {})
+    return () => { live = false }
+  }, [c.id])
+  if (!x?.url) return null
+  return (
+    <div className="st-row" data-setting="connection-manifest">
+      <a className="btn small" href={x.url} target="_blank" rel="noreferrer"><Icon name="external" size={12} /> {t('Its App Manifest page')}</a>
+      {x.missing?.length > 0 && <span className="muted small">{t('It lacks {scopes}: paste the manifest there, then reinstall.', { scopes: x.missing.join(', ') })}</span>}
     </div>
   )
 }

@@ -566,6 +566,8 @@ function App() {
       if (a?.chief) { setMtab('mate'); setMobileAgent(null); setMateId(paneId) } else { setMtab('agents'); setMobileAgent(paneId) }
       return
     }
+    // Bots is one tab, whichever of its tabs it shows: Bots at another tab takes its place.
+    if (typeof paneId === 'string' && paneId.startsWith(BOTS_VIEW) && !replace) replace = wsRef.current.tabs.find((x) => x.startsWith(BOTS_VIEW) && x !== paneId) || null
     // Back from it shows the one it replaced in that tab again (src/backForward.js); not Home's New,
     // which an agent started there takes for good.
     if (replace && replace !== 'view:new' && wsRef.current.tabs.includes(replace) && !wsRef.current.tabs.includes(paneId)) replacedWith(replace, paneId)

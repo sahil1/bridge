@@ -58,3 +58,6 @@ export function filterSessions(f) {
   try { localStorage.setItem(FILTER_KEY, JSON.stringify(f)) } catch { /* private window */ }
   window.dispatchEvent(new CustomEvent('bridge-bots-filter', { detail: f }))
 }
+
+// A connection's Chief, by its bot's id: the server gives { id, name } (or null), an older one an id.
+export const chiefIdOf = (c) => (c?.chief && typeof c.chief === 'object' ? c.chief.id || null : c?.chief || null)

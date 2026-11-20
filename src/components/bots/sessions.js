@@ -13,23 +13,25 @@ export function usePolled(path, ms = 4000) {
   const [state, setState] = useState({ data: null, error: null, missing: false })
   const live = useRef(true)
   const asked = useRef(0)
-  const load = useCallback(() => {
-    if (!path) return Promise.resolve()
+  const gone = useRef(false) // a 404: not asked again until the path changes, or reload() asks
+  const load = useCallback((force = false) => {
+    if (!path || (gone.current && force !== true)) return Promise.resolve()
     const n = ++asked.current
     return api(path).then(
-      (data) => { if (live.current && n === asked.current) setState({ data, error: null, missing: false }) },
-      (e) => { if (live.current && n === asked.current) setState((s) => ({ data: e.status === 404 ? null : s.data, error: e.status === 404 ? null : e.message, missing: e.status === 404 })) },
+      (data) => { gone.current = false; if (live.current && n === asked.current) setState({ data, error: null, missing: false }) },
+      (e) => { gone.current = e.status === 404; if (live.current && n === asked.current) setState((s) => ({ data: e.status === 404 ? null : s.data, error: e.status === 404 ? null : e.message, missing: e.status === 404 })) },
     )
   }, [path])
   useEffect(() => {
     live.current = true
+    gone.current = false
     setState({ data: null, error: null, missing: false })
     if (!path) return undefined
     load()
     const every = setInterval(() => { if (!document.hidden) load() }, ms)
     return () => { live.current = false; clearInterval(every) }
   }, [path, ms, load])
-  return { ...state, reload: load }
+  return { ...state, reload: () => load(true) }
 }
 
 // How a session stands: working on a turn, waiting for you (a draft, a change, a push, a question at
@@ -42,7 +44,7 @@ export const WAITING = () => ({ draft: t('a reply to check'), write: t('a change
 export function placeOf(p) {
   if (!p) return t('a channel')
   if (p.kind === 'dm') return t('a direct message')
-  if (p.kind === 'test') return t('a test session')
+  if (p.kind === 'test' || p.kind === 'try') return t('a test session')
   if (!p.name) return t('a channel')
   return String(p.id || '').startsWith('teams:') ? p.name : `#${p.name}`
 }

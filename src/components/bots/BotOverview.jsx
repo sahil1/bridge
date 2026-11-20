@@ -5,7 +5,7 @@ import { platName } from '../settings/Bots.jsx'
 import Conversations from './Conversations.jsx'
 import { SessionRow, StartTest } from './SessionList.jsx'
 import { usePolled, noteTitle } from './sessions.js'
-import { filterSessions, openBots } from './bots.js'
+import { chiefIdOf, filterSessions, openBots } from './bots.js'
 import { t } from '../../i18n/index.js'
 import './bots-home.css'
 
@@ -16,7 +16,7 @@ import './bots-home.css'
 export default function BotOverview({ d, onTab }) {
   const r = usePolled(`/bots/sessions?bot=${encodeURIComponent(d.id)}`, 5000)
   const conns = usePoll('/connections', 15000).data?.connections || []
-  const chiefOf = conns.filter((c) => c.chief === d.id)
+  const chiefOf = conns.filter((c) => chiefIdOf(c) === d.id)
   const via = Object.entries(d.connections || {}).filter(([, c]) => c)
   const folders = (d.folders || []).map((f) => f.shown)
   const sessions = (r.data?.sessions || []).slice(0, 5)

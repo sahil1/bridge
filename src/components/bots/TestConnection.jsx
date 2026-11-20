@@ -80,11 +80,15 @@ export default function TestConnection({ c, onDone }) {
 function whySaid(r, c) {
   const bot = r.bot?.name || ''
   const app = c.platform === 'teams' ? c.name : `@${c.name}`
-  const ai = r.detail === 'no-model' ? t('There\'s no model for AI Assist, so it couldn\'t pick.')
+  const ai = r.detail === 'no-chief' ? t('There\'s no Chief on this connection.')
+    : r.detail === 'not-chief' ? t('They may not ask its Chief.')
+    : r.detail === 'no-model' ? t('There\'s no model for AI Assist, so it couldn\'t pick.')
     : r.detail === 'unsure' ? t('AI Assist couldn\'t tell which from their descriptions.')
       : r.detail === 'off' ? t('AI Assist doesn\'t pick on this connection.')
         : r.detail ? t('AI Assist couldn\'t answer: {why}', { why: r.detail }) : ''
-  const n = (k) => (c.rules || []).indexOf(k) + 1
+  // (The last rule is the Chief's now; a connection from before had AI Assist's pick and the bot
+  // for when nothing says which.)
+  const n = (k) => (c.rules || []).indexOf(k) + 1 || (c.rules || []).indexOf(k === 'among' || k === 'unsure' ? 'chief' : k) + 1
   switch (r.rule) {
     case 'command': return t('Rule {n}, a command: {command} goes to {bot}.', { n: n('command'), command: r.detail || '', bot })
     case 'default': return t('Rule {n}, the channel\'s bot: everything asked in #{channel} goes to {bot}.', { n: n('default'), channel: r.detail || '', bot })

@@ -7,7 +7,7 @@ import SessionList from './SessionList.jsx'
 import { BotDot } from './RailBots.jsx'
 import { accessSaid } from './access.js'
 import { usePolled, stateOf } from './sessions.js'
-import { useBots, statusOf, STATUS, needsCount, openBot, refreshBots, BOTS_TABS } from './bots.js'
+import { useBots, statusOf, STATUS, needsCount, openBot, refreshBots, chiefIdOf, BOTS_TABS } from './bots.js'
 import { t } from '../../i18n/index.js'
 import './bots-page.css'
 import './bots-home.css'
@@ -64,7 +64,7 @@ function BotsTab({ list, deleted, error, conns, adding, onTab }) {
   const live = list.filter((b) => !b.draft)
   const drafts = list.filter((b) => b.draft)
   // (The Chiefs first, each with the connections it's Chief of; then the specialists.)
-  const chiefOf = (id) => (conns || []).filter((c) => c.chief === id)
+  const chiefOf = (id) => (conns || []).filter((c) => chiefIdOf(c) === id)
   const chiefs = live.filter((b) => chiefOf(b.id).length)
   const rest = live.filter((b) => !chiefOf(b.id).length)
   const first = !live.length && !drafts.length
