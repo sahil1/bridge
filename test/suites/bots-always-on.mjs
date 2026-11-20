@@ -8,7 +8,9 @@
 //   The health check (scripts/health.js, the image's HEALTHCHECK) says each bot's connection, and
 //   is unhealthy while one can't connect until something's fixed; `bridge-ai status` lists them.
 //   Scheduled posts through Routines: run by hand and at their time, posted at the top of the
-//   channel, waiting for you first unless it may go without asking. Answering without a mention in
+//   channel, waiting for you first unless it may go without asking; one that sums up the channel reads
+//   the recent messages of those who may ask it only, runs no commands, and its post waits while
+//   others' words are in it. Answering without a mention in
 //   a channel you pick: people who may ask are answered, anyone else and what isn't for it left
 //   alone. Back after being away: what was missed (a DM, a mention, a reply in its thread) answered,
 //   its direct messages and the threads it's in first, then its channels, each oldest first. Settings › Bots, Channels and Scheduled Posts, in light and dark.
@@ -137,6 +139,27 @@ try {
     await slack.ask({ user: 'U0DANA', text: 'And sick days? [answer Five.]' })
     await sleep(2500)
     ok(!(await mac.convs('b1', 'And sick days')).length, 'off again: a message without a mention isn\'t for it')
+  })
+
+  // ---------- A scheduled post that sums up the channel ----------
+  // It reads the channel's recent messages from the people who may ask it (Dana's), never Eve's (who
+  // may not: left out, not even masked); runs at the least of what they may (no commands, even with
+  // commands on); and its post waits for you, though the bot may answer on its own, as Dana's words
+  // are in it.
+  await part('a post that sums up the channel', async () => {
+    await kit.api('/bots/b1/settings', { auto: true, bash: 'sandboxed' })
+    try {
+      const made = await kit.api('/routines', { name: 'Channel digest', command: 'Sum up the channel today [run ls] [answer Here is the digest.]', to: 'bot', bot: 'b1', channel: { id: 'C0LAUNCH', name: 'launch' } })
+      await kit.api(`/routines/${made.id}/run`, {})
+      const s = await mac.startOf('Sum up the channel today', 30000)
+      const brief = mac.briefOf(s)
+      ok(!!s && /latest messages from the people who may ask you/.test(brief) && /Lunch anyone\?/.test(brief) && !/Does anyone know the leave policy/.test(brief) && !/Eve:/.test(brief), 'it reads the channel\'s recent messages from those who may ask it, and nobody else\'s', brief.slice(0, 1200))
+      ok(!!s && !s.args.join(' ').includes('Bash') && !s.given?.sandbox, 'and runs no commands, with commands on', s?.args?.slice(0, 2))
+      const d = await mac.draftOf('Sum up the channel today')
+      ok(d?.how === 'scheduled' && !(await slack.state()).posted.some((x) => x.channel === 'C0LAUNCH' && /Here is the digest/.test(x.text || '')), 'its post waits for you, though the bot may answer on its own: others\' words are in it', d && { draft: d.draft, state: d.state })
+      if (d) await kit.api(`/bots/questions/${d.id}`, { send: false })
+      await kit.api(`/routines/${made.id}`, {}, 'DELETE').catch(() => null)
+    } finally { await kit.api('/bots/b1/settings', { auto: false, bash: 'off' }) }
   })
 
   // ---------- Back after being away: oldest first ----------
