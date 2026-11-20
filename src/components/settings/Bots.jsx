@@ -1470,6 +1470,23 @@ function PurposeField({ d, save }) {
     </div>
   )
 }
+// When You Ask: Full Access (server/frontdesk.js answer): your own asks, with only you in the
+// conversation, run as your own Claude Code in its folders (every tool, Bash too, no sandbox, no
+// copy); anyone else's words in it end that, and it goes on limited. Off: yours are limited too.
+function FullAccessSwitch({ d, save }) {
+  const on = d.settings.fullAccess !== false
+  return (
+    <div className="bs-field" data-setting="bot-full-access">
+      <label className="st-check bs-switch">
+        <input type="checkbox" role="switch" checked={on} onChange={(e) => save({ fullAccess: e.target.checked })} />
+        <span><b>{t('When You Ask: Full Access')}</b> <span className="muted small">{on
+          ? t('Like your own Claude Code: when only you are in the conversation, it works directly in its folders with every tool, commands too, no sandbox. Its edits can be undone; what commands change can\'t. A push and a destructive ask wait for your OK. Once anyone else\'s words reach it, it goes on limited.')
+          : t('Off: your asks are limited as everyone else\'s are.')}</span></span>
+      </label>
+      {on && <p className="st-note warn" role="note" data-full-warn><Icon name="alert" size={13} /><span>{t('Anyone using your Slack account can run anything on this computer through this bot.')}</span></p>}
+    </div>
+  )
+}
 // Whether it edits files in its folder: on, it changes files in the folder it reads (Edits Files in
 // Its Folders, with Undo, yours made at once and anyone else's waiting for you); off, it only answers.
 // Pull requests and the folders it changes files in, under Advanced › Changes.
@@ -1577,6 +1594,7 @@ function BotSettings({ d, save, reload, onDelete, again, onTab }) {
       <Askers d={d} save={save} />
       <section className="st-sec bs-basic">
         <EditsSwitch d={d} save={save} />
+        <FullAccessSwitch d={d} save={save} />
       </section>
       <details className="sb-how bs-adv" data-setting="bot-advanced" open={adv} onToggle={(e) => { setAdv(e.currentTarget.open); saved('cc-bot-advanced', e.currentTarget.open ? 'open' : 'shut') }}>
         <summary><Icon name="chevron" size={11} />{t('Advanced')}</summary>
@@ -1659,7 +1677,15 @@ function eventLine(e) {
     case 'limit.carried': return t('Nobody answered at its time limit, so it carried on.')
     case 'stopped': return e.why === 'longest' ? t('Stopped its turn at its Longest Run; the session stays') : t('Stopped: {why}', { why: e.why || '' })
     // (A session: a live Claude Code for the conversation, its turns typed into it.)
-    case 'session.started': return t('Its session started')
+    case 'session.started': return e.full ? t('Its session started with Full Access: only you in it') : e.fullWhy ? t('Its session started limited: {why}', { why: e.fullWhy }) : t('Its session started')
+    case 'session.alert': return t('It deleted {n} files in one session: you were told', { n: e.deletes ?? '?' })
+    case 'full.commands': return e.repo ? t('It ran commands, which can\'t be undone; since the session began, in {repo}: {stat}', { repo: e.repo, stat: e.stat || t('{n} files', { n: (e.files || []).length }) }) : t('It ran commands, which can\'t be undone')
+    case 'full.edits': return t('It edited files outside its folders, which can\'t be undone here: {files}', { files: (e.notKept || []).join(', ') })
+    case 'share.asked': return t('Asked to share “{title}” with {who}: waits for you', { title: e.title || '', who: e.whoSaid || '' })
+    case 'share.made': return t('Shared “{title}” for {lasts}', { title: e.title || '', lasts: e.lasts === 'hour' ? t('an hour') : e.lasts === 'week' ? t('a week') : t('a day') }) + (e.by ? ` (${t('approved by {name}', { name: e.by })})` : '')
+    case 'share.declined': return t('{name} didn\'t share it', { name: by })
+    case 'share.refused': return t('Couldn\'t share {name}: {why}', { name: e.name || '', why: e.why || '' })
+    case 'share.failed': return t('The link couldn\'t be made: {why}', { why: e.error || '' })
     case 'session.restarted': return t('Its session picked up again, remembering the thread')
     case 'session.idle': return t('Its session went idle: its pane closed, the thread kept')
     case 'session.ended': return e.by ? t('{name} ended its session', { name: e.by }) : t('Its session ended: {why}', { why: e.why || '' })

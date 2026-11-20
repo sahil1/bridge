@@ -24,7 +24,7 @@ import { startKit, startSlack, startDiscord, checks, until, sleep, TEST } from '
 const { ok, done } = checks('conn-check')
 const slack = await startSlack('conn-check')
 const dc = await startDiscord('conn-check')
-const ALL = ['app_mentions:read', 'chat:write', 'im:history', 'im:read', 'im:write', 'users:read', 'channels:history', 'channels:read', 'groups:history', 'groups:read', 'mpim:history', 'mpim:read', 'reactions:write', 'pins:read', 'files:read', 'files:write', 'commands', 'assistant:write', 'chat:write.customize']
+const ALL = ['app_mentions:read', 'chat:write', 'im:history', 'im:read', 'im:write', 'users:read', 'users:read.email', 'channels:history', 'channels:read', 'groups:history', 'groups:read', 'mpim:history', 'mpim:read', 'reactions:write', 'pins:read', 'files:read', 'files:write', 'commands', 'assistant:write', 'chat:write.customize']
 const kit = await startKit('conn-check', {
   config: { name: 'Tester', trials: { 'slack-bot': true } },
   env: ({ home }) => {

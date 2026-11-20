@@ -72,7 +72,7 @@ function save() {
   // version and at: whether what ends up reopening them was an update or the computer restarting.
   const out = {
     nextId, spaces, tabs, version: VERSION, at: Date.now(),
-    panes: [...panes.values(), ...[...reopening.values()].filter((p) => !panes.has(p.paneId))].map((p) => ({ paneId: p.paneId, tabId: p.tabId, workspaceId: p.workspaceId, kind: p.kind, cwd: p.cwd, model: p.model, ...(p.effort ? { effort: p.effort } : {}), ...(p.access === 'read' || p.access === 'change' ? { access: p.access, ...(p.dirs ? { dirs: p.dirs } : {}) } : {}), sessionId: p.sessionId, account: p.account, ...(p.env ? { env: p.env } : {}), ...(p.midTask ? { midTask: true } : {}), ...(p.continuedAt ? { continuedAt: p.continuedAt } : {}) })),
+    panes: [...panes.values(), ...[...reopening.values()].filter((p) => !panes.has(p.paneId))].map((p) => ({ paneId: p.paneId, tabId: p.tabId, workspaceId: p.workspaceId, kind: p.kind, cwd: p.cwd, model: p.model, ...(p.effort ? { effort: p.effort } : {}), ...(p.access === 'read' || p.access === 'change' || p.access === 'owner' ? { access: p.access, ...(p.dirs ? { dirs: p.dirs } : {}) } : {}), sessionId: p.sessionId, account: p.account, ...(p.env ? { env: p.env } : {}), ...(p.midTask ? { midTask: true } : {}), ...(p.continuedAt ? { continuedAt: p.continuedAt } : {}) })),
   }
   // Whole or not at all: which agents to reopen, and which were mid-task, survive a crash mid-save.
   try { writeFileAtomic(STATE, JSON.stringify(out, null, 2)) } catch { /* read-only disk: keep going */ }
@@ -410,7 +410,7 @@ export async function fleet() {
     kind: p.kind, status: statusOf(p), title: p.title, cwd: p.cwd, account: accounts.labelOf(p.account), accountId: p.account, accountSure: !!p.account,
     sessionId: p.sessionId, model: p.model, effort: p.effort || null, focused: false, seq: p.seq,
     // (How much it may do, as it was started: a bot's session is looked at before a turn is typed in.)
-    access: p.access === 'read' || p.access === 'change' ? p.access : null,
+    access: p.access === 'read' || p.access === 'change' || p.access === 'owner' ? p.access : null,
     setup: p.setup?.step || null, setupUrl: p.setup?.url || null, setupKeys: p.setup?.keys || null, setupCode: p.setup?.code || null,
   }))
   const tabList = tabs.map((t) => ({

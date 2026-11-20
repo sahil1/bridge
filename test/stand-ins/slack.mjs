@@ -80,16 +80,16 @@ import crypto from 'node:crypto'
 import { WebSocketServer } from 'ws'
 
 const [port, log] = process.argv.slice(2)
-const ALL = ['app_mentions:read', 'chat:write', 'im:history', 'im:read', 'im:write', 'users:read', 'channels:history', 'channels:read', 'groups:history', 'groups:read', 'mpim:history', 'mpim:read', 'reactions:write', 'pins:read', 'files:read', 'files:write', 'commands', 'assistant:write', 'chat:write.customize']
+const ALL = ['app_mentions:read', 'chat:write', 'im:history', 'im:read', 'im:write', 'users:read', 'users:read.email', 'channels:history', 'channels:read', 'groups:history', 'groups:read', 'mpim:history', 'mpim:read', 'reactions:write', 'pins:read', 'files:read', 'files:write', 'commands', 'assistant:write', 'chat:write.customize']
 const APPS = {
   A1: { app: 'xapp-test', bot: 'xoxb-test', who: { team_id: 'T0TEST', team: 'Acme Test', url: 'https://acme-test.slack.com/', user_id: 'UBOT', bot_id: 'BBOT', user: 'bridge_ai' }, scopes: ALL },
   A2: { app: 'xapp-two', bot: 'xoxb-two', who: { team_id: 'T0TEST', team: 'Acme Test', url: 'https://acme-test.slack.com/', user_id: 'UBOT2', bot_id: 'BBOT2', user: 'atlas' }, scopes: ALL },
 }
 const PEOPLE = [
-  { id: 'U0DANA', team_id: 'T0TEST', name: 'dana', real_name: 'Dana Reyes', profile: { display_name: 'Dana', real_name: 'Dana Reyes', title: 'Sales' } },
-  { id: 'U0SAM', team_id: 'T0TEST', name: 'sam', real_name: 'Sam Okafor', profile: { display_name: 'Sam', real_name: 'Sam Okafor', title: 'Support' } },
+  { id: 'U0DANA', team_id: 'T0TEST', name: 'dana', real_name: 'Dana Reyes', profile: { display_name: 'Dana', real_name: 'Dana Reyes', title: 'Sales', email: 'dana@acme.test' } }, // private-ok: a stand-in person's made-up email
+  { id: 'U0SAM', team_id: 'T0TEST', name: 'sam', real_name: 'Sam Okafor', profile: { display_name: 'Sam', real_name: 'Sam Okafor', title: 'Support', email: 'sam@acme.test' } }, // private-ok: a stand-in person's made-up email
   { id: 'U0EVE', team_id: 'T0TEST', name: 'eve', real_name: 'Eve Mallory', profile: { display_name: 'Eve', real_name: 'Eve Mallory' } },
-  { id: 'U0OWNER', team_id: 'T0TEST', name: 'tester', real_name: 'Tester', profile: { display_name: 'Tester', real_name: 'Tester' } },
+  { id: 'U0OWNER', team_id: 'T0TEST', name: 'tester', real_name: 'Tester', profile: { display_name: 'Tester', real_name: 'Tester', email: 'tester@acme.test' } }, // private-ok: a stand-in person's made-up email
   { id: 'U0GUS', team_id: 'T0TEST', name: 'gus', real_name: 'Gus Guest', is_restricted: true, profile: { display_name: 'Gus', real_name: 'Gus Guest', title: 'Contractor' } },
   { id: 'UOLDBOT', team_id: 'T0TEST', name: 'jira', is_bot: true, profile: { display_name: 'Jira' } },
   { id: 'U0GONE', team_id: 'T0TEST', name: 'gone', deleted: true, profile: { display_name: 'Gone' } },

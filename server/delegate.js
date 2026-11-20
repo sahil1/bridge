@@ -126,9 +126,10 @@ export function makeDelegate({ cfg, dir, tasks, you = () => 'the user', resolve,
   // Its agent started, in its own folder with edits allowed when you said helpers may, else asking
   // as any agent does; read-only, started so. Couldn't: the task says why, and so does its card.
   async function start(h) {
-    const access = h.change ? 'change' : h.readOnly ? 'read' : h.own && edits() ? 'edits' : undefined
+    // (A bot's session for you alone with Full Access: owner, agents.js.)
+    const access = h.full ? 'owner' : h.change ? 'change' : h.readOnly ? 'read' : h.own && edits() ? 'edits' : undefined
     try {
-      const out = await launch({ kind: h.kind, cwd: h.cwd, own: h.own, label: tabName(h), space: h.space, prompt: h.idle ? undefined : promptOf(h), access, dirs: (h.readOnly || h.change) && h.dirs?.length ? h.dirs : undefined, fork: h.fork || undefined, resume: h.resume || undefined, model: h.model || undefined, env: h.list && h.env ? h.env : undefined })
+      const out = await launch({ kind: h.kind, cwd: h.cwd, own: h.own, label: tabName(h), space: h.space, prompt: h.idle ? undefined : promptOf(h), access, dirs: (h.readOnly || h.change || h.full) && h.dirs?.length ? h.dirs : undefined, fork: h.fork || undefined, resume: h.resume || undefined, model: h.model || undefined, env: h.list && h.env ? h.env : undefined })
       Object.assign(h, { state: 'working', paneId: out.paneId, session: out.session || '', ...(out.sessionId ? { sessionId: out.sessionId } : h.resume ? { sessionId: h.resume } : {}), startedAt: new Date().toISOString(), access: access || null, worked: false, again: false, againAt: null, armedAt: null })
       // (A session opened to look at, with nothing to say yet: it waits for its next turn.)
       if (h.idle) Object.assign(h, { state: 'ended', end: 'finished', endedAt: new Date().toISOString(), report: 'none' })
@@ -403,7 +404,9 @@ export function makeDelegate({ cfg, dir, tasks, you = () => 'the user', resolve,
       const named = b.cwd ? (own ? path.resolve(String(b.cwd)) : await resolve(String(b.cwd))) : null
       // (A bot's change, on another list only: edits held to its own folder, its copy of a repository.)
       const change = !!list && b.change === true
-      const dirs = (b.readOnly === true || change) && Array.isArray(b.dirs) ? (await Promise.all(b.dirs.slice(0, 50).map((d) => (mine(d) ? path.resolve(String(d)) : resolve(String(d)))))).filter((d) => d !== named) : []
+      // (A bot's session for you alone with Full Access, on another list only: agents.js access owner.)
+      const full = !!list && b.full === true && !change
+      const dirs = (b.readOnly === true || change || full) && Array.isArray(b.dirs) ? (await Promise.all(b.dirs.slice(0, 50).map((d) => (mine(d) ? path.resolve(String(d)) : resolve(String(d)))))).filter((d) => d !== named) : []
       // (Variables its agent starts with, on another list only: what a bot's change's hook needs to
       // run on Windows, botmcp.js runFolder.)
       const env = list && b.env && typeof b.env === 'object' ? Object.fromEntries(Object.entries(b.env).filter(([k, v]) => /^[A-Z_][A-Z0-9_]{0,63}$/.test(k) && typeof v === 'string' && v.length < 1000).slice(0, 10)) : {}
@@ -413,7 +416,7 @@ export function makeDelegate({ cfg, dir, tasks, you = () => 'the user', resolve,
       // its own in that same folder; or opened with nothing to do yet, idle; and which it is.)
       const resume = list && named && b.resume ? oneLine(b.resume, 80) : null
       const h = {
-        id: `h${data.next++}`, task: item.id, role, title: item.title, brief, kind, cwd, own: !named, readOnly: b.readOnly === true && !change, ...(change ? { change: true } : {}),
+        id: `h${data.next++}`, task: item.id, role, title: item.title, brief, kind, cwd, own: !named, readOnly: b.readOnly === true && !change && !full, ...(change ? { change: true } : {}), ...(full ? { full: true } : {}),
         ...(resume ? { resume } : {}), ...(list && b.idle === true && resume ? { idle: true } : {}), ...(list && b.session ? { sessionOf: oneLine(b.session, 40) } : {}),
         thread: b.thread ? oneLine(b.thread, 20) : null, space: oneLine(b.space, 40) || 'Helpers', from: oneLine(b.from, 20) || 'chief',
         ...(list ? { list } : {}), ...(b.fork && named ? { fork: oneLine(b.fork, 80) } : {}), ...(dirs.length ? { dirs } : {}), ...(list && b.model ? { model: oneLine(b.model, 80) } : {}), ...(Object.keys(env).length ? { env } : {}),

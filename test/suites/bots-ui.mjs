@@ -277,6 +277,16 @@ try {
       await sw.click()
       await until(async () => (await kit.api(`/bots/${HI}`)).settings.changes === before, 8000)
     } else ok(/Claude Code/.test(await textOf(p, '.bp [data-setting="bot-edits"]')), 'Edits Files: off, saying it needs Claude Code')
+    // When You Ask: Full Access, on and off: on, what it means, and that anyone using your Slack
+    // account can run anything here through it.
+    const full = p.locator('.bp [data-setting="bot-full-access"] input[type="checkbox"]')
+    const was = (await kit.api(`/bots/${HI}`)).settings.fullAccess
+    await full.click()
+    ok(!!(await until(async () => (await kit.api(`/bots/${HI}`)).settings.fullAccess === !was, 8000)), 'When You Ask: Full Access: switched, saved', was)
+    const fullText = await textOf(p, '.bp [data-setting="bot-full-access"]')
+    ok(!was ? /Like your own Claude Code/.test(fullText) && /Anyone using your Slack account can run anything on this computer through this bot/.test(fullText) : /Off: your asks are limited/.test(fullText), 'it says what it means, and warns while it\'s on', fullText)
+    await full.click()
+    await until(async () => (await kit.api(`/bots/${HI}`)).settings.fullAccess === was, 8000)
     await shot(p, `${tag}bots-ui-bot-settings-light`)
   })
 

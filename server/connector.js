@@ -276,6 +276,15 @@ export function combine({ id = 'bot', say = () => {}, threads = () => [], follow
     // Who's in a channel, where the platform says ([{ id, guest, external, unknown, bot }]); null
     // where it can't (only Slack's say).
     members: async (channel) => { const p = platformOf(channel); const c = parts[p]; if (!c?.members) return null; const list = await c.members(bare(channel)); return list ? list.map((m) => ({ ...m, id: idOf(p, m.id) })) : null },
+    // People's emails (ids, as members gives them), where the platform says (Slack, with
+    // users:read.email): { can, emails: { id: email | null } }; null where it can't.
+    emails: async (ids, channel) => {
+      const p = platformOf(channel)
+      const c = parts[p]
+      if (!c?.emails) return null
+      const r = await c.emails((ids || []).map(bare))
+      return r ? { can: !!r.can, emails: Object.fromEntries(Object.entries(r.emails || {}).map(([k, v]) => [idOf(p, k), v])) } : null
+    },
     // Slack's own: your direct messages' buttons, files attached.
     ...(parts.slack ? {
       askOwner: (owner, item) => parts.slack.askOwner(owner, item),

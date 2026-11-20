@@ -187,7 +187,7 @@ const escape = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').rep
 // status and Stop button), over Socket Mode, with the scopes the calls above need and no more. (A
 // manifest can't carry an icon: that's set in Slack's app page.) An app made from an earlier one
 // lacks some scopes: Settings says which, from auth.test, and what each would let it do.
-export const SCOPES = ['app_mentions:read', 'chat:write', 'im:history', 'im:read', 'im:write', 'users:read', 'channels:history', 'channels:read', 'groups:history', 'groups:read', 'mpim:history', 'mpim:read', 'reactions:write', 'pins:read', 'files:read', 'files:write', 'commands', 'assistant:write']
+export const SCOPES = ['app_mentions:read', 'chat:write', 'im:history', 'im:read', 'im:write', 'users:read', 'users:read.email', 'channels:history', 'channels:read', 'groups:history', 'groups:read', 'mpim:history', 'mpim:read', 'reactions:write', 'pins:read', 'files:read', 'files:write', 'commands', 'assistant:write']
 // (And a channel shared with another organization, or no longer: told at once, not at the next look.)
 export const EVENTS = ['app_mention', 'message.channels', 'message.groups', 'message.im', 'message.mpim', 'app_home_opened', 'agent_session_stopped', 'channel_shared', 'channel_unshared']
 // What each scope lets it do, for "your app lacks …".
@@ -198,6 +198,7 @@ export const SCOPE_FOR = {
   'im:read': 'see its direct messages',
   'im:write': 'send you its drafts in a direct message',
   'users:read': 'tell who\'s asking, and turn away guests',
+  'users:read.email': 'make a link it shares open for the people in the conversation, by their email',
   'channels:history': 'follow replies in its threads in public channels',
   'channels:read': 'see the public channels it\'s in',
   'groups:history': 'follow replies in its threads in private channels',
@@ -574,7 +575,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
   const learn = (u) => {
     if (!u?.id) return
     names[u.id] = u.profile?.display_name || u.profile?.real_name || u.real_name || u.name || u.id
-    users[u.id] = { guest: !!(u.is_restricted || u.is_ultra_restricted), team: u.team_id || null, stranger: u.is_stranger === true, bot: !!(u.is_bot || u.id === 'USLACKBOT') }
+    users[u.id] = { guest: !!(u.is_restricted || u.is_ultra_restricted), team: u.team_id || null, stranger: u.is_stranger === true, bot: !!(u.is_bot || u.id === 'USLACKBOT'), email: typeof u.profile?.email === 'string' ? u.profile.email : null }
   }
   // Who's in a channel (conversations.members), each as person() has them (a guest, someone from
   // another company, a bot); null when Slack can't say, or there are more than MEMBERS_MAX. (Many
@@ -1277,9 +1278,16 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     dms.set(user, channel)
     return channel
   }
-  async function dm(user, text) {
+  // (buttons: as post's, a Share Link a bot asks to make waiting on you, say; settle() puts what came
+  // of it in their place.)
+  async function dm(user, text, { buttons = null } = {}) {
     const channel = await openDm(user)
-    const j = await inLine(channel, () => call('chat.postMessage', { channel, text: escape(text), unfurl_links: false, unfurl_media: false }, { waits: 1 }))
+    const blocks = buttons?.length ? [
+      { type: 'section', text: { type: 'mrkdwn', text: clip(escape(text), 3000) } },
+      { type: 'actions', block_id: `bb_t_${Date.now().toString(36)}`, elements: buttons.slice(0, 5).map((b) => button(b.id, b.label, b.value, b.style || null)) },
+    ] : null
+    const j = await inLine(channel, () => call('chat.postMessage', { channel, text: escape(blocks ? clip(text, 3000) : text), ...(blocks ? { blocks } : {}), unfurl_links: false, unfurl_media: false }, { waits: 1 }))
+    if (blocks) { asks.set(`${j.channel || channel}:${j.ts}`, blocks); if (asks.size > 200) asks.delete(asks.keys().next().value) }
     return { channel: j.channel || channel, ts: j.ts }
   }
 
@@ -1649,5 +1657,14 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     set({ state: 'no-tokens', why: null })
   }
 
-  return { id, label: 'Slack', platform: 'slack', start, stop, state, post, react, context, people, channels, members, setTokens, forget, missed, masked, whisper, status, askOwner, settle, dm, download, choose, check, probe }
+  // The emails of the people given (their ids), for a Share Link that opens for them (frontdesk.js
+  // shareFor): { can: whether this app may read them (users:read.email; without it, update the app),
+  // emails: { id: email | null } }, each asked of Slack once (users.info), never the workspace's list.
+  async function emails(ids) {
+    const want = [...new Set((ids || []).filter((u) => USER.test(String(u || ''))))].slice(0, 20)
+    if (lacks('users:read.email')) return { can: false, emails: Object.fromEntries(want.map((u) => [u, null])) }
+    await Promise.all(want.filter((u) => !users[u]?.email).map((u) => call('users.info', { user: u }, { waits: 1 }).then((j) => learn(j.user), () => {})))
+    return { can: true, emails: Object.fromEntries(want.map((u) => [u, users[u]?.email || null])) }
+  }
+  return { id, label: 'Slack', platform: 'slack', start, stop, state, post, react, context, people, channels, members, emails, setTokens, forget, missed, masked, whisper, status, askOwner, settle, dm, download, choose, check, probe }
 }

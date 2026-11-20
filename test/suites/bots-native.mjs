@@ -27,7 +27,7 @@ const part = async (name, fn) => { try { await fn() } catch (e) { ok(false, `${n
 fs.writeFileSync(path.join(kit.home, 'pricing', 'pricing.md'), '# Pricing\n\nEnterprise is $40 a seat, billed yearly.\n')
 const state = () => slack.state()
 const inThread = async (ts) => (await posted()).filter((x) => x.thread_ts === ts)
-const OLD = ['app_mentions:read', 'chat:write', 'im:history', 'im:read', 'im:write', 'users:read', 'channels:history', 'channels:read', 'groups:history', 'groups:read', 'mpim:history', 'mpim:read', 'reactions:write', 'pins:read']
+const OLD = ['app_mentions:read', 'chat:write', 'im:history', 'im:read', 'im:write', 'users:read', 'users:read.email', 'channels:history', 'channels:read', 'groups:history', 'groups:read', 'mpim:history', 'mpim:read', 'reactions:write', 'pins:read']
 const Q = 'What is the enterprise price? [answer $40 a seat.]'
 
 try {

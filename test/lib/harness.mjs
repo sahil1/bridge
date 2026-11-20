@@ -193,6 +193,10 @@ export async function startKit(name, { env = {}, config = {}, node = process.exe
     // Nor GitHub for a release's phone page (relaycheck.js): a test gives a stand-in, or there's none.
     BRIDGE_RELAY_SOURCE: 'http://127.0.0.1:9',
     BRIDGE_FIX_DRYRUN: '1', LANG: 'en_US.UTF-8', TMPDIR: os.tmpdir(), USER: os.userInfo().username,
+    // A new bot starts with When You Ask: Full Access off here (on for everyone else: bots.js), so
+    // a test of what your own asks may do as anyone's are tests that; a test of Full Access turns it
+    // on (its settings, or this '0').
+    BRIDGE_TEST_BOT_FULL_OFF: '1',
     BRIDGE_SUMMARY_RETRY_MS: '4000', BRIDGE_MODEL_RETRY_MS: '200',
     // No test ever runs a real installer or downloads Node.js: a stand-in installer runs instead
     // (stand-ins/installer.cjs, its commands in bin/installs.log), and nodejs.org is nowhere unless

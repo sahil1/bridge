@@ -121,11 +121,20 @@ try {
 
   // ---------- a bot a Chief asks only answers ----------
   await part('ask_bot only answers', async () => {
-    // (No commands in this version, whatever it may run for you: agents.js COMMANDS.)
+    // (No commands in this version, whatever it may run for you: agents.js COMMANDS. And never Full
+    // Access, though both have it on: a bot a Chief asks only answers, and Chief, given its answer,
+    // goes on limited.)
+    await kit.api(`/bots/${ids.Chief}/settings`, { fullAccess: true })
+    await kit.api(`/bots/${ids.Marketing}/settings`, { fullAccess: true })
     const q = await slack.ask({ user: OWNER.id, text: `${M} What's left for the launch? [ask-bot Marketing What is left to do?] [answer That's what's left.]` })
+    const c = await startOf('What\'s left for the launch?')
+    ok(!!c && /--allowedTools .*\bBash\b/.test(c.args.join(' ')) && c.args.join(' ').includes('--permission-mode dontAsk'), 'Chief, asked by you alone, with Full Access on: your own Claude Code', c?.args)
     const m = await until(() => startsOf('What is left to do?').find((x) => inFolder(x, 'marketing')), 30000)
-    ok(!!m && !m.args.join(' ').includes('Bash') && !m.given?.sandbox && !m.args.some((a) => /^mcp__bridge_session__/.test(a)), 'Marketing, asked by Chief for you: its session has no commands, whatever it may run for you', m?.args)
+    ok(!!m && !m.args.join(' ').includes('Bash') && !m.given?.sandbox && !m.args.some((a) => /^mcp__bridge_session__/.test(a)), 'Marketing, asked by Chief for you: its session has no commands, whatever it may run for you, Full Access too', m?.args)
     await until(async () => (await inThread(q.ts)).length > 0, 30000)
+    const back = startsOf('What\'s left for the launch?').at(-1)
+    ok(events(ids.Chief).some((e) => e.type === 'session.ended' && /less/.test(e.why || '')) && back && back !== c && !back.args.join(' ').includes('Bash'), 'Chief, given Marketing\'s answer, goes on in a new, limited session', back?.args)
+    await kit.api(`/bots/${ids.Chief}/settings`, { fullAccess: false })
     await kit.api(`/bots/${ids.Marketing}/settings`, { bash: 'off' })
   })
 
@@ -142,6 +151,13 @@ try {
     await slack.ask({ user: 'U0DANA', thread: q.ts, text: 'And the logo? [answer The logo is in the brief.]' })
     const t = await until(() => logOf('turns.log').find((x) => x.text.includes('And the logo')), 30000)
     ok(!!t && fs.realpathSync(t.cwd) === fs.realpathSync(path.join(kit.home, 'marketing')), 'the next reply in that thread goes to Marketing\'s session, not Chief\'s', t && t.cwd)
+  })
+
+  // ---------- a hand-off is never Full Access ----------
+  await part('hand_to never full', async () => {
+    await slack.ask({ user: OWNER.id, text: `${M} Send me the brief. [hand-to Marketing Tester wants the brief] [answer Handing it on.]` })
+    const ms = await until(() => startsOf('Send me the brief').find((x) => inFolder(x, 'marketing')), 30000)
+    ok(!!ms && !ms.args.join(' ').includes('Bash') && ms.args.join(' ').includes('--tools Read,Grep,Glob'), 'Marketing, handed your question with Full Access on: limited', ms?.args)
   })
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)

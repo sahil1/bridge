@@ -127,7 +127,7 @@ try {
   const old = (await needs()).find((x) => x.text.includes('Old question'))
   ok(old?.draft === 'Yes, on track.' && old.bot?.name === 'Bridge AI', 'the question that waited still waits in Needs You, as the bot\'s', old)
   ok((await convs()).some((c) => /Old question/.test(c.asked)), 'and it\'s in its activity')
-  ok(JSON.stringify(b1.scopes?.missing) === JSON.stringify(['im:write', 'reactions:write', 'pins:read', 'files:read', 'files:write', 'commands', 'assistant:write']), 'its app, made from the old manifest, lacks the new scopes, from what Slack says it has', b1.scopes)
+  ok(JSON.stringify(b1.scopes?.missing) === JSON.stringify(['im:write', 'users:read.email', 'reactions:write', 'pins:read', 'files:read', 'files:write', 'commands', 'assistant:write']), 'its app, made from the old manifest, lacks the new scopes, from what Slack says it has', b1.scopes)
   ok(b1.manifest.oauth_config.scopes.bot.includes('pins:read') && b1.manifest.settings.event_subscriptions.bot_events.join() === 'app_mention,message.channels,message.groups,message.im,message.mpim,app_home_opened,agent_session_stopped,channel_shared,channel_unshared', 'the new manifest asks for them, and for replies in channels and threads', b1.manifest)
 
   // ---------- In its Settings: updating the app, renaming it, a second bot ----------

@@ -274,7 +274,13 @@ export function sandboxOf({ domains = [], cwd, dirs = [], writable = false, tmp 
     },
   }
 }
-export async function runFolder(bot, { all = false, key, outbox = null, write = null, attach = null, reads = [], own = [], session = null }) {
+// full: a session for you alone with When You Ask: Full Access (frontdesk.js): { undo: the folder its
+// hook keeps a copy of each file in before an edit, roots: the bot's folders }. Its settings are
+// yours as they are (none of Bridge AI's limits for a run kept to its folders), with two hooks: one on
+// commands that refuses a push or gh (a push waits for you: request_push), one before each edit that
+// keeps the file as it was, for Undo (botundo.mjs). rules.json says full, so agents.js gives it the
+// owner level; nothing else does.
+export async function runFolder(bot, { all = false, key, outbox = null, write = null, attach = null, reads = [], own = [], session = null, full = null }) {
   const want = (bot.mcp || []).filter((n) => n !== OUTBOX_SERVER && n !== FILES_SERVER && n !== SESSION_SERVER)
   if (!want.length && !outbox && !write && !session) return null
   const have = claudeServers()
@@ -320,6 +326,9 @@ export async function runFolder(bot, { all = false, key, outbox = null, write = 
     fs.chmodSync(keyFile, 0o600)
     const args = [path.join(ROOT, 'server', 'sessionmcp.js'), requests.file, keyFile]
     if (session.push) { args.push('--push'); allow.push(toolName(SESSION_SERVER, 'request_push')) }
+    // (A Share Link to a file or folder of its, or one it made: share_link, made by Bridge AI, at once
+    // for you, after your OK for anyone else: frontdesk.js shareFor.)
+    if (session.share) { args.push('--share'); allow.push(toolName(SESSION_SERVER, 'share_link')) }
     if (session.roster?.length) {
       const file = path.join(dir, 'roster.json')
       writeFileAtomic(file, JSON.stringify(session.roster.map((b) => ({ id: String(b.id), name: String(b.name), description: String(b.description || ''), access: String(b.access || '') })), null, 2), { mode: 0o600 })
@@ -328,11 +337,25 @@ export async function runFolder(bot, { all = false, key, outbox = null, write = 
     }
     if (args.length > 3) servers[SESSION_SERVER] = { type: 'stdio', command: NODE.bin, args, env: { ...NODE.env } }
   }
-  const bash = session?.bash || null
+  const bash = full ? null : session?.bash || null
   let hooks = null
   let guard = null
   let agentEnv = null
-  if (write?.root || bash) {
+  if (full) {
+    guard = { key: crypto.randomBytes(32).toString('hex'), log: path.join(dir, 'guard.log') }
+    fs.writeFileSync(guard.log, '', { mode: 0o600 })
+    const keyFile = path.join(dir, 'guard.key')
+    fs.writeFileSync(keyFile, guard.key, { mode: 0o600 })
+    fs.chmodSync(keyFile, 0o600)
+    fs.mkdirSync(full.undo, { recursive: true, mode: 0o700 })
+    const guardArgs = [path.join(ROOT, 'server', 'botguard.mjs'), '--bash-only', '--log', guard.log, '--key', keyFile, ...(session?.who ? ['--who', String(session.who).replace(/[\r\n]+/g, ' ').slice(0, 80)] : []), '--push', '--full']
+    const undoArgs = [path.join(ROOT, 'server', 'botundo.mjs'), '--dir', full.undo, ...(full.roots || []).flatMap((r) => ['--root', String(r)])]
+    const hookOf = (a) => (execHooks()
+      ? { type: 'command', command: NODE.bin, args: a, timeout: 30 }
+      : { type: 'command', command: `${Object.entries({ ...NODE.env }).map(([k, v]) => `${k}=${sh(v)} `).join('')}${sh(NODE.bin)} ${a.map(sh).join(' ')}`, timeout: 30 })
+    if (execHooks() && Object.keys(NODE.env).length) agentEnv = { ...NODE.env }
+    hooks = { disableAllHooks: false, hooks: { PreToolUse: [{ matcher: 'Bash|PowerShell', hooks: [hookOf(guardArgs)] }, { matcher: 'Edit|Write|MultiEdit|NotebookEdit', hooks: [hookOf(undoArgs)] }] } }
+  } else if (write?.root || bash) {
     guard = { key: crypto.randomBytes(32).toString('hex'), log: path.join(dir, 'guard.log') }
     fs.writeFileSync(guard.log, '', { mode: 0o600 })
     const keyFile = path.join(dir, 'guard.key')
@@ -360,8 +383,14 @@ export async function runFolder(bot, { all = false, key, outbox = null, write = 
   // every run kept to its folders, agents.js KEPT_SETTINGS; its Read rules, nothing hidden in the
   // folders it reads nor anything named as keys, passwords or credentials, kept off its own folders
   // (own: its copy, the files attached, its brief); and its hook when it changes files.)
-  const readDeny = reads.length ? readDenies(reads, { own }) : []
+  const readDeny = reads.length && !full ? readDenies(reads, { own }) : []
   const settings = path.join(dir, 'settings.json')
+  if (full) {
+    writeFileAtomic(settings, JSON.stringify({ ...(hooks || {}) }, null, 2), { mode: 0o600 })
+    writeFileAtomic(path.join(dir, 'config.json'), JSON.stringify({ mcpServers: servers }, null, 2), { mode: 0o600 })
+    writeFileAtomic(path.join(dir, 'rules.json'), JSON.stringify({ allow, deny: [], settings, full: true }, null, 2), { mode: 0o600 })
+    return { dir, servers: said, missing, guard, ...(agentEnv ? { agentEnv } : {}), ...(requests ? { requests } : {}), full: true }
+  }
   // (With commands: your home folder and the other roots of people's files unreadable to them, and to
   // its file tools outside its folders (blockReadsOutsideWorkingDirectories, Claude Code 2.1.257, as
   // old as commands need: agents.js BASH_MIN).)

@@ -1125,6 +1125,55 @@ export async function close(into, id, state) {
   return update(into, id, { state, nonce: null, closedAt: new Date().toISOString() })
 }
 // Undone: each file back as it was, only while each is still as the change left it. { files }.
+// What a session with Full Access changed with its edits in a turn (frontdesk.js): made already, in
+// your folders, by its agent, as your own Claude Code would; kept as a change made, so Activity and its
+// reply can Undo it as any other. undo: its hook's folder (botundo.mjs: each file as it was before
+// its first edit this turn, index.jsonl and blobs/), emptied once read; folders: [{ path (real),
+// shown }]. Each file as it was then and as it is now: one made, changed or taken away; one its hook
+// couldn't keep (over 50 MB, outside its folders, not a plain file) said as one that can't be undone
+// (notKept). null when nothing it edited changed.
+export async function made({ undo: dir, folders, into, by = null }) {
+  const index = path.join(dir, 'index.jsonl')
+  let lines = []
+  try { lines = fs.readFileSync(index, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) } catch { lines = [] }
+  if (!lines.length) return null
+  const roots = await Promise.all(folders.map((f) => fs.promises.realpath(f.path).catch(() => f.path)))
+  const blobs = new Map()
+  const keep = (buf) => { const h = sha(buf); blobs.set(h, buf); return h }
+  const entries = []
+  const notKept = []
+  for (const x of lines) {
+    const part = roots.findIndex((r) => x.path === r || String(x.path).startsWith(r + path.sep))
+    if (part < 0 || x.outside || x.kept === false) { notKept.push(x.path); continue }
+    const rel = relOf(roots[part], x.path)
+    if (!okRel(rel)) { notKept.push(x.path); continue }
+    let before = null
+    if (x.existed) {
+      const buf = await fs.promises.readFile(path.join(dir, 'blobs', String(x.hash || ''))).catch(() => null)
+      if (!buf || sha(buf) !== x.hash) { notKept.push(x.path); continue }
+      before = { hash: keep(buf), size: buf.length, mode: x.mode ?? 0o644 }
+    }
+    const st = await fs.promises.lstat(x.path).catch(() => null)
+    let after = null
+    if (st?.isFile() && st.size <= FILE_MAX) { const buf = await fs.promises.readFile(x.path); after = { hash: keep(buf), size: buf.length } } else if (st) { notKept.push(x.path); continue }
+    if (before?.hash === after?.hash) continue
+    if (!before && !after) continue
+    const text = [before, after].every((v) => !v || isText(blobs.get(v.hash)))
+    entries.push({ part, rel, op: !before ? 'add' : !after ? 'remove' : 'change', before, after, text })
+  }
+  await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {})
+  if (!entries.length && !notKept.length) return null
+  entries.sort((a, b) => a.part - b.part || a.rel.localeCompare(b.rel))
+  const f = folders.map((x, i) => ({ path: roots[i], shown: x.shown }))
+  const id = newId()
+  const change = { id, v: 1, at: new Date().toISOString(), by, folders: f, entries, held: [], refused: [], hash: hashOf(f, entries), nonce: crypto.randomBytes(16).toString('hex'), undoNonce: crypto.randomBytes(16).toString('hex'), state: 'applied', appliedAt: new Date().toISOString(), full: true, notKept: notKept.slice(0, 50) }
+  change.diff = diffOf(change, (h) => blobs.get(h), [])
+  change.files = filesOf(change)
+  await fs.promises.mkdir(path.join(into, id, 'blobs'), { recursive: true, mode: 0o700 })
+  for (const [h, buf] of blobs) await fs.promises.writeFile(path.join(into, id, 'blobs', h), buf, { mode: 0o600 })
+  await save(into, change)
+  return change
+}
 export async function undo(into, id, { roots, nonce = null }) {
   if (busy.has(id)) throw fail('It\'s being changed already', 'busy')
   busy.add(id)
