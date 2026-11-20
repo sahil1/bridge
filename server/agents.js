@@ -91,8 +91,10 @@ const MCP_RUNS = dataFile('front-desk', 'mcp')
 // later version brings commands back whole. What they'd run in stays, behind this one switch: the
 // sandbox (botmcp.js sandboxOf, sandboxClosed and bashProblem here), botguard.mjs's command checks,
 // botsessions.js stopShells. BRIDGE_TEST_BOT_COMMANDS=1 turns them on for the tests of that code only
-// (test/suites); Bridge AI never sets it.
-export const COMMANDS = process.env.BRIDGE_TEST_BOT_COMMANDS === '1'
+// (test/suites), and only in a test's kit (BRIDGE_FIX_DRYRUN, as BRIDGE_HOOK_EXEC and
+// BRIDGE_TEST_CAPTURE_TOKEN are), so a variable exported in a shell or set with launchctl setenv can't
+// turn them on in a real install; Bridge AI never sets either.
+export const COMMANDS = process.env.BRIDGE_TEST_BOT_COMMANDS === '1' && process.env.BRIDGE_FIX_DRYRUN === '1'
 export const COMMANDS_OFF = 'Commands in bot sessions come in a later version'
 export const sandboxClosed = (s) => {
   if (!COMMANDS) return false

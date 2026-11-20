@@ -239,16 +239,19 @@ const settings = { permissions: { blockReadsOutsideWorkingDirectories: true }, s
 const w = (j) => ag.widens(j, false) || '';
 console.log(JSON.stringify({ on: ag.COMMANDS, closed: ag.sandboxClosed(settings), withRule: ag.sandboxClosed({ ...settings, permissions: { ...settings.permissions, allow: ['Bash'] } }), sb,
   said: { excluded: w({ sandbox: { excludedCommands: ['docker *'] } }), webfetch: w({ permissions: { allow: ['WebFetch(domain:*)'] } }), edit: w({ permissions: { allow: ['Edit(~/**)'] } }), bash: w({ permissions: { allow: ['Bash(npm test)'] } }), mach: w({ sandbox: { network: { allowMachLookup: ['com.apple.*'] } } }), proxy: w({ sandbox: { network: { httpProxyPort: 8888 } } }), env: w({ env: { OPENAI_API_KEY: 'x' } }), quiet: w({ env: { DISABLE_TELEMETRY: '1' }, permissions: { allow: ['Read(~/notes/**)'] } }) } }));`
-    const run = (on) => { const r = spawnSync(process.execPath, ['--input-type=module', '-e', js, g], { encoding: 'utf8', env: { ...process.env, BRIDGE_HOME: path.join(g, 'data'), ...(on ? { BRIDGE_TEST_BOT_COMMANDS: '1' } : {}) }, timeout: 60000 }); try { return JSON.parse(String(r.stdout).trim().split('\n').pop()) } catch { return { error: String(r.stderr || r.stdout || '').slice(0, 600) } } }
-    const on = run(true)
-    const off = run(false)
+    // (on: the test's switch in a test's kit; alone: the switch without the kit's, as an exported
+    // variable would be in a real install; off: neither.)
+    const run = (env) => { const r = spawnSync(process.execPath, ['--input-type=module', '-e', js, g], { encoding: 'utf8', env: { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== 'BRIDGE_TEST_BOT_COMMANDS' && k !== 'BRIDGE_FIX_DRYRUN')), BRIDGE_HOME: path.join(g, 'data'), ...env }, timeout: 60000 }); try { return JSON.parse(String(r.stdout).trim().split('\n').pop()) } catch { return { error: String(r.stderr || r.stdout || '').slice(0, 600) } } }
+    const on = run({ BRIDGE_TEST_BOT_COMMANDS: '1', BRIDGE_FIX_DRYRUN: '1' })
+    const alone = run({ BRIDGE_TEST_BOT_COMMANDS: '1' })
+    const off = run({})
     const sb = on.sb || {}
     const denied = (sb.credentials?.envVars || []).filter((e) => e.mode === 'deny').map((e) => e.name)
     ok(on.on === true && on.closed === true && on.withRule === false && sb.failIfUnavailable === true && sb.allowUnsandboxedCommands === false && sb.autoAllowBashIfSandboxed === true && sb.network?.strictAllowlist === true && sb.network.allowedDomains.join() === 'example.com', 'with the switch on: its sandbox closed, no network but example.com, run by auto-allow and never by a Bash rule', { closed: on.closed, withRule: on.withRule, error: on.error })
     ok(['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'ANTHROPIC_CUSTOM_HEADERS', 'GITHUB_TOKEN', 'GH_TOKEN'].every((n) => denied.includes(n)) && sb.network?.deniedDomains?.includes('github.com') && sb.allowAppleEvents === false && sb.filesystem?.denyRead?.includes('/tmp') && sb.filesystem.allowRead?.some((d) => d.endsWith('/tmp')), 'every key kept from its commands, GitHub out, Apple Events off, the computer\'s temporary folders unreadable and its own readable', { denied: denied.length, deniedDomains: sb.network?.deniedDomains })
     const said = on.said || {}
     ok(/excludedCommands/.test(said.excluded) && /WebFetch\(domain:\*\)/.test(said.webfetch) && /Edit\(~\/\*\*\)/.test(said.edit) && /Bash\(npm test\)/.test(said.bash) && /allowMachLookup/.test(said.mach) && /httpProxyPort/.test(said.proxy) && /env: OPENAI_API_KEY/.test(said.env) && !said.quiet, 'your settings that would widen it each said; one that only turns something off doesn\'t count', said)
-    ok(off.on === false && off.closed === false, 'with the switch off, as Bridge AI ships: no settings file holds Bash', { on: off.on, closed: off.closed })
+    ok(off.on === false && off.closed === false && alone.on === false && alone.closed === false, 'with the switch off, as Bridge AI ships, or the test\'s variable set outside a test\'s kit: no settings file holds Bash', { off: [off.on, off.closed], alone: [alone.on, alone.closed] })
   })
 
   // ---------- Its copy, and a link its agent made in it ----------
