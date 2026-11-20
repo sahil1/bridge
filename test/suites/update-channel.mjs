@@ -16,7 +16,8 @@
 // notes as they're made (a nightly's by scripts/nightly.js from a nightly's commits, a release's and
 // a beta's from CHANGELOG.md by scripts/release.js): the version short on one line (Bridge AI 99.0.0,
 // 99.1.0 · Beta 2, 99.1.0 · Nightly 7), when it came out and the version you have under it, at most
-// four highlights a line each and none about the tests, Update now and What's new, Update settings
+// four highlights of at most two lines each (the label on the first) and none about the tests,
+// Update now and What's new, Update settings
 // last; in light and dark, in German and Japanese, inside the window; the Status menu's row and the
 // phone's line with the short name too.
 import fs from 'node:fs'
@@ -240,17 +241,21 @@ try {
   const card = await kitAs('card', 'app')
   await card.api('/updates?refresh=1')
   const here = (await card.api('/updates')).current
-  // What the card shows, and how it sits: each line's height against its line height (one line
-  // each), what's cut short, and anything outside the card or the window.
+  // What the card shows, and how it sits: how many lines each takes (its height against its line
+  // height: the title and the line under it one each, a highlight at most two, its label all on
+  // its first), what's cut short, and anything outside the card or the window.
   const look = (p, sel) => p.locator(sel).evaluate((pop) => {
     const box = pop.getBoundingClientRect()
-    const oneLine = (el) => { if (!el) return true; const cs = getComputedStyle(el); return el.getBoundingClientRect().height <= (parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.3) * 1.5 }
+    const lh = (el) => { const cs = getComputedStyle(el); return parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.3 }
+    const rows = (el) => (el ? Math.round(el.getBoundingClientRect().height / lh(el)) : 0)
     const text = (el) => el?.innerText.trim() || ''
     const items = [...pop.querySelectorAll('.update-list > li')]
+    const labelFirst = (li) => { const b = li.querySelector('b'); return !b || (b.getClientRects().length === 1 && b.getBoundingClientRect().top - li.getBoundingClientRect().top < lh(li) / 2) }
     return {
       title: text(pop.querySelector('.update-title')), meta: text(pop.querySelector('.update-meta')),
       items: items.map(text), labels: items.map((li) => text(li.querySelector('b')).replace(/:$/, '')),
-      lines: [pop.querySelector('.update-title'), pop.querySelector('.update-meta'), ...items].every(oneLine),
+      rows: items.map(rows),
+      lines: rows(pop.querySelector('.update-title')) === 1 && rows(pop.querySelector('.update-meta')) === 1 && items.every((li) => rows(li) >= 1 && rows(li) <= 2 && labelFirst(li)),
       titleCut: (() => { const el = pop.querySelector('.update-title'); return !!el && el.scrollWidth > el.clientWidth + 1 })(),
       acts: [...pop.querySelectorAll('.update-acts > *')].map(text), foot: text(pop.querySelector('.update-foot')),
       inside: box.left >= -1 && box.right <= window.innerWidth + 1 && (!!pop.closest('.status-pop') || box.bottom <= window.innerHeight + 1) && [...pop.querySelectorAll('*')].every((x) => { const r = x.getBoundingClientRect(); return !r.width || (r.left >= box.left - 1 && r.right <= box.right + 1) }),
@@ -277,24 +282,24 @@ try {
       await openCard(p)
       await shot(p, `${tag}update-card-${channel}-${what}`)
       const c = await look(p, '.topbar .update-pop').catch((e) => ({ error: e.message }))
-      ok(c.title === title && !c.titleCut && c.lines, `the card (${channel}, ${what}): ${title}, on one line, cut short nowhere`, c)
+      ok(c.title === title && !c.titleCut && c.lines, `the card (${channel}, ${what}): ${title}, on one line, cut short nowhere; each highlight at most two lines, its label on the first`, c)
       ok(new RegExp(`^\\w{3} \\d{1,2} · ${kind ? `${kind} · ` : ''}you have ${here.replace(/\./g, '\\.')}$`).test(c.meta), `under it: the day it came out, ${kind ? 'Early Access, ' : ''}and the version you have`, c.meta)
-      ok(c.items?.length >= 1 && c.items.length <= 4 && c.items.every((x) => !/\bTests?\b|\bCI\b|~\\|\.mjs\b|[0-9a-f]{7}/.test(x)), 'at most four highlights, a line each, none about the tests or a commit', c.items)
-      if (channel === 'nightly') ok(JSON.stringify(c.labels) === JSON.stringify(groups.slice(0, c.items.length)) && c.items.length === Math.min(4, groups.length), 'a nightly\'s: its first parts, each its label and first line', { shown: c.labels, groups })
+      ok(c.items?.length >= 1 && c.items.length <= 4 && c.items.every((x) => !/\bTests?\b|\bCI\b|~\\|\.mjs\b|[0-9a-f]{7}/.test(x)), 'at most four highlights, none about the tests or a commit', c.items)
+      if (channel === 'nightly') ok(JSON.stringify(c.labels) === JSON.stringify(groups.slice(0, c.items.length)) && c.items.length === Math.min(4, groups.length) && c.rows.includes(2), 'a nightly\'s: its first parts, each its label and first line, a long one on a second line rather than cut at the first', { shown: c.labels, groups, rows: c.rows })
       ok(/^Update now/.test(c.acts?.[0] || '') && c.acts?.[1] === "What's new" && c.foot === 'Update settings' && /update-foot/.test(c.last), 'then Update now and What\'s new, and Update settings last, on its own', c)
       ok(c.inside, 'nothing outside the card or the window', c)
       ok(errors.length === 0, 'no page errors', errors)
       await ctx.close()
     }
   }
-  // In German and Japanese, longer and shorter: still one line each, nothing outside the card.
+  // In German and Japanese, longer and shorter: the same lines, nothing outside the card.
   for (const lang of ['de', 'ja']) {
     const { ctx, p, errors } = await page(b, card.url, { mode: lang === 'ja' ? 'dark' : 'light', theme: lang === 'ja' ? 'midnight' : 'sky', store: { 'cc-lang': lang }, before: desktop })
     await openCard(p)
     await shot(p, `${tag}update-card-nightly-${lang}`)
     const c = await look(p, '.topbar .update-pop').catch((e) => ({ error: e.message }))
     const want = lang === 'de' ? 'Bridge AI 99.1.0 · Nightly 7' : 'Bridge AI 99.1.0 · ナイトリー 7'
-    ok(c.title === want && !c.titleCut && c.lines && c.inside && c.items?.length === Math.min(4, groups.length), `in ${lang === 'de' ? 'German' : 'Japanese'}: ${want}, a line each, nothing outside the card`, c)
+    ok(c.title === want && !c.titleCut && c.lines && c.inside && c.items?.length === Math.min(4, groups.length), `in ${lang === 'de' ? 'German' : 'Japanese'}: ${want}, highlights at most two lines each, nothing outside the card`, c)
     ok(c.foot === (lang === 'de' ? 'Update-Einstellungen' : 'アップデートの設定') && /^(Jetzt aktualisieren|今すぐアップデート)/.test(c.acts?.[0] || ''), 'its words in that language', c)
     ok(errors.length === 0, 'no page errors', errors)
     await ctx.close()
@@ -311,7 +316,7 @@ try {
     await shot(p, `${tag}update-card-status-row`)
     const c = await look(p, '.status-list .update-pop').catch((e) => ({ error: e.message }))
     const turned = await row.locator('.status-go').evaluate((el) => getComputedStyle(el).transform).catch(() => '')
-    ok(said === 'Bridge AI Nightly 7 is available' && c.title === 'Bridge AI 99.1.0 · Nightly 7' && c.lines && c.inside, 'the Status menu: "Bridge AI Nightly 7 is available", the card under it', { said, c })
+    ok(said === 'Bridge AI Nightly 7 is available' && c.title === 'Bridge AI 99.1.0 · Nightly 7' && c.lines && c.inside, 'the Status menu: "Bridge AI Nightly 7 is available", the card under it, highlights at most two lines each', { said, c })
     ok(/^matrix\(0, 1, -1, 0|^matrix\((-?[\d.e-]+), 1, -1, \1/.test(turned), 'its arrow turned to point at it', turned)
     ok(errors.length === 0, 'no page errors', errors)
     await ctx.close()

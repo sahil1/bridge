@@ -136,7 +136,7 @@ export default function UpdateChip({ u, onDetails, onDone, row = false }) {
           {u.forApp && <p className="small update-why">{t('This is the desktop app\'s update: Bridge AI runs from your clone here, and the app around it is {version}.', { version: versionName(u.current) })}</p>}
           {u.failed && !state && <p className="error-text small">{t('The last update didn\'t go through: {why}', { why: u.failed.line || t('the installer stopped') })}</p>}
           {items.length > 0
-            ? <ul className="update-list">{items.map((it, i) => <li key={i} title={[it.label, it.text].filter(Boolean).join(': ')}>{it.label && <b>{it.text ? `${it.label}:` : it.label}</b>}{it.label && it.text ? ' ' : ''}{it.text}</li>)}</ul>
+            ? <ul className="update-list">{items.map((it, i) => <li key={i} title={[it.label, it.text].filter(Boolean).join(': ')}><span className="update-clamp">{it.label && <b>{it.text ? `${it.label}:` : it.label}</b>}{it.label && it.text ? ' ' : ''}{it.text}</span></li>)}</ul>
             : summary && <p className="small update-summary">{summary}</p>}
           {state === 'installing'
             ? <p className="st-note ok small"><Icon name="refresh" size={12} className="spin" /> {t('Updating. Bridge AI closes and reopens by itself in a few seconds; your agents carry on.')}</p>

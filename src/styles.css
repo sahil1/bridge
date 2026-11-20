@@ -2701,17 +2701,18 @@ button.ue-row:hover { background: var(--pane-2); }
 .update-pop { position: absolute; right: 0; top: calc(100% + 8px); z-index: 60; width: min(380px, calc(100vw - 24px)); display: grid; gap: 12px; padding: 14px 16px 10px; border-radius: 12px; background: var(--pane); border: 1px solid var(--line-2); box-shadow: var(--shadow-lg); color: var(--ink); text-align: left; white-space: normal; line-height: 1.45; animation: fade-in .1s ease; }
 .update-pop p { margin: 0; }
 /* The update card (UpdateChip.jsx): the version on one line, when and what you have under it, then
-   a few highlights a line each, then what to do. Nothing in it wraps a long version or a long point
-   onto more lines: each is cut short, in full on hover. */
+   a few highlights of at most two lines each, then what to do. Nothing wraps past that: a long
+   version or point is cut short, in full on hover, and a highlight's label stays on its first line. */
 .update-head { display: grid; gap: 1px; min-width: 0; }
 .update-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 650; letter-spacing: -.005em; }
 .update-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 12px; font-variant-numeric: tabular-nums; }
 .update-why, .update-summary { color: var(--ink-2); }
 .update-summary { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
-.update-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 5px; color: var(--ink-2); font-size: 12.5px; }
-.update-list li { position: relative; min-width: 0; padding-left: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.update-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; color: var(--ink-2); font-size: 12.5px; }
+.update-list li { position: relative; min-width: 0; padding-left: 12px; }
 .update-list li::before { content: ""; position: absolute; left: 1px; top: calc(.725em - 2px); width: 4px; height: 4px; border-radius: 50%; background: var(--ink-3); }
-.update-list b { color: var(--ink); font-weight: 600; }
+.update-clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.update-list b { color: var(--ink); font-weight: 600; white-space: nowrap; }
 .update-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
 .update-acts.col { display: grid; gap: 6px; }
 .update-acts code { padding: 6px 8px; border-radius: 6px; background: var(--pane-2); word-break: break-all; }

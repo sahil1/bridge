@@ -138,7 +138,7 @@ export function grouped(changes) {
     .sort((a, b) => last(a) - last(b) || b.count - a.count)
     .map((g) => ({ label: g.label, points: firstOf(g.points).slice(0, MAX_POINTS) }))
 }
-// A part's points, its first the one the update card shows (on one line, so a short one): the
+// A part's points, its first the one the update card shows (in two lines at most, so a short one): the
 // oldest that's short and stands on its own (a part's first commit is usually what it is), else the
 // shortest that stands on its own; the rest oldest first.
 const SHORT = 80
