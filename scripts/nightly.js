@@ -261,13 +261,14 @@ export function notesFor({ version, sha, since, changes, mac }) {
 // "Merge pull request #258 from …", and its title says the change for people ("Share Links: a secure
 // link to a file, …"), where its commits are the steps. One putting several together for a nightly
 // (its branch nightly-next-…, or titled "Next nightly: …") lists them in its body, a line each,
-// "- #252 Bots that change files: …", at the start of the line with a space after the number: those
-// lines, of pull requests that were merged, are what it brings, not its own title. Any other pull
-// request's body is only words, whatever numbers it has ("  - #259, whose title …"). One titled with
+// "- #252 Bots that change files: …" or "- #246: meetings …", at the start of the line, the number
+// followed by a space or a colon and a space: those lines, of pull requests that were merged, are
+// what it brings, not its own title. Any other pull request's body is only words, whatever numbers
+// it has ("  - #259, whose title …"). One titled with
 // its branch's name (gh pr create --fill, for a branch of several commits), or one putting several
 // together that lists none merged, says nothing of its own: its commits do.
 const MERGED = /^Merge pull request #(\d+) from /
-const LISTED = /^- #(\d+) (\S.*)$/
+const LISTED = /^- #(\d+):? (\S.*)$/
 const NEXT = { branch: /^nightly-next(-|$)/, title: /^next nightly\b/i }
 // Whether a pull request ({ title, branch }) puts several together for a nightly.
 export const integration = (pr) => NEXT.branch.test(pr?.branch || '') || NEXT.title.test(pr?.title || '')

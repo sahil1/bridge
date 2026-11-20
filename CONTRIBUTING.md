@@ -164,7 +164,7 @@ For the project's owner, or a fork's: what `npm run release` puts out, and who i
   main gets no commit. It's a GitHub pre-release, never the latest, with what changed since the last
   nightly as its notes, made from the titles of the pull requests merged since then (a pull request
   putting several together, on a `nightly-next-…` branch or titled `Next nightly …`, lists the merged
-  ones in its body, a line each starting `- #252 Bots that change files: …`, and those lines are used
+  ones in its body, a line each starting `- #252 Bots that change files: …` or `- #246: …`, and those lines are used
   instead of its title; any other body is never read for them), or from the commits when there are none or GitHub
   can't be reached: a line for each part of Bridge AI, named by the words before a title's or
   subject's first colon (`Bots: a run at its time limit asks…`) or the name in capitals it starts
