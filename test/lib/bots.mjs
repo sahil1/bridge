@@ -51,7 +51,9 @@ export function lookers(kit, slack) {
     // Every event in a bot's record, as written.
     events: (id = 'b1') => { try { return fs.readFileSync(path.join(kit.data, 'bots', id, 'trace', `${month()}.jsonl`), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) } catch { return [] } },
     posted: async () => (await slack.state()).posted,
-    postedLike: (re, ms = 20000) => until(async () => (await slack.state()).posted.find((x) => re.test(x.text || '')), ms),
+    // (Not a draft's card in your direct messages, whose words have the draft in them too: posts go
+    // in each conversation at once now, so its Sent can land a moment after the answer.)
+    postedLike: (re, ms = 20000) => until(async () => (await slack.state()).posted.find((x) => re.test(x.text || '') && !/ — Draft: /.test(x.text || '')), ms),
     reacted: async (ts, name, app = 'A1') => (await slack.state()).reactions.some((r) => r.ts === ts && r.name === name && r.app === app),
     calls: (method) => slack.calls().filter((c) => c.method === method),
   }
