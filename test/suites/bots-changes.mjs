@@ -134,8 +134,11 @@ try {
   await part('gh signed out', async () => {
     fs.writeFileSync(path.join(kit.home, 'gh-signed-out'), '')
     const q = await slack.ask({ user: 'U0DANA', text: `${M} Bump the version [edit VERSION 1.1.0] [answer Bumped.]` })
-    const d = await draftOf('Bump the version')
-    ok(/gh isn't signed in to GitHub, so the pull request couldn't be opened \(the branch is pushed\)/.test(d?.problem || '') && !/pull request:/i.test(d.draft) && (await timelineOf('b1', 'Bump the version')).some((e) => e.type === 'change.failed' && e.step === 'pr'), 'gh signed out: said in the draft and the record, not hidden', d?.problem)
+    const d0 = await draftOf('Bump the version')
+    // (Approved while gh is signed out: its pull request can't open.)
+    const r0 = await kit.api(`/bots/questions/${d0.id}`, { send: true, text: d0.draft })
+    const d = r0.item
+    ok(/gh isn't signed in to GitHub, so the pull request couldn't be opened \(the branch is pushed\)/.test(d?.problem || '') && d.state === 'draft' && !/pull request:/i.test(d.draft) && (await timelineOf('b1', 'Bump the version')).some((e) => e.type === 'change.failed' && e.step === 'pr'), 'gh signed out: said in the draft and the record, not hidden', d && { problem: d.problem, state: d.state })
     ok(!(await inThread(q.ts)).some((x) => /Bumped/.test(x.text)), 'and nothing is sent')
     fs.rmSync(path.join(kit.home, 'gh-signed-out'))
     const r = await kit.api(`/bots/questions/${d.id}`, { send: true, text: d.draft })

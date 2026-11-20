@@ -15,9 +15,8 @@
 //   save_file takes five files a run at most, and says so for one more;
 //   for a public channel, an answer with files waits for you even where it may go without asking,
 //   whichever way it made them (its outbox, or a FILE: block); a page, a drawing or XML anywhere;
-//   a run picked up after its time limit (Continue, in a copy of its conversation) has its save_file
-//   tool still, and what it saved before it was stopped goes with the answer, counted in its five;
-//   a page it makes after Continue waits for you as any does;
+//   a run past its time limit, nobody having answered, carries on, and what it saved before and after
+//   goes with the answer, counted in its five; a page it makes waits for you as any does;
 //   its Activity lists the files it made with Open and Send to… (Send to… across two computers is
 //   in backup-move); one that could run something as it opens (a drawing, a page) is shown in
 //   Finder instead; nothing writes through a bot's files (Studio's routes, a copy into them).
@@ -59,7 +58,7 @@ await dc.heartbeat({ ms: 800 })
 const tm = await startTeams('bots-files')
 const model = await startModel('bots-files')
 const T1 = 'dtest.bot-one.0123456789abcdef'
-// (A "minute" is 3 seconds and the wait at a time limit 4, for a run picked up after its time limit.)
+// (A "minute" is 3 seconds and the wait at a time limit 4, for a run past its time limit.)
 const { slack, kit, needs, draftOf, startOf, startsOf, briefOf, botOf, connected, events, posted, postedLike } = await botKit('bots-files', {
   folders: ['notes'], env: { BRIDGE_DISCORD_URL: dc.url, BRIDGE_TEAMS_URL: tm.url, BRIDGE_TEAMS_PORT: '0', BRIDGE_BOT_HOLD_MS: '60000', BRIDGE_BOT_MINUTE_MS: '3000', BRIDGE_BOT_GRACE_MS: '4000' },
 })
@@ -216,7 +215,7 @@ try {
     const keptAt = kept ? path.join(kit.data, 'bots', 'b1', 'trace', 'files', ...kept.split('/')) : ''
     ok(kept === `${month()}/${d.id}-1/totals.csv` && fs.readFileSync(keptAt, 'utf8') === 'Region,Total\n', 'kept beside its record, as it was made', made)
     if (IS_MAC) ok(/Bridge AI/.test(spawnSync('xattr', ['-p', 'com.apple.quarantine', keptAt], { encoding: 'utf8' }).stdout || ''), 'marked as from elsewhere, as a download is (com.apple.quarantine)')
-    ok(!box || !fs.existsSync(box), 'its outbox gone once its answer was in')
+    ok(!box || !fs.existsSync(box) || !fs.readdirSync(box).length, 'its outbox emptied once its answer was in (its session\'s, for its next turn)', box && fs.existsSync(box) && fs.readdirSync(box))
     await send(d)
     const up = await until(async () => (await slack.state()).files.find((f) => f.name === 'totals.csv'), 15000)
     ok(up?.thread === q1.ts && up.content === 'Region,Total\n' && slack.calls().some((c) => c.method === 'files.getUploadURLExternal') && slack.calls().some((c) => c.method === 'files.completeUploadExternal'), 'sent with the answer, in the question\'s thread, through Slack\'s upload API', up)
@@ -542,20 +541,19 @@ try {
     await kit.api('/bots/b1/settings', { auto: false })
   })
 
-  // ---------- Picked up after its time limit ----------
-  await part('picked up after its time limit', async () => {
+  // ---------- Past its time limit ----------
+  // (Nobody answering at its time limit is a yes: it carries on, and what it saved before and after
+  // goes with its answer, counted in its five.)
+  await part('past its time limit', async () => {
     await kit.api('/bots/b1/settings', { auto: true, limits: { minutes: 1, atLimit: 'ask' } })
-    await slack.ask({ user: 'U0DANA', dm: true, text: `Early and late files [make-early early.csv a,1] [work 40] [then 2] [make late.html <p>Late</p>] ${[3, 4, 5, 6].map((n) => `[make m${n}.txt Note ${n}.]`).join(' ')} [answer Both.]` })
-    const stopped = await until(async () => (await needs()).find((x) => x.text.includes('Early and late files') && x.limit?.phase === 'stopped'), 40000)
-    ok(stopped?.limit.how === 'session' && !madeOf(stopped.id), 'stopped at its time limit with a file saved, nothing sent yet', stopped?.limit)
-    await kit.api(`/bots/questions/${encodeURIComponent(stopped.id)}/limit`, { act: 'continue', minutes: 10 })
-    const again = await until(() => startsOf('Early and late files')[1], 20000)
-    const args = again?.args.join(' ') || ''
-    ok(args.includes('--fork-session') && again.args.includes('--strict-mcp-config') && again.args.includes('mcp__bridge_outbox__save_file') && args.includes('--tools Read,Grep,Glob ') && !/Write|Edit|Bash|acceptEdits|bypassPermissions/.test(args), 'picked up in a copy of its conversation, with its save_file tool and still nothing that writes', again?.args)
+    await slack.ask({ user: 'U0DANA', dm: true, text: `Early and late files [make-early early.csv a,1] [work 20] [make late.html <p>Late</p>] ${[3, 4, 5, 6].map((n) => `[make m${n}.txt Note ${n}.]`).join(' ')} [answer Both.]` })
+    const asked = await until(async () => (await needs()).find((x) => x.text.includes('Early and late files') && x.limit?.phase === 'asking'), 40000)
+    const carried = await until(() => events().find((e) => e.type === 'limit.carried' && e.q === asked?.id), 30000)
+    ok(!!carried && !madeOf(asked?.id), 'asked at its time limit, nobody answered: it carries on, nothing sent yet', carried)
     const d = await until(async () => (await needs()).find((x) => x.text.includes('Early and late files') && x.state === 'draft' && x.files?.length), 40000)
     const names = (d?.files || []).map((f) => f.name).sort().join()
-    ok(names === 'early.csv,late.html,m3.txt,m4.txt,m5.txt' && /I couldn't save m6\.txt: You've saved 5 files already/.test(d.draft), 'what it saved before it was stopped goes with the answer, counted in its five', d && { files: names, draft: d.draft })
-    ok(/late\.html, which can run a script where it's opened, so it waits for you/.test(d?.warn || ''), 'a page it made after Continue waits for you, as any does', d?.warn)
+    ok(events().filter((e) => e.type === 'run.started' && e.q === d?.id).length === 1 && names === 'early.csv,late.html,m3.txt,m4.txt,m5.txt' && /I couldn't save m6\.txt: You've saved 5 files already/.test(d.draft), 'what it saved before and after its time limit goes with the answer, counted in its five', d && { files: names, draft: d.draft })
+    ok(/late\.html, which can run a script where it's opened, so it waits for you/.test(d?.warn || ''), 'a page it made waits for you, as any does', d?.warn)
     await kit.api(`/bots/questions/${encodeURIComponent(d.id)}`, { send: false })
     await kit.api('/bots/b1/settings', { auto: false, limits: { minutes: 10 } })
   })
@@ -740,18 +738,20 @@ try {
     await tm.endpoint(`http://127.0.0.1:${port}/api/messages`)
     await tm.install()
     await kit.api('/bots/b1/settings', { askers: [{ id: 'U0DANA', name: 'Dana' }, { id: 'discord:2001', name: 'Dana' }, { id: 'teams:aad-dana-0001', name: 'Dana Reyes' }] })
+    // (In a chat with it, a direct message: answered at once.)
     await tm.say({ user: 'dana', text: 'The summary please [make summary.md All well.] [answer Here it is.]' })
-    const d = await draftOf('The summary please')
-    ok(d?.files?.some((f) => f.name === 'summary.md'), 'its draft, with the file', d?.files)
-    await send(d)
-    const p = await until(async () => (await tm.state()).posted.find((x) => /Here it is/.test(x.text || '')), 15000)
+    const p = await until(async () => (await tm.state()).posted.find((x) => /Here it is/.test(x.text || '')), 30000)
+    const d = { id: events().find((e) => e.type === 'received' && /The summary please/.test(e.text || ''))?.q }
+    ok(events().some((e) => e.type === 'files.made' && e.q === d.id && e.files.some((f) => f.name === 'summary.md')), 'it made the file', d)
     ok(/I couldn't attach summary\.md \(\d+ bytes\) \(Microsoft Teams doesn't let a bot attach a file to a reply\)\. Tester has it in Bridge AI on /.test(p?.text || ''), 'the reply says Teams took no file, and who has it, where', p?.text)
     const ev = await until(() => events().find((e) => e.type === 'file.uploaded' && e.q === d.id), 8000)
     ok(ev?.ok === false && /Microsoft Teams/.test(ev.error || ''), 'and the record says so', ev)
     // Attached from its folder: its brief says Teams takes none, and the reply says so.
     await tm.say({ user: 'dana', text: 'The UCB book in Teams please [attach ~/notes/hiring/UCB_All_Resumes.pdf] [answer Here it is, in Teams.]' })
-    const s = await startOf('The UCB book in Teams please')
+    // (The same chat, so the same session: its brief, the one it started with.)
+    const s = await startOf('The summary please')
     ok(/attach it with your attach_file tool/.test(briefOf(s)) && /Microsoft Teams doesn't let a bot attach a file to a reply: a file you send back stays with Tester in Bridge AI, and your reply says so\./.test(briefOf(s)) && !/FILE:/.test(briefOf(s)), 'its brief in Teams: it may attach, and Teams takes none from a bot, which the reply says')
+    // (A file from its folders waits for you, in a direct message too.)
     const da = await draftOf('The UCB book in Teams please')
     ok(da?.files?.some((f) => f.name === 'UCB_All_Resumes.pdf'), 'its draft, with the PDF', da?.files)
     await send(da)

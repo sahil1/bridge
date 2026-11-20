@@ -261,6 +261,8 @@ if (forked && forked !== id) {
 const log = fs.openSync(path.join(project, `${id}.jsonl`), 'a')
 // (Gone on with: its conversation carries on from its last message, as Claude Code's does.)
 let prev = (() => { try { const l = fs.readFileSync(path.join(project, `${id}.jsonl`), 'utf8').trim().split('\n').pop(); return JSON.parse(l).uuid || null } catch { return null } })()
+// (Its brief, as its conversation began: what a later turn goes on with, as the agent remembers it.)
+const opening = (() => { try { const l = fs.readFileSync(path.join(project, `${id}.jsonl`), 'utf8').split('\n').find((x) => x.includes('"type":"user"')); const c = JSON.parse(l).message?.content; return typeof c === 'string' ? c : '' } catch { return '' } })() || message
 const w = (o) => {
   const e = { sessionId: id, cwd: process.cwd(), uuid: `h-${Math.random().toString(36).slice(2)}`, parentUuid: prev, timestamp: new Date().toISOString(), ...o }
   prev = e.uuid
@@ -362,7 +364,7 @@ function answerTurn(text) {
   // (On Windows its lines come as one, joined by " · ": runtime/spawn.js forCommandLine. Every
   // question block its brief has, as one: what someone added while it worked is asked of it too.)
   const q = [...text.matchAll(/----- question from.*? -----(?:\n| · )([\s\S]*?)(?:\n| · )----- end of question -----/g)].map((m) => m[1]).join('\n')
-  const told = (/----- instructions -----(?:\n| · )([\s\S]*?)(?:\n| · )----- end of instructions -----/.exec(text) || [])[1] || firstTold || ''
+  const told = (/----- instructions -----(?:\n| · )([\s\S]*?)(?:\n| · )----- end of instructions -----/.exec(text) || /----- instructions -----(?:\n| · )([\s\S]*?)(?:\n| · )----- end of instructions -----/.exec(opening) || [])[1] || firstTold || ''
   if (firstTold == null) firstTold = told
   const answered = (/----- answer from (.+?) -----(?:\n| · )([\s\S]*?)(?:\n| · )----- end of answer -----/.exec(text) || null)
   const sign = (/\[sign ([^\]]+)\]/.exec(told) || [])[1] || null
@@ -565,7 +567,7 @@ function answerTurn(text) {
     const remember = [...q.matchAll(/\[remember ([^\]]+)\]/g)].map((m) => `REMEMBER: ${m[1]}`).concat([...q.matchAll(/\[remember-me ([^\]]+)\]/g)].map((m) => `REMEMBER about ${(/----- question from (.*?) -----/.exec(text) || [])[1] || 'them'}: ${m[1]}`))
     const a = /\[answer ([^\]]+)\]/.exec(q)
     const long = /\[long\]/.test(q) ? `\n\n${Array.from({ length: 60 }, (_, i) => `Point ${i + 1}: the details of this part of the answer, said at some length.`).join('\n\n')}` : ''
-    const hand = /reply with HAND TO and that bot's name/.test(text) && /\[hand ([^\]]+)\]/.exec(q)
+    const hand = (/reply with HAND TO and that bot's name/.test(text) || /reply with HAND TO and that bot's name/.test(opening)) && /\[hand ([^\]]+)\]/.exec(q)
     const answer = hand ? `HAND TO ${hand[1]}` : /\[noanswer\]/.test(q) ? 'NO ANSWER\nNothing in this folder says.' : /\[notforme\]/.test(q) ? 'NOT FOR ME' : [[...out, a ? a[1] : 'Here is what I found.', ...(sign ? [sign] : [])].join(' ') + long, ...files, ...remember, ...(attachLines.length ? [attachLines.join('\n')] : [])].join('\n\n')
     said = answer
     reply(answer)

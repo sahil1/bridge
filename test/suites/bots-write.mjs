@@ -663,7 +663,7 @@ try {
     const p2 = events(HI).filter((e) => e.type === 'write.proposed' && (e.files || []).some((f) => /s3\.md$/.test(f.path))).at(-1)
     ok(r?.done && p2?.direct && p2.files.length === 1, 'it read the change in its copy, and its next change is only what\'s new (s3.md), made at once', { read: r, files: p2?.files })
     await slack.ask({ user: OWNER.id, thread: q.ts, text: `${M} Hiring: a batch [edit-many 3 Hiring/batch] [answer A batch.]` })
-    const held = await until(() => events(HI).find((e) => e.type === 'session.held'), 40000)
+    const held = await until(() => events(HI).find((e) => e.type === 'session.held' && e.conv === `C0LAUNCH:${q.ts}`), 40000)
     const it = await until(async () => (await needs()).find((x) => x.write?.held?.some((h) => h.why === 'total')), 20000)
     ok(!!held && held.files === 6 && !!it && it.write.state === 'waiting' && !fs.existsSync(H('batch')), 'past its running total (6 files in this session), the change waits for you, even yours, and you\'re told', { held, write: it?.write?.held })
     await kit.api(`/bots/questions/${it.id}`, { send: false })

@@ -37,7 +37,7 @@ const kit = await startKit('teams-bot', {
   },
 })
 kit.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'helper-claude.cjs'), 'utf8'))
-const { draftOf, startOf, startsOf, briefOf, botOf, events } = lookers(kit, null)
+const { draftOf, startOf, startsOf, briefOf, botOf, events, logOf } = lookers(kit, null)
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 const part = async (name, fn) => { try { await fn() } catch (e) { ok(false, `${name}: crashed: ${e.stack}`) } }
@@ -115,11 +115,9 @@ try {
     const brief = briefOf(s)
     ok(/You're Atlas, Tester's bot in Microsoft Teams/.test(brief) && /Tester's organization in Microsoft Teams/.test(brief) && /as Dana Reyes wrote it in Microsoft Teams/.test(brief) && !/FILE:/.test(brief), 'one agent, briefed as a bot in Microsoft Teams, the question as Dana wrote it there', brief.slice(0, 500))
     ok(!!(await until(async () => (await st()).typing.some((x) => x.conversation === q1.conversation), 8000)), '"typing…" where she asked, for 👀')
-    const d = await draftOf('enterprise price')
-    ok(d?.draft === 'Enterprise is $40 a seat.' && d.place?.kind === 'dm' && d.from?.id === 'teams:aad-dana-0001', 'its draft in Needs You', d)
-    await kit.api(`/bots/questions/${encodeURIComponent(d.id)}`, { send: true })
+    // (A direct message: answered at once.)
     const p = await postedLike(/\$40 a seat/)
-    ok(p?.conversation === q1.conversation && p.replyTo === q1.id && p.textFormat === 'markdown', 'sent, as a reply in that chat', p)
+    ok(p?.conversation === q1.conversation && p.replyTo === q1.id && p.textFormat === 'markdown' && events().some((e) => e.type === 'sent' && e.kind === 'answer' && e.how === 'auto' && e.platform === 'teams'), 'answered at once, as a reply in that chat', p)
     ok(!events().some((e) => e.type === 'reaction' && e.platform === 'teams'), 'and no reactions (Teams has none for bots), nor a failure for them')
     // A mention in a channel, then a reply in its thread with no mention.
     const q2 = await tm.say({ user: 'dana', kind: 'channel', mention: true, text: 'when do we launch? [answer On Friday.]' })
@@ -129,8 +127,8 @@ try {
     const p2 = await postedLike(/On Friday/)
     ok(p2?.conversation === `${CHANNEL};messageid=${q2.id}` && p2.replyTo === q2.id, 'answered in that post\'s thread', p2)
     await tm.say({ user: 'dana', kind: 'channel', thread: q2.id, text: 'and what time? [answer At 10.]' })
-    const f = await startOf('what time')
-    ok(/goes on from your earlier answers in this Microsoft Teams thread/.test(briefOf(f)) && f.args.includes('--resume'), 'a reply in its thread, without a mention, goes on from that answer', f?.args)
+    const f = await until(() => logOf('turns.log').find((x) => x.text.includes('what time')), 30000)
+    ok(!!f && /----- question from Dana Reyes -----/.test(f.text) && !startsOf('what time').length, 'a reply in its thread, without a mention, goes on in that answer\'s session, as its next turn', f?.text?.slice(0, 300))
     const d3 = await draftOf('what time')
     await kit.api(`/bots/questions/${encodeURIComponent(d3.id)}`, { send: true })
     ok((await postedLike(/At 10/))?.conversation === `${CHANNEL};messageid=${q2.id}`, 'in the same thread')
@@ -166,8 +164,8 @@ try {
     ok(!events().some((e) => /forged/.test(e.text || '')), 'nothing of a forged one in its record')
     const v = await where()
     ok(v.rejected?.n === 3 && /signature|another app|another address/.test(v.rejected.why || ''), 'how many were turned away, and why, for Settings', v.rejected)
-    await tm.say({ user: 'tester', kind: 'channel', mention: true, text: 'the owner asks [answer Yes.]' })
-    ok(!!(await draftOf('the owner asks')), 'you in Teams, not named under Who Can Ask: answered all the same')
+    await tm.say({ user: 'tester', kind: 'channel', mention: true, text: 'the owner asks [answer Yes, for you.]' })
+    ok(!!(await postedLike(/^Yes, for you\.$/)), 'you in Teams, not named under Who Can Ask: answered all the same, and at once')
   })
 
   // ---------- Commands ----------
@@ -186,15 +184,15 @@ try {
     const q = await tm.say({ user: 'dana', text: 'compare every plan [work 14] [answer All alike.]' })
     const a = await until(async () => (await st()).posted.find((x) => x.conversation === 'a:personal-tester' && /^Atlas's answer to Dana Reyes in a direct message has run \d+ minutes?: .+ Reply “continue 10”, “continue 30” or “stop”\.$/.test(x.text || '')), 20000)
     ok(!!a, 'at its time limit: you\'re asked in your own chat with it, in words', (await st()).posted.slice(-3).map((x) => x.text))
-    const told = await postedLike(/^This is taking me longer than usual: I'm checking with Tester that I can carry on\.$/)
-    ok(told?.conversation === q.conversation, 'Dana is told it\'s taking longer, in her chat with it', told)
+    const told = await postedLike(/^This is taking a while; I'm still on it\.$/)
+    ok(told?.conversation === q.conversation, 'Dana is told it\'s taking a while, in her chat with it', told)
     await tm.say({ user: 'tester', text: 'continue 30' })
     const ack = await postedLike(/^Atlas carries on with its answer to Dana Reyes, for 30 minutes more\.$/)
     const c = await until(() => events().find((e) => e.type === 'limit.continued'), 8000)
     ok(ack?.conversation === 'a:personal-tester' && c?.via === 'teams' && c.by === 'Tester' && c.minutes === 30, 'your "continue 30" there: it goes on, you\'re told so, and it\'s in the record, by you from Teams', c)
-    const d = await draftOf('compare every plan', 30000)
-    ok(d?.draft === 'All alike.' && events().filter((e) => e.type === 'run.started' && e.q === d.id).length === 1, 'with no gap: one run, to its answer')
-    await kit.api(`/bots/questions/${encodeURIComponent(d.id)}`, { send: false })
+    const done1 = await postedLike(/^All alike\.$/, 30000)
+    const qid = events().find((e) => e.type === 'received' && /compare every plan/.test(e.text || ''))?.q
+    ok(done1?.conversation === q.conversation && events().filter((e) => e.type === 'run.started' && e.q === qid).length === 1, 'with no gap: one run, to its answer, sent in her chat')
     await kit.api('/bots/b1/settings', { limits: { minutes: 10 } })
   })
 

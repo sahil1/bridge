@@ -69,8 +69,7 @@ try {
     ok(d2?.draft === 'Closed on Saturdays.' && d2.session === sid, 'its answer is that turn\'s, in the same session', d2 && { draft: d2.draft, session: d2.session })
     const v = await kit.api(`/bots/sessions/${sid}`)
     ok(v.session.turns === 2 && v.turns.length === 2 && v.turns[1].draft === 'Closed on Saturdays.' && v.pane.live && v.pane.paneId === one.paneId, 'the session has both turns, and its pane', v && { turns: v.turns.map((t) => [t.text, t.draft]), pane: v.pane })
-    // (Both sent, for what follows.)
-    await kit.api(`/bots/questions/${d1.id}`, { send: true, text: d1.draft })
+    ok(!(await needs()).some((x) => x.id === d1.id) && events('b1').some((e) => e.type === 'discarded' && e.q === d1.id && /newer answer/.test(e.why || '')) && /Your last answer here hasn't been sent/.test(t2?.text || ''), 'its earlier answer, still waiting, gives way to the newer one, and its agent is told', { needs: (await needs()).map((x) => x.id) })
     await kit.api(`/bots/questions/${d2.id}`, { send: true, text: d2.draft })
   })
 
@@ -220,6 +219,19 @@ try {
     const shown = await kit.api('/fleet')
     ok(Array.isArray(shown.botSessions) && shown.botSessions.length >= 1 && shown.botSessions.every((a) => a.helper?.session) && !shown.agents.some((a) => a.helper?.list === 'desk'), 'the fleet gives the live sessions as botSessions, never among the agents', { botSessions: shown.botSessions?.map((a) => a.paneId), agents: shown.agents.length })
     await kit.api('/bots/b1/settings', { max: 2, limits: { atOnce: 2 } })
+  })
+
+  // ---------- A new bot from what it's for and a folder ----------
+  await part('quick', async () => {
+    const v = await kit.api('/bots/quick', { purpose: 'Answer hiring questions and keep the roles list up to date', folder: '~/notes' })
+    ok(v.name === 'Hiring Bot' && v.settings.readsFrom.join() === '~/notes' && v.settings.writesTo.join() === '~/notes' && v.settings.changes === 'edit' && v.settings.answerIn === 'thread' && v.settings.who === 'named' && v.description.startsWith('Answer hiring questions'), 'a new bot from what it\'s for and a folder: it reads and changes files there, answers in a thread, named people may ask', { name: v.name, settings: v.settings, description: v.description })
+    const bad = await kit.api('/bots/quick', { purpose: 'Anything', folder: '/etc' }).then(() => null, (e) => e)
+    ok(bad?.status === 400, 'a folder outside your home folder is refused', bad?.message)
+    const none = await kit.api('/bots/quick', { folder: '~/notes' }).then(() => null, (e) => e)
+    ok(none?.status === 400, 'and one with nothing to be for', none?.message)
+    const bash = await kit.api(`/bots/${v.id}/settings`, { bash: 'always' }).then(() => null, (e) => e)
+    const dom = await kit.api(`/bots/${v.id}/settings`, { domains: ['not a domain'] }).then(() => null, (e) => e)
+    ok(bash?.status === 400 && dom?.status === 400, 'commands are off or sandboxed, and domains are domains', [bash?.message, dom?.message])
   })
 
   // ---------- The sessions' API ----------

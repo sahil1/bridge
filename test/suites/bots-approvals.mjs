@@ -441,52 +441,55 @@ try {
     const people = () => { try { return JSON.parse(fs.readFileSync(path.join(kit.data, 'bots', 'b1', 'people.json'), 'utf8')).people } catch { return {} } }
     const earlier = (x) => (/----- earlier conversations -----([\s\S]*?)----- end of earlier conversations -----/.exec(briefOf(x)) || [])[1] ?? null
     const send = async (words, text) => { const d = await draftOf(words); await kit.api(`/bots/questions/${d.id}`, { send: true, ...(text ? { text } : {}) }); return d }
-    await slack.ask({ user: 'U0DANA', dm: true, text: 'Which floor is support on? [answer The third floor.]' })
-    await send('Which floor is support on', 'The third floor, by the lifts.')
-    await postedLike(/by the lifts/)
-    // Your edit there is offered as a learning: that direct message's own, waiting for your Keep even
-    // with learnings kept straight away, and never given anywhere else.
-    const fix = await until(async () => (await mem()).find((y) => y.source === 'edit' && /Which floor/.test(y.text)), 8000)
-    ok(fix?.state === 'proposed' && fix.private === true && fix.kind === 'channel' && fix.of === 'D0DANA' && fix.place?.kind === 'dm' && fix.place.name === 'Dana', 'your correction of a draft in a direct message: that place\'s own, waiting for your Keep, though learnings are kept straight away', fix)
+    const sidOf = (x) => { const i = (x?.args || []).indexOf('--session-id'); return i >= 0 ? x.args[i + 1] : null }
+    // A direct message: answered at once, and one session, its next question that session's next turn.
+    await slack.ask({ user: 'U0DANA', dm: true, text: 'Which floor is support on? [answer The third floor.] [remember Which floor is support on: the third floor, by the lifts]' })
+    const floor = await postedLike(/The third floor/)
+    ok(floor?.channel === 'D0DANA', 'Dana\'s question in a direct message is answered at once', floor)
+    // What it learns there is that direct message's own: waiting for your Keep even with learnings kept
+    // straight away, and never given anywhere else.
+    const fix = await until(async () => (await mem()).find((y) => /Which floor/.test(y.text)), 8000)
+    ok(fix?.state === 'proposed' && fix.private === true && fix.kind === 'channel' && fix.of === 'D0DANA' && fix.place?.kind === 'dm' && fix.place.name === 'Dana', 'what it learns in a direct message: that place\'s own, waiting for your Keep, though learnings are kept straight away', fix)
     const asked = await until(() => dmOf('used only there'), 10000)
     ok(/a direct message with Dana, used only there/.test(JSON.stringify(asked?.blocks || [])) && /Which floor/.test(JSON.stringify(asked?.blocks || [])), 'your Slack DM asks, saying where it came from', asked?.blocks)
     await kit.api(`/bots/b1/memory/${fix.id}`, { keep: true }, 'PATCH')
+    const s1 = await startOf('Which floor is support on')
     await slack.ask({ user: 'U0DANA', dm: true, text: 'Is it open at lunch? [answer Yes, all day.]' })
-    const s2 = await startOf('Is it open at lunch')
-    ok(/----- earlier turns -----\nDana: Which floor is support on\? \[answer The third floor\.\]\nyou \(Helpdesk\): The third floor, by the lifts\.\n----- end of earlier turns -----/.test(briefOf(s2)) && !s2.args.join(' ').includes('--fork-session'), 'a direct message, one running conversation: its earlier turns given from the record, the answer as it was sent', briefOf(s2).slice(0, 1600))
-    ok(/----- memory -----[^]*Which floor is support on[^]*----- end of memory -----/.test(briefOf(s2)), 'the correction you kept, given in that direct message', briefOf(s2).slice(0, 1600))
-    await send('Is it open at lunch')
     const lunch = await postedLike(/Yes, all day/)
     ok(lunch?.channel === 'D0DANA' && !lunch.thread_ts, 'answered plainly in the direct message', lunch)
-    ok(people().U0DANA?.kept.length === 2 && people().U0DANA.kept.every((x) => x.where?.kind === 'dm' && x.where.private) && events().some((e) => e.type === 'context.noted' && e.person?.id === 'U0DANA' && e.state === 'kept'), 'kept straight away in her running context: her words and its answers, marked private', people().U0DANA)
+    ok(!startsOf('Is it open at lunch').length && logOf('turns.log').some((t) => t.text.includes('Is it open at lunch') && t.session === sidOf(s1)), 'a direct message, one running conversation: the next question goes on in the same session', logOf('turns.log').map((t) => t.session))
+    ok(await until(() => people().U0DANA?.kept.length === 2, 8000) && people().U0DANA.kept.every((x) => x.where?.kind === 'dm' && x.where.private) && events().some((e) => e.type === 'context.noted' && e.person?.id === 'U0DANA' && e.state === 'kept'), 'kept straight away in her running context: her words and its answers, marked private', people().U0DANA)
     // Asked in a public channel: what she said in her direct messages isn't given there.
     await slack.ask({ user: 'U0DANA', text: `${M} Where do I get a badge? [answer At reception.]` })
     const s3 = await startOf('Where do I get a badge')
-    ok(earlier(s3) === null && !/third floor/.test(briefOf(s3)), 'in a public channel, nothing from her direct messages: not her running context, nor your kept correction', briefOf(s3).slice(0, 1200))
+    ok(earlier(s3) === null && !/third floor/.test(briefOf(s3)), 'in a public channel, nothing from her direct messages: not her running context', briefOf(s3).slice(0, 1200))
     await send('Where do I get a badge')
     await postedLike(/At reception/)
     // Someone else: never hers.
     await slack.ask({ user: 'U0SAM', dm: true, text: 'What is the wifi called? [answer Acme-Guest.]' })
     const s4 = await startOf('wifi called')
     ok(!/third floor|by the lifts|badge|At reception|Which floor/.test(briefOf(s4)), 'Sam\'s question: none of Dana\'s running context', briefOf(s4).slice(0, 1200))
-    await send('wifi called')
     await postedLike(/Acme-Guest/)
-    // Hers, when she asks again: what she said where others could read it, besides this conversation's turns.
+    // Hers, in a new session (!new): what she said where others could read it.
+    await slack.ask({ user: 'U0DANA', dm: true, text: '!new' })
+    await postedLike(/Starting afresh/)
     await slack.ask({ user: 'U0DANA', dm: true, text: 'Anything else I should know? [answer No.]' })
     const s5 = await startOf('Anything else I should know')
-    ok(/Where do I get a badge\?[\s\S]*At reception\./.test(earlier(s5) || '') && !/Acme-Guest|wifi/.test(briefOf(s5)) && /They're Dana's alone/.test(briefOf(s5)), 'Dana again: given her earlier conversation in #launch, as hers alone, and nothing of Sam\'s', earlier(s5))
-    ok((await timelineOf('b1', 'Anything else I should know')).find((e) => e.type === 'run.started')?.earlier?.person === 1, 'and the run says what it was given', (await timelineOf('b1', 'Anything else I should know')).find((e) => e.type === 'run.started')?.earlier)
-    await kit.api(`/bots/questions/${(await draftOf('Anything else I should know')).id}`, { send: false })
+    ok(sidOf(s5) !== sidOf(s1) && /Where do I get a badge\?[\s\S]*At reception\./.test(earlier(s5) || '') && !/Acme-Guest|wifi/.test(briefOf(s5)) && /They're Dana's alone/.test(briefOf(s5)), 'Dana in a new session: given her earlier conversation in #launch, as hers alone, and nothing of Sam\'s', earlier(s5))
+    ok((await timelineOf('b1', 'Anything else I should know')).find((e) => e.type === 'run.started')?.earlier?.person >= 1, 'and the run says what it was given', (await timelineOf('b1', 'Anything else I should know')).find((e) => e.type === 'run.started')?.earlier)
+    await postedLike(/^No\.$/)
     // Memory off: none given, none kept.
     await kit.api('/bots/b1/settings', { memory: 'off' })
     const had = people().U0DANA.kept.length
+    await slack.ask({ user: 'U0DANA', dm: true, text: '!new' })
+    await until(async () => (await posted()).filter((x) => /Starting afresh/.test(x.text || '')).length >= 2, 10000)
     await slack.ask({ user: 'U0DANA', dm: true, text: 'One more question? [answer Go ahead.]' })
     const s6 = await startOf('One more question')
     ok(earlier(s6) === null, 'memory off: no running context given', briefOf(s6).slice(0, 1200))
-    const d6 = await send('One more question')
     await postedLike(/Go ahead/)
     await sleep(800)
-    ok(people().U0DANA.kept.length === had && !events().some((e) => e.type === 'context.noted' && e.q === d6.id), 'and none kept')
+    const q6 = events().find((e) => e.type === 'received' && /One more question/.test(e.text || ''))?.q
+    ok(people().U0DANA.kept.length === had && !events().some((e) => e.type === 'context.noted' && e.q === q6), 'and none kept')
     // Forgotten, by you: gone, and not given again; Sam's untouched.
     await kit.api('/bots/b1/settings', { memory: 'auto' })
     const f = await kit.api('/bots/b1/people/U0DANA/forget', {})
