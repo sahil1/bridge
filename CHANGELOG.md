@@ -2,6 +2,58 @@
 
 Each version's section here becomes its GitHub release notes (`npm run release`).
 
+## 3.22.0
+
+Bots now have Connections, Bots and Sessions: each conversation is a live Claude Code session in the bot's folder, your own asks get Full Access, and a bot can change files with your approval and Undo, attach files and post Share Links. Share Links gives people outside your devices a link to a file, a folder, a Studio document or an agent's app. Settings opens on Your Features, in nine sections. Also Models for Each Task, Back Up & Move, Which Devices May Connect for everything a device does, meetings merged and carried on, and Scan QR code on the phone. Bots and Remote Screen and Preview are Beta Features.
+
+<!-- rollout: 10 -->
+
+### What's new
+
+- **Bots** (a Beta Feature): Bots in the sidebar has three tabs: Connections, Bots and Sessions. Bots need Claude Code 2.1.257 or later (`claude update`), and say so on an older one. A bot's runs load only your own Claude Code settings, never its folder's, and read nothing outside its folders.
+  - **Connections:** every Slack, Discord and Microsoft Teams app, by platform. One shared app reaches all your bots and routes each question to the right one. A bot can have an app of its own (bots made in 3.21.0 keep theirs), and **Use it for all your bots** makes that app the shared one. Each card has **Test this connection**, **You Here** (you link yourself with a code you send the app in a direct message), its Chief and specialists, and Channel Defaults. A card that isn't working says why, with the fix.
+  - **Bots:** a Chief and its specialists. The Chief takes what nothing else places, and hands a thread to a specialist or asks one. A new bot needs what it's for, a folder and a connection, or is set up in AI Assist's chat from what you say it's for. Each bot's page has Overview, Settings, Memory and Activity, with What Answers (agents and models, in order, with fallbacks) and MCP Servers for that bot.
+  - **Sessions:** each thread or direct message is one live Claude Code session. Follow-ups go into it, and it comes back after it's been idle or Bridge AI restarted. Its Thread has Send, Discard, Approve and Undo. Live shows it working, and typing there steps in. Stop and End session.
+  - **Answers:** yours go at once. Other people's go at once in direct messages and private channels, and wait for you in public and shared channels. A session gets the rights of the least trusted person whose words reach it.
+  - **When You Ask: Full Access**, on by default, for bots made before too: when only your words reach a session, the bot works as your own Claude Code in its folders, commands included. It asks you before anything destructive (Allow Once), and a push waits for your OK. Each bot's page says so once, with **Turn off**. When anyone else's words reach that session, it ends and the conversation goes on in a limited one.
+  - **Edits Files in Its Folders**, a new level in Changes: the bot changes a copy and Bridge AI applies the change, at once for you and the people you pick, after your approval for anyone else. Deleting or moving files, more than 20 files, secrets, instructions and files that run always wait for you. **Undo** is on the reply, in Activity and in Needs You.
+  - **Files:** a bot attaches files from its folders (PDFs, documents, pictures) and files it makes. They wait for you unless **Send Files From Its Folders Without Asking** says otherwise. Hidden files, files named for keys or passwords, and files with keys or tokens in them are never sent.
+  - **Share Links:** a bot can post a Share Link to a file, folder or page in its folders. One for you is made at once; one for anyone else waits for your OK. People open it with their email, or a password sent to them in a direct message. In Slack, links by email need **Update Your Slack App** on its connection.
+  - **At its time limit** a run asks you: Continue 10 or 30 more minutes, or Stop. With no answer it carries on, up to its Longest Run (240 minutes unless you change it).
+- **Share Links**: **Share Link…** on a file or folder, a Studio document or an agent's app gives people outside your devices a link and a QR code.
+  - **Who:** Anyone With the Link, with a password if you like, or Only These People, by email, each with a code sent to them first. A link lasts an hour, a day or a week.
+  - **How:** it goes through your relay, end-to-end encrypted, so the relay can't read what's shown. It works while this computer is on.
+  - **What:** one file, a folder (read-only), a Studio document at its latest, or an app, buttons included. A relay of your own, and Bridge AI's relay until it has its share domain, share no sites or apps: files, folders without web pages and Studio documents are shared. A relay of your own needs updating once: Settings › Devices & Access › Phone says so, with Update it.
+  - **Settings › Devices & Access › Share Links** and Studio › Shared list each link, who opened it and when, with Stop Sharing. The first open of each link notifies your devices.
+- **Settings** opens on **Your Features**: a card for each feature and each Beta Feature, with its switch, how it's doing in a line, and Open.
+  - Nine sections instead of thirteen, by what you're doing: You, Agents & Models, Meetings & Voice, Mail & Calendar, Bots, Devices & Access, Notifications, Back Up & Move, and About & Updates.
+  - Each Beta Feature's switch is at the top of its own place, and About & Updates › Beta Features lists them all. A setting that needs another shows greyed, with what to turn on. ⌘K finds every setting.
+- **Models for Each Task**: each kind of job can run on a model you pick, from any provider you've connected, with up to five to fall back on. In Settings › Agents & Models › Which Model Does What: meeting notes, AI Assist, Mail (on a Mac), titles and tidy-ups, live AI Assist and diagrams, each on Automatic or a model of its own.
+  - A model that can't run is passed over for the next, and the row's last run says which answered and why. Picking a provider with no key opens its key form there.
+- **Back Up & Move**: Settings › Back Up & Move puts your setup in one file sealed with a passphrase, or moves it straight to a linked computer.
+  - It holds bots, connections, routines, the Chief of Staff's files, MCP servers and settings. Meetings, recordings, and this computer's keys and sign-ins stay out.
+  - What comes is shown in full before anything is added. Bots' connections and scheduled routines arrive paused, so they never run on two computers at once, with Start in one click.
+- **Meetings**: **Merge into one meeting** joins a meeting recorded as two, with Separate for 7 days, and Bridge AI suggests it when the second is the rest of the first. Merge with… is in a meeting's ⋯.
+  - A recording stopped because Bridge AI closed says so, with **Resume recording**, which carries on in the same meeting.
+- **Remote Screen and Preview** (a Beta Feature):
+  - The viewer is a window of its own in the screen's shape, with Fit, Actual Size and Full Screen, and **Which screen?** names each display.
+  - The **Remote Access Password**, set at that computer, is asked of every session, and 5 wrong tries lock that device out for 15 minutes. Control needs the password: a computer that had control on without one has it off until one is set. **Ask Here First** (off at first) asks Allow or Deny there.
+  - Your other devices are notified when a session starts, with Stop and Block This Device. Screen Activity lists who looked, from which device and for how long.
+  - A session starts every time, or says why, with the button that fixes it: Reopen Bridge AI, Open Bridge AI, Allow Screen Recording, or Update Bridge AI on that computer.
+- **Which Devices May Connect**: in Settings › Devices & Access › Remote Access, with Remote Screen and Preview on or off. A device you untick can't use that computer at all, its agents, terminals, files and screen included, and not through another of your computers either. Once a password, Ask Here First or an unticked device is set, a newly paired device waits as New in Needs You, with Allow and Keep Out.
+- **Scan QR code** on a phone: in the computer menu's On this phone, in Link a device, and beside Add a computer. In the phone's browser and the Android app in this release; the iPhone app has it from its next build.
+- **Update card**: the version on one line, up to four highlights from its notes, then Update now and What's new.
+
+
+### Fixes
+
+- Watch a screen in a meeting says why when it can't start, with what to do, and a screen picked in macOS's picker more than 10 seconds after it opened is watched. The floating card has Cancel beside Picking….
+- Through Tailscale, every request needs Bridge AI's key: a phone is let in by scanning the QR code in Settings › Devices & Access › Phone, a link that works once.
+- A closed agent that never got as far as a conversation says so, with Start fresh, instead of a Resume that started nothing.
+- A bot's run answers Claude Code's question about trusting its folder, so Try It and first questions no longer wait 10 minutes for nothing.
+- Slack bots: another copy of Bridge AI on the same app is found and said, a mention in a channel the app isn't in says so with the fix, and one rate-limited conversation doesn't hold up the others.
+- Crash reports leave out the names of paired phones and of devices seen through your other computers.
+
 ## 3.21.0
 
 Bots answer the people you choose in Slack, Discord and Microsoft Teams, from folders on your computer, and each answer waits for you unless you say otherwise. Remote Screen and Preview shows another of your computers' screen and its agents' apps, and its mouse and keyboard can be used once you allow that there. Both are Beta Features. Settings › About & Updates has an Update Channel anyone can pick. Studio's files work as Finder's do, meetings save as Word and PDF, and a file an agent names in its chat opens where it is. And fixes: switching relays keeps phones and computers paired, and messages to Codex are sent.
