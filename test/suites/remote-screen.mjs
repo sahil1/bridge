@@ -1501,7 +1501,8 @@ try {
     await view.waitFor({ timeout: 15000 })
     await view.click()
     const card = p.locator('.rs-card.c-password')
-    await card.waitFor({ timeout: 15000 })
+    // (What the viewer showed instead, when it doesn't come.)
+    await card.waitFor({ timeout: 15000 }).catch(async (e) => { throw new Error(`${e.message.split('\n')[0]} (the viewer: ${await p.locator('.rs-view').innerText({ timeout: 1000 }).then((s) => s.replace(/\s+/g, ' ').slice(0, 200), () => 'not there')})`) })
     ok(/Studio asks for its password before it shows its screen/.test(await card.innerText()) && !(await p.locator('.rs-view img.rs-media').getAttribute('src')), 'View screen: Studio asks for its Remote Access Password first, and nothing shows before it', await card.innerText())
     const b0 = await boxes(p)
     const cb = await card.boundingBox()
@@ -1512,7 +1513,9 @@ try {
     ok(/Wrong password\. 4 more wrong tries lock this device out for 15 minutes/.test(await p.locator('.rs-card-bad').innerText()), 'a wrong one: said, with the tries left', await p.locator('.rs-card-bad').innerText())
     await enterPw(p)
     ok(!!(await picture(p)), 'the right one: Studio\'s screen, its pictures shown')
-    ok(fills(await boxes(p), 1280, 800), 'the picture fills the viewer under the toolbar, its shape kept, centred on the letterbox', await boxes(p))
+    // (Measured once the room under the toolbar is: the toolbar can take another line as the picture comes, and the
+    // picture is fitted again a frame after.)
+    ok(!!(await until(async () => fills(await boxes(p), 1280, 800), 5000, 100)), 'the picture fills the viewer under the toolbar, its shape kept, centred on the letterbox', await boxes(p))
     ok(/Through the relay \(slower\)/.test(await p.locator('.rs-mode').innerText()), 'and says it comes through the relay, slower')
     ok(await p.locator('.rs-view').getByText('View only').isVisible(), 'View only: Studio hasn\'t allowed control')
     await shot(p, `${tag}remote-screen-view`)
@@ -1617,12 +1620,14 @@ try {
       ok(await contrast(p.locator('.rs-card.c-password p').first()) >= 4.5 && await contrast(p.locator('.rs-card.c-password .btn').first()) >= 4.5, `${mode}: the password question and its buttons are readable`)
       await enterPw(p)
       await picture(p)
-      ok(fills(await boxes(p), 1280, 800), `${mode}: the picture fills the viewer`)
+      ok(!!(await until(async () => fills(await boxes(p), 1280, 800), 5000, 100)), `${mode}: the picture fills the viewer`, await boxes(p))
       if (mode === 'dark') await shot(p, `${tag}remote-screen-view${sfx}`)
       await p.context().close()
       // macOS not letting Bridge AI record the screen there (the owner's case), as Studio says it.
       const why = "macOS doesn't let Bridge AI record the screen on Studio. On Studio, turn on Bridge AI in System Settings › Privacy & Security › Screen & System Audio Recording, then open Bridge AI again there."
-      const q = await page(b, laptop.url, { mode, before: (ctx) => changeAnswer(ctx, /\/api\/remote\?sources=1/, (j) => ({ ...j, screen: { can: false, code: 'screenPermission', permission: 'denied', why } })) })
+      // (No service worker, as in the desktop app: WebKit's test build doesn't route what one fetches,
+      // so once the worker takes the page over Studio's real answer would come instead.)
+      const q = await page(b, laptop.url, { mode, before: async (ctx) => { await noServiceWorker(ctx); await changeAnswer(ctx, /\/api\/remote\?sources=1/, (j) => ({ ...j, screen: { can: false, code: 'screenPermission', permission: 'denied', why } })) } })
       errors.push(...q.errors)
       await ready(q.p)
       await viewOn(q.p)
@@ -1785,7 +1790,7 @@ try {
       ok(look.title.left >= 76 && look.bar.height >= 52 && Math.abs(look.title.top + look.title.height / 2 - 26) <= 4 && /Studio's Screen · Bridge AI/.test(look.doc), `${mode}: the title clears the window's buttons, on their line, and names the window`, look)
       // (A browser that doesn't know the property says nothing of it either way.)
       ok(look.drag === 'drag' ? look.button === 'no-drag' : !look.drag && !look.button, `${mode}: the toolbar moves the window, its buttons stay buttons`, look)
-      ok(fills(await boxes(p), 1280, 800), `${mode}: the picture fills the window under it`)
+      ok(!!(await until(async () => fills(await boxes(p), 1280, 800), 5000, 100)), `${mode}: the picture fills the window under it`, await boxes(p))
       ok(!(await p.locator('.rs-view').getByRole('button', { name: 'Close' }).count()), `${mode}: no Close of its own beside the window's`)
       await shot(p, `${tag}remote-screen-window${mode === 'dark' ? '-dark' : ''}`)
       await p.context().close()
@@ -2168,12 +2173,27 @@ try {
     const said = []
     let to = null
     await cap.p.routeWebSocket(/\/api\/remote\/capture/, (ws) => { to = ws; const server = ws.connectToServer(); ws.onMessage((m) => { said.push(String(m)); server.send(m) }) })
+    // The start held where it waits for the screen to play until the stop has come, so the stop comes
+    // while it starts however fast this computer is (sent straight after the start, it could come
+    // once the start was done, and then the screen is rightly taken until the stop). Each track
+    // stopped is counted: the start let go of its screen.
+    await cap.ctx.addInitScript(() => {
+      const play = HTMLMediaElement.prototype.play
+      window.__plays = 0
+      HTMLMediaElement.prototype.play = function () { window.__plays++; return new Promise((go) => { window.__letPlay = () => go(play.call(this)) }) }
+      const stop = MediaStreamTrack.prototype.stop
+      window.__trackStops = 0
+      MediaStreamTrack.prototype.stop = function () { window.__trackStops++; return stop.call(this) }
+    })
     await cap.p.reload()
     await until(() => to && said.some((m) => /"t":"hello"/.test(m)), 8000, 50)
     to.send(JSON.stringify({ t: 'start', session: 'stopped-1', source: { kind: 'screen', id: 'fake-1', name: 'Test screen', w: 640, h: 400 }, p2p: null, rate: 1, max: 180000 }))
+    const starting = await until(() => cap.p.evaluate(() => window.__plays === 1), 8000, 50)
     to.send(JSON.stringify({ t: 'stop', session: 'stopped-1' }))
-    await sleep(1500)
-    ok(!said.some((m) => /"started"/.test(m) && /stopped-1/.test(m)) && !(await cap.p.locator('.rs-capture').getAttribute('data-sessions')), 'stopped while it started: the screen isn\'t taken for it', said.filter((m) => /stopped-1/.test(m)))
+    // (After the stop: what the test sends the page, and what it runs there, reach it in order.)
+    await cap.p.evaluate(() => window.__letPlay())
+    const after = await until(async () => (await cap.p.evaluate(() => window.__trackStops > 0)) || said.some((m) => /"started"/.test(m) && /stopped-1/.test(m)), 8000, 50)
+    ok(!!starting && !!after && !said.some((m) => /"started"/.test(m) && /stopped-1/.test(m)) && !(await cap.p.locator('.rs-capture').getAttribute('data-sessions')), 'stopped while it started: the screen isn\'t taken for it', { starting, said: said.filter((m) => /stopped-1/.test(m)) })
     await cap.ctx.close()
   })
 
