@@ -12,7 +12,7 @@ import TabStrip from './components/TabStrip.jsx'
 import Dock from './components/Dock.jsx'
 import Console, { MateEmpty, showChat, showView } from './components/Console.jsx'
 import { Settings, Onboarding, HerdrView, Terminals, ShellTab, MeetingsHome, MeetingPage, StudioHome, StudioPage, UsageStats, BotPage, BotsHome, SessionView, preloadViews } from './lazy.jsx'
-import { useBots, needsCount, botPlace, BOT_VIEW, BOTS_VIEW, SESSION_VIEW, botView, botsView, sessionView } from './components/bots/bots.js'
+import { useBots, needsCount, firstTab, botPlace, BOT_VIEW, BOTS_VIEW, SESSION_VIEW, botView, botsView, sessionView } from './components/bots/bots.js'
 import { sessionTitle } from './components/bots/sessions.js'
 import Home from './components/Home.jsx'
 import { FirstRunAnswers } from './components/FirstRun.jsx'
@@ -1244,7 +1244,7 @@ function App() {
       { id: 'terminals', icon: 'terminal', label: t('Terminals'), hint: t("Every agent's terminal, live"), run: () => setMoreView('terminals') },
       { id: 'map', icon: 'grid', label: t('Agent Map'), hint: t("What's running on each of your computers"), run: () => setMoreView('view:map') },
       // Bots (a beta feature): its Connections, Bots and Sessions, as the computer's.
-      bots.on && { id: 'bots', icon: 'bot', label: t('Bots'), hint: t('Connections, bots and every conversation they\'re having'), count: needsCount(bots.list), run: () => setMoreView(botsView(needsCount(bots.list) ? 'sessions' : 'bots')) },
+      bots.on && { id: 'bots', icon: 'bot', label: t('Bots'), hint: t('Connections, bots and every conversation they\'re having'), count: needsCount(bots.list), run: () => setMoreView(botsView(firstTab(bots.list))) },
       { id: 'needs', icon: 'bell', label: t('Needs You'), hint: t("What's waiting on you, on every device"), count: waiting, run: () => setInbox({}) },
       { id: 'history', icon: 'clock', label: t('History'), hint: t('Every conversation, and closed agents'), run: () => setHistory(true) },
       { id: 'settings', icon: 'settings', label: t('Settings'), hint: t('Devices, voice, appearance and more'), run: () => setSettings('all') },

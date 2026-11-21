@@ -163,6 +163,30 @@ try {
     ok(errors.length === 0, 'no page errors', errors)
     await ctx.close()
   })
+  // ---------- Its connection turned down ----------
+  // (Socket Mode turned off for the app: every bot on it needs you. The sidebar's Bots and the
+  // phone's More › Bots open at Connections, where the card says why, not at Sessions, where
+  // nothing waits.)
+  await part('turned down', async () => {
+    await slack.linkoff({ app: 'A1' })
+    ok(!!(await until(async () => (await kit.api('/bots')).bots.every((x) => x.state === 'error'), 15000)), 'Socket Mode off: every bot on maya_bot\'s app turned down')
+    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light' })
+    const row = p.locator('[data-setting="rail-bots"] .rail-nav-btn')
+    ok(!!(await until(async () => Number(await row.locator('.mc-needs').innerText().catch(() => '0')) > 0, 15000)), 'the sidebar\'s Bots says they need you')
+    await row.click()
+    ok(await shown(p, '.bh[data-tab="connections"]'), 'Bots opens at Connections', await p.locator('.bh').getAttribute('data-tab').catch(() => null))
+    ok(/Socket Mode is turned off/.test(await textOf(p, '.bh .cn-card[data-kind="shared"] .cn-state')), 'where the card says why', await textOf(p, '.bh .cn-card[data-kind="shared"] .cn-state'))
+    ok(errors.length === 0, 'no page errors', errors)
+    await ctx.close()
+    const x = await page(b, kit.url, { mode: 'dark', phone: true })
+    await x.p.locator('.tabbar button', { hasText: 'More' }).click({ timeout: 20000 })
+    await x.p.locator('.m-more-row[data-id="bots"]').click()
+    ok(await shown(x.p, '[data-setting="phone-bots"][data-tab="connections"]'), 'a phone\'s More › Bots too', await x.p.locator('[data-setting="phone-bots"]').getAttribute('data-tab').catch(() => null))
+    ok(x.errors.length === 0, 'a phone: no page errors', x.errors)
+    await x.ctx.close()
+    await kit.api(`/connections/${(await botOf(S)).connections.slack.id}/connect`, {})
+    ok(!!(await until(async () => (await botOf(S)).state === 'connected', 15000)), 'Connect: connected again')
+  })
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
 } finally {
