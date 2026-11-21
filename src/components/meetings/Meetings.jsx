@@ -149,6 +149,26 @@ function RecordingBar({ id, data }) {
 }
 
 
+// A meeting recording in another window, or on the computer seen from a phone: Pause (or Resume) and
+// Stop here too, as the floating card and the menu bar have them. The window recording it follows
+// (recording.jsx: it stops or pauses its mic once the server says so).
+function Elsewhere({ id, paused, onDone, onMsg }) {
+  const [busy, setBusy] = useState(null)
+  const go = (op) => async () => {
+    setBusy(op)
+    try { await api(`/meetings/${encodeURIComponent(id)}/${op}`, { method: 'POST' }); refetch('/meetings'); onDone?.() } catch (e) { onMsg({ error: true, text: e.message }) } finally { setBusy(null) }
+  }
+  return (
+    <div className="mt-elsewhere" role="group" aria-label={t('Recording')}>
+      <span className="muted small">{t('This meeting is recording in another window.')}</span>
+      {paused
+        ? <button type="button" className="btn small" disabled={!!busy} onClick={go('resume')}><Icon name="mic" size={13} /> {t('Resume')}</button>
+        : <button type="button" className="btn small" disabled={!!busy} onClick={go('pause')}><Icon name="pause" size={13} /> {t('Pause')}</button>}
+      <button type="button" className="btn small danger-soft" disabled={!!busy} onClick={go('stop')}><Icon name="stop" size={13} /> {t('Stop')}</button>
+    </div>
+  )
+}
+
 // A calendar event happening now or starting within 10 minutes, to take notes for: on a call, the
 // one it's for (eventNow).
 function useNextEvent() {
@@ -578,6 +598,11 @@ function WrittenFrom({ from, onView }) {
 // Board: AI Assist's live board, a beta feature (board.jsx), there once the server says how it is.
 // A combined meeting (several as one) has its summary, your notes on it and the meetings in it.
 const VIEWS = [['summary', 'sparkle', tx('Summary')], ['assist', 'bulb', tx('Suggestions')], ['board', 'shapes', tx('Board')], ['mine', 'edit', tx('My notes')], ['transcript', 'chat', tx('Transcript')], ['video', 'video', tx('Video')], ['parts', 'layers', tx('Meetings')], ['files', 'paperclip', tx('Files')]]
+// The kinds of meeting the summary's Template picks from (server meetings.js KINDS), by their names
+// in the packs: the server's own are in English.
+const KIND_NAMES = { general: tx('Any meeting'), one_on_one: tx('1:1'), standup: tx('Standup'), customer: tx('Customer call'), interview: tx('Interview'), brainstorm: tx('Brainstorm') }
+// The least the meeting's name (with its icon) keeps in the header before the views go to icons.
+const TITLE_ROOM = 140
 // Resume recording is offered in the header for this long after a meeting ended (stopped by
 // mistake, or by itself); after, it's in ⋯.
 const RESUME_MS = 4 * 3600e3
@@ -671,6 +696,29 @@ export function MeetingPage({ id, onBack }) {
     if (!el || phone || typeof ResizeObserver === 'undefined') { setFlow(false); return }
     const ro = new ResizeObserver(() => setFlow(el.clientHeight > 0 && el.clientHeight < 440))
     ro.observe(el)
+    return () => ro.disconnect()
+  }, [loaded, phone])
+  // The views by their icons alone (their names in their tooltips) once the meeting's name would be
+  // squeezed out of the header: in a longer language (German, French) or a narrower window, before
+  // the pane's own width says so (styles.css, at 880 px), as the header has more in it than most.
+  // Their names come back once there's room for them and the meeting's name. Not on a phone, whose
+  // header has a row of its own for the views.
+  const [tight, setTight] = useState(false)
+  const tightAt = useRef(0) // how wide the header has to be for both
+  useEffect(() => {
+    const head = pageRef.current?.parentElement?.querySelector(':scope > .pane-head')
+    const title = head?.querySelector('.pane-title')
+    tightAt.current = 0
+    setTight(false)
+    if (!title || phone || typeof ResizeObserver === 'undefined') return
+    const look = () => {
+      const w = head.clientWidth
+      if (!w) return
+      if (!tightAt.current && title.clientWidth < TITLE_ROOM) { tightAt.current = w + TITLE_ROOM - title.clientWidth; setTight(true) } else if (tightAt.current && w >= tightAt.current) { tightAt.current = 0; setTight(false) }
+    }
+    const ro = new ResizeObserver(look)
+    ro.observe(head)
+    ro.observe(title)
     return () => ro.disconnect()
   }, [loaded, phone])
   // Voices in a room: whether they can be told apart here, and Who spoke's answer once it's done.
@@ -912,7 +960,8 @@ export function MeetingPage({ id, onBack }) {
   // Heard by a light model on this computer: Large turbo would hear names and jargon better.
   const light = lines.find((l) => /^whisper\.cpp (Small|Base)\b/.test(l.engine || ''))?.engine?.replace(/^whisper\.cpp /, '') || null
   const again = data.status === 'transcribing' && data.again && !data.again.done
-  const kinds = list?.kinds || [{ id: 'general', label: t('Any meeting') }]
+  // (Their names as the server has them, in English: meetings.js KINDS, each in the packs.)
+  const kinds = (list?.kinds || [{ id: 'general', label: KIND_NAMES.general }]).map((k) => ({ ...k, label: t(KIND_NAMES[k.id] || k.label) }))
   const o = opts || { language: 'auto', model: '', kind: 'general' }
   // The transcript as a timeline: what was said, with the screen's pictures and your stamped notes
   // where they happened.
@@ -1242,14 +1291,14 @@ export function MeetingPage({ id, onBack }) {
   ) : null
 
   return (
-    <div className="mt-view">
+    <div className={`mt-view${tight ? ' tight' : ''}`}>
       {head}
       <div ref={pageRef} className={`mt-page${dropping ? ' dropping' : ''}${flow ? ' flow' : ''}`} onDragOver={(e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); setDropping(true) } }} onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDropping(false) }} onDrop={onDrop}>
         {phone && <div className="mt-meta">{meta}</div>}
         <RecordingBar id={id} data={data} />
         {!combined && (recording || Date.now() - Date.parse(data.startedAt) < 36 * 3600e3) && <SinceLastTime path={`/meetings/${encodeURIComponent(id)}/since`} onOpen={(mid) => window.dispatchEvent(new CustomEvent('bridge-open-meeting', { detail: { id: mid } }))} />}
         {(data.status === 'recording' || data.status === 'paused') && <SpeechSetup recording />}
-        {!live && (data.status === 'recording' || data.status === 'paused') && <p className="muted small">{t('This meeting is recording in another window.')}</p>}
+        {!live && (data.status === 'recording' || data.status === 'paused') && <Elsewhere id={id} paused={data.status === 'paused'} onDone={refresh} onMsg={setMsg} />}
         {canResume && recent && phone && <div className="mt-resume-row">{resumeBtn}</div>}
         {/* Bridge AI closed while it recorded (server meetings.js recover): said here until it carries on. */}
         {done && data.interrupted && <p className="mt-interrupted small" role="status"><Icon name="alert" size={12} /> <span>{t('Recording stopped when Bridge AI closed at {time}. What was recorded until then is kept.', { time: timeOf(data.interrupted.at) })}</span>{canResume && <button type="button" className="link-btn" onClick={resumeRec} disabled={busy === 'resume'}>{t('Resume recording')}</button>}</p>}

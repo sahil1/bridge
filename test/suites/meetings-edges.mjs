@@ -5,8 +5,9 @@
 // written" for ever with Summarize greyed out), and a meeting stopped just before it closed getting
 // its notes; a meeting's page whose meeting isn't there any more (merged into another, or deleted,
 // on another device or in another tab), saying so with the way on, open or opened afresh, on a
-// computer and a phone; and what a merge says on the merged meeting, on a phone's width, its icon
-// beside its words.
+// computer and a phone; what a merge says on the merged meeting, on a phone's width, its icon
+// beside its words; a meeting the computer records, paused and stopped from a phone; and the
+// summary's Template in German.
 import fs from 'node:fs'
 import path from 'node:path'
 import http from 'node:http'
@@ -208,6 +209,61 @@ try {
     ok(!at.error && at.link.left > at.left + 40, 'and Separate follows the words, not on a line of its own', at)
     await shot(p, `${tag}edges-merged-phone`)
     ok(withoutCutOff(errors).length === 0, 'merged on a phone: no page errors', errors)
+    await ctx.close()
+  }
+
+  // ---------- Recording on the computer, seen from a phone ----------
+  // The phone's page of a meeting the computer records: Pause and Stop there too, and the
+  // computer's recording follows (paused, then stopped, its mic let go).
+  {
+    const pc = await page(b, kit.url, { store: { 'cc-rail-meetings': true }, before: tone })
+    await pc.p.waitForSelector('.rail-nav-row', { timeout: 15000 })
+    await pc.p.locator('.rail-nav-btn', { hasText: 'Meetings' }).click()
+    await pc.p.locator('.mt-view .pane-head button', { hasText: 'Start recording' }).click({ timeout: 10000 })
+    await pc.p.waitForSelector('.mt-recbar', { timeout: 15000 }).catch(() => {})
+    const R = (await until(async () => (await api('/meetings')).meetings.find((x) => x.status === 'recording'), 10000))?.id
+    const ph = await page(b, kit.url, { phone: true })
+    await ph.p.waitForSelector('.tabbar button', { timeout: 15000 }).catch(() => {})
+    await sleep(5000) // (the computer's page follows the server once its recording has been going a few seconds)
+    await open(ph.p, R)
+    const there = ph.p.locator('.mt-elsewhere')
+    ok(!!(await until(async () => (await there.locator('button', { hasText: 'Stop' }).count()) === 1 && (await there.locator('button', { hasText: 'Pause' }).count()) === 1, 10000)), 'the phone: a meeting the computer records has Pause and Stop', await ph.p.locator('.mt-view').first().innerText().catch(() => ''))
+    const tops = await there.locator('button').evaluateAll((bs) => bs.map((x) => Math.round(x.getBoundingClientRect().top)))
+    ok(tops.length === 2 && tops[0] === tops[1], 'side by side', tops)
+    await shot(ph.p, `${tag}edges-elsewhere-phone`)
+    await there.locator('button', { hasText: 'Pause' }).click()
+    ok(!!(await until(async () => /Paused/.test(await pc.p.locator('.mt-recbar').innerText().catch(() => '')), 10000)), 'Pause on the phone: the computer\'s recording pauses', await pc.p.locator('.mt-recbar').innerText().catch(() => ''))
+    await there.locator('button', { hasText: 'Stop' }).click()
+    ok(!!(await until(async () => (await pc.p.locator('.mt-recbar').count()) === 0 && !(await api('/meetings')).meetings.some((x) => x.status === 'recording' || x.status === 'paused'), 12000)), 'Stop on the phone: the computer stops recording', await pc.p.locator('.mt-view').first().innerText().catch(() => ''))
+    ok(withoutCutOff([...pc.errors, ...ph.errors]).length === 0, 'from the phone: no page errors', [...pc.errors, ...ph.errors])
+    await pc.ctx.close(); await ph.ctx.close()
+  }
+
+  // ---------- In another language ----------
+  // The summary's Template, in German: the kinds of meeting by their German names, none in English.
+  {
+    const K = await recorded('Kundengespräch mit Northwind', 'Wir beginnen mit der Preisliste.')
+    const { ctx, p, errors } = await page(b, kit.url, { store: { 'cc-lang': 'de' } })
+    await p.waitForSelector('.rail-nav-row', { timeout: 15000 })
+    await open(p, K)
+    await p.locator('.seg button[data-view="summary"]').click({ timeout: 8000 }).catch(() => {})
+    const names = await until(async () => { const o = await p.locator('.mt-tools select option[value="customer"]').count() ? await p.locator('.mt-tools select:has(option[value="customer"]) option').allInnerTexts() : null; return o?.length ? o : null }, 8000)
+    const en = ['Any meeting', 'Standup', 'Customer call', 'Interview', 'Brainstorm']
+    ok(!!names && names.length === 6 && names.includes('Allgemein') && names.includes('Kundengespräch') && !names.some((x) => en.includes(x)), 'German: the Template\'s kinds of meeting in German, none in English', names)
+    // The header in German, in a 1280 px window: the views' longer names would squeeze the meeting's
+    // name out of it, so they go to icons; wider, they come back, with room for the name too.
+    const head = async () => p.evaluate(() => {
+      const h = document.querySelector('.mt-view > .pane-head')
+      return { title: Math.round(h.querySelector('.pane-title').getBoundingClientRect().width), name: h.querySelector('.mt-title')?.value || '', names: [...h.querySelectorAll('.seg button span')].filter((s) => s.offsetWidth > 0).length, over: h.scrollWidth > h.clientWidth + 1 }
+    })
+    await p.setViewportSize({ width: 1280, height: 900 })
+    let h = await until(async () => { const x = await head(); return x.title >= 140 && x }, 5000)
+    ok(!!h && /Kundengespräch/.test(h.name) && h.names === 0 && !h.over, 'German at 1280 px: the views as icons, the meeting\'s name kept in the header', h || await head())
+    await shot(p, `${tag}edges-header-de-1280`)
+    await p.setViewportSize({ width: 1700, height: 900 })
+    h = await until(async () => { const x = await head(); return x.names > 0 && x }, 5000)
+    ok(!!h && h.title >= 140 && !h.over, 'and at 1700 px, the views\' names again, with the name', h || await head())
+    ok(withoutCutOff(errors).length === 0, 'German: no page errors', errors)
     await ctx.close()
   }
 } catch (e) {
