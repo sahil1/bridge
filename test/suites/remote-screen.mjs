@@ -2384,6 +2384,24 @@ try {
     await p.context().close()
   })
 
+  // The top bar's devices menu on Studio turns control on too; turned down (macOS not letting Bridge AI
+  // use the mouse and keyboard, here stood in for), it says why there, rather than staying off unsaid.
+  await part('the devices menu\'s control switch, turned down: said there', async () => {
+    const { p, errors: e5 } = await page(b, studio.url, { before: async (ctx) => { await noServiceWorker(ctx); await ctx.route('**/api/remote/control', (r) => r.fulfill({ status: 400, json: { error: 'macOS doesn\'t let Bridge AI use the mouse and keyboard on Studio.', code: 'controlUnavailable' } })) } })
+    errors.push(...e5)
+    await ready(p)
+    await p.locator('.mc-chip').click()
+    const item = p.locator('.mc-menu [role="menuitemcheckbox"]')
+    await item.waitFor({ timeout: 8000 })
+    ok(!!(await until(() => item.isEnabled(), 8000)), 'the devices menu offers "Let my other devices control this computer" (Studio has its password)')
+    await item.click()
+    const said = await p.locator('.mc-menu .mc-err').innerText({ timeout: 8000 }).catch(() => null)
+    ok(!!said && /doesn't let Bridge AI use the mouse and keyboard on Studio/.test(said), 'turned down: why, in the menu', said)
+    ok(await item.getAttribute('aria-checked') === 'false', 'and it stays off')
+    await shot(p, `${tag}remote-screen-menu-refused`)
+    await p.context().close()
+  })
+
   // What Studio says of control and of a session it ends is in English: the viewer says it in its own
   // language (German here), not Studio's words.
   await part('in another language: why control is off, and a session ended there, in it', async () => {
@@ -2399,6 +2417,13 @@ try {
     const expect = was.access.password ? /^Steuern ist auf Studio aus\. Schalte dort „Meine anderen Geräte dürfen diesen Computer steuern“ ein, unter Einstellungen › / : /^Steuern braucht ein Fernzugriffspasswort auf Studio\. Lege dort eines fest unter Einstellungen › /
     ok(!!line && expect.test(line.trim()) && !/Control is off|Control needs/.test(line), 'why control is off, under the toolbar: in German, naming Studio and where to turn it on there, not Studio\'s English', line)
     await shot(p, `${tag}remote-screen-german`)
+    if (was.access.password) {
+      // Turned on at Studio meanwhile: said so, in German, with Control there to take it.
+      await studio.api('/remote/control', { on: true })
+      const now = await until(async () => { const x = await p.locator('.rs-note').innerText().catch(() => ''); return /jetzt/.test(x) ? x : null }, 8000)
+      ok(!!now && /^Steuern ist jetzt an: Wähle Steuern, um es zu nutzen\./.test(now.trim()), 'control turned on at Studio meanwhile: said in German too', now || await p.locator('.rs-note').innerText().catch(() => ''))
+      await studio.api('/remote/control', { on: false })
+    } else ok(false, 'Studio has its Remote Access Password by now')
     await studio.api('/settings', { trials: { 'remote-screen': false } }, 'PATCH')
     const ended = await until(async () => { const x = await p.locator('.rs-card').innerText().catch(() => ''); return x.trim() ? x : null }, 10000)
     ok(!!ended && /Bildschirm und Vorschau aus der Ferne wurde auf Studio ausgeschaltet/.test(ended), 'Remote Screen and Preview turned off at Studio mid-session: said in German', ended)

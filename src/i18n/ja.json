@@ -1430,6 +1430,7 @@
   "Continue {n} more minutes": "あと {n} 分続ける",
   "Control": "操作",
   "Control is off on {name}. Turn on \"{setting}\" there, in {place}.": "{name} では操作がオフです。そちらの {place} で「{setting}」をオンにしてください。",
+  "Control is on now: choose Control to use it.": "操作がオンになりました。使うには「操作」を選んでください。",
   "Control is turned on and off at {name} itself.": "操作の許可は {name} 本体でオン・オフします。",
   "Control needs a Remote Access Password on {name}. Set one there in {place}, then turn on \"{setting}\".": "操作するには {name} にリモートアクセスパスワードが必要です。そちらの {place} で設定してから、「{setting}」をオンにしてください。",
   "Control works on a whole screen: pick one of the screens to control it.": "操作できるのは画面全体だけです。操作するには画面を 1 つ選んでください。",

@@ -1430,6 +1430,7 @@
   "Continue {n} more minutes": "再继续 {n} 分钟",
   "Control": "控制",
   "Control is off on {name}. Turn on \"{setting}\" there, in {place}.": "{name} 上的控制已关闭。请在那里的 {place} 中打开“{setting}”。",
+  "Control is on now: choose Control to use it.": "控制现已开启：选择“控制”即可使用。",
   "Control is turned on and off at {name} itself.": "控制只能在 {name} 本机上开启和关闭。",
   "Control needs a Remote Access Password on {name}. Set one there in {place}, then turn on \"{setting}\".": "控制需要在 {name} 上设置远程访问密码。请在那里的 {place} 中设置一个，然后打开“{setting}”。",
   "Control works on a whole screen: pick one of the screens to control it.": "只有整块屏幕才能控制：请选择一块屏幕来控制。",

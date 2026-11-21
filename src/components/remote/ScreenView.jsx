@@ -527,7 +527,7 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
   const limits = st?.access?.limits || ACCESS
   const takeable = !allowed && !!ctl?.on && cur?.kind === 'screen'
   // Why control isn't there, in this device's language (that computer says it in English: its
-  // reasons, in the order it weighs them, server/remote.js controlWhy); one of its own as it says it.
+  // reasons, in the order it weighs them, server/remote.js controlWhy and controlChanged).
   const setting = t('Let my other devices control this computer')
   const ctlWhy = !ctl?.why ? null
     : !ctl.on ? (st?.access?.password === false || st?.control?.needs === 'password'
@@ -535,7 +535,7 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
       : t('Control is off on {name}. Turn on "{setting}" there, in {place}.', { name, setting, place: where('remote') }))
       : cur?.kind !== 'screen' ? t('Control works on a whole screen: pick one of the screens to control it.')
         : ctl.idle ? t('View only now: nothing was pressed for {n} minutes. Choose Control to take it again.', { n: limits.idleMinutes || ACCESS.idleMinutes })
-          : ctl.why
+          : t('Control is on now: choose Control to use it.') // (turned on there while this was view only)
   const record = tn('{name} shows that its screen is being seen, with Stop, and keeps a record of it.', { name: <b key="n">{name}</b> })
 
   // What shows in the middle of the stage until the picture does, and when it's gone.
@@ -548,6 +548,11 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
         device: t("{name} doesn't let this device connect. That's changed at {name} itself, in {place}.", { place: where('remote-devices'), name }),
         blocked: t("{name} doesn't let this device connect. That's changed at {name} itself, in {place}.", { place: where('remote-devices'), name: err.at || name }),
         stopped: t('Stopped from {device}.', { device: err.by || t('another of your devices') }),
+        // (What that computer says in English, said here in this device's language.)
+        trial: t('Remote Screen and Preview is off on {name}. Turn it on there in {place}.', { name, place: where('beta-remote-screen') }),
+        off: t('Remote Screen and Preview was turned off on {name}.', { name }),
+        changed: t('The Remote Access Password changed on {name}. Connect again.', { name }),
+        lost: t('The Bridge AI app on {name} stopped sharing its screen.', { name }),
         timeout: t("The password wasn't typed in time. Try again."),
         screenPermission: t("macOS doesn't let Bridge AI record the screen on {name}. On {name}, turn on Bridge AI in System Settings › Privacy & Security › Screen & System Audio Recording, then open Bridge AI again there.", { name }),
         reopen: t("Screen Recording was turned on for Bridge AI on {name} after it opened, and macOS lets it record only once it's reopened.", { name }),
@@ -558,10 +563,6 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
         noApp: err.fix === 'open' ? t("The Bridge AI app isn't open on {name}. Its screen can be seen while the app runs there.", { name }) : null,
         offline: t("{name} isn't reachable just now: it may be asleep, or offline.", { name }),
         closed: t('The connection to {name} closed before its screen showed.', { name }),
-        trial: t('Remote Screen and Preview is off on {name}. Turn it on there in {place}.', { name, place: where('beta-remote-screen') }),
-        off: t('Remote Screen and Preview was turned off on {name}.', { name }),
-        changed: t('The Remote Access Password changed on {name}. Connect again.', { name }),
-        lost: t('The Bridge AI app on {name} stopped sharing its screen.', { name }),
         updateSlow: t("Bridge AI on {name} hasn't come back from its update yet. Try again in a minute.", { name }),
       }
       const icon = err.code === 'locked' ? 'lock' : ['denied', 'unanswered', 'device', 'blocked', 'stopped'].includes(err.code) ? 'ban' : 'alert'

@@ -1430,6 +1430,7 @@
   "Continue {n} more minutes": "{n} मिनट और जारी रखें",
   "Control": "नियंत्रित करें",
   "Control is off on {name}. Turn on \"{setting}\" there, in {place}.": "{name} पर नियंत्रण बंद है। वहाँ {place} में \"{setting}\" चालू करें।",
+  "Control is on now: choose Control to use it.": "नियंत्रण अब चालू है: इस्तेमाल करने के लिए नियंत्रित करें चुनें।",
   "Control is turned on and off at {name} itself.": "नियंत्रण {name} पर ही चालू और बंद होता है।",
   "Control needs a Remote Access Password on {name}. Set one there in {place}, then turn on \"{setting}\".": "नियंत्रण के लिए {name} पर रिमोट एक्सेस पासवर्ड चाहिए। वहाँ {place} में एक सेट करें, फिर \"{setting}\" चालू करें।",
   "Control works on a whole screen: pick one of the screens to control it.": "नियंत्रण पूरी स्क्रीन पर काम करता है: उसे नियंत्रित करने के लिए कोई एक स्क्रीन चुनें।",

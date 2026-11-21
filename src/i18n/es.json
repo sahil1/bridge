@@ -1430,6 +1430,7 @@
   "Continue {n} more minutes": "Continuar {n} minutos más",
   "Control": "Controlar",
   "Control is off on {name}. Turn on \"{setting}\" there, in {place}.": "El control está desactivado en {name}. Activa allí «{setting}», en {place}.",
+  "Control is on now: choose Control to use it.": "El control ya está activado: elige Controlar para usarlo.",
   "Control is turned on and off at {name} itself.": "El control se activa y desactiva en {name} mismo.",
   "Control needs a Remote Access Password on {name}. Set one there in {place}, then turn on \"{setting}\".": "Para controlar hace falta una contraseña de acceso remoto en {name}. Establece una allí en {place} y luego activa «{setting}».",
   "Control works on a whole screen: pick one of the screens to control it.": "El control funciona en una pantalla completa: elige una de las pantallas para controlarla.",
