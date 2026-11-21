@@ -44,7 +44,6 @@ Bots now have Connections, Bots and Sessions: each conversation is a live Claude
 - **Scan QR code** on a phone: in the computer menu's On this phone, in Link a device, and beside Add a computer. In the phone's browser and the Android app in this release; the iPhone app has it from its next build.
 - **Update card**: the version on one line, up to four highlights from its notes, then Update now and What's new.
 
-
 ### Fixes
 
 - Watch a screen in a meeting says why when it can't start, with what to do, and a screen picked in macOS's picker more than 10 seconds after it opened is watched. The floating card has Cancel beside Picking….
