@@ -891,6 +891,7 @@
   "Back (⌘[)": "后退（⌘[）",
   "Back Up": "备份",
   "Back Up & Move": "备份与迁移",
+  "Back Up & Move works from this device once {computer} keeps it. On {computer}, choose Keep where it says this device paired with it.": "{computer} 保留此设备后，即可在这里使用备份与迁移。在 {computer} 上，在显示此设备已配对的地方选择“保留”。",
   "Back Up to a File": "备份到文件",
   "Back in the list.": "已移回列表。",
   "Back on the Azure Bot's Configuration page, set Messaging endpoint to this address and Apply. Then Channels › Microsoft Teams › Apply.": "回到 Azure Bot 的 Configuration 页面，把 Messaging endpoint 设为这个地址，然后点 Apply。接着 Channels › Microsoft Teams › Apply。",

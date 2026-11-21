@@ -891,6 +891,7 @@
   "Back (⌘[)": "पीछे (⌘[)",
   "Back Up": "बैकअप लें",
   "Back Up & Move": "बैकअप और मूव",
+  "Back Up & Move works from this device once {computer} keeps it. On {computer}, choose Keep where it says this device paired with it.": "{computer} द्वारा इस डिवाइस को रखे जाने के बाद बैकअप और मूव यहाँ से काम करता है। {computer} पर, जहाँ लिखा है कि यह डिवाइस पेयर हुआ, वहाँ रखें चुनें।",
   "Back Up to a File": "फ़ाइल में बैकअप",
   "Back in the list.": "लिस्ट में वापस आ गई।",
   "Back on the Azure Bot's Configuration page, set Messaging endpoint to this address and Apply. Then Channels › Microsoft Teams › Apply.": "Azure Bot के Configuration पेज पर वापस जाकर Messaging endpoint में यह पता डालें और Apply पर क्लिक करें। फिर Channels › Microsoft Teams › Apply।",

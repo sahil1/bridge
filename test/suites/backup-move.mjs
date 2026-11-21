@@ -396,6 +396,32 @@ try {
     ok(errors.length === 0, 'no page errors', errors)
     await ctx.close()
   })
+  // A phone paired a moment ago (its page through the relay, as the apps run it), not kept on Studio
+  // yet: Back Up & Move says what to do there, in the phone's language, not the server's English
+  // refusal; and it opens by itself once it's kept.
+  await part('a phone paired a moment ago, through its relay page', async () => {
+    const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, ...(which === 'chromium' ? { isMobile: true } : {}), hasTouch: true, deviceScaleFactor: 2 })
+    await ctx.addInitScript(() => { try { localStorage.setItem('cc-toured', JSON.stringify({ desktop: true, phone: true })); localStorage.setItem('cc-lang', JSON.stringify('de')) } catch { /* no storage */ } })
+    const p = await ctx.newPage()
+    const errors = []
+    p.on('pageerror', (e) => errors.push(e.message))
+    const was = new Set((await studio.api('/relay')).devices.map((d) => d.id))
+    await p.goto((await studio.api('/relay/pair', {})).pairing.link, { waitUntil: 'commit' })
+    await p.locator('#pair-go').click({ timeout: 15000 })
+    const f = await until(() => p.frames().find((x) => x !== p.mainFrame() && x.url().startsWith(ra.url)), 30000, 100)
+    await openSettings(f, 'backup', '.modal.settings')
+    const sec = f.locator('.modal.settings .st-scroll').first()
+    const note = f.locator('.modal.settings [data-kept="no"]')
+    const said = await note.waitFor({ timeout: 30000 }).then(() => note.innerText(), () => null)
+    ok(!!said && /Sichern & Umziehen funktioniert auf diesem Gerät, sobald Studio es behält\. Wähle auf Studio „Behalten“/.test(said) && !/Keep .* in Bridge AI on Studio first/.test(said), 'not kept on Studio yet: what to do there, in German, naming Studio (not the server\'s English refusal)', said || await sec.innerText().catch(() => ''))
+    await shot(p, `${tag}backup-move-phone-not-kept`)
+    const d = await until(async () => (await studio.api('/relay')).devices.find((x) => !was.has(x.id) && x.fresh), 10000, 200)
+    ok(!!d, 'Studio lists the phone as new, to keep or remove', (await studio.api('/relay')).devices)
+    if (d) await studio.api(`/relay/devices/${d.id}/keep`, {})
+    ok(!!(await until(async () => f.locator('[data-setting="backup"]').count(), 15000)), 'kept on Studio: Back Up & Move opens on the phone by itself')
+    ok(!errors.length, 'no page errors', errors)
+    await ctx.close()
+  })
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
   for (const k of kits) console.log(k.log().slice(-2500))

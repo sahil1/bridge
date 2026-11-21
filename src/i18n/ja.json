@@ -891,6 +891,7 @@
   "Back (⌘[)": "戻る（⌘[）",
   "Back Up": "バックアップ",
   "Back Up & Move": "バックアップと移行",
+  "Back Up & Move works from this device once {computer} keeps it. On {computer}, choose Keep where it says this device paired with it.": "{computer} がこのデバイスを確定すると、ここからバックアップと移行を使えます。{computer} で、このデバイスがペアリングしたという表示の「確定」を選んでください。",
   "Back Up to a File": "ファイルにバックアップ",
   "Back in the list.": "一覧に戻しました。",
   "Back on the Azure Bot's Configuration page, set Messaging endpoint to this address and Apply. Then Channels › Microsoft Teams › Apply.": "Azure Bot の Configuration ページに戻り、Messaging endpoint にこのアドレスを設定して Apply を押します。次に Channels › Microsoft Teams › Apply の順に進みます。",
