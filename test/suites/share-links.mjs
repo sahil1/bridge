@@ -6,6 +6,12 @@
 // at a content address of each link's own. Bold Bridge's accounts service is stood in for
 // (stand-ins/accounts.mjs, its mailbox), as what emails a named person's code; links' hours are
 // seconds here (BRIDGE_TEST_SHARE_HOUR_MS).
+//   a Beta Feature: off at first, making a link is refused saying where to turn it on, the list still
+//     answers, a Studio document has no Share Link button nor a file in Studio Share Link…, and its
+//     switch is first in Settings › Devices & Access › Share Links and Studio › Shared, turned on
+//     there; turned off again later, the links already made are listed (to a phone too), still open
+//     for whoever has them, and stopped from Settings or a phone, while no new one is made, nor from
+//     a phone;
 //   a file: it shows, and only it; its scripts don't run; the link's secret leaves the address;
 //   a folder of files: listed, its pages' relative links; a site or an app refused on a relay of your
 //     own, saying why;
@@ -105,12 +111,13 @@ const push = path.join(TEST, '.out', `share-links-push-${process.pid}.jsonl`)
 fs.rmSync(push, { force: true })
 const kits = []
 const procs = []
+// (Studio starts with Share Links off, as everyone does: its first part turns it on; Hosted has it on.)
 const kit = await startKit('share-links', {
   config: { account: accounts.accountConfig },
   env: (d) => { fs.writeFileSync(path.join(d.data, 'relay.json'), JSON.stringify(relay.relayFile)); return { BRIDGE_TEST_PUSH: push, BRIDGE_TEST_SHARE_HOUR_MS: String(HOUR), BRIDGE_COMPUTER_NAME: 'Studio', BRIDGE_VIEW_IDLE_MS: '3000', BRIDGE_VIEW_WAIT_MS: '4000' } },
 })
 kits.push(kit)
-const hk = await startKit('share-links-hosted', { config: { account: accounts.accountConfig, relay: { hostedUrl: hosted.url } }, env: { BRIDGE_COMPUTER_NAME: 'Hosted' } })
+const hk = await startKit('share-links-hosted', { config: { account: accounts.accountConfig, relay: { hostedUrl: hosted.url }, trials: { 'share-links': true } }, env: { BRIDGE_COMPUTER_NAME: 'Hosted' } })
 kits.push(hk)
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
@@ -178,6 +185,59 @@ try {
   fs.writeFileSync(path.join(data, '.env'), 'TOKEN=HIDDEN-ENV')
   fs.writeFileSync(path.join(data, '.git', 'config'), 'HIDDEN-GIT')
   fs.writeFileSync(path.join(data, 'big.bin'), Buffer.alloc(8 * 1024 * 1024, 7))
+
+  // ---------- a Beta Feature: off until it's turned on ----------
+  const OFF = 'Share Links is a Beta Feature: turn it on in Settings › About & Updates › Beta Features.'
+  await part('the Beta off', async () => {
+    const r = await kit.api('/shares', { kind: 'file', root: 'home', path: 'outside.txt', who: 'link', lasts: 'hour' }).then(() => null, (e) => e)
+    ok(r?.status === 404 && r.j?.trial === 'share-links' && r.message === OFF, 'off: making a link is refused, saying it\'s a Beta Feature and where to turn it on', r && { status: r.status, j: r.j })
+    const l = await kit.api('/shares')
+    ok(Array.isArray(l.shares) && l.can?.ok === false && l.can.why === 'trial' && l.can.text === OFF && (await kit.api('/config')).trials?.['share-links'] === false, 'the list still answers, saying why no link can be made', l.can)
+    fs.writeFileSync(path.join(home, 'Beta.md'), '# Beta doc\n')
+    const d = await page(b, kit.url)
+    await d.p.waitForSelector('.rail-nav-btn', { timeout: 20000 })
+    // Studio's home: no Share Link… on a file; Shared has the switch first.
+    const menu = async (p = d.p) => {
+      await p.locator('.fx-side-row[data-label="Home"]').click()
+      await p.locator('.fx-row[data-name="outside.txt"]').click({ button: 'right' })
+      await p.locator('.ctx-menu').waitFor({ timeout: 4000 })
+      const items = await p.locator('.ctx-menu button').evaluateAll((els) => els.map((e) => e.querySelector('span')?.innerText.trim()))
+      await p.keyboard.press('Escape')
+      return items
+    }
+    await d.p.locator('.rail-nav-btn', { hasText: 'Studio' }).click()
+    await d.p.locator('.fx.sd-home').waitFor({ timeout: 15000 })
+    const off = await menu()
+    ok(off.includes('Get Info') && !off.includes('Share Link…'), 'off: a file\'s menu in Studio has no Share Link…', off)
+    await d.p.locator('.fx-side-row[data-shelf="shared"]').click()
+    const sharedSw = d.p.locator('.sd-shared > .st-beta[data-beta="share-links"]:first-child input[role="switch"]')
+    const none = await until(async () => /Nothing is shared now\.$/m.test(await d.p.locator('.sd-shared').innerText().catch(() => '')), 8000)
+    ok(await sharedSw.waitFor({ timeout: 8000 }).then(() => true, () => false) && !(await sharedSw.isChecked()) && !!none, 'Studio › Shared: Share Links\' switch first, off, then the links (none yet, and nothing said of where to share from)', await d.p.locator('.sd-shared').innerText().catch(() => ''))
+    // A Studio document: no Share Link button.
+    await d.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root: 'home', path: 'Beta.md' } })))
+    await d.p.locator('.sd-focus-btn').waitFor({ timeout: 15000 })
+    ok(await d.p.locator('.sd-share-btn').count() === 0, 'off: a Studio document has no Share Link button')
+    // Settings › Devices & Access › Share Links: its switch at the top, marked Beta; turned on there.
+    await d.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'sharing' } })))
+    const sw = d.p.locator('.modal.settings .st-sections > .st-beta[data-beta="share-links"]:first-child')
+    await sw.waitFor({ timeout: 10000 })
+    ok(await sw.locator('.st-chip.beta').count() === 1 && !(await sw.locator('input[role="switch"]').isChecked()) && await d.p.locator('.modal.settings [data-setting="shares"]').isVisible() && !(await d.p.locator('.modal.settings .shares .st-note').count()), 'Settings › Devices & Access › Share Links: its switch at the top, marked Beta and off, then the list (the switch says why none can be made)')
+    await shot(d.p, `${tag}share-beta-off`)
+    await sw.locator('input[role="switch"]').check()
+    ok(!!(await until(async () => (await kit.api('/config')).trials?.['share-links'] === true, 5000)), 'turned on there, it\'s on')
+    await d.p.locator('button[aria-label="Close settings"]').click()
+    ok(!!(await until(() => d.p.locator('.sd-share-btn').count(), 8000)), 'on: the Studio document has its Share Link button')
+    ok(!d.errors.length, 'no page errors', d.errors)
+    await d.ctx.close()
+    const d2 = await page(b, kit.url)
+    await d2.p.waitForSelector('.rail-nav-btn', { timeout: 20000 })
+    await d2.p.locator('.rail-nav-btn', { hasText: 'Studio' }).click()
+    await d2.p.locator('.fx.sd-home').waitFor({ timeout: 15000 })
+    const on = await menu(d2.p)
+    ok(on.includes('Share Link…'), 'and a file\'s menu in Studio has Share Link…', on)
+    await d2.ctx.close()
+    await kit.api('/settings', { trials: { 'share-links': true } }, 'PATCH') // (on for what follows, whatever happened above)
+  })
 
   // ---------- a file ----------
   await part('a file', async () => {
@@ -606,6 +666,53 @@ try {
     ok(!!(await until(async () => /This link has ended/.test(await w.p.locator('#wait-title').innerText()) && /Tester stopped sharing it/.test(await w.p.locator('#wait-text').innerText()), 5000)), 'Stop Sharing: the open page ends at once, saying so')
     ok((await viewAs(s2.link)).refused?.why === 'no-share', 'and the link opens no more')
     await w.ctx.close()
+  })
+
+  // ---------- turned off: the links already made stay until they end ----------
+  await part('turned off, the links already made', async () => {
+    const s = await share({ kind: 'folder', root: 'home', path: 'data' })
+    const s2 = await share({ kind: 'file', root: 'home', path: 'outside.txt', title: 'Kept file' })
+    const w = await viewer(s.link)
+    await frameOf(w.p, 'a[href="notes.txt"]')
+    const ph = await linkAs(relay.url, { code: (await kit.api('/relay/pair', {})).pairing.code, name: 'Off Phone', about: { name: 'Off Phone' } })
+    await kit.api('/settings', { trials: { 'share-links': false } }, 'PATCH')
+    ok((await refusal({ kind: 'file', root: 'home', path: 'outside.txt' })) === OFF, 'turned off: no new link is made')
+    const fromPhone = await ph.request('POST', '/api/shares', { kind: 'file', root: 'home', path: 'outside.txt', who: 'link', lasts: 'hour' })
+    ok(fromPhone.status === 404 && fromPhone.json?.error === OFF && fromPhone.json.trial === 'share-links', 'nor from a phone, which hears the same', fromPhone)
+    const v = await viewAs(s.link)
+    ok(/MARKER-DATA/.test((await v.request('GET', '/c/notes.txt')).text), 'a link made before it was turned off still opens, for anyone who has it')
+    v.close()
+    await sleep(500)
+    ok(await w.p.locator('#view').isVisible() && !!(await frameOf(w.p, 'a[href="notes.txt"]')), 'and a page that has it open keeps it')
+    const listed = (await kit.api('/shares')).shares
+    ok(listed.find((x) => x.id === s.id)?.link === s.link && !listed.find((x) => x.id === s.id)?.ended && listed.some((x) => x.id === s2.id && !x.ended), 'both are still listed, with their links', listed.filter((x) => [s.id, s2.id].includes(x.id)).map((x) => ({ id: x.id, ended: x.ended })))
+    const onPhone = await ph.request('GET', '/api/shares')
+    ok(onPhone.status === 200 && onPhone.json?.shares?.some((x) => x.id === s.id && !x.ended) && onPhone.json.can?.why === 'trial', 'and to a phone', onPhone.status)
+    // Settings › Devices & Access › Share Links: the switch, off, and the links, each with Stop Sharing.
+    const d = await page(b, kit.url)
+    await d.p.waitForSelector('.rail-nav-btn', { timeout: 20000 })
+    await d.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'sharing' } })))
+    const row = d.p.locator(`.modal.settings .share-row[data-share="${s.id}"]`)
+    await row.waitFor({ timeout: 10000 })
+    ok(!(await d.p.locator('.modal.settings [data-beta="share-links"] input[role="switch"]').isChecked()) && await row.getByRole('button', { name: 'Stop Sharing' }).isVisible() && await d.p.locator(`.modal.settings .share-row[data-share="${s2.id}"]`).isVisible(), 'Settings › Devices & Access › Share Links, off: the switch, off, and the links made, each with Stop Sharing')
+    await shot(d.p, `${tag}share-beta-off-links`)
+    await row.getByRole('button', { name: 'Stop Sharing' }).click()
+    ok(!!(await until(async () => /This link has ended/.test(await w.p.locator('#wait-title').innerText()), 6000)), 'Stop Sharing there, while it\'s off, ends the open page at once')
+    ok((await kit.api('/shares')).shares.find((x) => x.id === s.id)?.ended === 'stopped' && (await viewAs(s.link)).refused?.why === 'no-share', 'and the link opens no more')
+    await d.p.locator('button[aria-label="Close settings"]').click()
+    // Studio › Shared, off: the switch first, and the link still open.
+    await d.p.locator('.rail-nav-btn', { hasText: 'Studio' }).click()
+    await d.p.locator('.fx-side-row[data-shelf="shared"]').click()
+    const kept = d.p.locator(`.sd-shared .share-row[data-share="${s2.id}"]`)
+    ok(await kept.waitFor({ timeout: 8000 }).then(() => true, () => false) && await d.p.locator('.sd-shared > .st-beta[data-beta="share-links"]:first-child').isVisible(), 'Studio › Shared, off: the switch first, and the link still open', await d.p.locator('.sd-shared').innerText().catch(() => ''))
+    ok(!d.errors.length, 'no page errors', d.errors)
+    await d.ctx.close()
+    // A phone stops one too, while it's off.
+    const stopped = await ph.request('POST', `/api/shares/${s2.id}/stop`, {})
+    ok(stopped.status === 200 && stopped.json.shares.find((x) => x.id === s2.id)?.ended === 'stopped', 'and a phone stops one, while it\'s off', stopped.status)
+    ph.close()
+    await w.ctx.close()
+    await kit.api('/settings', { trials: { 'share-links': true } }, 'PATCH')
   })
 
   // ---------- the computer offline ----------
