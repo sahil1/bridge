@@ -13,6 +13,8 @@
 .home-box:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, var(--line-2)); }
 .home-box textarea { width: 100%; min-height: 64px; max-height: 40vh; resize: none; border: 0; outline: 0; background: transparent; color: var(--ink); font: 15px/1.5 var(--font); padding: 2px 4px; }
 .home-box textarea::placeholder { color: var(--ink-3); }
+.home-box .enter-at { --box-bg: var(--pane); }
+.home-box .enter-at > .enter-hint { right: 0; } /* no resize grip here: in line with Start */
 .home-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
 .home-grow { flex: 1; }
 .home-chip-wrap { position: relative; min-width: 0; }

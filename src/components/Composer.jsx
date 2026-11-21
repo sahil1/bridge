@@ -11,6 +11,8 @@ import { LiveWords } from '../dictation/Pill.jsx'
 import { useDictation, registerBox, noteBoxFocus, press, release, finish, cancel, dismiss, retry, settings, keysPlatform, dictationKey, listeningHint, eventTime } from '../dictation/controller.js'
 import { useBusy } from '../busy.js'
 import { where as placeIn } from './settings/search.js'
+import { useEnter, SendKeys } from './EnterHint.jsx'
+import { modKey } from '../enter.js'
 
 // Drafts survive navigation and reloads: one per agent, kept in this browser.
 const draftKey = (id) => `cc-draft-${id}`
@@ -659,8 +661,13 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
     requestAnimationFrame(() => { const el = taRef.current; if (el) { el.focus(); el.setSelectionRange(pos, pos) } })
   }
   const trackCaret = (e) => setCaret(e.currentTarget.selectionStart ?? 0)
+  // Enter (src/enter.js): while it works, ⌘Enter interrupts it and sends (⌘Enter Sends: queues, as
+  // Enter does in the others). A phone's keyboard on the screen makes a new line, the send button sends.
+  const enter = useEnter(draft.text, (e) => send(agentBusy && enter.mode !== 'mod' && (e.metaKey || e.ctrlKey)), { onScreen: 'newline' })
 
   const onKeyDown = (e) => {
+    // An input method's Enter ends the word it's putting together: it neither sends nor picks.
+    if (e.key === 'Enter' && (e.nativeEvent.isComposing || e.keyCode === 229)) return
     if (editing && e.key === 'Escape') { e.preventDefault(); endEdit(true); return }
     // In the meetings: Esc, or Backspace with nothing typed after the @, goes back to the files. With
     // none to pick (still on their way, or none yet), Enter waits rather than sending the @ or the
@@ -682,8 +689,9 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
     }
     if (e.key === 'Tab' && !e.shiftKey && nextBlank(e.currentTarget)) { e.preventDefault(); return }
     if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey && !e.altKey && !e.metaKey && recall(e)) { e.preventDefault(); return }
-    const touch = window.matchMedia('(pointer: coarse)').matches
-    if (e.key === 'Enter' && !e.shiftKey && !touch && !e.nativeEvent.isComposing) { e.preventDefault(); send(agentBusy && (e.metaKey || e.ctrlKey)) }
+    // A message brought back with ↑, not changed since, goes again with Enter wherever ↑ left the caret.
+    const v = e.currentTarget.value
+    enter.onKeyDown(e, hist.current ? { value: v, selectionStart: v.length, selectionEnd: v.length } : e.currentTarget)
   }
 
   const recording = mine && (dict.phase === 'opening' || dict.phase === 'listening')
@@ -696,6 +704,8 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
   const canSend = !!(draft.text.trim() || draft.files.length) && !uploading
   // Sending now waits its turn: the agent is working (a sent message's edit goes in at once).
   const queues = agentBusy && !editing
+  // The caret back in what's written (src/enter.js), so Enter is a new line there (not after ↑).
+  const keys = { mode: enter.mode, mid: enter.mid && !hist.current }
   const attachNums = numbered(draft.files)
   const attachPics = draft.files.filter((f) => f.image && f.preview).map((f) => ({ path: f.path, src: f.preview, name: attachNums.count > 1 ? t('Image {n} · {name}', { n: attachNums.of(f), name: f.name }) : f.name }))
   const status = busy ? (dict.early ? t('Still writing out the last one…') : t('Transcribing on your computer…')) : uploading ? (uploading > 1 ? t('Uploading {n} files…', { n: uploading }) : t('Uploading {n} file…', { n: uploading })) : null
@@ -767,9 +777,10 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
             value={draft.text}
             rows={1}
             placeholder={placeholder}
-            onChange={(e) => { hist.current = null; setDraft((d) => ({ ...d, text: e.target.value })); trackCaret(e) }}
-            onSelect={trackCaret}
-            onFocus={() => { loadPast(); noteBoxFocus(id) }}
+            onChange={(e) => { hist.current = null; setDraft((d) => ({ ...d, text: e.target.value })); trackCaret(e); enter.box.onSelect(e) }}
+            onSelect={(e) => { trackCaret(e); enter.box.onSelect(e) }}
+            onFocus={(e) => { loadPast(); noteBoxFocus(id); enter.box.onFocus(e) }}
+            onBlur={enter.box.onBlur}
             onKeyDown={onKeyDown}
             data-composer={id}
           />
@@ -808,9 +819,13 @@ export default function Composer({ id, placeholder, onSend, keysOpen, onToggleKe
               {phone ? <span className="comp-hint" /> : <>
               <span className={`comp-hint ${status ? 'status' : ''}`}>{status || (agentBusy
                 // While it works, a message waits its turn (held by your computer), or interrupts it.
-                ? <span className="busy-hint">{t('Working')}{queuedCount ? ` · ${t('{n} queued', { n: queuedCount })}` : ''}<span className="hide-touch"> · <kbd>⏎</kbd> {t('queue')} · <kbd>{/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl'}⏎</kbd> {t('interrupt and send')}</span></span>
-                : mirroring ? <span className="hide-touch">{t("Shows in the agent's input line above as you type")} · <kbd>⏎</kbd> {t('send')}</span>
-                : <span className="hide-touch"><kbd>⏎</kbd> {t('send')} · <kbd>⇧⏎</kbd> {t('new line')}</span>)}</span>
+                // The keys as Enter Key has them (src/enter.js): with the caret back in what you
+                // wrote, Enter is a new line there, so only ⌘⏎ is said.
+                ? <span className="busy-hint">{t('Working')}{queuedCount ? ` · ${t('{n} queued', { n: queuedCount })}` : ''}<span className="hide-touch">{keys.mode === 'mod'
+                  ? <> · <kbd>{modKey()}⏎</kbd> {t('queue')}</>
+                  : <>{!keys.mid && <> · <kbd>⏎</kbd> {t('queue')}</>} · <kbd>{modKey()}⏎</kbd> {t('interrupt and send')}</>}</span></span>
+                : mirroring ? <span className="hide-touch">{t("Shows in the agent's input line above as you type")} · <kbd>{keys.mode === 'mod' || keys.mid ? `${modKey()}⏎` : '⏎'}</kbd> {t('send')}</span>
+                : <span className="hide-touch"><SendKeys enter={keys} /></span>)}</span>
               {agentBusy && stopBtn}
               {agentBusy && canSend && nowBtn}
               </>}
