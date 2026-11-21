@@ -37,6 +37,7 @@ const SUITES = [
   { name: 'studio-xlsx', build: null, covers: [/^src\/components\/studio\/(xlsxbook|xlsx)\.js$/, /^test\/lib\/sheetfile\.mjs$/] },
   { name: 'studio-sheets', build: 'dist', browser: true, covers: [/^src\/components\/studio\/(xlsx|csv|sheetkeys|sheetcells|focus)\.js$/, /^src\/components\/studio\/(sheetchart\.jsx|sheet\.css|editors\/SheetEditor\.jsx)$/, /^src\/App\.jsx$/] },
   { name: 'studio-deck', build: 'dist', browser: true, covers: [/^server\/(studio|index)\.js$/, /^src\/components\/studio\/(deck\.js|deck\.css|pptx\.js|pptxdoc\.js|pptxdraw\.js|pptxtext\.js|packs\.jsx|doctools\.jsx|doc\.css|Studio\.jsx|focus\.js)$/, /^src\/components\/studio\/editors\/(Deck|Slides)/, /^test\/lib\/deckfile\.mjs$/, /^test\/stand-ins\/model\.mjs$/] },
+  { name: 'studio-big', build: 'dist', browser: true, covers: [/^server\/(studio|studioparts|zip|explorer|files|index)\.js$/, /^shared\/(imagesize|lockfile)\.js$/, /^src\/components\/studio\/(Studio\.jsx|files\.js|pptxdoc\.js|pptxdraw\.js|ooxml\.js|wordschema\.js|pdf\/pdfjs\.js|pdf\/PdfView\.jsx)$/, /^src\/components\/studio\/editors\/(Slides|Doc)Editor\.jsx$/, /^src\/components\/files\/(names|views)\.jsx$/, /^test\/lib\/(bigdeck|deckfile)\.mjs$/] },
   { name: 'studio-deck-looks', build: 'dist', browser: true, covers: [/^src\/components\/studio\/(deck\.js|deck\.css|pptx\.js|pptxdoc\.js|pptxdraw\.js|Studio\.jsx)$/, /^src\/components\/studio\/editors\/(Deck|Slides)/, /^test\/lib\/bgdecks\.mjs$/] },
   { name: 'meetings-limit', build: null, covers: [/^server\/(meetings|consult|accounts|chatmodels)\.js$/, /^test\/stand-ins\/claude\.cjs$/] },
   { name: 'perf', build: 'dist', browser: true, alone: true, covers: [/^src\//, /^server\//, /^desktop\//] },
@@ -45,6 +46,7 @@ const SUITES = [
   { name: 'memory', build: 'dist', browser: true, covers: [/^server\/(meetmemory|memoryview|meetings|meetinsights|dictations|dictation|chief|index)\.js$/, /^src\/components\/memory\//, /^src\/components\/meetings\/(tools|Meetings)\.jsx$/, /^src\/components\/dictations\/(Dictations|shared)\.jsx$/, /^src\/components\/dictations\/dictations\.css$/, /^src\/components\/settings\/Meetings\.jsx$/, /^src\/components\/(Rail|Settings)\.jsx$/, /^src\/(trials|App|lazy)\.jsx?$/, /^chief\/INSTRUCTIONS\.md$/, /^test\/stand-ins\/model\.mjs$/] },
   { name: 'meeting-insights', build: 'dist', browser: true, covers: [/^server\/(meetinsights|meetings|meetwork|meetmemory|voices|calendar|index)\.js$/, /^src\/components\/meetings\/(insights|people|tools|Meetings)\.jsx$/, /^native\/bridgecal\.swift$/, /^src\/components\/settings\/About\.jsx$/, /^src\/components\/meetings\/meetings\.css$/, /^src\/(trials|App)\.jsx?$/] },
   { name: 'meetings-ui', build: 'dist', browser: true, covers: [/^src\/components\/meetings\//, /^src\/components\/(Rail|Icon|FileExtras|layout)\.jsx$/, /^src\/(api|App|appearance)\.jsx?$/, /^server\/(meetings|meetwork|calendar|calls|index)\.js$/] },
+  { name: 'meetings-screen', build: 'dist', browser: true, covers: [/^src\/components\/meetings\//, /^src\/(api|App)\.jsx?$/, /^server\/(meetings|calls|index)\.js$/] },
   { name: 'scroll-ui', build: 'dist', browser: true, covers: [/^src\/styles\.css$/, /^src\/scrolling\.js$/, /^src\/main\.jsx$/, /^src\/components\/meetings\/meetings\.css$/] },
   { name: 'rail-ui', build: 'dist', browser: true, covers: [/^src\/components\/(Rail|Palette|Tour|Console)\.jsx$/, /^src\/components\/meetings\/(RailMeetings|bulk)\.jsx$/, /^src\/App\.jsx$/, /^src\/styles\.css$/, /^server\/(meetings|threads)\.js$/] },
   { name: 'settings-ui', build: 'dist', browser: true, covers: [/^src\/components\/settings\//, /^src\/components\/(Settings|Appearance|Palette|Machines)\.jsx$/, /^src\/(dictation|voice)\/[\w.]+\.css$/, /^src\/styles\.css$/] },
@@ -54,7 +56,7 @@ const SUITES = [
   // board), and in Settings' sections (a test of their own), pressed in the desktop app and in a
   // browser: each has to do something.
   { name: 'dead-clicks', build: 'dist', browser: true, minutes: 8, covers: [/^src\//, /^desktop\/(senders|preload|main)\.js$/, /^server\/(index|explorer|files)\.js$/] },
-  { name: 'dead-clicks-settings', build: 'dist', browser: true, covers: [/^src\//, /^desktop\/(senders|preload|main)\.js$/, /^server\/(index|explorer|files)\.js$/, /^test\/suites\/dead-clicks\.mjs$/] },
+  { name: 'dead-clicks-settings', build: 'dist', browser: true, minutes: 8, covers: [/^src\//, /^desktop\/(senders|preload|main)\.js$/, /^server\/(index|explorer|files)\.js$/, /^test\/suites\/dead-clicks\.mjs$/] },
   { name: 'back-forward', build: 'dist', browser: true, covers: [/^src\/backForward\.js$/, /^src\/components\/(BackForward|Console|Settings|files\/Explorer|meetings\/Meetings)\.jsx$/, /^src\/components\/backforward\.css$/, /^src\/(App\.jsx|pwa\.js|trials\.js)$/, /^server\/(index|paths)\.js$/, /^config\.example\.json$/, /^desktop\/main\.js$/] },
   { name: 'tab-strip', build: 'dist', browser: true, covers: [/^src\/components\/(TabStrip|Rail|Icon|NewAgent)\.jsx$/, /^src\/components\/tabstrip\.css$/, /^src\/(App\.jsx|styles\.css|trials\.js)$/, /^test\/stand-ins\/claude\.cjs$/] },
   { name: 'recommended-settings', build: 'dist', browser: true, covers: [/^src\/recommended\.js$/, /^src\/components\/(Recommended|Home|NewAgent|ModelChip|Onboarding)\.jsx$/, /^src\/components\/settings\/Agents\.jsx$/, /^src\/components\/recommended\.css$/, /^server\/(index|accounts|agents)\.js$/, /^server\/runtime\/(builtin|herdr)\.js$/, /^chief\/bin\/bridge$/, /^src\/trials\.js$/, /^test\/stand-ins\/claude\.cjs$/] },
@@ -293,7 +295,8 @@ const runOne = (j, attempt) => new Promise((resolve) => {
   // two shapes at once, took longer than five on CI's macOS WebKit runner, so Settings' sections are a
   // test of their own (dead-clicks-settings) and each half has the five; with Studio's home and
   // Account & Devices (3.20) the main views took 270 to 300 s there, so they have eight; files-ui too,
-  // since it pictures the icons, the list and groups in light and dark, on a computer and a phone.
+  // since it pictures the icons, the list and groups in light and dark, on a computer and a phone;
+  // and Settings' sections, nine of them from 3.22, 273 s to past 300 there.
   const mins = j.minutes || 5
   const limit = setTimeout(() => { fs.appendFileSync(log, `\nFAIL took more than ${mins} minutes, so it was stopped\n`); stopTree(p) }, mins * 60_000)
   p.on('exit', (code, signal) => {

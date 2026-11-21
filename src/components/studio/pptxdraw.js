@@ -422,7 +422,7 @@ function objHtml(o, box, opts, top) {
     const iw = box.w / Math.max(0.01, 1 - c.l - c.r), ih = box.h / Math.max(0.01, 1 - c.t - c.b)
     const clip = g.prst === 'ellipse' ? 'border-radius:50%;' : g.prst === 'roundRect' ? `border-radius:${n2(Math.min(box.w, box.h) * 0.16667)}px;` : ''
     const look = `${o.img.alpha < 1 ? `opacity:${n2(o.img.alpha)};` : ''}${filterCss(o.img)}`
-    const img = o.img.url ? `<img alt="${esc(o.descr || o.name)}" src="${esc(o.img.url)}" draggable="false" style="left:${n2(-c.l * iw)}px;top:${n2(-c.t * ih)}px;width:${n2(iw)}px;height:${n2(ih)}px;${look}">` : `<div class="px-missing">${esc(opts.words?.picture || 'Picture')}</div>`
+    const img = o.img.url ? `<img alt="${esc(o.descr || o.name)}" src="${esc(o.img.url)}" draggable="false" loading="lazy" decoding="async" style="left:${n2(-c.l * iw)}px;top:${n2(-c.t * ih)}px;width:${n2(iw)}px;height:${n2(ih)}px;${look}">` : `<div class="px-missing">${esc(opts.words?.picture || 'Picture')}</div>`
     parts.push(`<div class="px-pic" style="inset:0;${clip}${flip ? `transform:${flip};` : ''}">${img}${o.img.video ? '<svg viewBox="0 0 24 24" style="position:absolute;left:50%;top:50%;width:48px;height:48px;margin:-24px 0 0 -24px"><circle cx="12" cy="12" r="11" fill="rgb(0 0 0/.55)"/><path d="M10 8l6 4-6 4z" fill="#fff"/></svg>' : ''}</div>`)
   }
   const drawShape = o.kind !== 'pic' || ln

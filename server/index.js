@@ -666,8 +666,33 @@ app.get('/api/studio/recent', wrap(async () => { studioApps.warm(); return { fil
 app.delete('/api/studio/recent', wrap((req) => { const q = sq(req); return studio.forget(q.root, q.path) }))
 app.get('/api/studio/open', wrap(async (req) => { const q = sq(req); return studio.open(await rootOf(q.root), q.path, { rootId: q.root, label: String(req.query.where || '') || null }) }))
 // A save over a change made meanwhile is a 409, so the page offers theirs or yours.
-app.put('/api/studio/file', express.raw({ type: () => true, limit: '80mb' }), async (req, res) => {
-  try { const q = sq(req); res.json(await studio.save(await rootOf(q.root), q.path, req.body, { mtime: req.query.mtime, force: req.query.force === '1', auto: req.query.auto === '1' })) } catch (e) { res.status(e.conflict ? 409 : 502).json({ error: e.message, ...(e.conflict ? { conflict: true } : {}) }) }
+// parts=1: the page opened it in parts, so the parts it never had are put back from the file.
+app.put('/api/studio/file', express.raw({ type: () => true, limit: studio.SAVE_MAX }), async (req, res) => {
+  try { const q = sq(req); res.json(await studio.save(await rootOf(q.root), q.path, req.body, { mtime: req.query.mtime, force: req.query.force === '1', auto: req.query.auto === '1', inParts: req.query.parts === '1' })) } catch (e) { res.status(e.conflict ? 409 : e.status === 413 ? 413 : 502).json({ error: e.message, ...(e.conflict ? { conflict: true } : {}), ...(typeof e.code === 'string' ? { code: e.code } : {}), ...(e.data || {}) }) }
+})
+// A big Word, Excel or PowerPoint file, opened in parts (studioparts.js): the file with its XML and
+// a marker for each picture or other big part, then each of those as it's shown (a picture at the
+// width it's drawn at, w). Through another computer's window or a phone, only what's shown goes.
+app.get('/api/studio/slim', async (req, res) => {
+  try {
+    const q = sq(req)
+    const { bytes } = await studio.slimFile(await rootOf(q.root), q.path, req.query.mtime)
+    res.set({ 'Content-Type': 'application/zip', 'Content-Length': String(bytes.length), 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' })
+    res.end(bytes)
+  } catch (e) { res.status(e.status === 409 ? 409 : e.status === 413 ? 413 : 404).json({ error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}), ...(e.data || {}) }) }
+})
+app.get('/api/studio/part', async (req, res) => {
+  try {
+    const q = sq(req)
+    const p = await studio.partOf(await rootOf(q.root), q.path, String(req.query.name || ''), { w: Number(req.query.w) || 0 })
+    // The address names the file as it was (v: its mtime), so a picture is kept by the browser.
+    res.set({ 'Content-Type': p.type, 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox", 'Cache-Control': req.query.v ? 'private, max-age=86400' : 'no-store' })
+    if (p.file) return res.sendFile(p.file, { dotfiles: 'allow' })
+    if (p.length != null) res.set('Content-Length', String(p.length))
+    p.stream.on('error', () => res.destroy())
+    res.on('close', () => p.stream.destroy())
+    p.stream.pipe(res)
+  } catch (e) { if (res.headersSent) return res.destroy(); res.status(e.status === 404 ? 404 : e.status === 413 ? 413 : 502).json({ error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}), ...(e.data || {}) }) }
 })
 app.get('/api/studio/changed', wrap(async (req) => { const q = sq(req); return studio.changed(await rootOf(q.root), q.path, req.query.since) }))
 app.get('/api/studio/versions', wrap(async (req) => { const q = sq(req); return studio.versions(await rootOf(q.root), q.path) }))

@@ -28,6 +28,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { safePath } from './files.js'
+import { isLockFile } from '../shared/lockfile.js'
 import { mayLook, noteAsked } from './projects.js'
 
 const HOME = os.homedir()
@@ -87,8 +88,9 @@ const LEFTOVERS = new Set(['.DS_Store', 'Thumbs.db', 'desktop.ini', '$RECYCLE.BI
 const MAC_ROOT = new Set(['bin', 'cores', 'dev', 'etc', 'home', 'opt', 'private', 'sbin', 'tmp', 'usr', 'var', 'Volumes', 'System Volumes'])
 // Windows marks these hidden (Node can't read the mark): the old names linked to new ones, and its own.
 const WIN_HIDDEN = /^(ntuser\..*|AppData|Application Data|Cookies|Local Settings|My Documents|NetHood|PrintHood|Recent|SendTo|Start Menu|Templates|pagefile\.sys|hiberfil\.sys|swapfile\.sys|DumpStack\.log.*|Documents and Settings|Recovery|ProgramData|Config\.Msi|MSOCache)$/i
+// Office's lock file beside an open document (~$Report.docx) is hidden as a dotfile is (shared/lockfile.js).
 function hiddenIn(dir, name) {
-  if (name.startsWith('.') || LEFTOVERS.has(name)) return true
+  if (name.startsWith('.') || LEFTOVERS.has(name) || isLockFile(name)) return true
   if (IS_MAC) return (dir === '/' && MAC_ROOT.has(name)) || (dir === HOME && name === 'Library')
   if (IS_WIN) return WIN_HIDDEN.test(name)
   return false

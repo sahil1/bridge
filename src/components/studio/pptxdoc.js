@@ -6,6 +6,7 @@
 // changed, and every other part of the file (masters, layouts, themes, charts' workbooks, media,
 // comments, animations) is copied as it was. No browser APIs, so the tests read and write in Node.
 import JSZip from 'jszip'
+import { imageSize } from '../../../shared/imagesize.js'
 
 export const EMU_PX = 9525 // 914400 EMU an inch, 96 px an inch
 const REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
@@ -221,42 +222,9 @@ function blipOf(k) {
     gray: !!kid(b, 'a:grayscl'), lum: lum ? { bright: num(lum.attrs.bright, 0) / 100000, contrast: num(lum.attrs.contrast, 0) / 100000 } : null, duotone: !!kid(b, 'a:duotone'),
   }
 }
-// A picture's size in px as PowerPoint sizes one (its pixels at its own dots to the inch, 96 when it
-// doesn't say), from its first bytes: PNG, JPEG, GIF, BMP and WebP; null for any other.
-export function imageSize(b) {
-  if (!b || b.length < 30) return null
-  const u16 = (o, le) => (le ? b[o] | (b[o + 1] << 8) : (b[o] << 8) | b[o + 1])
-  const u32 = (o, le) => (le ? (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)) >>> 0 : ((b[o] << 24) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3]) >>> 0)
-  const tag = (o) => String.fromCharCode(b[o], b[o + 1], b[o + 2], b[o + 3])
-  let w = 0, h = 0, dx = 96, dy = 96
-  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) {
-    w = u32(16); h = u32(20)
-    for (let i = 8; i + 12 <= b.length;) {
-      const len = u32(i), type = tag(i + 4)
-      if (type === 'pHYs' && b[i + 16] === 1 && u32(i + 8) && u32(i + 12)) { dx = Math.round(u32(i + 8) * 0.0254); dy = Math.round(u32(i + 12) * 0.0254) }
-      if (type === 'IDAT' || type === 'IEND') break
-      i += len + 12
-    }
-  } else if (b[0] === 0xff && b[1] === 0xd8) {
-    for (let i = 2; i + 9 < b.length;) {
-      if (b[i] !== 0xff) { i++; continue }
-      const m = b[i + 1]
-      if (m === 0xff || m === 0xd8 || (m >= 0xd0 && m <= 0xd7) || m === 0x01) { i += m === 0xff ? 1 : 2; continue }
-      const len = u16(i + 2)
-      if (m === 0xe0 && tag(i + 4) === 'JFIF') { const unit = b[i + 11], x = u16(i + 12), y = u16(i + 14); if (x && y && unit === 1) { dx = x; dy = y } else if (x && y && unit === 2) { dx = x * 2.54; dy = y * 2.54 } }
-      if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) { h = u16(i + 5); w = u16(i + 7); break }
-      i += 2 + len
-    }
-  } else if (tag(0) === 'GIF8') { w = u16(6, true); h = u16(8, true) }
-  else if (b[0] === 0x42 && b[1] === 0x4d) { w = u32(18, true); h = Math.abs(u32(22, true) | 0); const ppm = u32(38, true); if (ppm) dx = dy = Math.round(ppm * 0.0254) }
-  else if (tag(0) === 'RIFF' && tag(8) === 'WEBP') {
-    const kind = tag(12)
-    if (kind === 'VP8X') { w = 1 + (b[24] | (b[25] << 8) | (b[26] << 16)); h = 1 + (b[27] | (b[28] << 8) | (b[29] << 16)) }
-    else if (kind === 'VP8 ') { w = u16(26, true) & 0x3fff; h = u16(28, true) & 0x3fff }
-    else if (kind === 'VP8L') { const v = u32(21, true); w = (v & 0x3fff) + 1; h = ((v >> 14) & 0x3fff) + 1 }
-  }
-  return w > 0 && h > 0 ? { w: (w * 96) / dx, h: (h * 96) / dy } : null
-}
+// A picture's size in px as PowerPoint sizes one (shared/imagesize.js, which the server reads a big
+// file's pictures' sizes with too).
+export { imageSize }
 // A line (a:ln): { color, width (px), dash, head, tail } or { none: true }; null: inherited.
 export function lineOf(ln, cx, ph = null) {
   if (!ln) return null
@@ -466,17 +434,19 @@ function themeOf(xml, rels = {}) {
 const clrMapOf = (el) => (el ? { ...el.attrs } : null)
 
 // The file, read: { size: { cx, cy }, slides, layouts, masters, … } with what saving needs.
-export async function readPptx(buf) {
+// parts: a big file opened in parts (files.js partsOf): its pictures are left on its computer (a
+// marker in each one's place here, which saving keeps as it is), and shown from there by urlOf.
+export async function readPptx(buf, { parts = null } = {}) {
   const zip = await JSZip.loadAsync(buf)
   const texts = new Map()
   const bin = new Map()
   for (const [name, f] of Object.entries(zip.files)) {
-    if (f.dir) continue
+    if (f.dir || parts?.has(name)) continue
     if (/\.(xml|rels)$/i.test(name)) texts.set(name, await f.async('string'))
     else if (showable(name)) bin.set(name, await f.async('uint8array'))
   }
   // Pictures' bytes are read at once, so a slide's can be drawn as soon as it's asked for.
-  const doc = { zip, texts, bin, text: (p) => texts.get(p) ?? null, layouts: new Map(), masters: new Map(), themes: new Map() }
+  const doc = { zip, texts, bin, parts, text: (p) => texts.get(p) ?? null, layouts: new Map(), masters: new Map(), themes: new Map() }
   const rootRels = relsOf(doc.text('_rels/.rels'), '')
   const presPath = Object.values(rootRels).find((r) => r.type === 'officeDocument')?.target || 'ppt/presentation.xml'
   const presXml = doc.text(presPath)
@@ -644,6 +614,9 @@ function withPicture(f, cx) {
   if (f?.type !== 'blip') return f
   const part = cx.rels?.[f.rid]?.target || null
   const bytes = part ? cx.doc.bin.get(part) : null
+  // Left on its computer (a big file, in parts): its size as the server read it, shown from there.
+  const far = !bytes && part && showable(part) ? cx.doc.parts?.size(part) : null
+  if (far) return { ...f, part, url: mediaUrl(cx, f.rid, cx.doc.size.cx / EMU_PX), size: far.w ? { w: far.w, h: far.h } : null }
   if (!bytes) return { ...f, lost: part && cx.doc.zip?.file(part) ? (part.split('.').pop() || '').toUpperCase() : 'missing' }
   return { ...f, part, url: mediaUrl(cx, f.rid), size: imageSize(bytes) }
 }
@@ -736,7 +709,10 @@ function objOf(el, src, cx, inGroup = false) {
     const src2 = kid(kid(el, 'p:blipFill'), 'a:srcRect')
     // How see-through, grey, bright and contrasting it's made (Picture Transparency, Recolor…).
     const { alpha, gray, lum } = blipOf(kid(el, 'p:blipFill'))
-    o.img = { rid, url: mediaUrl(cx, rid), part: cx.rels[rid]?.target || null, crop: { l: num(src2?.attrs.l, 0) / 100000, t: num(src2?.attrs.t, 0) / 100000, r: num(src2?.attrs.r, 0) / 100000, b: num(src2?.attrs.b, 0) / 100000 }, video: !!first(nv, 'a:videoFile') || !!first(nv, 'p14:media'), alpha, gray, lum }
+    const crop = { l: num(src2?.attrs.l, 0) / 100000, t: num(src2?.attrs.t, 0) / 100000, r: num(src2?.attrs.r, 0) / 100000, b: num(src2?.attrs.b, 0) / 100000 }
+    // How wide it's drawn, all of it (a cropped one is wider than its box): the size it's asked for at.
+    const wide = o.w / Math.max(0.05, 1 - crop.l - crop.r)
+    o.img = { rid, url: mediaUrl(cx, rid, wide), part: cx.rels[rid]?.target || null, crop, video: !!first(nv, 'a:videoFile') || !!first(nv, 'p14:media'), alpha, gray, lum }
   }
   // Its text, with its levels' styles from the master down.
   const txBody = kid(el, 'p:txBody')
@@ -821,10 +797,11 @@ function numbered(type, n) {
   const cased = /Uc/.test(type) ? core.toUpperCase() : core
   return /ParenBoth/.test(type) ? `(${cased})` : /ParenR/.test(type) ? `${cased})` : /Plain/.test(type) ? cased : `${cased}.`
 }
-function mediaUrl(cx, rid) {
+// px: how wide it's drawn, in the slide's px (a picture left on its computer comes about that wide).
+function mediaUrl(cx, rid, px = 0) {
   const r = cx.rels?.[rid]
   if (!r || r.external) return r?.external && /^https?:/.test(r.target) ? null : null
-  return cx.doc.urlOf ? cx.doc.urlOf(r.target) : null
+  return cx.doc.urlOf ? cx.doc.urlOf(r.target, px) : null
 }
 // A custom shape's paths, in its own units: [{ w, h, fill, stroke, cmds: [[op, ...pts]] }].
 function pathsOf(cust) {

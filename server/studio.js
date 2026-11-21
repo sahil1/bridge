@@ -11,6 +11,8 @@ import os from 'node:os'
 import { DATA, writeFileAtomic } from './paths.js'
 import { safePath } from './files.js'
 import * as doctext from './doctext.js'
+import * as parts from './studioparts.js'
+import { isLockFile } from '../shared/lockfile.js'
 
 const DIR = path.join(DATA, 'studio')
 const VERSIONS = path.join(DIR, 'versions')
@@ -31,20 +33,52 @@ export const kindOf = (name, head = '') => {
 }
 export const opens = (name) => !!KINDS[path.extname(String(name)).toLowerCase()]
 
-const MAX_BYTES = 80 * 1024 * 1024
+// How big a file Studio opens and saves. A Word, Excel or PowerPoint file over IN_PARTS opens in
+// parts (studioparts.js: its XML, then each picture as it's shown), and a PDF so too (pdf.js asks
+// for the parts of it it shows: the file route answers a range), so what the page holds is what it
+// shows, however big the file: up to OPEN_MAX. A kind the page holds whole (text: Markdown, CSV, a
+// page) only up to WHOLE_MAX. Saved up to SAVE_MAX: a save writes the whole file and keeps the one
+// before as a version, and a bigger one keeps fewer versions (keepFor). Over SAVE_MAX it opens to
+// read only, and Studio keeps none of its versions (nothing it does changes it).
+// (In MB and GB as Finder counts them: a million bytes, a billion.)
+const MB = 1000 * 1000
+export const IN_PARTS = 8 * MB
+export const OPEN_MAX = 1000 * MB
+export const SAVE_MAX = 250 * MB
+const WHOLE_MAX = 80 * MB
+const PARTS = new Set(['.docx', '.xlsx', '.xlsm', '.pptx', '.pdf'])
+export const inParts = (ext, size) => PARTS.has(ext) && size > IN_PARTS
 const KEEP = 60 // versions per file
 const MAX_ALL = 2 * 1024 ** 3 // all the copies together
+const PER_FILE = 600 * MB // one file's copies together, at most: a 95 MB deck keeps 6, a 250 MB one 2
+export const keepFor = (size) => (size > SAVE_MAX ? 0 : Math.max(2, Math.min(KEEP, Math.floor(PER_FILE / Math.max(1, size)))))
 const hash = (buf) => crypto.createHash('sha256').update(buf).digest('hex').slice(0, 32)
 const keyOf = (real) => crypto.createHash('sha1').update(real).digest('hex').slice(0, 20)
 const readJSON = async (f, d) => { try { return JSON.parse(await fsp.readFile(f, 'utf8')) } catch { return d } }
+const mb = (n) => (n >= 1000 * MB ? `${+(n / (1000 * MB)).toFixed(1)} GB` : `${Math.max(1, Math.round(n / MB))} MB`)
+// Which app opens it on its computer, for what Studio says when it can't.
+const APP = { '.docx': 'Word', '.xlsx': 'Excel', '.xlsm': 'Excel', '.pptx': 'PowerPoint', '.pdf': 'a PDF reader', '.csv': 'Excel', '.tsv': 'Excel' }
+// Too big for Studio: said with the real reason and what to do, and (code, data) for the page to
+// say it in your language.
+function tooBig(ext, size, max, whole) {
+  const app = APP[ext] || null
+  const msg = whole
+    ? `It's ${mb(size)}, and a page holds a file of this kind whole, so Studio opens one up to ${mb(max)}. Open it on its computer in ${app || 'a text editor'}, or download it.`
+    : `It's ${mb(size)}, and Studio opens files up to ${mb(max)}. Open it on its computer in ${app || 'its own app'}, or download it.`
+  return Object.assign(new Error(msg), { code: 'too-big', status: 413, data: { size, max, whole: !!whole, app } })
+}
 
-// A file Studio may open: inside the root Files gave (an agent's folder, a place), and a kind it knows.
+// A file Studio may open: inside the root Files gave (an agent's folder, a place), a kind it knows,
+// not Office's lock file beside one, and not too big for it.
 async function locate(root, rel) {
   const { real, rel: r } = await safePath(root, rel)
   const st = await fsp.stat(real)
   if (!st.isFile()) throw new Error('Not a file')
+  if (isLockFile(real)) throw Object.assign(new Error("This is Office's lock file, kept beside a document while it's open in Word, Excel or PowerPoint (it says who has it open). It isn't a document: open the one without ~$ in its name."), { code: 'lock-file' })
   if (!opens(real)) throw new Error("Studio doesn't open this kind of file")
-  if (st.size > MAX_BYTES) throw new Error('Too big for Studio (80 MB at most)')
+  const ext = path.extname(real).toLowerCase()
+  const max = PARTS.has(ext) ? OPEN_MAX : WHOLE_MAX
+  if (st.size > max) throw tooBig(ext, st.size, max, !PARTS.has(ext))
   return { real, rel: r, st }
 }
 
@@ -85,27 +119,35 @@ const versionsOf = (real) => inIndex(indexOf(real), () => readIndex(indexOf(real
 // saves itself): one version for each few minutes of typing, the newest of them, so typing for
 // an hour keeps a handful, not hundreds; a save of yours (Save, ⌘S) keeps the one it's at.
 const MERGE_MS = 10 * 60_000
-function snapshot(real, by, { name = null, buf = null, auto = false } = {}) {
+// saved: what's in the file is what was just saved (a big one's version copied from the file, by the
+// system, rather than written again from memory).
+function snapshot(real, by, { name = null, buf = null, auto = false, saved = false } = {}) {
   return inIndex(indexOf(real), async () => {
-    const data = buf || await fsp.readFile(real)
-    const h = hash(data)
+    // A big file is hashed as it's read, and copied by the system (on a Mac's disk, a copy that
+    // takes no room until one of them changes), never held in memory whole.
+    const size = buf ? buf.length : (await fsp.stat(real)).size
+    const keep = keepFor(size)
+    if (!keep) return null
+    const h = buf ? hash(buf) : await parts.hashFile(real)
     const idx = await readIndex(indexOf(real))
     const top = idx.versions[0]
     if (top?.hash === h) {
-      if (by === 'you' && buf && !auto && top.auto) { delete top.auto; delete top.since; writeFileAtomic(indexOf(real), JSON.stringify(idx, null, 1)) }
+      if (by === 'you' && (buf || saved) && !auto && top.auto) { delete top.auto; delete top.since; writeFileAtomic(indexOf(real), JSON.stringify(idx, null, 1)) }
       return top
     }
     const dir = path.dirname(indexOf(real))
     await fsp.mkdir(dir, { recursive: true })
     const id = `${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`
     const file = `${id}${path.extname(real).toLowerCase()}`
-    await fsp.writeFile(path.join(dir, file), data)
+    if (buf) await fsp.writeFile(path.join(dir, file), buf)
+    else await fsp.copyFile(real, path.join(dir, file))
     const at = new Date().toISOString()
     const merge = auto && by === 'you' && top?.by === 'you' && top.auto && Date.now() - Date.parse(top.since || top.at) < MERGE_MS
-    const v = { id, at, by, ...(name ? { name: String(name).slice(0, 80) } : {}), size: data.length, hash: h, file, ...(auto ? { auto: true, since: merge ? top.since || top.at : at } : {}) }
+    const v = { id, at, by, ...(name ? { name: String(name).slice(0, 80) } : {}), size, hash: h, file, ...(auto ? { auto: true, since: merge ? top.since || top.at : at } : {}) }
     idx.path = real
     idx.versions = merge ? [v, ...idx.versions.slice(1)] : [v, ...idx.versions]
-    const dropped = [...(merge ? [top] : []), ...idx.versions.splice(KEEP)]
+    // A big file keeps fewer (keepFor): its oldest go.
+    const dropped = [...(merge ? [top] : []), ...idx.versions.splice(keep)]
     writeFileAtomic(indexOf(real), JSON.stringify(idx, null, 1))
     // Their copies only once the list no longer names them.
     for (const old of dropped) await fsp.rm(path.join(dir, old.file), { force: true }).catch(() => {})
@@ -149,6 +191,9 @@ function prune() {
   return pruning
 }
 const shown = (vs) => vs.map(({ id, at, by, name, size }) => ({ id, at, by, name: name || null, size }))
+// The copies of a file's versions, newest first: where a save of a file opened in parts finds a part
+// the page never had, if the file changed since it was opened.
+const copiesOf = async (real) => (await versionsOf(real)).map((v) => path.join(path.dirname(indexOf(real)), v.file))
 
 // ---------- Asked of an agent ----------
 // An edit asked of an agent: the change to the file that comes next is its version, with its name.
@@ -302,14 +347,39 @@ export async function forget(root, rel) {
 // root (a pane, place:<id>), kept in Recent.
 export async function open(root, rel, { rootId = null, label = null } = {}) {
   const { real, rel: r, st } = await locate(root, rel)
-  const head = TEXT.has(path.extname(real).toLowerCase()) ? (await fsp.readFile(real, 'utf8')).slice(0, 2000) : ''
+  const ext = path.extname(real).toLowerCase()
+  const head = TEXT.has(ext) ? (await fsp.readFile(real, 'utf8')).slice(0, 2000) : ''
   const kind = kindOf(real, head)
   const vs = await versionsOf(real)
   const w = whoChanged(real)
   const now = await snapshot(real, vs.length ? w.by : 'opened', { name: w.name })
   if (w.by === 'agent' && now?.by === 'agent') asked.delete(real)
   if (rootId) remember({ root: String(rootId), path: slashed(r), name: path.basename(real), kind, at: new Date().toISOString(), ...(label ? { where: String(label).slice(0, 120) } : {}) }).catch(() => {})
-  return { path: r, name: path.basename(real), kind, ext: path.extname(real).toLowerCase(), size: st.size, mtime: st.mtimeMs, versions: shown(await versionsOf(real)) }
+  // In parts (a big Office file, a PDF): what's left on the computer until it's shown. An Office
+  // file that isn't a zip (an older one renamed, a locked one) opens whole if it can.
+  let partsOf = null
+  if (inParts(ext, st.size) && ext !== '.pdf') {
+    partsOf = await parts.index(real, st).catch(() => null)
+    if (!partsOf && st.size > WHOLE_MAX) throw new Error(`Studio can't read the parts of this ${APP[ext] || 'Office'} file: it isn't in the newer Office format, or it's damaged or locked with a password. Open it on its computer in ${APP[ext] || 'its own app'}.`)
+  }
+  return {
+    path: r, name: path.basename(real), kind, ext, size: st.size, mtime: st.mtimeMs, versions: shown(await versionsOf(real)),
+    inParts: inParts(ext, st.size) && (ext === '.pdf' || !!partsOf), ...(partsOf ? { left: partsOf.left, model: partsOf.model } : {}),
+    saves: st.size <= SAVE_MAX, keep: keepFor(st.size), limits: { open: OPEN_MAX, save: SAVE_MAX, whole: WHOLE_MAX },
+  }
+}
+
+// A file opened in parts, as the page gets it (studioparts.slim): its XML, a marker in each big
+// part's place. Only of the file as it was opened (mtime): changed since, the page opens it again.
+export async function slimFile(root, rel, mtime) {
+  const { real, st } = await locate(root, rel)
+  if (mtime != null && mtime !== '' && Math.abs(st.mtimeMs - Number(mtime)) > 1) throw Object.assign(new Error('The file changed since it was opened. Open it again.'), { status: 409, code: 'changed' })
+  return { bytes: await parts.slim(real), mtime: st.mtimeMs }
+}
+// One of its parts, as the page shows it (a picture at the width it's drawn at, w).
+export async function partOf(root, rel, name, { w = 0 } = {}) {
+  const { real, st } = await locate(root, rel)
+  return parts.part(real, st, name, { w })
 }
 
 // Studio's writes to a file (a save, a version put back) and the looks at whether it changed, one
@@ -319,10 +389,13 @@ const inTurn = queue()
 
 // Saved from Studio: only if nobody changed it since you opened it (mtime: what you loaded),
 // unless force. What was there is kept first, if it isn't already. auto: saved as you typed.
-export async function save(root, rel, buf, { mtime, force = false, auto = false } = {}) {
+// inParts: the page opened it in parts, so what it sends has markers for the parts it never had
+// (studioparts.merge puts them back).
+export async function save(root, rel, buf, { mtime, force = false, auto = false, inParts: fromParts = false } = {}) {
   if (!Buffer.isBuffer(buf)) throw new Error('Expected the file')
-  if (buf.length > MAX_BYTES) throw new Error('Too big to save (80 MB at most)')
-  const { real } = await locate(root, rel)
+  const { real, st: was } = await locate(root, rel)
+  const app = APP[path.extname(real).toLowerCase()] || 'its own app'
+  if (was.size > SAVE_MAX || buf.length > SAVE_MAX) throw Object.assign(new Error(`It's ${mb(Math.max(was.size, buf.length))}, and Studio saves files up to ${mb(SAVE_MAX)}, so here it opens to read only. Change it on its computer in ${app}, or ask an agent to.`), { code: 'too-big-to-save', status: 413, data: { size: Math.max(was.size, buf.length), max: SAVE_MAX } })
   return inTurn(real, async () => {
     const st = await fsp.stat(real)
     if (!force && mtime != null && Math.abs(st.mtimeMs - Number(mtime)) > 1) {
@@ -330,10 +403,13 @@ export async function save(root, rel, buf, { mtime, force = false, auto = false 
     }
     const w = whoChanged(real)
     await snapshot(real, w.by, { name: w.name })
-    await fsp.writeFile(real, buf)
-    await snapshot(real, 'you', { buf, auto })
+    // The parts the page never had, from the file as it is or (changed since) the copy it was opened from.
+    const bytes = fromParts ? (await parts.merge(buf, [real, ...await copiesOf(real)])).bytes : buf
+    if (bytes.length > SAVE_MAX) throw Object.assign(new Error(`Saved, it would be ${mb(bytes.length)}, and Studio saves files up to ${mb(SAVE_MAX)}. Change it on its computer in ${app}, or ask an agent to.`), { code: 'too-big-to-save', status: 413, data: { size: bytes.length, max: SAVE_MAX } })
+    await fsp.writeFile(real, bytes)
+    await snapshot(real, 'you', fromParts ? { auto, saved: true } : { buf: bytes, auto })
     const after = await fsp.stat(real)
-    return { mtime: after.mtimeMs, size: after.size, versions: shown(await versionsOf(real)) }
+    return { mtime: after.mtimeMs, size: after.size, versions: shown(await versionsOf(real)), keep: keepFor(after.size), saves: after.size <= SAVE_MAX }
   })
 }
 
@@ -352,8 +428,8 @@ export async function changed(root, rel, since) {
 }
 
 export async function versions(root, rel) {
-  const { real } = await locate(root, rel)
-  return { versions: shown(await versionsOf(real)) }
+  const { real, st } = await locate(root, rel)
+  return { versions: shown(await versionsOf(real)), keep: keepFor(st.size) }
 }
 // One version's copy, to show or download.
 export async function versionFile(root, rel, id) {
@@ -369,9 +445,8 @@ export async function restore(root, rel, id) {
   return inTurn(real, async () => {
     const w = whoChanged(real)
     await snapshot(real, w.by, { name: w.name })
-    const data = await fsp.readFile(file)
-    await fsp.writeFile(real, data)
-    await snapshot(real, 'restored', { buf: data })
+    await fsp.copyFile(file, real)
+    await snapshot(real, 'restored')
     const st = await fsp.stat(real)
     return { mtime: st.mtimeMs, size: st.size, versions: shown(await versionsOf(real)) }
   })

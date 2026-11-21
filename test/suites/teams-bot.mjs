@@ -124,7 +124,9 @@ try {
     ok(!!(await until(async () => (await st()).typing.some((x) => x.conversation === q1.conversation), 8000)), '"typing…" where she asked, for 👀')
     // (A direct message: answered at once.)
     const p = await postedLike(/\$40 a seat/)
-    ok(p?.conversation === q1.conversation && p.replyTo === q1.id && p.textFormat === 'markdown' && events().some((e) => e.type === 'sent' && e.kind === 'answer' && e.how === 'auto' && e.platform === 'teams'), 'answered at once, as a reply in that chat', p)
+    // (Its record is written once Teams has answered the post, a moment after Teams has it.)
+    const sent = await until(() => events().find((e) => e.type === 'sent' && e.kind === 'answer' && e.platform === 'teams'), 5000)
+    ok(p?.conversation === q1.conversation && p.replyTo === q1.id && p.textFormat === 'markdown' && sent?.how === 'auto', 'answered at once, as a reply in that chat', { posted: p, record: sent })
     ok(!events().some((e) => e.type === 'reaction' && e.platform === 'teams'), 'and no reactions (Teams has none for bots), nor a failure for them')
     // A mention in a channel, then a reply in its thread with no mention.
     const q2 = await tm.say({ user: 'dana', kind: 'channel', mention: true, text: 'when do we launch? [answer On Friday.]' })

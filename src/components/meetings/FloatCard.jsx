@@ -279,6 +279,10 @@ export default function FloatCard() {
   const writing = () => { const i = card.current?.querySelector('.fc-note input'); return !!i && (i.value.trim() !== '' || (document.activeElement === i && document.hasFocus())) }
   const enter = () => { clearTimeout(leave.current); if (onHover && !drag.current?.moved) setHover(true) }
   const out = () => { clearTimeout(leave.current); if (onHover && !drag.current?.moved && !edgeNow.current) leave.current = setTimeout(() => { if (!writing()) setHover(false) }, 500) }
+  // Focus gone from it (tabbed past its last button, or a button in it turned off as it's pressed,
+  // as Reset and ask again is while it works, which Chromium counts as focus leaving): closed only
+  // once the pointer isn't on it either, else it would close under the pointer.
+  const blur = () => { if (!card.current?.matches(':hover')) out() }
   // macOS lets Bridge AI hear a call only once it's allowed (System Audio Recording): until then a
   // call's sound is silence. Opens the settings page to allow it.
   const allowCall = () => api('/fix/settings', { method: 'POST', body: { pane: 'audio' } }).then(() => noteOpened('sound'), (e) => setErr(e.message))
@@ -553,7 +557,7 @@ export default function FloatCard() {
   const h = tallToo && size.h ? Math.max(LIMITS.minH, Math.min(Math.floor(((window.screen?.availHeight || 900) - 16) / zoom - 24), size.h)) : null
   return (
     <div className="float-root">
-      <div ref={card} className={`float-card${r && !open ? ' slim' : ''}${up ? ' up' : ''}${dragging ? ' dragging' : ''}${h ? ' sized' : ''}${resizing ? ' resizing' : ''}`} onMouseEnter={enter} onMouseLeave={out} onFocus={enter} onBlur={out}
+      <div ref={card} className={`float-card${r && !open ? ' slim' : ''}${up ? ' up' : ''}${dragging ? ' dragging' : ''}${h ? ' sized' : ''}${resizing ? ' resizing' : ''}`} onMouseEnter={enter} onMouseLeave={out} onFocus={enter} onBlur={blur}
         style={{ ...(w ? { '--fc-w': `${w}px` } : {}), ...(h ? { '--fc-h': `${h}px` } : {}), ...(resizing ? { cursor: GRIP[resizing] } : {}) }}
         onPointerDown={down} onPointerMove={move} onPointerUp={release} onPointerCancel={release}>
         {body}

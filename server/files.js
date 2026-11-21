@@ -13,6 +13,7 @@ import { loginPath } from './agents.js'
 import { gitReady, NO_GIT } from './gitready.js'
 import { DATA } from './paths.js'
 import { openToRead } from './openread.js'
+import { isLockFile } from '../shared/lockfile.js'
 
 const HIDDEN = new Set(['.git', 'node_modules', '.DS_Store', '__pycache__', '.venv', 'venv', '.next', 'dist', '.cache', '.turbo'])
 const MAX_TEXT = 1024 * 1024
@@ -50,7 +51,7 @@ const exists = (p) => fsp.access(p).then(() => true, () => false)
 export async function listDir(root, rel, { showHidden = false } = {}) {
   const { real, rel: r } = await safePath(root, rel)
   const shown = (await fsp.readdir(real, { withFileTypes: true }))
-    .filter((e) => (showHidden ? e.name !== '.git' && e.name !== '.DS_Store' : !HIDDEN.has(e.name) && !e.name.startsWith('.')))
+    .filter((e) => (showHidden ? e.name !== '.git' && e.name !== '.DS_Store' : !HIDDEN.has(e.name) && !e.name.startsWith('.') && !isLockFile(e.name)))
   // Every entry's stat at once, so a big folder isn't one wait after another.
   const entries = (await Promise.all(shown.map(async (e) => {
     const st = await fsp.stat(path.join(real, e.name)).catch(() => null) // null: a broken link
@@ -252,7 +253,7 @@ export async function findFiles(root, q, limit = 60) {
     const walk = async (dir, depth) => {
       if (depth > 6 || files.length > 8000) return
       for (const e of await fsp.readdir(dir, { withFileTypes: true })) {
-        if (HIDDEN.has(e.name) || e.name.startsWith('.')) continue
+        if (HIDDEN.has(e.name) || e.name.startsWith('.') || isLockFile(e.name)) continue
         const p = path.join(dir, e.name)
         if (e.isDirectory()) await walk(p, depth + 1)
         else files.push(path.relative(realRoot, p))
