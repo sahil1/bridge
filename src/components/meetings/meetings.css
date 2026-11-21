@@ -62,6 +62,10 @@
 .mt-msg { margin: -2px 0 0; }
 .mt-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; min-height: 30px; }
 .mt-loading { padding: 20px; }
+/* A meeting that isn't there any more (MeetingGone): what became of it, and the way on. */
+.mt-gone { display: grid; gap: 10px; max-width: 560px; padding: 20px 4px; }
+.mt-gone p { margin: 0; line-height: 1.5; }
+.mt-gone-acts { display: flex; flex-wrap: wrap; gap: 8px; }
 
 .mt-recbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 9px 12px; border-radius: 12px; border: 1px solid color-mix(in srgb, #e5484d 30%, var(--line-2)); background: color-mix(in srgb, #e5484d 5%, var(--pane)); }
 .mt-recbar.paused { border-color: var(--line-2); background: var(--pane-2); }
@@ -631,8 +635,9 @@ button.mt-who:not(:disabled):hover { text-decoration: underline dotted; text-und
 .mt-part-open { display: grid; flex: 1; min-width: 0; gap: 2px; padding: 8px 10px; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; }
 .mt-part-open b { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mt-part > .ghost-btn { flex: none; margin-right: 6px; }
-.mt-stale { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; padding: 7px 10px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--warning, #b7791f) 35%, var(--line-2)); background: color-mix(in srgb, var(--warning, #b7791f) 6%, var(--pane)); }
-.mt-stale svg { flex: none; color: var(--warning, #b7791f); }
+.mt-stale { display: block; line-height: 1.5; margin: 0; padding: 7px 10px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--warning, #b7791f) 35%, var(--line-2)); background: color-mix(in srgb, var(--warning, #b7791f) 6%, var(--pane)); }
+.mt-stale > svg { display: inline-block; vertical-align: -2px; margin-right: 6px; color: var(--warning, #b7791f); }
+.mt-stale > .link-btn { margin-left: 6px; }
 .mt-resume-row { display: flex; }
 /* One meeting recorded as two (merge.jsx): the suggestion on the later one, what was merged into
    one, and a recording that stopped when Bridge AI closed. */
@@ -641,8 +646,11 @@ button.mt-who:not(:disabled):hover { text-decoration: underline dotted; text-und
 .mt-merge-text { display: grid; gap: 2px; flex: 1; min-width: 200px; }
 .mt-merge-text small { line-height: 1.45; }
 .mt-merge-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.mt-merged, .mt-interrupted { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; }
-.mt-merged svg { flex: none; }
+/* Each a sentence with its icon and its link in it: on a phone the words wrap under the icon and
+   the link follows them, rather than the icon, the words and the link each on a line of their own. */
+.mt-merged, .mt-interrupted { display: block; margin: 0; line-height: 1.5; }
+.mt-merged > svg, .mt-interrupted > svg { display: inline-block; vertical-align: -2px; margin-right: 6px; }
+.mt-merged > .link-btn, .mt-interrupted > .link-btn { margin-left: 6px; }
 .mt-interrupted { padding: 7px 10px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--warning, #b7791f) 35%, var(--line-2)); background: color-mix(in srgb, var(--warning, #b7791f) 6%, var(--pane)); }
 .mt-interrupted svg { flex: none; color: var(--warning, #b7791f); }
 .mt-stopped > svg { color: var(--warning, #b7791f); }

@@ -586,10 +586,31 @@ const tilde = (p) => String(p || '').replace(/^\/Users\/[^/]+/, '~')
 // For <input type="datetime-local">: the time where you are.
 const localInput = (iso) => { const d = new Date(iso); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16) }
 
+// A meeting that isn't there any more (deleted, here or on another device, or merged into another)
+// while its tab was open, or opened from a link to it: said, with the way on, rather than the
+// meeting as it was or Loading… for ever.
+function MeetingGone({ id, list, onBack }) {
+  useEffect(() => { refetch('/meetings') }, [])
+  const into = (list?.meetings || []).find((x) => (x.merged || []).some((y) => y.id === id))
+  return (
+    <div className="mt-view">
+      <div className="mt-page">
+        <div className="mt-gone" role="status">
+          <p><b>{t("This meeting isn't here any more.")}</b> {into ? t('It was merged into {title}.', { title: into.title }) : t('It was deleted, here or on another of your devices.')}</p>
+          <div className="mt-gone-acts">
+            {into && <button type="button" className="btn small primary" onClick={() => { onBack?.(); openMeeting(into.id) }}>{t('Open it')}</button>}
+            <button type="button" className="btn small" onClick={() => onBack?.()}>{t('All meetings')}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function MeetingPage({ id, onBack }) {
   const m = useMeetings()
   const live = m?.rec?.id === id
-  const { data, refresh } = usePoll(`/meetings/${encodeURIComponent(id)}`, live ? 1500 : 4000)
+  const { data, refresh, errorCode } = usePoll(`/meetings/${encodeURIComponent(id)}`, live ? 1500 : 4000)
   useCropping(id, data, refresh)
   const { data: list } = usePoll('/meetings', 60_000)
   const models = useChatModels()
@@ -864,6 +885,7 @@ export function MeetingPage({ id, onBack }) {
     if (rest.length) linkFiles(id, rest).then((n) => { setMsg({ text: n === 1 ? t("Linked {n} file to this meeting. They're read when the notes are written.", { n }) : t("Linked {n} files to this meeting. They're read when the notes are written.", { n }) }); refresh() }, (err) => setMsg({ error: true, text: err.message }))
   }
 
+  if (errorCode === 'no_meeting') return <MeetingGone id={id} list={list} onBack={onBack} />
   if (!data) return <div className="mt-view"><div className="mt-page"><p className="muted small mt-loading">{t('Loading…')}</p></div></div>
   const done = data.status === 'done'
   const recording = isRecording
