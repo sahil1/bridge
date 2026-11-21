@@ -2,7 +2,8 @@
 // (a site, read-only), a Studio document (always its latest) or an agent's app (usable, buttons
 // included), through your relay, end-to-end encrypted. ShareDialog makes one (from Files, Studio and
 // the Preview tab); SharesList is every link, as Settings › Sharing and Studio's Shared show them,
-// with who opened each and Stop Sharing.
+// with who opened each and Stop Sharing. A beta feature (src/trials.js 'share-links'): while it's off
+// nothing offers Share Link… and the server makes no new link, but the list and Stop Sharing stay.
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Icon from './Icon.jsx'
@@ -62,6 +63,8 @@ export function ShareDialog({ what, onClose }) {
   // scripts: no sites, no apps (server/shares.js says so too).
   const scripts = !info || info.can.scripts !== false
   const noApp = what.kind === 'app' && !scripts
+  // Where what stops a link is put right: Share Links turned off (a beta feature: its switch), else the relay.
+  const fixAt = info?.can.why === 'trial' ? 'beta-share-links' : 'phone'
   const about = what.kind === 'app' ? null
     : what.kind === 'folder' ? (scripts ? t('Its files are shared read-only, as a site: its index.html opens first, or a list of what\'s in it. Hidden files (names starting with a dot) aren\'t shared.') : t('Its files are shared read-only, with nothing in them run. Hidden files (names starting with a dot) aren\'t shared. This relay can\'t share a folder with web pages in it (a site).'))
       : what.kind === 'doc' ? t('View-only, and always its latest version: what you change shows on their screen as you save.')
@@ -75,7 +78,7 @@ export function ShareDialog({ what, onClose }) {
           <div className="share-body">
             <p className="st-note warn" role="alert"><Icon name="alert" size={13} /> {info.can.text}</p>
             <div className="modal-foot">
-              {info.can.why !== 'full' && <button type="button" className="btn small" onClick={() => { onClose(); window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'phone' } })) }}>{t('Open {place}', { place: where('phone') })}</button>}
+              {info.can.why !== 'full' && <button type="button" className="btn small" onClick={() => { onClose(); window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: fixAt } })) }}>{t('Open {place}', { place: where(fixAt) })}</button>}
               <button type="button" className="btn small primary" onClick={onClose}>{t('Close')}</button>
             </div>
           </div>
@@ -202,9 +205,10 @@ export function SharesList() {
   }
   return (
     <div className="shares">
-      {!data.can.ok && data.can.why !== 'full' && <p className="st-note warn"><Icon name="alert" size={13} /> {data.can.text}</p>}
+      {/* (Turned off, a beta feature: its switch, above the list, says so.) */}
+      {!data.can.ok && data.can.why !== 'full' && data.can.why !== 'trial' && <p className="st-note warn"><Icon name="alert" size={13} /> {data.can.text}</p>}
       {err && <p className="st-note bad" role="alert"><Icon name="alert" size={13} /> {err}</p>}
-      {on.length ? <ul className="share-list">{on.map(row)}</ul> : <p className="muted small">{t('Nothing is shared now. Share a file or a folder from Files, a document from Studio, or an agent\'s app from its Preview tab.')}</p>}
+      {on.length ? <ul className="share-list">{on.map(row)}</ul> : <p className="muted small">{data.can.why === 'trial' ? t('Nothing is shared now.') : t('Nothing is shared now. Share a file or a folder from Files, a document from Studio, or an agent\'s app from its Preview tab.')}</p>}
       {done.length > 0 && (
         <details className="share-ended">
           <summary className="small">{t('Ended ({n})', { n: done.length })}</summary>

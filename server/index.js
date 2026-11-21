@@ -582,7 +582,7 @@ const rootOf = async (pane) => {
 // One that's no longer a beta stays in older configs, read by nothing: Memory, now a page for
 // everyone; Studio, Sign PDFs, Comments and @bridge, Make a Sheet, Back and Forward, Tab Groups,
 // Files (Folders, now Studio's home) and Recommended Settings, part of the app since 3.19.0.
-const TRIALS = ['home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'routines', 'mcp-server', 'meeting-board', 'assist-answers', 'call-video', 'slack-bot', 'remote-screen']
+const TRIALS = ['home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'routines', 'mcp-server', 'meeting-board', 'assist-answers', 'call-video', 'slack-bot', 'remote-screen', 'share-links']
 const trialOn = (id) => cfg.trials?.[id] === true
 const trialOff = (id, label) => (req, res, next) => (trialOn(id) ? next() : res.status(404).json({ error: `${label} is a beta feature. Turn it on in ${placeEn('beta')}.`, trial: id }))
 
@@ -3006,8 +3006,11 @@ app.get('/api/relay/pagecheck', wrap((req) => relaycheck.ask({ now: req.query.no
 // A link for people outside your devices, to a file, a folder, a Studio document or an agent's app,
 // through the relay. Made, seen and stopped here or on any of your devices (a phone too); what the
 // link's page asks never comes here (relay.js answers it with shares.js alone).
+// A beta feature (TRIALS): while it's off no new link is made (a bot's share_link isn't offered
+// either: frontdesk.js), but the list, Stop Sharing and Remove from the List answer as ever, and the
+// links already made open until they end or are stopped (shares.js on).
 shares.use({
-  shareAt: () => relay.shareAt(), ready: () => relay.sharesReady(), relayLimits: () => relay.shareLimits(), owner: () => settings.cleanName(cfg.name), computer: () => relay.thisName(),
+  on: () => trialOn('share-links'), shareAt: () => relay.shareAt(), ready: () => relay.sharesReady(), relayLimits: () => relay.shareLimits(), owner: () => settings.cleanName(cfg.name), computer: () => relay.thisName(),
   isDevPort, devPortWhy: (port) => servers.ownedWhy(port), ownPorts: () => [cfg.port, cfg.port + 1, ...pages.ports(), ...previewPorts.portsOpen()],
   endViewers: (id, said) => relay.endViewers(id, said), viewersOf: (id) => relay.viewersOf(id), waitingOf: (id) => relay.waitingOf(id),
   notify: (note) => notify.send(note).catch(() => {}),
@@ -3018,7 +3021,8 @@ shares.use({
 // devices sees each link, who opened it, and Stop Sharing.
 const askerOf = (req) => ({ here: fromHere(req), device: typeof req.headers['x-bridge-relay'] === 'string' ? req.headers['x-bridge-relay'] : null })
 app.get('/api/shares', wrap((req) => shares.list(askerOf(req))))
-app.post('/api/shares', wrap(async (req) => {
+const sharesGuard = (req, res, next) => (shares.on() ? next() : res.status(404).json({ error: shares.OFF, trial: 'share-links', code: 'trial' }))
+app.post('/api/shares', sharesGuard, wrap(async (req) => {
   const b = req.body || {}
   const by = relay.deviceOf(req.headers['x-bridge-relay'])?.name || null
   const o = { kind: String(b.kind || ''), who: b.who, password: b.password, emails: b.emails, lasts: b.lasts, title: b.title, by, byDevice: askerOf(req).device, here: askerOf(req).here }
