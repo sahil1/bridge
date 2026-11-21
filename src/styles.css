@@ -2474,6 +2474,8 @@ button.ue-row:hover { background: var(--pane-2); }
 .st-back:active { background: var(--accent-soft); }
 .st-bar .st-close { justify-self: end; width: 44px; height: 44px; border-radius: 10px; color: var(--ink-2); }
 .modal.settings.phone .st-scroll { flex: 1; min-height: 0; padding: 14px 16px calc(24px + env(safe-area-inset-bottom)); }
+/* Every field at 16px or more: iOS zooms into a smaller one as it's tapped, and the page stays zoomed. */
+.modal.settings.phone :is(input:not([type=checkbox], [type=radio], [type=range], [type=color], [type=file]), select, textarea) { font-size: 16px; }
 .st-list .m-more-text span { white-space: normal; overflow: visible; line-height: 1.35; }
 .st-list .m-more-row { min-height: 60px; padding-block: 10px; }
 .st-lede { margin: 0 0 12px; }
