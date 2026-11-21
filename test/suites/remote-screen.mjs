@@ -2384,6 +2384,28 @@ try {
     await p.context().close()
   })
 
+  // What Studio says of control and of a session it ends is in English: the viewer says it in its own
+  // language (German here), not Studio's words.
+  await part('in another language: why control is off, and a session ended there, in it', async () => {
+    const { p, errors: e4 } = await page(b, laptop.url, { store: { 'cc-lang': 'de' } })
+    errors.push(...e4)
+    const was = await studio.api('/remote')
+    await devices(p)
+    await p.locator('.mch-row', { hasText: 'Studio' }).getByRole('button', { name: 'Bildschirm ansehen' }).click()
+    await until(async () => (await p.locator('.rs-card.c-password').count()) || (!(await p.locator('.rs-card').count()) && (await studio.api('/remote')).sessions.length === 1), 15000, 100)
+    if (await p.locator('.rs-card.c-password').count()) await enterPw(p)
+    ok(!!(await picture(p)), 'Laptop, in German, views Studio\'s screen')
+    const line = await until(async () => { const x = await p.locator('.rs-note').innerText().catch(() => ''); return x.trim() ? x : null }, 8000)
+    const expect = was.access.password ? /^Steuern ist auf Studio aus\. Schalte dort „Meine anderen Geräte dürfen diesen Computer steuern“ ein, unter Einstellungen › / : /^Steuern braucht ein Fernzugriffspasswort auf Studio\. Lege dort eines fest unter Einstellungen › /
+    ok(!!line && expect.test(line.trim()) && !/Control is off|Control needs/.test(line), 'why control is off, under the toolbar: in German, naming Studio and where to turn it on there, not Studio\'s English', line)
+    await shot(p, `${tag}remote-screen-german`)
+    await studio.api('/settings', { trials: { 'remote-screen': false } }, 'PATCH')
+    const ended = await until(async () => { const x = await p.locator('.rs-card').innerText().catch(() => ''); return x.trim() ? x : null }, 10000)
+    ok(!!ended && /Bildschirm und Vorschau aus der Ferne wurde auf Studio ausgeschaltet/.test(ended), 'Remote Screen and Preview turned off at Studio mid-session: said in German', ended)
+    await studio.api('/settings', { trials: { 'remote-screen': true } }, 'PATCH')
+    await p.context().close()
+  })
+
   // Last, as it drops every link through Studio's relay (the phone's too).
   await part('the link to Studio dropping while it\'s viewed: said why, with View again', async () => {
     const { p, errors: e3 } = await page(b, laptop.url)

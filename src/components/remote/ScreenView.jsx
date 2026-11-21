@@ -526,6 +526,16 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
   const rate = st && sess.mode === 'relay' ? (hello?.rate || RATE.own) : null
   const limits = st?.access?.limits || ACCESS
   const takeable = !allowed && !!ctl?.on && cur?.kind === 'screen'
+  // Why control isn't there, in this device's language (that computer says it in English: its
+  // reasons, in the order it weighs them, server/remote.js controlWhy); one of its own as it says it.
+  const setting = t('Let my other devices control this computer')
+  const ctlWhy = !ctl?.why ? null
+    : !ctl.on ? (st?.access?.password === false || st?.control?.needs === 'password'
+      ? t('Control needs a Remote Access Password on {name}. Set one there in {place}, then turn on "{setting}".', { name, place: where('remote'), setting })
+      : t('Control is off on {name}. Turn on "{setting}" there, in {place}.', { name, setting, place: where('remote') }))
+      : cur?.kind !== 'screen' ? t('Control works on a whole screen: pick one of the screens to control it.')
+        : ctl.idle ? t('View only now: nothing was pressed for {n} minutes. Choose Control to take it again.', { n: limits.idleMinutes || ACCESS.idleMinutes })
+          : ctl.why
   const record = tn('{name} shows that its screen is being seen, with Stop, and keeps a record of it.', { name: <b key="n">{name}</b> })
 
   // What shows in the middle of the stage until the picture does, and when it's gone.
@@ -548,6 +558,10 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
         noApp: err.fix === 'open' ? t("The Bridge AI app isn't open on {name}. Its screen can be seen while the app runs there.", { name }) : null,
         offline: t("{name} isn't reachable just now: it may be asleep, or offline.", { name }),
         closed: t('The connection to {name} closed before its screen showed.', { name }),
+        trial: t('Remote Screen and Preview is off on {name}. Turn it on there in {place}.', { name, place: where('beta-remote-screen') }),
+        off: t('Remote Screen and Preview was turned off on {name}.', { name }),
+        changed: t('The Remote Access Password changed on {name}. Connect again.', { name }),
+        lost: t('The Bridge AI app on {name} stopped sharing its screen.', { name }),
         updateSlow: t("Bridge AI on {name} hasn't come back from its update yet. Try again in a minute.", { name }),
       }
       const icon = err.code === 'locked' ? 'lock' : ['denied', 'unanswered', 'device', 'blocked', 'stopped'].includes(err.code) ? 'ban' : 'alert'
@@ -675,7 +689,7 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
             ? <button type="button" className={`btn small rs-take${controlling && allowed ? ' primary' : ''}`} aria-pressed={controlling && allowed} aria-label={controlling && allowed ? t('Controlling') : t('Control')} onClick={toggleControl} title={t('Use your mouse and keyboard on {name}. Anyone at {name} moving its mouse or pressing a key pauses you for a moment.', { name })}>
               <Icon name="keyboard" size={12} /> <span>{controlling && allowed ? t('Controlling') : t('Control')}</span>
             </button>
-            : live && ctl?.why && <span className="muted small rs-why" title={ctl.why} aria-label={t('View only')}><Icon name="eye" size={12} /> <span>{t('View only')}</span></span>}
+            : live && ctl?.why && <span className="muted small rs-why" title={ctlWhy} aria-label={t('View only')}><Icon name="eye" size={12} /> <span>{t('View only')}</span></span>}
           {live && allowed && controlling && !phone && <>
             {swapsKeys(HERE, hello?.os) || swap != null ? (
               <label className="rs-swap" title={t('⌘ here is Ctrl there, so copy, paste and undo work as you\'d expect.')}>
@@ -692,7 +706,7 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
         <div className={`rs-note ${note?.bad ? 'bad' : ''}`} role="status">
           {paused ? <><Icon name="pause" size={12} /> <span>{t('Paused: someone at {name} is using it. You can carry on in a moment.', { name })}</span></>
             : note ? <><span>{note.text}</span><button type="button" className="win-btn" onClick={() => setNote(null)} aria-label={t('Dismiss')}><Icon name="x" size={12} /></button></>
-              : <><Icon name="info" size={12} /> <span>{ctl.why}</span></>}
+              : <><Icon name="info" size={12} /> <span>{ctlWhy}</span></>}
         </div>
       )}
       <div className={`rs-stage${controlling && allowed ? ' controlling' : ''}${scrolls ? ' scrolls' : ''}${actual ? ' actual' : ''}`} ref={stage} tabIndex={0} data-mode={actual ? 'actual' : zoom > 1.01 ? 'zoom' : 'fit'}
