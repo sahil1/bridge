@@ -10,7 +10,8 @@
 // it, Advanced opened to show it near the top, and that opening isn't kept. A link to one
 // (bridge-open-settings) does the same, and the ids that opened a section before it moved (general,
 // appearance, voice, sharing, slack-bot…) land where it is now. Every data-setting any section shows
-// is one ⌘K knows (settings/search.js), so nothing in Settings is out of its reach. What's on unless
+// is one ⌘K knows (settings/search.js), so nothing in Settings is out of its reach; a beta feature's
+// own settings it finds only while it's on, its switch always (Share Links'). What's on unless
 // turned off and sends what it reads off the computer is never under Advanced: Meetings' cleanup,
 // naming who spoke and preparing (with which model writes the notes and where it runs said there:
 // none yet, then a key's), Mail's learning again, the Agents tab's picking up unfinished work.
@@ -77,7 +78,7 @@ const FIRST = {
   Phone: [/relay|Cloudflare/i],
   Computers: ['Your Devices', 'Link a device'],
   'Remote Access': ['Remote Screen and Preview', 'Which Devices May Connect'],
-  'Share Links': [/Nothing is shared now/],
+  'Share Links': ['Share Links', /beta/i, /Nothing is shared now/],
   Notifications: ['Notifications on this device', 'What to notify about', 'An agent needs you', 'Notification sounds', 'Screen Sharing Notifications', 'Needs Remote Screen and Preview on'],
   'Back Up & Move': ['Back Up to a File', 'Restore From a File'],
   'About & Updates': ['Version', 'Check for new versions', 'Beta Features', 'Privacy', 'Report a problem'],
@@ -100,16 +101,17 @@ const ALL = {
   Phone: ['button|Sign in with Cloudflare', 'button|Use an API token instead', 'button|Check again'],
   Computers: ['button|Details', "input|The other device's link", 'button|Link'],
   'Remote Access': ['input|Remote Screen and Preview'],
+  'Share Links': ['input|Share Links'],
   Notifications: ['button|Turn on notifications', 'input|An agent needs you (a question, a permission)', 'input|An agent finished', 'select|Usage running low', 'input|Notification sounds', 'input|Answer buttons for simple questions (yes or no, or two short choices)', "input|Notify my phone even when I'm at the computer", 'input|Screen Sharing Notifications', 'button|Turn On'],
   'Back Up & Move': ['input|Passphrase', 'button|Back Up', 'button|Choose a Backup'],
-  'About & Updates': ['button|Check now', 'input|Check for new versions', 'button|Take the tour', 'a|Report a problem', 'a|Suggest an idea', 'button|Copy details', 'input|Home', 'input|Tidy what I say', 'input|Usage Across Every Provider', 'input|Meeting Insights', 'input|Scheduled Routines', 'input|Bridge AI as an MCP Server', 'button|Copy path', 'textarea|config.json', 'button|Save', 'button|Effective settings', 'button|Defaults', ...(IS_MAC ? ["input|Speakers From the Call's Video"] : [])],
+  'About & Updates': ['button|Check now', 'input|Check for new versions', 'button|Take the tour', 'a|Report a problem', 'a|Suggest an idea', 'button|Copy details', 'input|Home', 'input|Tidy what I say', 'input|Usage Across Every Provider', 'input|Meeting Insights', 'input|Scheduled Routines', 'input|Bridge AI as an MCP Server', 'input|Share Links', 'button|Copy path', 'textarea|config.json', 'button|Save', 'button|Effective settings', 'button|Defaults', ...(IS_MAC ? ["input|Speakers From the Call's Video"] : [])],
 }
 // Beta Features: only those still in beta, in order (Studio, Sign PDFs, Comments and @bridge, Make a
 // Sheet, Back and Forward, Tab Groups, Files and Recommended Settings are part of the app since
 // 3.19.0); Speakers From the Call's Video only where the server runs on a Mac. Each one's switch is
 // first in its own place too.
-const BETAS = ['Home', 'Tidy what I say', 'Usage Across Every Provider', 'Meeting Insights', 'Scheduled Routines', 'Live Meeting Board', 'Answers in AI Assist', 'Bots', 'Bridge AI as an MCP Server', 'Remote Screen and Preview', ...(IS_MAC ? ["Speakers From the Call's Video"] : [])]
-const BETA_AT = { Home: 'You', 'Tidy what I say': 'Dictation', 'Usage Across Every Provider': 'Model Providers', 'Meeting Insights': 'Meetings', 'Scheduled Routines': 'Agents', 'Live Meeting Board': 'Meetings', 'Answers in AI Assist': 'Meetings', Bots: 'Bots', 'Bridge AI as an MCP Server': 'MCP Servers', 'Remote Screen and Preview': 'Remote Access', "Speakers From the Call's Video": 'Meetings' }
+const BETAS = ['Home', 'Tidy what I say', 'Usage Across Every Provider', 'Meeting Insights', 'Scheduled Routines', 'Live Meeting Board', 'Answers in AI Assist', 'Bots', 'Bridge AI as an MCP Server', 'Remote Screen and Preview', 'Share Links', ...(IS_MAC ? ["Speakers From the Call's Video"] : [])]
+const BETA_AT = { 'Share Links': 'Share Links', Home: 'You', 'Tidy what I say': 'Dictation', 'Usage Across Every Provider': 'Model Providers', 'Meeting Insights': 'Meetings', 'Scheduled Routines': 'Agents', 'Live Meeting Board': 'Meetings', 'Answers in AI Assist': 'Meetings', Bots: 'Bots', 'Bridge AI as an MCP Server': 'MCP Servers', 'Remote Screen and Preview': 'Remote Access', "Speakers From the Call's Video": 'Meetings' }
 // Every setting ⌘K knows (search.js), by id, and the ones known by the start of theirs (each agent's
 // row, each group of providers).
 const SEARCH = fs.readFileSync(path.join(ROOT, 'src', 'components', 'settings', 'search.js'), 'utf8')
@@ -301,6 +303,23 @@ try {
     ok(!!(await until(() => hit.isVisible(), 4000)) && /Settings › Meetings & Voice › Dictation/.test(await hit.innerText()), '⌘K "dictation history": in Settings › Meetings & Voice › Dictation', await p.locator('.pal-list').innerText().catch(() => ''))
     await hit.click()
     ok(!!(await until(async () => (await at()).tab === 'Dictation' && await p.locator('.modal.settings [data-setting="dictation-history"]').isVisible(), 8000, 100)), 'and it opens the Dictation tab at it', await at())
+    // A beta feature's own settings are in ⌘K only while it's on; its switch always (Share Links).
+    const found = async (words) => {
+      await p.locator('button[aria-label="Close settings"]').click().catch(() => {})
+      await p.keyboard.press('ControlOrMeta+K')
+      await p.locator('.palette input').fill(words)
+      await until(() => p.locator('.pal-item[data-id="s:beta-share-links"]').isVisible(), 4000)
+      const ids = await p.locator('.pal-item[data-id^="s:"]').evaluateAll((l) => l.map((e) => e.dataset.id))
+      await p.keyboard.press('Escape')
+      return ids
+    }
+    const offIds = await found('share links')
+    await kit.api('/settings', { trials: { 'share-links': true } }, 'PATCH')
+    await p.reload()
+    await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
+    const onIds = await found('share links')
+    await kit.api('/settings', { trials: { 'share-links': false } }, 'PATCH')
+    ok(offIds.includes('s:beta-share-links') && !offIds.includes('s:shares') && onIds.includes('s:beta-share-links') && onIds.includes('s:shares'), '⌘K "share links": its switch, on or off; the links you shared only while Share Links is on', { offIds, onIds })
     // A setting that needs another one on: greyed where it is, with Turn On, not gone.
     await kit.api('/settings', { dictation: { on: false } }, 'PATCH')
     await p.reload()

@@ -12,6 +12,7 @@ import Gate, { gateOf } from './remote/Gate.jsx'
 import { connect } from './remote/remote.js'
 import { t, tn } from '../i18n/index.js'
 import { ShareDialog } from './Share.jsx'
+import { useTrial } from '../trials.js'
 
 const enc = encodeURIComponent
 // On this computer the app is at localhost; from a phone (over Tailscale) it's this computer's
@@ -66,7 +67,8 @@ export default function PreviewView({ agent, onSendToAgent }) {
   const [busy, setBusy] = useState(null)
   const [msg, setMsg] = useState(null)
   const [sharing, setSharing] = useState(false) // making a Share Link for the app (Share.jsx)
-  const list = data?.servers || []
+  const shareOn = useTrial('share-links') // Share Links, a beta feature (src/trials.js)
+  const list =data?.servers || []
   const current = list.find((s) => s.port === picked) || list[0] || null
   // That computer's name, where the app runs elsewhere.
   const comp = usePoll(HOW === 'here' ? null : '/version', 10 * 60 * 1000).data?.computer || t('that computer')
@@ -152,7 +154,7 @@ export default function PreviewView({ agent, onSendToAgent }) {
             </button>
           )}
           <button className="win-btn" onClick={() => setReload((k) => k + 1)} title={t('Reload')} aria-label={t('Reload')}><Icon name="refresh" size={13} /></button>
-          <button className="win-btn pv-share" onClick={() => setSharing(true)} title={t('Share Link: the app, usable by whoever opens it, for people outside your devices')} aria-label={t('Share Link')}><Icon name="link" size={13} /></button>
+          {shareOn && <button className="win-btn pv-share" onClick={() => setSharing(true)} title={t('Share Link: the app, usable by whoever opens it, for people outside your devices')} aria-label={t('Share Link')}><Icon name="link" size={13} /></button>}
           {hrefOf(shown) && <a className="win-btn" href={hrefOf(shown)} target="_blank" rel="noreferrer" title={HOW === 'port' ? t('Open in a browser on this computer') : t('Open in your browser')} aria-label={HOW === 'port' ? t('Open in a browser on this computer') : t('Open in your browser')}><Icon name="external" size={13} /></a>}
           <button className="win-btn" onClick={() => stop(current)} title={t('Stop this server')} aria-label={t('Stop this server')}><Icon name="stop" size={13} /></button>
         </>}

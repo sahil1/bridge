@@ -58,7 +58,7 @@ function BetaCard({ x, icon, line = null, why = null }) {
   return <Card id={x.id} icon={icon} name={t(x.label)} beta on={on} onSwitch={set} why={why} status={on ? line || t('On') : t(x.card)} to={x.setting} />
 }
 
-const BETA_ICON = { home: 'home', 'dictation-cleanup': 'wand', 'usage-everywhere': 'bar-chart', 'meeting-insights': 'trend', routines: 'repeat', 'meeting-board': 'shapes', 'assist-answers': 'sparkle', 'slack-bot': 'chat', 'mcp-server': 'link', 'remote-screen': 'screen', 'call-video': 'video' }
+const BETA_ICON = { home: 'home', 'dictation-cleanup': 'wand', 'usage-everywhere': 'bar-chart', 'meeting-insights': 'trend', routines: 'repeat', 'meeting-board': 'shapes', 'assist-answers': 'sparkle', 'slack-bot': 'chat', 'mcp-server': 'link', 'remote-screen': 'screen', 'share-links': 'link', 'call-video': 'video' }
 
 export default function Features({ onOpenAgent }) {
   const { s, save } = useSettings()
@@ -102,7 +102,7 @@ export default function Features({ onOpenAgent }) {
   const phones = (relay?.devices || []).filter((x) => x.kind !== 'computer')
   const phoneLine = !relay ? null : phones.length ? n(phones.length, tx('{n} phone paired'), tx('{n} phones paired')) : relay.configured ? t('Relay on · no phone paired yet') : t('Not set up')
 
-  // Share Links: how many are open now.
+  // Share Links (a beta feature): how many are open now.
   const live = (shares?.shares || []).filter((x) => !x.ended)
   const shareLine = !shares ? null : live.length ? n(live.length, tx('{n} link open'), tx('{n} links open')) : t('None shared now')
 
@@ -124,7 +124,7 @@ export default function Features({ onOpenAgent }) {
   const added = (mcp?.apps || []).filter((a) => a.added).map((a) => a.label)
   const mcpLine = !mcp ? null : added.length ? t('Added to {apps}', { apps: added.join(', ') }) : t('Not added to an app yet')
 
-  const betaLine = { 'slack-bot': botLine, 'mcp-server': mcpLine, 'remote-screen': remoteLine }
+  const betaLine = { 'slack-bot': botLine, 'mcp-server': mcpLine, 'remote-screen': remoteLine, 'share-links': shareLine }
   const betas = TRIALS.filter((x) => !x.mac || mac)
 
   const setDictation = async (v) => { await save({ dictation: { on: v } }); settingsChanged(); window.bridgeApp?.dictateConfigure?.({ ...d, on: v }).catch(() => {}) }
@@ -136,7 +136,6 @@ export default function Features({ onOpenAgent }) {
         <Card id="dictation" icon="keyboard" name={t('Dictation')} on={dictOn} onSwitch={setDictation} status={dictLine} to="dictation" />
         <Card id="chief" icon="sparkle" name={t('Chief of Staff')} status={chiefLine} to="chief" />
         <Card id="phone" icon="phone" name={t('Phone')} status={phoneLine} to="phone" />
-        <Card id="sharing" icon="link" name={t('Share Links')} status={shareLine} to="sharing" />
         {conf.mail && <Card id="mail" icon="mail" name={t('Mail & Calendar')} status={mailLine} to="mail" />}
         <Card id="notifications" icon="bell" name={t('Notifications')} status={noteLine} to="notifications" />
       </ul>
