@@ -552,8 +552,11 @@ try {
   ok(!!pop && pop !== 'rgb(255, 255, 255)', 'dark: the link bubble in the dark look', pop)
   await shot(dark.p, `${tag}studio-writing-dark`)
   // Suggesting and a picture picked, in the dark: their bubbles in the dark look.
-  await until(async () => { await dark.p.evaluate(({ root }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: 'review.docx' } })), { root }); return dark.p.locator('.sd-w del.sd-rev').first().waitFor({ timeout: 2500 }).then(() => true, () => false) }, 25000, 300)
-  await dark.p.evaluate(() => { const ed = document.querySelector('.sd-w').editor; let r = null; ed.state.doc.descendants((n, pos) => { if (r == null && n.isText && n.text === 'ide') r = pos + 1; return r == null }); ed.view.focus(); ed.commands.setTextSelection(r) })
+  // (review.docx's own editor: report.docx, open before it, has a tracked change too, and goes as
+  // review.docx's comes.)
+  const review = dark.p.locator('.sd-file', { has: dark.p.locator('.pane-head', { hasText: 'review.docx' }) })
+  await until(async () => { await dark.p.evaluate(({ root }) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: { root, path: 'review.docx' } })), { root }); return review.locator('.sd-w del.sd-rev').first().waitFor({ timeout: 2500 }).then(() => true, () => false) }, 25000, 300)
+  await review.locator('.sd-w').evaluate((w) => { const ed = w.editor; let r = null; ed.state.doc.descendants((n, pos) => { if (r == null && n.isText && n.text === 'ide') r = pos + 1; return r == null }); ed.view.focus(); ed.commands.setTextSelection(r) })
   const dChange = await until(() => dark.p.locator('.sd-change-pop').evaluate((e) => getComputedStyle(e).backgroundColor).catch(() => null), 5000, 100)
   ok(!!dChange && dChange !== 'rgb(255, 255, 255)', 'dark: a tracked change\'s bubble in the dark look', dChange)
   await shot(dark.p, `${tag}studio-writing-suggesting-dark`)

@@ -16,7 +16,7 @@ import os from 'node:os'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { startKit, startModel, checks, until, browser, page, shot, IS_WIN, IS_MAC, TEST, devToolsStandIn } from '../lib/harness.mjs'
+import { startKit, startModel, checks, until, browser, page, shot, noServiceWorker, IS_WIN, IS_MAC, TEST, devToolsStandIn } from '../lib/harness.mjs'
 import { signInScreen, firstRun, SIGN_IN_ENDED } from '../../server/firstrun.js'
 
 const { ok, skip, done } = checks('new-install')
@@ -308,11 +308,16 @@ try {
   {
     let saved = null
     // A slow first start: its first look at this computer takes a while, and you close it before then.
+    // (No service worker, as in the desktop app: once one takes the page over, WebKit's test build
+    // doesn't route what the page fetches, so the first look wouldn't be held, or seen.)
     let held = false
-    const { ctx, p } = await open(LOOKS[0][1], { phone: true, before: (c) => c.route(/\/api\/setup$/, async (r) => {
-      if (r.request().method() === 'GET' && !held) { held = true; await new Promise((ok) => setTimeout(ok, 2500)) }
-      r.continue()
-    }) })
+    const { ctx, p } = await open(LOOKS[0][1], { phone: true, before: async (c) => {
+      await noServiceWorker(c)
+      await c.route(/\/api\/setup$/, async (r) => {
+        if (r.request().method() === 'GET' && !held) { held = true; await new Promise((ok) => setTimeout(ok, 2500)) }
+        r.continue()
+      })
+    } })
     p.on('request', (r) => { if (/\/api\/setup$/.test(r.url()) && r.method() === 'POST') saved = r.postDataJSON() })
     await p.waitForSelector('.wiz-x')
     await p.click('.wiz-x')
