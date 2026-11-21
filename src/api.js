@@ -213,6 +213,18 @@ const screenSubs = new Set()
 export const screensLive = { get: () => screens, subscribe: (fn) => { screenSubs.add(fn); return () => screenSubs.delete(fn) } }
 const screensHeard = (list) => { screens = Array.isArray(list) ? list : []; for (const f of screenSubs) f(screens) }
 
+// What this phone is asked to sign (Sign on Phone, event: sign, server/signphone.js), and one a
+// notification opened (?sign=<id>, pwa.js), for the pad over the whole screen (PhoneSign.jsx).
+let signs = []
+let signOpened = null
+const signSubs = new Set()
+const signsTold = () => { for (const f of signSubs) f(signs) }
+export const signsLive = {
+  get: () => signs, subscribe: (fn) => { signSubs.add(fn); return () => signSubs.delete(fn) },
+  open: (id) => { signOpened = id; signsTold() }, take: () => { const id = signOpened; signOpened = null; return id }, opened: () => signOpened,
+}
+const signsHeard = (list) => { signs = Array.isArray(list) ? list : []; signsTold() }
+
 // Live fleet over server-sent events, with a polling fallback.
 export function useFleet() {
   const [fleet, setFleet] = useState(null)
@@ -226,6 +238,7 @@ export function useFleet() {
       // The config changed on the server (a Beta Feature turned on or off, here or on another device).
       es.addEventListener('config', () => refetch('/config'))
       es.addEventListener('screen', (e) => { try { screensHeard(JSON.parse(e.data).list) } catch { /* not that */ } })
+      es.addEventListener('sign', (e) => { try { signsHeard(JSON.parse(e.data).list) } catch { /* not that */ } })
       es.onerror = () => { setLive(false); es.close(); timer = setTimeout(connect, 3000) }
     }
     connect()

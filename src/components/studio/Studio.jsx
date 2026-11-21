@@ -17,6 +17,7 @@ import { YourFiles, useYourFiles, kindsHere, KIND_ICON } from './HomeFiles.jsx'
 import Explorer from '../files/Explorer.jsx'
 import AiAssist from '../AiAssist.jsx'
 import { ShareDialog, SharesList } from '../Share.jsx'
+import { signedLine, placesLine } from './pdf/signed.js'
 import './studio.css'
 import './home.css'
 
@@ -280,7 +281,7 @@ export function StudioHome({ onOpen }) {
       { id: 'recent', icon: 'clock', label: t('Recent'), n: files.found ? files.recentRows.length : null, hint: t('What you opened here, and what was opened or changed in the last 30 days') },
       ...kindsHere.map(([k, label]) => ({ id: `kind:${k}`, icon: KIND_ICON[k], label: t(label), n: files.found ? files.kindCount[k] : null })),
       { id: 'packs', icon: 'palette', label: t('Design Packs'), hint: t('Your colours, fonts and logo, for the decks, documents and pages Studio makes') },
-      { id: 'signature', icon: 'signature', label: t('Your Signature'), hint: t("Your signature and initials, for AI Assist's Sign this on a PDF") },
+      { id: 'signature', icon: 'signature', label: t('Your Signatures'), hint: t("Your signatures and initials, for AI Assist's Sign this on a PDF") },
       { id: 'shared', icon: 'link', label: t('Shared'), hint: t('Share Links you gave people outside your devices: who opened them, and Stop Sharing') },
     ],
     render: (id, { q, tap, keys, focus }) => (id === 'packs' ? <PacksSection packs={packs} />
@@ -302,7 +303,7 @@ export function StudioHome({ onOpen }) {
 // keeps one of its own.
 const SAVES_ITSELF = new Set(['doc'])
 const AUTO_MS = 1200
-const WHO = { you: tx('You'), agent: tx('An agent'), outside: tx('Changed outside Studio'), restored: tx('Restored'), opened: tx('When it was first opened here') }
+const WHO = { you: tx('You'), agent: tx('An agent'), outside: tx('Changed outside Studio'), restored: tx('Restored'), opened: tx('When it was first opened here'), signed: tx('Signed') }
 // Nothing in a Word or an Excel file is lost by saving it here, so neither is warned about before
 // its first save; an editor still says what one change can't keep (warn.text).
 const RISKY = {}
@@ -652,7 +653,7 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
           {!meta || !data ? opening
             : <Suspense fallback={opening}><Editor key={gen} file={{ ...meta, root, path: rel }} data={meta.url ? null : data} onDirty={edited} onStats={setStats} handle={handle} packs={packs.list} onOpen={onOpen} readOnly={readOnly} /></Suspense>}
         </div>
-        {panel === 'versions' && meta && <Versions f={f} ext={meta.ext} versions={meta.versions} keep={meta.keep} size={meta.size} name={name} onRestore={restore} onClose={() => setPanel(null)} />}
+        {panel === 'versions' && meta && <Versions f={f} ext={meta.ext} versions={meta.versions} signings={meta.signings} keep={meta.keep} size={meta.size} name={name} onRestore={restore} onOpen={onOpen} onClose={() => setPanel(null)} />}
       </div>
       {/* The status line: what the editor counts, what kind of file it is (tapped: what saving keeps),
           how many versions are kept, and whether it's saved. On a phone, Open in its app and Focus here
@@ -685,16 +686,28 @@ const BackBtn = ({ onBack, icon }) => <><button type="button" className="win-btn
 // keep: how many versions Studio keeps of this file (server/studio.js keepFor): fewer of a big one,
 // none of one too big to save; said at the top of the list.
 const KEEP_ALL = 60
-function Versions({ f, ext, versions, keep = KEEP_ALL, size = 0, onRestore, onClose }) {
+// signings: each time it was signed in Studio (a copy was made: this file stays as it was), with
+// who, where, how it was asked, the places and the copy, to open.
+function Versions({ f, ext, versions, signings = [], keep = KEEP_ALL, size = 0, onRestore, onOpen, onClose }) {
   const [compare, setCompare] = useState(null) // the version compared with the file as it is
   return (<>
     <aside className="sd-panel" aria-label={t('Versions')}>
       <div className="sd-panel-head"><b>{t('Versions')}</b><span className="muted small">{t('{n} kept', { n: versions.length })}</span><span className="sd-grow" /><button type="button" className="win-btn" onClick={onClose} aria-label={t('Close')}><Icon name="x" size={13} /></button></div>
       {keep < KEEP_ALL && <p className="sd-v-note muted small" role="note">{keep === 0 ? t('Studio keeps no versions of a file this big ({size}): it opens here to read only.', { size: sizeOf(size) }) : t('This file is big ({size}), so Studio keeps its last {n} versions, not 60.', { size: sizeOf(size), n: keep })}</p>}
+      {!!signings?.length && (
+        <ol className="sd-versions sd-signings" aria-label={t('Signed copies')}>
+          {signings.map((s) => (
+            <li key={s.id} className="signed">
+              <span className="sd-v-who"><b><Icon name="signature" size={11} /> {signedLine(s)}</b><small className="muted">{when(s.at)}{s.places?.length ? ` · ${placesLine(s.places)}` : ''}</small></span>
+              {s.copy && onOpen && <span className="sd-v-acts"><button type="button" className="link-btn" onClick={() => onOpen({ root: f.root, path: s.copy })} title={s.copy}>{t('Open the copy')}</button></span>}
+            </li>
+          ))}
+        </ol>
+      )}
       <ol className="sd-versions">
         {versions.map((v, i) => (
-          <li key={v.id} className={i === 0 ? 'now' : ''}>
-            <span className="sd-v-who"><b>{v.by === 'agent' && v.name ? v.name : t(WHO[v.by] || v.by)}</b><small className="muted">{when(v.at)} · {sizeOf(v.size)}</small></span>
+          <li key={v.id} className={`${i === 0 ? 'now' : ''}${v.signed ? ' signed' : ''}`}>
+            <span className="sd-v-who"><b>{v.signed ? <><Icon name="signature" size={11} /> {signedLine(v.signed)}</> : v.by === 'agent' && v.name ? v.name : t(WHO[v.by] || v.by)}</b><small className="muted">{when(v.at)} · {v.signed?.places?.length ? `${placesLine(v.signed.places)} · ` : ''}{sizeOf(v.size)}</small></span>
             {i === 0 ? <small className="muted">{t('Now')}</small> : <span className="sd-v-acts">
               {comparable(ext) && <button type="button" className="link-btn" onClick={() => setCompare(v)}>{t('Compare')}</button>}
               <a className="link-btn" href={versionUrl(f, v.id)} target="_blank" rel="noreferrer">{t('Open')}</a>

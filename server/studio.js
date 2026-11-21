@@ -121,7 +121,7 @@ const versionsOf = (real) => inIndex(indexOf(real), () => readIndex(indexOf(real
 const MERGE_MS = 10 * 60_000
 // saved: what's in the file is what was just saved (a big one's version copied from the file, by the
 // system, rather than written again from memory).
-function snapshot(real, by, { name = null, buf = null, auto = false, saved = false } = {}) {
+function snapshot(real, by, { name = null, buf = null, auto = false, saved = false, signed = null } = {}) {
   return inIndex(indexOf(real), async () => {
     // A big file is hashed as it's read, and copied by the system (on a Mac's disk, a copy that
     // takes no room until one of them changes), never held in memory whole.
@@ -143,7 +143,7 @@ function snapshot(real, by, { name = null, buf = null, auto = false, saved = fal
     else await fsp.copyFile(real, path.join(dir, file))
     const at = new Date().toISOString()
     const merge = auto && by === 'you' && top?.by === 'you' && top.auto && Date.now() - Date.parse(top.since || top.at) < MERGE_MS
-    const v = { id, at, by, ...(name ? { name: String(name).slice(0, 80) } : {}), size, hash: h, file, ...(auto ? { auto: true, since: merge ? top.since || top.at : at } : {}) }
+    const v = { id, at, by, ...(name ? { name: String(name).slice(0, 80) } : {}), size, hash: h, file, ...(auto ? { auto: true, since: merge ? top.since || top.at : at } : {}), ...(signed ? { signed } : {}) }
     idx.path = real
     idx.versions = merge ? [v, ...idx.versions.slice(1)] : [v, ...idx.versions]
     // A big file keeps fewer (keepFor): its oldest go.
@@ -190,7 +190,35 @@ function prune() {
   })().finally(() => { pruning = null })
   return pruning
 }
-const shown = (vs) => vs.map(({ id, at, by, name, size }) => ({ id, at, by, name: name || null, size }))
+const shown = (vs) => vs.map(({ id, at, by, name, size, signed }) => ({ id, at, by, name: name || null, size, ...(signed ? { signed } : {}) }))
+// Each time it was signed in Studio (signing.js): a line of its own, not a version (signing makes a
+// copy; this file stays as it was). Newest first.
+const signingsOf = (real) => inIndex(indexOf(real), () => readIndex(indexOf(real))).then((idx) => idx.signed || [])
+const KEEP_SIGNED = 60
+// The record of one signing: who (you), on which of your devices, how it was asked (Touch ID, the
+// Mac's password, Windows Hello, the signing PIN; null when Ask Before Signing was off), the places
+// (kind and page) and when, and the copy it made.
+const cleanSigned = (r) => ({
+  on: String(r?.on || '').slice(0, 80), how: ['touchid', 'password', 'hello', 'pin'].includes(r?.how) ? r.how : null, at: String(r?.at || new Date().toISOString()),
+  places: (Array.isArray(r?.places) ? r.places : []).slice(0, 200).map((x) => ({ kind: ['signature', 'initials', 'date'].includes(x?.kind) ? x.kind : 'signature', page: Number(x?.page) || 1 })),
+  copy: r?.copy ? String(r.copy).slice(0, 600) : null, from: r?.from ? String(r.from).slice(0, 600) : null,
+})
+// A signing, in both files' history: the signed copy's first version says it was signed (and how),
+// and the original keeps a line for it.
+export async function noteSigned({ original, copy, rec }) {
+  const r = cleanSigned(rec)
+  if (copy) await snapshot(copy, 'signed', { signed: r })
+  if (!original) return
+  const file = indexOf(original)
+  await inIndex(file, async () => {
+    const idx = await readIndex(file)
+    idx.path ||= original
+    idx.versions ||= []
+    idx.signed = [{ id: `s${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`, ...r }, ...(idx.signed || [])].slice(0, KEEP_SIGNED)
+    await fsp.mkdir(path.dirname(file), { recursive: true })
+    writeFileAtomic(file, JSON.stringify(idx, null, 1))
+  })
+}
 // The copies of a file's versions, newest first: where a save of a file opened in parts finds a part
 // the page never had, if the file changed since it was opened.
 const copiesOf = async (real) => (await versionsOf(real)).map((v) => path.join(path.dirname(indexOf(real)), v.file))
@@ -363,7 +391,7 @@ export async function open(root, rel, { rootId = null, label = null } = {}) {
     if (!partsOf && st.size > WHOLE_MAX) throw new Error(`Studio can't read the parts of this ${APP[ext] || 'Office'} file: it isn't in the newer Office format, or it's damaged or locked with a password. Open it on its computer in ${APP[ext] || 'its own app'}.`)
   }
   return {
-    path: r, name: path.basename(real), kind, ext, size: st.size, mtime: st.mtimeMs, versions: shown(await versionsOf(real)),
+    path: r, name: path.basename(real), kind, ext, size: st.size, mtime: st.mtimeMs, versions: shown(await versionsOf(real)), signings: await signingsOf(real),
     inParts: inParts(ext, st.size) && (ext === '.pdf' || !!partsOf), ...(partsOf ? { left: partsOf.left, model: partsOf.model } : {}),
     saves: st.size <= SAVE_MAX, keep: keepFor(st.size), limits: { open: OPEN_MAX, save: SAVE_MAX, whole: WHOLE_MAX },
   }
@@ -429,7 +457,7 @@ export async function changed(root, rel, since) {
 
 export async function versions(root, rel) {
   const { real, st } = await locate(root, rel)
-  return { versions: shown(await versionsOf(real)), keep: keepFor(st.size) }
+  return { versions: shown(await versionsOf(real)), keep: keepFor(st.size), signings: await signingsOf(real) }
 }
 // One version's copy, to show or download.
 export async function versionFile(root, rel, id) {

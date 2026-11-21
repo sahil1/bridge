@@ -47,6 +47,9 @@ export function subscribe(sub, label, here = false, device = null) {
   return { id }
 }
 
+// Whether a paired device has turned notifications on through it (Sign on Phone can wake it).
+export const hasDevice = (device) => !!device && (read().devices || []).some((x) => x.device === device)
+
 // A paired device removed: the notifications it turned on go with it.
 export function forgetDevice(device) {
   if (!device) return { removed: 0 }
@@ -68,7 +71,8 @@ export function unsubscribe({ id, endpoint }) {
 // note.skip: devices left out (Remote Screen's: the one doing the viewing, screentell.js), as
 // { devices: [the paired devices they came through], here: this computer's own browsers too,
 // hide(device): one a computer the note is about keeps out }.
-const skipped = (note, dev) => !!note.skip && ((!!dev.device && !!note.skip.devices?.includes(dev.device)) || (!!note.skip.here && isHere(dev)) || (!!dev.device && !!note.skip.hide?.(dev.device)))
+// note.only: { devices: [...] }, those alone (Sign on Phone's request: the phones it's for).
+const skipped = (note, dev) => (!!note.only && !(dev.device && note.only.devices?.includes(dev.device))) || !!note.skip && ((!!dev.device && !!note.skip.devices?.includes(dev.device)) || (!!note.skip.here && isHere(dev)) || (!!dev.device && !!note.skip.hide?.(dev.device)))
 // A device not let in here (Which Devices May Connect, remote.js) gets none: what it turned on
 // through it is kept for when it's let in again. out(id): it isn't (index.js).
 let out = () => false

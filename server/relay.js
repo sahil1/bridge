@@ -63,6 +63,7 @@ import * as inbox from './inbox.js'
 import * as shares from './shares.js'
 import { LIMITS as SHARE_LIMITS } from '../shared/shares.js'
 import { authHeaders, localKey } from './apitoken.js'
+import { HEADER as PROOF, proofOf } from './relayproof.js'
 import { plainName } from '../shared/remote.js'
 import { placeEn } from '../shared/places.js'
 
@@ -821,8 +822,10 @@ class Conn {
         let res
         if (this.view) res = await shares.answer(this.view, { m, u, h: Array.isArray(h) ? h.filter((x) => Array.isArray(x) && x.length === 2) : [], body: s.body ? Buffer.concat(s.body) : null, content: c === 1 })
         else {
-          const headers = Object.fromEntries((h || []).filter(([k]) => !DROP.has(k.toLowerCase()) && !/^(sec-|x-bridge-relay$|authorization$)/i.test(k) && (computer || !FOR.test(k))))
+          const headers = Object.fromEntries((h || []).filter(([k]) => !DROP.has(k.toLowerCase()) && !/^(sec-|x-bridge-relay$|x-bridge-relay-proof$|authorization$)/i.test(k) && (computer || !FOR.test(k))))
           headers['x-bridge-relay'] = this.device.id
+          // (And that it's the relay saying so: relayproof.js.)
+          headers[PROOF] = proofOf(this.device.id)
           Object.assign(headers, authHeaders(localKey()))
           res = await fetch(target, { method: m || 'GET', headers, body: s.body ? Buffer.concat(s.body) : undefined, signal: abort.signal, redirect: 'manual' })
         }
@@ -876,7 +879,7 @@ class Conn {
     const target = new URL(String(u || '/'), base)
     if (target.origin !== new URL(base).origin) return this.send(K.WS_CLOSE, sid, { c: 1008, r: 'Not allowed' })
     const said = this.device?.kind === 'computer' ? (Array.isArray(h) ? h : []).filter(([k, v]) => FOR.test(String(k)) && typeof v === 'string').map(([k, v]) => [String(k).toLowerCase(), v.slice(0, 200)]) : []
-    const ws = new WebSocket(target.href.replace(/^http/, 'ws'), { headers: { ...Object.fromEntries(said), 'x-bridge-relay': this.device.id, ...authHeaders(localKey()) } })
+    const ws = new WebSocket(target.href.replace(/^http/, 'ws'), { headers: { ...Object.fromEntries(said), 'x-bridge-relay': this.device.id, [PROOF]: proofOf(this.device.id), ...authHeaders(localKey()) } })
     this.streams.set(sid, { ws, ...forOf(said) })
     ws.on('open', () => this.send(K.WS_OPENED, sid))
     ws.on('message', (data, isBinary) => {

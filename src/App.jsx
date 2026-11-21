@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import SoundButton from './components/SoundButton.jsx'
 import StatusMenu, { UsageChip, UsageGlance, WeatherChip, ClockChip } from './components/StatusMenu.jsx'
 import Icon, { StatusDot } from './components/Icon.jsx'
@@ -37,7 +37,7 @@ import { NextMeetingChip } from './components/Agenda.jsx'
 import { TodayTabs, TodayBody, openToday } from './components/Dock.jsx'
 import { mailDo } from './components/today.js'
 import { Handle, usePersisted, useMedia, useHotkey, useWidth, useShared, store } from './components/layout.jsx'
-import { api, useFleet, usePoll, relayActivity, cloudOnly, refetch, viaRelay, machineId } from './api.js'
+import { api, useFleet, usePoll, relayActivity, cloudOnly, refetch, viaRelay, machineId, signsLive } from './api.js'
 import { takeReturn } from './permissions.js'
 import { takeEarlyLink } from './earlyLink.js'
 import CloudHome from './components/CloudHome.jsx'
@@ -332,6 +332,16 @@ function placesMoved() {
   }
 }
 placesMoved()
+
+// Sign on Phone, on a phone: the pad over the whole screen when your computer asks this phone to
+// sign (PhoneSign.jsx), loaded only once there's a request (the feed's event: sign, or a
+// notification's ?sign=).
+const PhoneSign = lazy(() => import('./components/studio/pdf/PhoneSign.jsx'))
+function SignHere() {
+  const [on, setOn] = useState(() => signsLive.get().length > 0 || !!signsLive.opened())
+  useEffect(() => signsLive.subscribe((l) => { if (l.length || signsLive.opened()) setOn(true) }), [])
+  return on ? <Suspense fallback={null}><PhoneSign /></Suspense> : null
+}
 
 // The recording of a meeting lives above everything else, so it goes on while you move around.
 export default function Root() {
@@ -1255,6 +1265,7 @@ function App() {
         <RuntimeNotice runtime={conf?.runtime?.name} fellBack={conf?.runtime?.fellBack} />
         <Quiet name="Link requests"><AskBanner /></Quiet>
         <Quiet name="Switched computer"><SwitchedHere /></Quiet>
+      <Quiet name="Sign on Phone"><SignHere /></Quiet>
       <Quiet name="Remote screen"><RemoteHere /></Quiet>
       <Quiet name="Screens being viewed"><ScreenLive /></Quiet>
         <main className="m-body" style={untilAsks}>
@@ -1429,6 +1440,7 @@ function App() {
       <RuntimeNotice runtime={conf?.runtime?.name} fellBack={conf?.runtime?.fellBack} />
       <Quiet name="Link requests"><AskBanner /></Quiet>
       <Quiet name="Switched computer"><SwitchedHere /></Quiet>
+      <Quiet name="Sign on Phone"><SignHere /></Quiet>
       <Quiet name="Remote screen"><RemoteHere /></Quiet>
       <Quiet name="Screens being viewed"><ScreenLive /></Quiet>
       <div className="views" style={untilAsks}>

@@ -6,7 +6,8 @@ import { q as fileQuery } from '../files.js'
 import { SIZES } from '../../../../shared/signmarks.js'
 import { findPlaces } from './find.js'
 import { pageData, pagesText } from './read.js'
-import { SignatureCard } from './Signatures.jsx'
+import { SignatureChooser, sigsOf } from './Signatures.jsx'
+import { HOW, signedLine, placesLine } from './signed.js'
 import { KIND } from './Marks.jsx'
 import { AssistHead } from '../../AiAssist.jsx'
 import { where } from '../../settings/search.js'
@@ -16,10 +17,13 @@ import { where } from '../../settings/search.js'
 //      who's in it, the money, the dates, what you'd agree to, renewal and ending it, and what's
 //      worth a closer look (each a tap from its page). It says which model read it, and that the
 //      text went to it. It explains; it isn't legal advice.
-//   2. Where to sign: your signature (drawn here if it isn't yet), then the places the PDF asks
-//      for one (find.js), each on its page to move, resize and approve; more added by hand.
+//   2. Where to sign: your signature (drawn here if it isn't yet; another of yours picked, or a new
+//      one drawn), then the places the PDF asks for one (find.js), each on its page to move, resize
+//      and approve, or Sign everywhere it asks at once; more added by hand, as many as it needs.
 //   3. A signed copy: the places you approved, written into a new PDF in _signed beside this one
-//      (server/signing.js), which then opens. The original stays as it is.
+//      (server/signing.js), which then opens. The original stays as it is. With Ask Before Signing
+//      on, Touch ID (or the Mac's password, Windows Hello, your signing PIN) first, once for them
+//      all; the signing is in both files' versions, with how it was asked.
 // Honest throughout: it's a drawn signature on the page, not a certificate-based digital one.
 const STEPS = [['read', tx('What you\'re signing')], ['place', tx('Where to sign')], ['save', tx('Save a signed copy')]]
 const read = new Map() // what was explained, by file and version, while the app is open
@@ -43,7 +47,7 @@ function dateChoices() {
   return { list: out, first: currentLang() === 'en' ? out[0] : latin(own) ? own : out[5] }
 }
 
-export default function SignAssist({ file, pdf, setup, marks, setMarks, picked, setPicked, onApprove, dateText, setDateText, onShow, onPoint, onOpen, onClose }) {
+export default function SignAssist({ file, pdf, setup, marks, setMarks, picked, setPicked, onApprove, dateText, setDateText, using, setUsing, onShow, onPoint, onOpen, onClose }) {
   // Back where you were: at the places, once there are some.
   const [step, setStep] = useState(() => (marks.length ? 'place' : 'read'))
   const go = (s) => { setStep(s); body.current?.scrollTo?.({ top: 0 }) }
@@ -73,8 +77,8 @@ export default function SignAssist({ file, pdf, setup, marks, setMarks, picked, 
                 {on && (
                   <div className="sd-step-body">
                     {id === 'read' && <Explain file={file} pdf={pdf} setup={setup} said={said} onSaid={(r) => { read.set(keyOf(file), r); setSaid(r) }} onPoint={onPoint} onNext={() => go('place')} onSkip={() => { setSkipped(true); go('place') }} />}
-                    {id === 'place' && <Place pdf={pdf} setup={setup} marks={marks} setMarks={setMarks} picked={picked} setPicked={setPicked} onApprove={onApprove} dateText={dateText} setDateText={setDateText} onShow={onShow} onNext={() => go('save')} />}
-                    {id === 'save' && <Save file={file} setup={setup} marks={marks} dateText={dateText} onBack={() => go('place')} onOpen={onOpen} />}
+                    {id === 'place' && <Place file={file} pdf={pdf} setup={setup} marks={marks} setMarks={setMarks} picked={picked} setPicked={setPicked} onApprove={onApprove} dateText={dateText} setDateText={setDateText} using={using} setUsing={setUsing} onShow={onShow} onNext={() => go('save')} />}
+                    {id === 'save' && <Save file={file} setup={setup} marks={marks} dateText={dateText} using={using} onBack={() => go('place')} onOpen={onOpen} />}
                   </div>
                 )}
               </li>
@@ -177,11 +181,11 @@ function Explain({ file, pdf, setup, said, onSaid, onPoint, onNext, onSkip }) {
 // ---------- 2. Where to sign ----------
 const FROM = { field: tx('Its form\'s own field'), text: tx('Next to "{label}"'), you: tx('Added by you') }
 let added = 0
-function Place({ pdf, setup, marks, setMarks, picked, setPicked, onApprove, dateText, setDateText, onShow, onNext }) {
+function Place({ file, pdf, setup, marks, setMarks, picked, setPicked, onApprove, dateText, setDateText, using, setUsing, onShow, onNext }) {
   const [look, setLook] = useState(marks.length ? { done: true } : { at: 0, of: pdf.doc.numPages }) // { at, of } | { done } | { error }
   const [tries, setTries] = useState(0)
   const sig = setup.data?.signature
-  const needInitials = marks.some((m) => m.kind === 'initials') && setup.data && !setup.data.initials
+  const hasInitials = marks.some((m) => m.kind === 'initials')
   const dates = useMemo(dateChoices, [])
   useEffect(() => { if (!dateText) setDateText(dates.first) }, [dateText, dates, setDateText])
   // Looked for once, page by page (again after an error).
@@ -228,10 +232,15 @@ function Place({ pdf, setup, marks, setMarks, picked, setPicked, onApprove, date
   }
   const open = marks.filter((m) => !m.approved).length
   const ok = marks.length - open
+  // Sign everywhere it asks: each place the PDF asks for (its form's fields, the lines it found),
+  // approved at once, with yours in it. Not the ones you added: those you place yourself.
+  const asked = marks.filter((m) => m.source !== 'you' && !m.approved)
+  const canAll = asked.length > 1 && asked.every((m) => m.kind === 'date' || sigsOf(setup, m.kind).length)
+  const signAll = () => setMarks((ms) => ms.map((m) => (m.source !== 'you' ? { ...m, approved: true } : m)))
   return (
     <div className="sd-place">
-      <SignatureCard which="signature" setup={setup} compact />
-      {needInitials && <SignatureCard which="initials" setup={setup} compact />}
+      <SignatureChooser which="signature" setup={setup} value={using.signature} onChange={(id) => setUsing((u) => ({ ...u, signature: id }))} doc={file.name} />
+      {hasInitials && <SignatureChooser which="initials" setup={setup} value={using.initials} onChange={(id) => setUsing((u) => ({ ...u, initials: id }))} doc={file.name} />}
       {look && !look.done && !look.error && <p className="muted small sd-looking" role="status"><Icon name="refresh" size={12} className="spin" /> {t('Looking for where to sign: page {n} of {total}…', { n: look.at, total: look.of })}</p>}
       {look?.error && <p className="error-text small" role="alert">{t("Couldn't look for where to sign: {error}", { error: look.error })} <button type="button" className="link-btn" onClick={() => setTries((n) => n + 1)}>{t('Try again')}</button></p>}
       {look?.done && (
@@ -247,6 +256,7 @@ function Place({ pdf, setup, marks, setMarks, picked, setPicked, onApprove, date
                 <span className={`sd-place-ic k-${m.kind}`}><Icon name={m.approved ? 'check' : m.kind === 'date' ? 'calendar' : 'signature'} size={12} /></span>
                 <span className="sd-place-name"><b>{t(KIND[m.kind])} · {t('page {n}', { n: m.page })}</b><small className="muted">{m.source === 'text' ? t(FROM.text, { label: m.label.length > 34 ? `${m.label.slice(0, 33)}…` : m.label }) : t(FROM[m.source] || FROM.you)}</small></span>
               </button>
+              {m.kind !== 'date' && sigsOf(setup, m.kind).length > 1 && m.sig && <span className="sd-place-sig" title={t('This place has its own')}>{sigsOf(setup, m.kind).find((x) => x.id === m.sig)?.name}</span>}
               {m.approved
                 ? <button type="button" className="ghost-btn sd-place-undo" onClick={() => setMarks((ms) => ms.map((x) => (x.id === m.id ? { ...x, approved: false } : x)))} title={t('Approved: press to change your mind')}>{t('Approved')}</button>
                 : <button type="button" className="btn small" onClick={() => onApprove(m.id)}>{t('Approve')}</button>}
@@ -272,6 +282,12 @@ function Place({ pdf, setup, marks, setMarks, picked, setPicked, onApprove, date
           {dateText && !latin(dateText) && <span className="error-text small">{t('The PDF\'s own font writes Latin letters and digits only: pick a date in digits.')}</span>}
         </label>
       )}
+      {canAll && (
+        <div className="sd-all">
+          <button type="button" className="btn small" onClick={signAll}><Icon name="signature" size={12} /> {t('Sign everywhere it asks')}</button>
+          <small className="muted">{t('Approves all {n} places it found, with your default signature, initials and the date. Look them over on the pages before you save.', { n: asked.length })}</small>
+        </div>
+      )}
       <div className="sd-step-acts">
         {open > 0 && <button type="button" className="btn small" onClick={next}>{t('Next place')} <Icon name="down" size={12} /></button>}
         <button type="button" className="btn small primary" onClick={onNext} disabled={!ok || (!sig && marks.some((m) => m.approved && m.kind === 'signature'))}>{t('Next: save a signed copy')} <Icon name="chevron" size={12} /></button>
@@ -282,51 +298,87 @@ function Place({ pdf, setup, marks, setMarks, picked, setPicked, onApprove, date
 }
 
 // ---------- 3. A signed copy ----------
-function Save({ file, setup, marks, dateText, onBack, onOpen }) {
+// Ask Before Signing on: asked once here, for every place at once (server/signauth.js), by the way
+// this device is asked (Touch ID or the Mac's password; Windows Hello; else the signing PIN typed
+// here), then signed with the grant it gives.
+const ASKED = {
+  cancelled: tx('Not signed: Touch ID or the password was cancelled.'),
+  'no-pin': tx('Ask Before Signing is on, and from here it asks for your signing PIN, but there isn\'t one yet. Set it in {place}, on the computer.'),
+}
+function Save({ file, setup, marks, dateText, using, onBack, onOpen }) {
   const [check, setCheck] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [asking, setAsking] = useState(null)
   const [err, setErr] = useState(null)
   const [done, setDone] = useState(null)
+  const [pin, setPin] = useState('')
   useEffect(() => { api(`/studio/sign/check?${fileQuery(file)}`).then(setCheck, (e) => setCheck({ error: e.message })) }, [file])
   const ok = marks.filter((m) => m.approved)
   const count = (k) => ok.filter((m) => m.kind === k).length
-  const pages = [...new Set(ok.map((m) => m.page))].sort((a, b) => a - b)
-  const parts = [
-    count('signature') && (count('signature') === 1 ? t('1 signature') : t('{n} signatures', { n: count('signature') })),
-    count('initials') && (count('initials') === 1 ? t('1 set of initials') : t('{n} sets of initials', { n: count('initials') })),
-    count('date') && (count('date') === 1 ? t('1 date') : t('{n} dates', { n: count('date') })),
-  ].filter(Boolean)
-  const missing = ['signature', 'initials'].filter((k) => count(k) && !setup.data?.[k])
+  const missing = ['signature', 'initials'].filter((k) => count(k) && !sigsOf(setup, k).length)
   const stem = file.name.replace(/\.pdf$/i, '')
+  // Ask Before Signing as it is now (it may have been turned on or off since Sign this opened).
+  const [ask, setAsk] = useState(setup.data?.ask || null)
+  useEffect(() => { api('/studio/sign/ask').then(setAsk, () => {}) }, [])
+  const way = ask?.on ? ask.way : null
+  const sayErr = (e) => {
+    if (e.code === 'pin-wrong') return t('That PIN isn\'t right ({n} tries left).', { n: e.data?.left ?? 0 })
+    if (e.code === 'pin-locked') return t('The signing PIN was wrong too many times, so it\'s locked until {time}.', { time: new Date(e.data?.until || Date.now()).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' }) })
+    if (e.code === 'no-pin') return t(ASKED['no-pin'], { place: where('ask-before-signing') })
+    if (e.code === 'cancelled' && way === 'device') return t(ASKED.cancelled)
+    return t("Couldn't make the signed copy: {error}", { error: e.message })
+  }
   const save = async () => {
     setBusy(true); setErr(null)
     try {
-      const r = await api('/studio/sign', { method: 'POST', body: { root: file.root, path: file.path, marks: ok.map(({ kind, page, x, y, w, h, align, field, fieldType }) => ({ kind, page, x, y, w, h, align, field, fieldType, ...(kind === 'date' ? { text: dateText || '' } : {}) })) } })
+      let grant = null
+      if (way) {
+        setAsking(way === 'device' ? (ask.touchID ? t('Touch ID, or your Mac\'s password, on this Mac…') : t('Your Mac\'s password, on this Mac…')) : way === 'hello' ? t('Windows Hello, on this computer…') : t('Checking your PIN…'))
+        const g = await api('/studio/sign/ask', { method: 'POST', body: { root: file.root, path: file.path, ...(way === 'pin' ? { pin } : {}) } })
+        grant = g.grant || null
+      }
+      setAsking(null)
+      const r = await api('/studio/sign', { method: 'POST', body: { root: file.root, path: file.path, grant, marks: ok.map(({ kind, page, x, y, w, h, align, field, fieldType, sig }) => ({ kind, page, x, y, w, h, align, field, fieldType, ...(kind === 'date' ? { text: dateText || '' } : { sig: sig || using?.[kind] || undefined }) })) } })
       setDone(r)
-      setTimeout(() => onOpen?.({ root: r.root || file.root, path: r.path }), 900)
-    } catch (e) { setErr(e.message) } finally { setBusy(false) }
+      setPin('')
+      setTimeout(() => onOpen?.({ root: r.root || file.root, path: r.path }), 1400)
+    } catch (e) { setErr(sayErr(e)) } finally { setBusy(false); setAsking(null) }
   }
   if (done) {
     return (
       <div className="sd-saved" role="status">
         <span className="sd-saved-ic"><Icon name="check" size={16} /></span>
         <b>{t('Signed. Saved as {name}', { name: done.name })}</b>
-        <span className="muted small">{t('In the _signed folder beside the original, which stays as it was. Opening it…')}</span>
+        {done.record && <span className="small sd-saved-rec">{signedLine(done.record)} · {placesLine(done.record.places)}</span>}
+        <span className="muted small">{t('In the _signed folder beside the original, which stays as it was; both keep this in their versions. Opening it…')}</span>
         <button type="button" className="btn small" onClick={() => onOpen?.({ root: done.root || file.root, path: done.path })}><Icon name="external" size={12} /> {t('Open it')}</button>
       </div>
     )
   }
+  const what = placesLine(ok)
+  const label = way === 'device' ? (ask.touchID ? t('Sign with Touch ID') : t('Sign with your password')) : way === 'hello' ? t('Sign with Windows Hello') : t('Sign and save a copy')
   return (
     <div className="sd-save">
-      <p className="small">{parts.length ? t('{what}, on {pages}.', { what: parts.join(', '), pages: pages.length === 1 ? t('page {n}', { n: pages[0] }) : t('pages {list}', { list: pages.join(', ') }) }) : t('Nothing approved yet.')}</p>
+      <p className="small">{what ? `${what}.` : t('Nothing approved yet.')}</p>
       <p className="muted small">{t('A new PDF, {name}, in a _signed folder beside this one. The original stays as it is, and a file that\'s there already is never replaced.', { name: `${stem} (signed).pdf` })}</p>
+      {way && (
+        <p className="small sd-ask-note"><Icon name={way === 'pin' ? 'lock' : 'fingerprint'} size={12} /> {way === 'pin'
+          ? t('Ask Before Signing is on: type your signing PIN to sign every place at once.')
+          : t('Ask Before Signing is on: {how} is asked once, for every place.', { how: t(way === 'hello' ? HOW.hello : ask.touchID ? HOW.touchid : HOW.password) })}</p>
+      )}
+      {way === 'pin' && (
+        <label className="sd-field sd-pin"><span className="muted small">{t('Signing PIN')}</span>
+          <input type="password" inputMode="numeric" autoComplete="off" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 12))} onKeyDown={(e) => { if (e.key === 'Enter' && pin.length >= 4) save() }} aria-label={t('Signing PIN')} disabled={busy} />
+        </label>
+      )}
       {check?.encrypted && <p className="error-text small" role="alert">{t('This PDF is locked against changes (it\'s encrypted), so a signed copy can\'t be made from it. Ask whoever sent it for one that isn\'t locked, or print it and sign it on paper.')}</p>}
       {!!check?.signed?.length && <p className="sd-warn small"><Icon name="alert" size={11} /> {t('Someone has signed this PDF with a digital certificate already. The signed copy is a new file, so that signature won\'t check out in it: keep the original too.')}</p>}
       {check?.error && <p className="error-text small" role="alert">{check.error}</p>}
       {!!missing.length && <p className="error-text small" role="alert">{missing.includes('signature') ? t('Draw your signature first (step 2).') : t('Draw your initials first (step 2).')}</p>}
-      {err && <p className="error-text small" role="alert">{t("Couldn't make the signed copy: {error}", { error: err })}</p>}
+      {asking && <p className="small sd-asking" role="status"><Icon name="fingerprint" size={12} /> {asking}</p>}
+      {err && <p className="error-text small" role="alert">{err}</p>}
       <div className="sd-step-acts">
-        <button type="button" className="btn small primary" onClick={save} disabled={busy || !ok.length || !!missing.length || !!check?.encrypted || !check}>{busy ? t('Signing…') : <><Icon name="signature" size={12} /> {t('Sign and save a copy')}</>}</button>
+        <button type="button" className="btn small primary" onClick={save} disabled={busy || !ok.length || !!missing.length || !!check?.encrypted || !check || (way === 'pin' && pin.length < 4)}>{busy ? t('Signing…') : <><Icon name={way && way !== 'pin' ? 'fingerprint' : 'signature'} size={12} /> {label}</>}</button>
         <button type="button" className="ghost-btn" onClick={onBack} disabled={busy}>{t('Back')}</button>
       </div>
     </div>

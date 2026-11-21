@@ -280,6 +280,12 @@
 .sd-v-who { flex: 1; min-width: 0; display: grid; }
 .sd-v-who b { font-weight: 550; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sd-v-acts { display: flex; gap: 8px; font-size: 12px; }
+/* Signed in Studio: its line in the versions, and the original's list of signed copies. */
+.sd-versions li.signed .sd-v-who b > svg { color: var(--accent); vertical-align: -1px; }
+.sd-versions li.signed .sd-v-who :is(b, small) { white-space: normal; }
+.sd-v-who small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-signings { border-bottom: 1px solid var(--line); }
+.sd-signings li { background: color-mix(in srgb, var(--accent) 5%, transparent); }
 
 /* Compare: a version against the file as it is now */
 .sd-compare { display: grid; grid-template-rows: auto minmax(0, 1fr); width: min(920px, 100%); max-height: min(80vh, 900px); border-radius: 14px; background: var(--pane); box-shadow: 0 0 0 1px var(--line), 0 18px 50px rgb(0 0 0 / .28); overflow: hidden; }

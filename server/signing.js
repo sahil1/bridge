@@ -1,61 +1,38 @@
 // AI Assist's Sign this (Sign PDFs, in Studio): a PDF you're asked to sign, explained in plain
 // words by the model you pick, then your drawn signature, initials and today's date put where you
 // approve, in a new copy: <its folder>/_signed/<name> (signed).pdf. The original isn't touched.
-// Your signature and initials are pictures you drew, kept only here, in <data>/studio/signatures,
-// readable by you alone; they're never sent to a model or anywhere else. What's written is a simple
-// electronic signature (a picture on the page), not a certificate-based digital one, and the page
-// says so. Where to sign is found in the page (src/components/studio/pdf/find.js), which has the
-// PDF open already; this writes the copy (pdf-lib) and asks the model.
+// Your signatures and initials are pictures you drew (on the pad, the trackpad or your phone), kept
+// only here, sealed (signstore.js); they're never sent to a model or anywhere else. With Ask Before
+// Signing on, a copy is made only once you've said it's you (signauth.js), and each signing is in the
+// document's versions (studio.js noteSigned). What's written is a simple electronic signature (a
+// picture on the page), not a certificate-based digital one, and the page says so. Where to sign is
+// found in the page (src/components/studio/pdf/find.js), which has the PDF open already; this writes
+// the copy (pdf-lib) and asks the model.
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { PDFDocument, StandardFonts, PDFSignature, PDFTextField, PDFName, PDFRef, degrees, rgb } from 'pdf-lib'
-import { DATA, writeFileAtomic } from './paths.js'
 import { safePath } from './files.js'
+import * as store from './signstore.js'
+import * as auth from './signauth.js'
+import * as phone from './signphone.js'
+import { probe, trackpad } from './signhelper.js'
 import { shownSize, fitImage, dateSize, dateSpot, toUser, KINDS } from '../shared/signmarks.js'
 import { placeEn } from '../shared/places.js'
 
-const DIR = path.join(DATA, 'studio', 'signatures')
-const INDEX = path.join(DIR, 'index.json')
 const MARKS = ['signature', 'initials'] // the two you draw
-const MAX_PNG = 1.5 * 1024 * 1024
 const MAX_PDF = 80 * 1024 * 1024
-const readJSON = async (f, d) => { try { return JSON.parse(await fsp.readFile(f, 'utf8')) } catch { return d } }
+const MAX_MARKS = 200
 
-// ---------- Your signature and initials ----------
-const pngOf = (which) => path.join(DIR, `${which}.png`)
-const check = (which) => { if (!MARKS.includes(which)) throw Object.assign(new Error('Only a signature or initials'), { status: 400 }) }
+// ---------- Your signatures and initials ----------
+// Kept sealed (signstore.js): as many as you like, each named, one of each kind the default.
+// mine(): the defaults, as the page has always had them ({ signature, initials }: their
+// { id, name, at, width, height }, or null), and every one (list).
 export async function mine() {
-  const idx = await readJSON(INDEX, {})
-  const out = {}
-  for (const w of MARKS) out[w] = idx[w] && await fsp.access(pngOf(w)).then(() => true, () => false) ? idx[w] : null
+  const list = await store.list()
+  const out = { list }
+  for (const k of MARKS) out[k] = list.find((x) => x.kind === k && x.default) || null
   return out
 }
-// A PNG the page drew (data:image/png;base64,...), its size read from its own header.
-export async function keep(which, dataUrl) {
-  check(which)
-  const m = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(String(dataUrl || ''))
-  const buf = m ? Buffer.from(m[1], 'base64') : null
-  if (!buf || buf.length < 33 || buf.readUInt32BE(0) !== 0x89504e47 || buf.toString('latin1', 12, 16) !== 'IHDR') throw Object.assign(new Error('Expected a drawing, as a PNG'), { status: 400 })
-  if (buf.length > MAX_PNG) throw Object.assign(new Error('That drawing is too big to keep'), { status: 400 })
-  // Only you can read them: the folder and each file.
-  await fsp.mkdir(DIR, { recursive: true, mode: 0o700 })
-  await fsp.chmod(DIR, 0o700).catch(() => {})
-  writeFileAtomic(pngOf(which), buf, { mode: 0o600 })
-  const idx = await readJSON(INDEX, {})
-  idx[which] = { at: new Date().toISOString(), width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) }
-  writeFileAtomic(INDEX, JSON.stringify(idx, null, 1), { mode: 0o600 })
-  return mine()
-}
-export async function forget(which) {
-  check(which)
-  await fsp.rm(pngOf(which), { force: true })
-  const idx = await readJSON(INDEX, {})
-  delete idx[which]
-  if (Object.keys(idx).length) writeFileAtomic(INDEX, JSON.stringify(idx, null, 1), { mode: 0o600 })
-  else await fsp.rm(INDEX, { force: true })
-  return mine()
-}
-export const imageFile = async (which) => { check(which); await fsp.access(pngOf(which)); return pngOf(which) }
 
 // ---------- The PDF ----------
 async function pdfAt(root, rel) {
@@ -98,7 +75,7 @@ function dropField(doc, form, f) {
 // The marks you approved, checked: their kind, page and box (kept on the page), a field they fill.
 function cleanMarks(marks, pages) {
   if (!Array.isArray(marks) || !marks.length) throw Object.assign(new Error('Nothing to sign: approve where your signature goes first'), { status: 400 })
-  if (marks.length > 60) throw Object.assign(new Error('Too many places to sign at once (60 at most)'), { status: 400 })
+  if (marks.length > MAX_MARKS) throw Object.assign(new Error(`Too many places to sign at once (${MAX_MARKS} at most)`), { status: 400 })
   return marks.map((m) => {
     const kind = String(m?.kind || '')
     const page = Number(m?.page)
@@ -110,22 +87,27 @@ function cleanMarks(marks, pages) {
     if (!n.every(Number.isFinite) || n[2] < 2 || n[3] < 2) throw Object.assign(new Error('A place to sign without a size'), { status: 400 })
     const w = Math.min(n[2], bw), h = Math.min(n[3], bh)
     const x = Math.min(Math.max(n[0], bx), bx + bw - w), y = Math.min(Math.max(n[1], by), by + bh - h)
-    return { kind, page, x, y, w, h, align: m.align === 'left' ? 'left' : 'center', field: m.field ? String(m.field).slice(0, 300) : null, fieldType: m.fieldType === 'Sig' || m.fieldType === 'Tx' ? m.fieldType : null, text: kind === 'date' ? String(m.text || '').trim().slice(0, 60) : null }
+    return { kind, page, x, y, w, h, align: m.align === 'left' ? 'left' : 'center', field: m.field ? String(m.field).slice(0, 300) : null, fieldType: m.fieldType === 'Sig' || m.fieldType === 'Tx' ? m.fieldType : null, text: kind === 'date' ? String(m.text || '').trim().slice(0, 60) : null, sig: kind !== 'date' && /^[a-z0-9]{8,32}$/.test(String(m.sig || '')) ? String(m.sig) : null }
   })
 }
 
 // The signed copy: your pictures and the date on the pages you approved, a form's own date field
 // filled in, and a signature field you signed in taken off the form (it'd show as still waiting to
-// be signed). Saved beside the original in _signed, never over a file that's there.
+// be signed). Saved beside the original in _signed, never over a file that's there. Each place has
+// the signature or initials it was given (m.sig, one of yours), else that kind's default.
 export async function sign(root, rel, marks) {
   const { real, realRoot, bytes } = await pdfAt(root, rel)
   const doc = await load(bytes)
   const pages = doc.getPages()
   const list = cleanMarks(marks, pages)
-  const have = await mine()
-  for (const k of MARKS) if (list.some((m) => m.kind === k) && !have[k]) throw Object.assign(new Error(k === 'signature' ? 'Draw your signature first' : 'Draw your initials first'), { status: 400 })
+  for (const m of list) {
+    if (m.kind === 'date') continue
+    const x = await store.pick(m.kind, m.sig)
+    if (!x) throw Object.assign(new Error(m.kind === 'signature' ? 'Draw your signature first' : 'Draw your initials first'), { status: 400 })
+    m.sig = x.id
+  }
   const font = await doc.embedFont(StandardFonts.Helvetica)
-  const pics = {}
+  const pics = {} // by the signature's id
   // The form only when a mark fills one of its fields: asking for it adds one to a PDF without.
   const form = list.some((m) => m.field) ? (() => { try { return doc.getForm() } catch { return null } })() : null
   const done = new Set()
@@ -154,8 +136,8 @@ export async function sign(root, rel, marks) {
       const o = toUser(m, turn, at.u, at.v)
       page.drawText(m.text, { x: o.x, y: o.y, size, font, color: rgb(0.1, 0.1, 0.12), rotate: degrees(turn) })
     } else {
-      pics[m.kind] ||= await doc.embedPng(await fsp.readFile(pngOf(m.kind)))
-      const img = pics[m.kind]
+      pics[m.sig] ||= await doc.embedPng(await store.image(m.sig))
+      const img = pics[m.sig]
       const fit = fitImage(shown.w, shown.h, img.width, img.height, m.align)
       const o = toUser(m, turn, fit.u, fit.v)
       page.drawImage(img, { x: o.x, y: o.y, width: fit.w, height: fit.h, rotate: degrees(turn) })
@@ -176,7 +158,7 @@ export async function sign(root, rel, marks) {
   for (let n = 1; n < 1000; n++) {
     const file = path.join(at, `${stem} (signed${n > 1 ? ` ${n}` : ''}).pdf`)
     try { await fsp.writeFile(file, out, { flag: 'wx' }) } catch (e) { if (e.code === 'EEXIST') continue; throw e }
-    return { path: path.relative(realRoot, file).split(path.sep).join('/'), name: path.basename(file), folder: '_signed', marks: list.length, pages: [...new Set(list.map((m) => m.page))].sort((a, b) => a - b) }
+    return { path: path.relative(realRoot, file).split(path.sep).join('/'), name: path.basename(file), folder: '_signed', marks: list.length, pages: [...new Set(list.map((m) => m.page))].sort((a, b) => a - b), real: file, from: real, places: list.map(({ kind, page }) => ({ kind, page })) }
   }
   throw new Error('There are too many signed copies of it in _signed already')
 }
@@ -281,15 +263,139 @@ export async function explain(root, rel, { pages: given, total, model, lang } = 
 }
 
 // ---------- Routes ----------
-// Under Studio's own (/api/studio).
-export function routes(app, { wrap, rootOf, sq }) {
-  app.get('/api/studio/sign/setup', wrap(async (req) => ({ ...(await mine()), model: await modelInfo(String(req.query.model || '') || null), readsScans: !!helpers.scanText })))
-  app.get('/api/studio/signature/:which', async (req, res) => {
-    try { res.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.type('image/png').sendFile(await imageFile(req.params.which), { dotfiles: 'allow' }) } catch { res.status(404).json({ error: 'Not drawn yet' }) }
+// Under Studio's own (/api/studio). From index.js: here(req) (this computer itself), device(req)
+// (the paired device a request came through, and the one a computer says it asks for), nameOf(req)
+// (that device's name, or this computer's), page(req) (one of your own windows: a page's cookie, or
+// a device through the relay; not a program holding the key), and record(…) (the document's
+// versions, studio.js).
+const answer = (fn) => async (req, res) => {
+  try { res.json(await fn(req, res)) } catch (e) { res.status(e.status && e.status >= 400 && e.status < 600 ? e.status : 502).json({ error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}), ...(e.data && typeof e.data === 'object' ? e.data : {}) }) }
+}
+const SIG_ID = /^[a-z0-9]{8,32}$/
+export function routes(app, { wrap, rootOf, sq, here, device, nameOf, page, record }) {
+  // Who may sign, or ask for Ask Before Signing's grant: this computer itself, or one of your devices
+  // the relay proves (not a request that only says it's one, nor one through Tailscale, which can't
+  // be told from a program here).
+  const asker = (req) => {
+    const h = here(req)
+    const { device: d, forId } = device(req)
+    if (!h && !d) throw Object.assign(new Error('Sign in Bridge AI on the computer, or on one of your devices paired with it.'), { status: 403, code: 'not-here' })
+    return { here: h, device: d, forId }
+  }
+  const me = (req) => auth.who(asker(req))
+  // (Signing with Ask Before Signing off: anyone who reaches this server as you, as before.)
+  const signer = (req) => { try { return asker(req) } catch { return { here: false, device: null, forId: null } } }
+  app.get('/api/studio/sign/setup', wrap(async (req) => {
+    const h = here(req)
+    let sigs
+    try { sigs = { ...(await mine()), setAside: await store.setAsideNote() } } catch (e) { sigs = { list: [], signature: null, initials: null, sealError: e.message } }
+    const p = h ? await probe() : { trackpad: false }
+    const me = device(req).device
+    return {
+      ...sigs, sealed: store.sealedWith(), model: await modelInfo(String(req.query.model || '') || null), readsScans: !!helpers.scanText,
+      ask: await auth.status(h), trackpad: !!p.trackpad,
+      // Your phones the pad can ask (Sign on Phone): not the one asking.
+      phones: phone.phones().filter((x) => x.id !== me).map(({ id, name }) => ({ id, name })),
+    }
+  }))
+  // A picture, to your own windows only: never to a program on this computer holding the key alone
+  // (the CLI, `bridge-ai mcp`, a script), which has no use for one.
+  app.get('/api/studio/signature/:id', async (req, res) => {
+    try {
+      if (!page(req)) throw Object.assign(new Error('Your signatures are shown only in Bridge AI\'s own windows'), { status: 403 })
+      const id = String(req.params.id)
+      const x = MARKS.includes(id) ? await store.pick(id, null) : SIG_ID.test(id) ? { id } : null
+      if (!x) throw Object.assign(new Error('Not drawn yet'), { status: 404 })
+      const png = await store.image(x.id)
+      res.set({ 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; sandbox", 'Content-Type': 'image/png', 'Content-Length': String(png.length) })
+      res.end(png)
+    } catch (e) { res.status(e.status === 403 ? 403 : 404).json({ error: e.status === 403 ? e.message : 'Not drawn yet' }) }
   })
-  app.put('/api/studio/signature/:which', wrap((req) => keep(req.params.which, req.body?.png)))
-  app.delete('/api/studio/signature/:which', wrap((req) => forget(req.params.which)))
+  // Add one (kind, name, png; default: the one to use from now on), rename one or make it the
+  // default, take one away.
+  // (replace: one of yours drawn again, which keeps its name and whether it's the default.)
+  app.post('/api/studio/signatures', answer(async (req) => { const r = await store.add({ kind: String(req.body?.kind || ''), name: req.body?.name, png: req.body?.png, makeDefault: req.body?.default === true, replace: SIG_ID.test(String(req.body?.replace || '')) ? String(req.body.replace) : null }); return { id: r.id, ...(await mine()) } }))
+  app.patch('/api/studio/signatures/:id', answer(async (req) => { await store.change(String(req.params.id), { name: req.body?.name, makeDefault: req.body?.default === true }); return mine() }))
+  app.delete('/api/studio/signatures/:id', answer(async (req) => { await store.remove(String(req.params.id)); return mine() }))
+  // Drawn again: the default of that kind replaced (or the first one, when there's none).
+  app.put('/api/studio/signature/:which', answer(async (req) => {
+    const kind = String(req.params.which)
+    if (!MARKS.includes(kind)) throw Object.assign(new Error('Only a signature or initials'), { status: 400 })
+    const was = await store.pick(kind, null)
+    await store.add({ kind, png: req.body?.png, replace: was?.id || null, makeDefault: true })
+    return mine()
+  }))
+  app.delete('/api/studio/signature/:which', answer(async (req) => {
+    const was = MARKS.includes(String(req.params.which)) ? await store.pick(String(req.params.which), null) : null
+    if (was) await store.remove(was.id)
+    return mine()
+  }))
+
+  // ---------- Ask Before Signing ----------
+  app.get('/api/studio/sign/ask', answer((req) => auth.status(here(req))))
+  // Asked now (Touch ID on this Mac, or the PIN): a grant for this document's signing, or for a
+  // change to the setting.
+  app.post('/api/studio/sign/ask', answer(async (req) => {
+    const purpose = req.body?.purpose === 'settings' ? 'settings' : 'sign'
+    const q = purpose === 'sign' ? sq(req) : null
+    if (q) await rootOf(q.root)
+    const name = q ? path.basename(String(q.path || '')) : null
+    return auth.ask({ ...asker(req), purpose, doc: q ? { root: String(q.root), path: String(q.path) } : null, reason: name ? `sign ${name.slice(0, 80)}` : 'change Ask Before Signing', pin: req.body?.pin != null ? String(req.body.pin) : null })
+  }))
+  app.post('/api/studio/sign/ask/setting', answer((req) => auth.set({ ...asker(req), on: typeof req.body?.on === 'boolean' ? req.body.on : undefined, pin: req.body?.pin != null ? String(req.body.pin) : null, removePin: req.body?.removePin === true, grant: req.body?.grant })))
+
   app.get('/api/studio/sign/check', wrap(async (req) => { const q = sq(req); return inspect(await rootOf(q.root), q.path) }))
   app.post('/api/studio/sign/explain', wrap(async (req) => { const q = sq(req); return explain(await rootOf(q.root), q.path, { pages: req.body?.pages, total: req.body?.total, model: req.body?.model ? String(req.body.model) : null, lang: req.body?.lang }) }))
-  app.post('/api/studio/sign', wrap(async (req) => { const q = sq(req); return { root: q.root, ...(await sign(await rootOf(q.root), q.path, req.body?.marks)) } }))
+  // The signed copy: with Ask Before Signing on, only with the grant asked for this document by this
+  // device (used up here, whatever happens next). Then it's in the document's versions.
+  app.post('/api/studio/sign', answer(async (req) => {
+    const q = sq(req)
+    const root = await rootOf(q.root)
+    let how = null
+    if (await auth.needed()) {
+      const g = auth.use(req.body?.grant, { purpose: 'sign', doc: { root: String(q.root), path: String(q.path) }, ...signer(req) })
+      if (!g) throw Object.assign(new Error('Confirm it\'s you first: Ask Before Signing is on.'), { status: 403, code: 'ask' })
+      how = g.how
+    }
+    const r = await sign(root, q.path, req.body?.marks)
+    const on = nameOf(req)
+    const rec = { on, how, places: r.places, at: new Date().toISOString(), copy: r.path, from: String(q.path) }
+    await record({ original: r.from, copy: r.real, rec }).catch((e) => console.error(`signing: signed, but its versions couldn't say so: ${e.message}`))
+    const { real: _r, from: _f, ...out } = r
+    return { root: q.root, ...out, record: rec }
+  }))
+
+  // ---------- The trackpad (this Mac's own window only) ----------
+  // A stream of the finger's place while you sign on the trackpad (native/bridgesign trackpad),
+  // as server-sent events: ready, then d, m, u, and done or cancel. Closing it stops it.
+  app.get('/api/studio/sign/trackpad', async (req, res) => {
+    if (!here(req)) return res.status(403).json({ error: 'The trackpad is this computer\'s: sign on it in Bridge AI on this computer', code: 'here' })
+    if (!(await probe()).trackpad) return res.status(409).json({ error: 'This Mac has no trackpad to sign on', code: 'no-trackpad' })
+    res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' })
+    res.flushHeaders()
+    // (Ended, it isn't started again by the browser reconnecting on its own.)
+    res.write('retry: 3600000\n\n')
+    const t = trackpad({
+      hint: String(req.query.hint || '').slice(0, 160) || null,
+      onLine: (j) => res.write(`data: ${JSON.stringify(j)}\n\n`),
+      onEnd: (j) => { res.write(`event: end\ndata: ${JSON.stringify(j)}\n\n`); res.end() },
+    })
+    req.on('close', () => t.stop())
+  })
+
+  // ---------- Sign on Phone (signphone.js) ----------
+  app.post('/api/studio/sign/phone', answer((req) => phone.ask({ asker: me(req), askerName: nameOf(req), what: req.body?.what === 'initials' ? 'initials' : 'signature', doc: String(req.body?.doc || ''), to: req.body?.to ? String(req.body.to) : null })))
+  // The pad that asked: how it stands (wait=1: until it changes, or 25 s), and cancelled from there.
+  app.get('/api/studio/sign/phone/:id/state', answer((req) => phone.state(req.params.id, me(req), req.query.wait === '1' ? 25000 : 0)))
+  // The phone: what's waiting for it, one of them, its answer, or cancelled there.
+  const phoneOf = (req) => { const d = device(req); return d.forId ? null : d.device }
+  app.get('/api/studio/sign/phone', answer((req) => ({ list: phone.waitingFor(phoneOf(req)) })))
+  app.get('/api/studio/sign/phone/:id', answer((req) => phone.one(req.params.id, phoneOf(req))))
+  app.post('/api/studio/sign/phone/:id/answer', answer((req) => phone.answer(req.params.id, phoneOf(req), { nonce: req.body?.nonce, ink: req.body?.ink })))
+  app.post('/api/studio/sign/phone/:id/cancel', answer((req) => {
+    const d = phoneOf(req)
+    // The phone it went to, or the pad that asked.
+    try { if (d) return phone.cancel(req.params.id, { device: d }) } catch (e) { if (e.code !== 'gone') throw e }
+    return phone.cancel(req.params.id, { asker: me(req) })
+  }))
 }

@@ -16,7 +16,9 @@
 // export leaves out), each connection with its tokens (connections.js; the fields each connector
 // keeps, TOKEN_FIELDS), your routines, the Chief of Staff's playbook, ledger and task list, each
 // agent's user-level MCP servers (mcp.js), and the settings that mean the same on another computer
-// (SETTINGS). What isn't: this computer's own (its name, its key, its relay and its keys, the
+// (SETTINGS), and your saved signatures and initials (Studio's, signstore.js) only when you tick them
+// as you back up or move (they're opened from this computer's key, carried inside the sealed file or
+// the encrypted link, and sealed again with the other computer's key there). What isn't: this computer's own (its name, its key, its relay and its keys, the
 // devices paired or linked with it, your Bold Bridge sign-in, the agents' and model providers'
 // sign-ins, its port, update channel and caches), meetings and recordings (often gigabytes: Files ›
 // Send to… copies them), and each bot's record, its files and drafts waiting (they stay with the
@@ -65,6 +67,7 @@ import * as mcp from './mcp.js'
 import * as machines from './machines.js'
 import { placeEn } from '../shared/places.js'
 import { available as accountsOn } from './account.js'
+import * as signatures from './signstore.js'
 
 export const FILE_KIND = 'bridge-ai-backup' // the file
 const KIND = 'bridge-ai-setup' // what's sealed in it, and what a move sends
@@ -141,8 +144,9 @@ export function use(o) { h = { ...h, ...o } }
 const chiefState = () => path.join(h.chiefDir || dataFile('chief'), 'state')
 const peopleOf = (bot) => path.join(store.DIR, bot, PEOPLE)
 
-// Everything that goes, as it is now: nothing sealed yet.
-export async function collect() {
+// Everything that goes, as it is now: nothing sealed yet. withSignatures: your saved signatures
+// too (only when you tick them).
+export async function collect({ withSignatures = false } = {}) {
   const bots = store.live().map((b) => {
     let people = null
     try { const t = fs.readFileSync(peopleOf(b.id), 'utf8'); if (t.length <= PEOPLE_MAX) people = t } catch { /* none */ }
@@ -158,6 +162,7 @@ export async function collect() {
   return {
     kind: KIND, v: 1, madeAt: new Date().toISOString(), from: h.computer?.() || 'another computer', app: VERSION,
     bots, connections, routines: routines.readDefs(), chief, mcp: await mcp.userServersRaw(h.installed || (async () => [])), settings: settingsOf(settings.readUser()),
+    ...(withSignatures ? { signatures: await signatures.exportAll() } : {}),
   }
 }
 
@@ -204,7 +209,7 @@ export async function unseal(file, passphrase) {
 }
 const checked = (x) => {
   if (!x || typeof x !== 'object' || x.kind !== KIND) throw fail('That isn\'t a Bridge AI setup', 400, 'not-backup')
-  for (const k of ['bots', 'connections', 'routines', 'mcp']) if (!Array.isArray(x[k])) x[k] = []
+  for (const k of ['bots', 'connections', 'routines', 'mcp', 'signatures']) if (!Array.isArray(x[k])) x[k] = []
   if (!x.chief || typeof x.chief !== 'object') x.chief = {}
   if (!x.settings || typeof x.settings !== 'object') x.settings = {}
   return x
@@ -290,8 +295,9 @@ export async function planOf(x, { kind = 'file', from = null } = {}) {
   return {
     from: clean(from || x.from, 80), madeAt: x.madeAt || null, app: x.app || null, kind,
     // (From a file, what runs things on this computer, and its settings, are added only when you tick them.)
-    optIn: kind === 'file' ? ['routines', 'mcp', 'settings'] : [],
+    optIn: kind === 'file' ? ['routines', 'mcp', 'settings', 'signatures'] : [],
     bots, connections, routines: rs, chief, mcp: servers,
+    signatures: x.signatures.filter((y) => ['signature', 'initials'].includes(y?.kind)).slice(0, 40).map((y) => ({ kind: y.kind, name: clean(y.name, 60) })),
     settings: { keys, changes: keys.filter((k) => JSON.stringify(now[k]) !== JSON.stringify(p[k])), values: Object.fromEntries(keys.map((k) => [k, said(p[k])])) },
   }
 }
@@ -302,8 +308,11 @@ export async function planOf(x, { kind = 'file', from = null } = {}) {
 // connection brought here says while it's paused; pausedBy, what paused it. req: the request it's
 // applied by (a bot's folders are checked as Settings checks them, from where it's asked).
 export async function apply(x, { parts = {}, why = 'Paused', pausedBy = 'restore', kind = 'file', req = null } = {}) {
-  const on = (k) => (kind === 'file' && ['routines', 'mcp', 'settings'].includes(k) ? parts[k] === true : parts[k] !== false)
-  const out = { bots: [], connections: [], routines: [], chief: [], mcp: [], settings: [], problems: [] }
+  const on = (k) => (kind === 'file' && ['routines', 'mcp', 'settings', 'signatures'].includes(k) ? parts[k] === true : parts[k] !== false)
+  const out = { bots: [], connections: [], routines: [], chief: [], mcp: [], settings: [], signatures: 0, problems: [] }
+  if (on('signatures') && x.signatures.length) {
+    try { out.signatures = await signatures.importAll(x.signatures) } catch (e) { out.problems.push(`Your signatures couldn't be added: ${e.message}`) }
+  }
   // (Settings first: Bots, a beta feature, is on here once its setting is. Then MCP servers, so a
   // bot that uses one finds it.)
   if (on('settings')) {
@@ -437,12 +446,12 @@ const viewMove = (m) => ({ id: m.id, to: m.to, toName: m.toName, at: m.at, state
 // still waiting there is called off (it's told so, and couldn't pause anything here now).
 // (One after another, so two asked at once can't both be sent: the second calls the first off.)
 let moving = Promise.resolve()
-export function moveTo(machineId) {
-  const go = moving.then(() => moveNow(machineId))
+export function moveTo(machineId, o = {}) {
+  const go = moving.then(() => moveNow(machineId, o))
   moving = go.catch(() => {})
   return go
 }
-async function moveNow(machineId) {
+async function moveNow(machineId, { withSignatures = false } = {}) {
   const m = machines.list().find((x) => x.id === machineId && x.state === 'linked')
   if (!m) throw fail('That computer isn\'t linked to this one', 404)
   const done = state.moves.find((y) => y.state === 'moved')
@@ -452,7 +461,7 @@ async function moveNow(machineId) {
     y.state = 'cancelled'
     machines.callOn(y.to, 'POST', '/api/backup/withdrawn', { id: y.id }, 15000).catch(() => {})
   }
-  const x = await collect()
+  const x = await collect({ withSignatures })
   const id = newId()
   const rec = {
     id, to: m.id, toName: m.name, at: new Date().toISOString(), state: 'sending',
@@ -617,7 +626,7 @@ export function routes(app, x) {
     try {
       hereOnly(req, 'Back up to a file')
       checkPass(req.body?.passphrase)
-      const file = await seal(await collect(), req.body.passphrase)
+      const file = await seal(await collect({ withSignatures: req.body?.signatures === true }), req.body.passphrase)
       const name = `${clean(file.from, 60).replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '') || 'Bridge-AI'}-${file.madeAt.slice(0, 10)}.bridge-backup`
       res.setHeader('content-type', 'application/json; charset=utf-8')
       res.setHeader('content-disposition', `attachment; filename="${name}"`)
@@ -670,7 +679,7 @@ export function routes(app, x) {
     return { ...start({ connections: ids }), paused: pausedNow() }
   }))
   // To another of your computers.
-  app.post('/api/backup/move', wrap(async (req) => { mine(req); return moveTo(String(req.body?.to || '')) }))
+  app.post('/api/backup/move', wrap(async (req) => { mine(req); return moveTo(String(req.body?.to || ''), { withSignatures: req.body?.signatures === true }) }))
   app.post('/api/backup/moves/:id/undo', wrap(async (req) => { mine(req); return undo(req.params.id) }))
   // Another of your computers: a move for this one, called off there, applied there, turned down
   // there, or taken back there.

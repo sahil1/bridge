@@ -179,19 +179,80 @@
 .sd-sigcard.compact .sd-sigcard-name b { font-weight: 550; }
 .sd-sigcard.compact .sd-sigcard-pic { flex: 1 1 auto; max-width: 160px; }
 .sd-sign-home > p { max-width: 640px; line-height: 1.5; }
-/* The pad: paper white with a line to sign on, whatever the theme. */
-.sd-pad { display: grid; gap: 6px; }
-.sd-pad-box { position: relative; height: 150px; border-radius: 10px; background: #fff; box-shadow: 0 0 0 1px var(--line-2, var(--line)), inset 0 1px 2px rgb(0 0 0 / .04); }
+.sd-sign-home.in-settings > p:first-child { margin-top: 0; }
+/* Drawing one: its name beside what it is. */
+.sd-draw-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; }
+.sd-draw-head .sd-sigcard-name { flex: 0 1 auto; }
+.sd-sig-name { flex: 0 1 200px; min-width: 0; width: 200px; height: 28px; padding: 0 8px; border: 1px solid var(--line-2, var(--line)); border-radius: 7px; background: var(--pane); color: var(--ink); font: 13px var(--font); }
+/* Every one saved, by kind, as Preview lists them: the picture, its name, the default starred. */
+.sd-siglist { display: grid; gap: 14px; max-width: 800px; }
+.sd-sig-kind { display: grid; gap: 8px; }
+.sd-sig-kind-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; }
+.sd-sig-kind-head > b { font: 600 10.5px var(--font); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.sd-sig-kind-head .btn.small { white-space: nowrap; }
+.sd-saved-sigs { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 8px; }
+.sd-saved-sig { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 8px 8px 8px 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--pane-2); }
+.sd-saved-sig.default { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.sd-saved-sig .sd-sigcard-pic { width: 104px; height: 42px; }
+.sd-saved-sig .sd-sigcard-name { flex: 1; min-width: 0; }
+.sd-saved-sig .sd-sigcard-name small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-saved-sig .sd-sigcard-acts { flex: none; }
+.sd-saved-sig .ghost-btn { white-space: nowrap; }
+.sd-saved-sig > .error-text { flex-basis: 100%; margin: 0; }
+.sd-sig-title { display: block; max-width: 100%; padding: 0; color: var(--ink); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-sig-title:hover b { text-decoration: underline; text-decoration-color: var(--line-2, var(--line)); }
+.sd-default { display: grid; place-items: center; width: 28px; height: 28px; color: var(--accent); }
+.sd-default svg { fill: currentColor; }
+.sd-make-default { width: 28px; padding: 0; justify-content: center; color: var(--ink-3); }
+.sd-make-default:hover:not(:disabled) { color: var(--accent); }
+.sd-siglist + .sd-kept, .sd-sign-home .sd-kept { margin-top: 10px; }
+/* In Sign this: which one new places get. */
+.sd-sig-pick { flex: 1 1 auto; min-width: 0; max-width: 150px; height: 28px; padding: 0 6px; border: 1px solid var(--line-2, var(--line)); border-radius: 7px; background: var(--pane); color: var(--ink); font: 12.5px var(--font); }
+.sd-sigcard.compact .sd-sigcard-acts { flex: 1 1 auto; flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
+.sd-sigcard.compact .sd-sigcard-acts .btn.small { white-space: nowrap; }
+.sd-all { display: grid; gap: 3px; justify-items: start; padding: 8px 10px; border-radius: 10px; background: var(--accent-soft); }
+.sd-all .btn.small { white-space: nowrap; }
+.sd-place-sig { flex: none; max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 1px 6px; border-radius: 99px; background: var(--pane-3); color: var(--ink-2); font-size: 11px; }
+.sd-mark-sig { height: 26px; max-width: 120px; padding: 0 4px; border: 1px solid var(--line-2, var(--line)); border-radius: 7px; background: var(--pane); color: var(--ink); font: 12px var(--font); }
+/* Ask Before Signing, as you save. */
+.sd-ask-note { display: flex; align-items: baseline; gap: 6px; padding: 7px 9px; border-radius: 8px; background: var(--accent-soft); color: var(--ink-2); }
+.sd-ask-note > svg { flex: none; color: var(--accent); align-self: center; }
+.sd-asking { display: flex; align-items: center; gap: 6px; color: var(--accent); }
+.sd-pin input { width: 160px; height: 32px; padding: 0 10px; border: 1px solid var(--line-2, var(--line)); border-radius: 8px; background: var(--pane); color: var(--ink); font: 15px var(--font); letter-spacing: .2em; }
+.sd-saved-rec { color: var(--ink-2); }
+.sd-pin-row, .sd-pin-new, .sd-pin-now { flex-wrap: wrap; align-items: center; gap: 6px; }
+.sd-pin-new .st-input, .sd-pin-now .st-input { width: 150px; }
+/* The pad: paper white with a line to sign on, whatever the theme; the ways to sign on it above it
+   (Draw, Trackpad, Phone), and below it two groups that each stay on one line: the ink, Undo and
+   Clear at the start, Cancel and Keep it at the end, the second going under the first, to the
+   right, when there's no room for both. */
+.sd-pad { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; container-type: inline-size; }
+.sd-pad-modes { justify-self: start; display: inline-flex; max-width: 100%; overflow-x: auto; padding: 2px; border: 1px solid var(--line); border-radius: 9px; background: var(--pane-2); scrollbar-width: none; }
+.sd-pad-modes button { flex: none; display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border-radius: 7px; color: var(--ink-3); font: 500 12.5px var(--font); white-space: nowrap; }
+.sd-pad-modes button.on { background: var(--pane); color: var(--ink); box-shadow: 0 0 0 1px var(--line-2, var(--line)); }
+.sd-pad-box { position: relative; height: 150px; border-radius: 10px; background: #fff; box-shadow: 0 0 0 1px var(--line-2, var(--line)), inset 0 1px 2px rgb(0 0 0 / .04); transition: box-shadow .15s; }
 .sd-pad.initials .sd-pad-box { height: 110px; max-width: 260px; }
+.sd-pad.m-trackpad .sd-pad-box { height: auto; max-height: 260px; }
+.sd-pad.initials.m-trackpad .sd-pad-box { max-width: 300px; }
+.sd-pad-box.listening, .sd-pad-box.waiting { box-shadow: 0 0 0 2px var(--accent), 0 0 0 5px var(--accent-soft); }
+.sd-pad-over { position: absolute; inset: 0 0 34px; display: grid; place-content: center; justify-items: center; gap: 6px; padding: 8px; text-align: center; }
+.sd-pad-over .btn.small { height: 30px; white-space: nowrap; }
+.sd-pad-over small { color: #6b7280; }
+.sd-pad-to { max-width: 220px; height: 28px; padding: 0 6px; border: 1px solid #d6d9df; border-radius: 7px; background: #fff; color: #1a1a1f; font: 12.5px var(--font); }
 .sd-pad-canvas { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 10px; cursor: crosshair; touch-action: none; }
 .sd-pad-line { position: absolute; left: 16px; right: 16px; bottom: 30px; display: flex; align-items: center; height: 0; border-bottom: 1px solid #c9ccd3; color: #9aa0ab; pointer-events: none; }
 .sd-pad-line > svg { margin: 0 0 14px -2px; }
 .sd-pad-hint { position: absolute; inset: 0 0 34px; display: grid; place-items: center; color: #a3a8b2; font: italic 14px var(--font); pointer-events: none; }
-.sd-pad-how { margin: 0; }
-.sd-pad-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.sd-pad-how { margin: 0; min-height: 1.4em; font-variant-numeric: tabular-nums; }
+.sd-pad-acts { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 8px; }
+.sd-pad-tools, .sd-pad-done { display: flex; flex-wrap: nowrap; align-items: center; gap: 4px; min-width: 0; }
+.sd-pad-done { margin-left: auto; }
+.sd-pad-acts .btn.small, .sd-pad-acts .ghost-btn { flex: none; white-space: nowrap; }
+.sd-pad-acts .btn.small { height: 30px; }
+@container (max-width: 300px) { .sd-pad-tools .ghost-btn { padding: 0 6px; } .sd-pad-inks { gap: 2px; } }
 .sd-pad-inks { display: inline-flex; gap: 4px; }
 .sd-pad-inks button { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; }
-.sd-pad-inks button i { width: 14px; height: 14px; border-radius: 50%; box-shadow: 0 0 0 1px rgb(0 0 0 / .12); }
+.sd-pad-inks button i { width: 14px; height: 14px; border-radius: 50%; box-shadow: 0 0 0 1px var(--line-2, rgb(0 0 0 / .12)); }
 .sd-pad-inks button.on { box-shadow: 0 0 0 2px var(--accent); }
 
 /* Thumbnails beside the pages while there's room; Sign this under them on a phone. */
@@ -218,5 +279,11 @@
 .app.narrow .sd-place-open { min-height: 40px; }
 .app.narrow .sd-model select, .app.narrow .sd-date-row input, .app.narrow .sd-date-row select, .app.narrow .sd-pdf-pw-row input { height: 40px; font-size: 16px; }
 .app.narrow .sd-pad-inks button { width: 40px; height: 40px; }
+.app.narrow .sd-pad-modes button { height: 40px; padding: 0 12px; font-size: 14px; }
+.app.narrow .sd-default { width: 40px; height: 40px; }
+.app.narrow .sd-pad-acts .btn.small, .app.narrow .sd-pad-acts .ghost-btn, .app.narrow .sd-pad-over .btn.small, .app.narrow .sd-saved-sig .ghost-btn, .app.narrow .sd-sig-kind-head .btn.small, .app.narrow .sd-all .btn.small { min-height: 40px; min-width: 40px; padding: 0 12px; justify-content: center; }
+.app.narrow .sd-sig-name, .app.narrow .sd-sig-pick, .app.narrow .sd-pad-to, .app.narrow .sd-mark-sig, .app.narrow .sd-pin input { height: 40px; font-size: 16px; }
+.app.narrow .sd-saved-sig .sd-sigcard-pic { width: 88px; }
+.app.narrow .sd-sig-title { min-height: 32px; }
 .app.narrow .sd-mark-size { right: -12px; bottom: -12px; width: 24px; height: 24px; }
 .app.narrow .sd-mark-acts .btn.small { height: 40px; min-width: 40px; }

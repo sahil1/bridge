@@ -44,6 +44,8 @@ export default function PdfView({ file, data, onStats, handle, onOpen }) {
   const [marks, setMarks] = useState([])
   const [picked, setPicked] = useState(null)
   const [dateText, setDateText] = useState('')
+  // The signature and initials new places get, picked in Sign this (null: your default).
+  const [using, setUsing] = useState({ signature: null, initials: null })
   const passwordRef = useRef(null)
   const setup = useSignSetup(signing)
 
@@ -258,7 +260,7 @@ export default function PdfView({ file, data, onStats, handle, onOpen }) {
         <div className="sd-pdf-main">
           <div className="sd-pdf-scroll" ref={scroller} tabIndex={-1} onPointerDown={(e) => { if (picked && !e.target.closest?.('.sd-mark')) setPicked(null) }}>
             <div className="pdfViewer" ref={inner} />
-            {signing && ready && <Marks pdf={pdf.current} layout={layout} marks={marks} setMarks={setMarks} picked={picked} setPicked={setPicked} onApprove={approve} dateText={dateText} sig={setup.data} />}
+            {signing && ready && <Marks pdf={pdf.current} layout={layout} marks={marks} setMarks={setMarks} picked={picked} setPicked={setPicked} onApprove={approve} dateText={dateText} sig={setup.data} using={using} />}
           </div>
           {state.phase === 'loading' && <div className="sd-empty sd-loading sd-pdf-cover" role="status"><Icon name="refresh" size={16} className="spin" /><span className="muted">{t('Opening {name}…', { name: file.name })}</span></div>}
           {state.phase === 'error' && (
@@ -280,7 +282,7 @@ export default function PdfView({ file, data, onStats, handle, onOpen }) {
         </div>
         {signing && ready && (
           <Suspense fallback={<aside className="sd-sign"><p className="muted small sd-loading">{t('Opening…')}</p></aside>}>
-            <SignAssist file={file} pdf={pdf.current} setup={setup} marks={marks} setMarks={setMarks} picked={picked} setPicked={setPicked} onApprove={approve} dateText={dateText} setDateText={setDateText}
+            <SignAssist file={file} pdf={pdf.current} setup={setup} marks={marks} setMarks={setMarks} picked={picked} setPicked={setPicked} onApprove={approve} dateText={dateText} setDateText={setDateText} using={using} setUsing={setUsing}
               onShow={show} onPoint={point} onOpen={onOpen} onClose={() => { setSigning(false); setPicked(null) }} />
           </Suspense>
         )}

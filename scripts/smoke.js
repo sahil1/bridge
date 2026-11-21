@@ -72,6 +72,15 @@ try {
     if (process.env.BRIDGE_SIGN_P12 && !/certificate leaf = H"/.test(shown)) throw new Error(`a certificate was given, but it's signed ${by}`)
     return by
   })
+  // Studio's signing (server/signhelper.js): on a Mac its helper (native/bridgesign) is in the app and
+  // says what this Mac has, asking nothing.
+  if (process.platform === 'darwin') {
+    await built('Studio\'s signing helper answers', async () => {
+      const r = spawnSync(path.join(app.root, 'native', 'bin', 'bridgesign'), ['probe'], { encoding: 'utf8', timeout: 10000 })
+      if (r.status !== 0 || !/"trackpad"/.test(r.stdout)) throw new Error(`native/bin/bridgesign probe: ${r.error?.message || r.stderr || r.stdout || r.status}`)
+      return r.stdout.trim()
+    })
+  }
   // Dictation's key from other apps (desktop/dictation.js): on a Mac its helper (native/bridgekeys)
   // is in the app and answers; on Windows and Linux the keyboard hook's build for this system is.
   await built('the dictation key can be heard from other apps', async () => {

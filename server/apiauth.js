@@ -68,6 +68,8 @@ export function makeAuth({ port, token, ui, viaTailnet = () => false }) {
   }
   const keyed = (req) => same(bearer(req), token()) || same(cookieOf(req), cookieValue(token()))
   const allowed = (req) => keyed(req)
+  // A page's own cookie (a window of the desktop app, a browser tab let in), not the key alone.
+  const byCookie = (req) => same(cookieOf(req), cookieValue(token()))
   const siteKey = (pane) => crypto.createHmac('sha256', token()).update(`site\n${pane}`).digest('base64url').slice(0, 32)
 
   const isPublic = (req) => (req.method === 'GET' || req.method === 'HEAD') && (PUBLIC_API.has(req.path) || builtFile(ui(), req.path))
@@ -126,7 +128,7 @@ export function makeAuth({ port, token, ui, viaTailnet = () => false }) {
   }
   // A WebSocket: a page's carries the cookie; a program's (bridge-ai attach) the key.
   const upgrade = (req) => allowed(req)
-  return { http, upgrade, link, allowed, siteKey, NAME }
+  return { http, upgrade, link, allowed, byCookie, siteKey, NAME }
 }
 
 const PAGE_STYLE = `:root{color-scheme:light dark;--bg:#eef0f3;--pane:#fff;--ink:#1d2330;--muted:#5b6475;--line:#d9dde5;--accent:#3b6fd8}

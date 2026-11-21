@@ -95,6 +95,8 @@ import * as callEvent from './callevent.js'
 import * as perf from './perf.js'
 import * as studio from './studio.js'
 import * as signing from './signing.js'
+import * as signPhone from './signphone.js'
+import { provenDevice } from './relayproof.js'
 import * as doctext from './doctext.js'
 import * as studioFound from './studiofound.js'
 import * as commentAssist from './commentassist.js'
@@ -746,7 +748,28 @@ signing.setHelpers({
   describe: (id) => chatModels.describe(id), via: async (id) => (await chatModels.models().catch(() => [])).find((m) => m.id === id)?.via || null,
   contextOf: (id) => chatModels.contextOf(id), scanText: doctext.ocrBin() ? (file) => doctext.textOf(file, 200_000) : null,
 })
-signing.routes(app, { wrap, rootOf, sq })
+// Who's signing, for Ask Before Signing's grant and the record: this computer itself, or a device
+// the relay proves it ran the request for (relayproof.js: not just a header a program here could
+// send), and the one a computer of yours says it asks for; a picture of a signature only to your
+// own windows (a page's cookie, or a device through the relay), never to a program holding the key
+// alone. said: a device was named, proven or not.
+function signDevice(req) {
+  const id = provenDevice(req)
+  return { device: id, said: !!req.headers['x-bridge-relay'], forId: id && relay.isMachine(id) && req.headers['x-bridge-for-id'] ? String(req.headers['x-bridge-for-id']).slice(0, 80) : null }
+}
+signing.routes(app, {
+  wrap, rootOf, sq, here: (req) => atThisComputer(req), device: signDevice, nameOf: (req) => whoAsks(req),
+  page: (req) => auth.byCookie(req) || !!provenDevice(req), record: (x) => studio.noteSigned(x),
+})
+// Sign on Phone (signphone.js): your phones paired here, kept and let in, told on their own feed
+// (event: sign) and by a notification to them alone, which opens the pad there (?sign=<id>).
+signPhone.setHelpers({
+  phones: () => relay.status().devices.filter((d) => d.kind !== 'computer' && !d.fresh).map((d) => ({ id: d.id, name: d.name, connected: d.connected, push: push.hasDevice(d.id) })),
+  admits: (id) => { const d = relay.deviceOf(id); return !!d && d.kind !== 'computer' && !d.fresh && remote.admits(id) },
+  tell: (targets) => { for (const c of clients) if (c.signDevice && targets.includes(c.signDevice)) c.write(`event: sign\ndata: ${JSON.stringify({ list: signPhone.waitingFor(c.signDevice) })}\n\n`) },
+  notify: (r) => notify.send({ kind: 'sign', title: r.what === 'initials' ? `Initials for ${relay.thisName()}` : `A signature for ${relay.thisName()}`, body: `${r.doc ? `${r.doc}: ` : ''}draw it on this phone, then press Use. It ends in 2 minutes.`, url: `/?sign=${r.id}`, tag: `sign-${r.id}`, only: { devices: r.targets } }),
+  computer: () => relay.thisName(),
+})
 // Your files wherever they are, for Studio's home (studiofound.js): asked for only once it's open,
 // and let go of if you leave before it's done. Each found in an agent's folder or a place opens
 // through it, and one in Studio's own folder (a deck made from a meeting) through that.
@@ -1727,6 +1750,10 @@ app.get('/api/events', (req, res) => {
   if (lastFleet) res.write(`event: fleet\ndata: ${JSON.stringify(shownFleet(lastFleet))}\n\n`)
   // Who's viewing a screen of yours now, here or on another of your computers (screentell.js).
   res.write(`event: screen\ndata: ${JSON.stringify({ list: screensFor(res.bridgeDevice) })}\n\n`)
+  // A phone: what's waiting for it to sign (Sign on Phone, signphone.js), to the phone the relay
+  // proves this feed is for only.
+  res.signDevice = provenDevice(req)
+  if (res.signDevice) res.write(`event: sign\ndata: ${JSON.stringify({ list: signPhone.waitingFor(res.signDevice) })}\n\n`)
   // The desktop app's own feed (desktop/main.js says so): it also hears when another of your devices
   // asks this computer to allow something (fixes.js askHere).
   // (Only from this computer itself: never a device's, nor a browser through Tailscale.)
