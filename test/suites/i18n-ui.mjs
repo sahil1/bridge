@@ -2,7 +2,8 @@
 // (src/i18n/<code>.json) is valid and keeps each string's {placeholders} (scripts/i18n.js), and
 // Settings › You offers every pack, named in its own words. Then each language: the page says which it is, the
 // sidebar, Settings' sections and its look (You) are in its words, nothing is wider than the window (or
-// a phone, for the longest), with no page errors; Match this computer follows the browser's
+// a phone, for the longest), Studio's signing (Settings › Studio, its pad's ways and buttons) in its
+// words with every string of it in the pack and no button squeezed, with no page errors; Match this computer follows the browser's
 // language; and picking one in Settings › You switches to it, in another open window too.
 import fs from 'node:fs'
 import path from 'node:path'
@@ -79,6 +80,20 @@ try {
       return { ok: !!a && Math.abs((a.top + a.bottom) / 2 - (q.top + q.bottom) / 2) < 8 && a.left >= q.right - 1, a: a && [a.left, a.top], q: [q.right, q.top] }
     })
     ok(inline === true || inline.ok, `${l}: and its link in the line`, inline)
+    // Studio's signing, every string of it in this pack: Settings › Studio, and the pad (Add a
+    // signature), its buttons whole in their words.
+    const SIGNING = ['Studio', 'Your Signatures', 'Ask Before Signing', 'Add a signature', 'Add initials', 'Draw', 'Trackpad', 'Phone', 'Keep it', 'Sign on Phone', 'Sign everywhere it asks', 'Sign with Touch ID', 'Signed by you on {computer} ({how})', 'Use', 'Make default', 'Signing PIN: none yet', 'Set a PIN']
+    ok(SIGNING.every((en) => typeof words[l]?.[en] === 'string' && words[l][en].trim()), `${l}: Studio's signing is in the pack`, SIGNING.filter((en) => !words[l]?.[en]))
+    await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'studio' } })))
+    ok(!!(await until(async () => (await p.locator('[data-setting="ask-before-signing"] h4').innerText().catch(() => '')).trim() === say(l, 'Ask Before Signing'), 8000)) && (await p.locator('.st-nav-item.on').innerText()).trim() === say(l, 'Studio'), `${l}: Settings › Studio, in its words`, await p.locator('[data-setting="ask-before-signing"]').innerText().catch(() => ''))
+    await p.locator('.sd-sig-kind[data-kind="signature"] .sd-sig-kind-head button').click()
+    await p.locator('.sd-pad').waitFor({ timeout: 5000 })
+    const padSays = await p.locator('.sd-sigcard.drawing').innerText()
+    const squeezedHere = await p.locator('.modal.settings .st-scroll').evaluate((root) => [...root.querySelectorAll('button')].filter((x) => x.offsetParent && x.scrollWidth > x.clientWidth + 1).map((x) => x.innerText))
+    // Its look comes with it, though no PDF was opened here: a pad of paper white, its tools on a line.
+    const padLook = await p.locator('.sd-pad-box').evaluate((e) => ({ h: e.getBoundingClientRect().height, bg: getComputedStyle(e).backgroundColor, acts: getComputedStyle(e.closest('.sd-pad').querySelector('.sd-pad-acts')).display }))
+    ok(padSays.includes(say(l, 'Keep it')) && padSays.includes(say(l, 'Draw your signature')) && !squeezedHere.length && padLook.h >= 100 && padLook.bg === 'rgb(255, 255, 255)' && padLook.acts === 'flex', `${l}: the pad in its words and its own look, no button squeezed`, { padSays, squeezedHere, padLook })
+    await shot(p, `${tag}i18n-${l}-signing`)
     if (phone) {
       const ph = await page(b, kit.url, { ...look, phone: true, store: { 'cc-lang': l } })
       await ph.p.waitForSelector('.tabbar button', { timeout: 15000 })

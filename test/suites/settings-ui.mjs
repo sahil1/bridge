@@ -60,7 +60,7 @@ const TABBED = {
   'Meetings & Voice': TABS,
   'Devices & Access': ['Phone', 'Computers', 'Remote Access', 'Share Links'],
 }
-const SECTIONS = ['Your Features', 'You', 'Agents & Models', 'Meetings & Voice', ...(IS_MAC ? ['Mail & Calendar'] : []), 'Bots', 'Devices & Access', 'Notifications', 'Back Up & Move', 'About & Updates']
+const SECTIONS = ['Your Features', 'You', 'Agents & Models', 'Meetings & Voice', ...(IS_MAC ? ['Mail & Calendar'] : []), 'Studio', 'Bots', 'Devices & Access', 'Notifications', 'Back Up & Move', 'About & Updates']
 const FIRST = {
   'Your Features': ['Meetings', 'Dictation', 'Chief of Staff', 'Phone', 'Share Links', 'Notifications', 'Beta', 'Bots', 'Remote Screen and Preview', 'Bridge AI as an MCP Server', 'Set up'],
   You: ['Home', 'Your name', 'Location', 'Layout', 'Color Mode', 'Theme', 'Text Size', 'Language'],
@@ -73,13 +73,14 @@ const FIRST = {
   Meetings: ['Live Meeting Board', 'Answers in AI Assist', 'Meeting Insights', 'Transcribe with', 'Language', 'Names and terms', 'Notes are written by', 'Write the summary when a meeting ends', 'Clean up the transcript when a meeting ends', 'Name who spoke on the call', ...(IS_MAC ? ['Prepare for each meeting'] : []), 'Record the other side of calls', 'Notice calls', 'Save every meeting as Markdown'],
   'Mail & Calendar': ['How You Write', 'Learn it again now and then', 'Working days', 'Working hours', 'Read-Only'],
   Bots: ['Bots', /beta/i, 'Open Bots'],
+  Studio: ['Your Signatures', /signatures/i, /initials/i, 'Add a signature', 'Add initials', 'Ask Before Signing', 'Ask that it\'s you before a document is signed', 'Signing PIN'],
   'MCP Servers': ['Bridge AI as an MCP Server', 'Add server'],
   Phone: [/relay|Cloudflare/i],
   Computers: ['Your Devices', 'Link a device'],
   'Remote Access': ['Remote Screen and Preview', 'Which Devices May Connect'],
   'Share Links': [/Nothing is shared now/],
   Notifications: ['Notifications on this device', 'What to notify about', 'An agent needs you', 'Notification sounds', 'Screen Sharing Notifications', 'Needs Remote Screen and Preview on'],
-  'Back Up & Move': ['Back Up to a File', 'Restore From a File'],
+  'Back Up & Move': ['Back Up to a File', 'Restore From a File', 'With your signatures'],
   'About & Updates': ['Version', 'Check for new versions', 'Beta Features', 'Privacy', 'Report a problem'],
 }
 // Every setting there was, by its control's name (kind|name; a name the control's own includes), in
@@ -96,12 +97,13 @@ const ALL = {
   Meetings: ['input|Live Meeting Board', 'input|Answers in AI Assist', 'input|Meeting Insights', 'input|On this computer', 'input|OpenAI', 'input|Groq', 'input|Deepgram', 'input|AssemblyAI', 'input|Another OpenAI-style service', 'button|Speech models', 'select|Meeting language', 'button|Open Memory', 'input|More words to listen for', 'input|Record the other side of calls', 'select|Model for meeting notes', 'input|Write the summary when a meeting ends', 'input|Clean up the transcript when a meeting ends', 'input|Suggest what to ask, in every meeting', 'select|How often AI Assist suggests something', ...(IS_MAC ? ['input|Prepare for each meeting', "input|Speakers From the Call's Video"] : []), 'input|Name who spoke on the call', 'textarea|Your own instructions for every summary', 'input|Tell voices apart in a room', 'input|Tell voices apart on a call', 'input|Learn my voice', 'input|Remember voices you name', 'select|The key that mentions a meeting', 'input|Notice calls', 'input|Stop by itself when the call ends', 'select|What to save', 'input|Folder', 'input|Subfolders', 'input|File name', 'input|Front matter', 'input|Your mic, as', 'input|The call, as', 'input|Keep saved notes up to date', 'input|Save every meeting as Markdown'],
   'Mail & Calendar': ['input|Learn it again now and then', 'button|Mon', 'button|Sun', 'input|From', 'input|To', 'select|Kept clear around meetings', 'select|Around a meeting somewhere else', 'select|How many times to offer'],
   Bots: ['input|Bots', 'button|Open Bots'],
+  Studio: ['button|Add a signature', 'button|Add initials', 'input|Ask that it\'s you before a document is signed', 'button|Set a PIN'],
   'MCP Servers': ['input|Bridge AI as an MCP Server', 'button|Add server', 'button|Refresh'],
   Phone: ['button|Sign in with Cloudflare', 'button|Use an API token instead', 'button|Check again'],
   Computers: ['button|Details', "input|The other device's link", 'button|Link'],
   'Remote Access': ['input|Remote Screen and Preview'],
   Notifications: ['button|Turn on notifications', 'input|An agent needs you (a question, a permission)', 'input|An agent finished', 'select|Usage running low', 'input|Notification sounds', 'input|Answer buttons for simple questions (yes or no, or two short choices)', "input|Notify my phone even when I'm at the computer", 'input|Screen Sharing Notifications', 'button|Turn On'],
-  'Back Up & Move': ['input|Passphrase', 'button|Back Up', 'button|Choose a Backup'],
+  'Back Up & Move': ['input|Passphrase', 'button|Back Up', 'button|Choose a Backup', 'input|With your signatures'],
   'About & Updates': ['button|Check now', 'input|Check for new versions', 'button|Take the tour', 'a|Report a problem', 'a|Suggest an idea', 'button|Copy details', 'input|Home', 'input|Tidy what I say', 'input|Usage Across Every Provider', 'input|Meeting Insights', 'input|Scheduled Routines', 'input|Bridge AI as an MCP Server', 'button|Copy path', 'textarea|config.json', 'button|Save', 'button|Effective settings', 'button|Defaults', ...(IS_MAC ? ["input|Speakers From the Call's Video"] : [])],
 }
 // Beta Features: only those still in beta, in order (Studio, Sign PDFs, Comments and @bridge, Make a
@@ -215,7 +217,7 @@ try {
       if (FIRST[name]) ok(!want.length, `${name}: what most people change shows first`, { missing: want.map(String), shown: shown.slice(0, 600) })
       const has = await adv(p).count() && await adv(p).isVisible()
       if (TABBED[section]) ok(await p.locator('.st-head p').count() === 0, `${name}: no line under the section's name, where its tabs are`)
-      if (['Your Features', 'Which Model Does What', 'Speech Models', 'Spoken Answers', 'Computers', 'Remote Access', 'Share Links', 'Bots', 'MCP Servers'].includes(name)) ok(!has, `${name}: nothing under Advanced, so no Advanced`, { has })
+      if (['Your Features', 'Which Model Does What', 'Speech Models', 'Spoken Answers', 'Computers', 'Remote Access', 'Share Links', 'Bots', 'MCP Servers', 'Studio'].includes(name)) ok(!has, `${name}: nothing under Advanced, so no Advanced`, { has })
       else ok(has && (await isOpen(p)) === false, `${name}: the rest under Advanced, at the end, closed`, { has, open: await isOpen(p) })
       // A beta's switch, first in its place and marked.
       for (const [beta, at] of Object.entries(BETA_AT)) {
@@ -281,6 +283,7 @@ try {
     ok(await lands('slack-bot', 'Bots', null, '[data-setting="bots-beta"]'), 'the Bots beta\'s id: Bots', await at())
     ok(await lands('config', 'About & Updates', null, '[data-setting="config-file"]') && await isOpen(p) === true, 'the config file: About & Updates, under Advanced', await at())
     ok(await lands('backup', 'Back Up & Move', null, '[data-setting="backup"]'), 'Back Up & Move', await at())
+    ok(await lands('ask-before-signing', 'Studio', null, '[data-setting="ask-before-signing"]') && await lands('signatures', 'Studio', null, '[data-setting="signatures"]') && await lands('studio', 'Studio', null, '[data-setting="signatures"]'), 'Ask Before Signing and Your Signatures: Studio', await at())
     ok(await lands('setup', 'Your Features', null, '[data-setting="setup"]') && await lands('all', 'Your Features', null, '.ft-grid'), 'Set up, and Settings itself: Your Features', await at())
     await lands('meetings', 'Meetings & Voice', 'Meetings', '.st-meet')
     // The section in the list, with a tab showing: it stays; from another section: the first again.

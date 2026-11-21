@@ -31,7 +31,8 @@
 //   connects twice), and Try Again once Studio is back pauses Studio's and starts Laptop's.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, startRelay, startSlack, checks, until, browser, page, shot, TEST, IS_WIN } from '../lib/harness.mjs'
+import zlib from 'node:zlib'
+import { startKit, startRelay, startSlack, checks, until, browser, page, shot, rawFetch, TEST, IS_WIN } from '../lib/harness.mjs'
 import { lookers, openSettings, M, openBot } from '../lib/bots.mjs'
 import { linkAs } from '../lib/linkclient.mjs'
 
@@ -157,6 +158,29 @@ try {
     ok(!(await spare.api('/backup')).paused.connections.length && !(await spare.api('/bots')).bots?.length, 'nothing changed on Spare')
   })
 
+  // ---------- Your signatures: only when ticked, sealed again there ----------
+  await part('signatures', async () => {
+    // A signature drawn on Studio (a stroke, as the pad sends it).
+    const w = 120, h = 40
+    const raw = Buffer.alloc((w * 4 + 1) * h)
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (Math.abs(y - (x * h) / w) < 2) raw.writeUInt32BE(0x101820ff, y * (w * 4 + 1) + 1 + x * 4)
+    const chunk = (type, data) => { const len = Buffer.alloc(4); len.writeUInt32BE(data.length); const td = Buffer.concat([Buffer.from(type), data]); const c = Buffer.alloc(4); c.writeUInt32BE(zlib.crc32(td) >>> 0); return Buffer.concat([len, td, c]) }
+    const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 6
+    const png = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))])
+    await studio.api('/studio/signatures', { kind: 'signature', name: 'Studio hand', png: `data:image/png;base64,${png.toString('base64')}` })
+    const withSigs = await studio.api('/backup/file', { passphrase: PASS, signatures: true })
+    const wText = JSON.stringify(withSigs)
+    ok(!wText.includes(png.toString('base64').slice(10, 90)) && !wText.includes('Studio hand'), 'with your signatures ticked: in the file, sealed with the rest (not a picture in the open)')
+    const o = await spare.api('/backup/open', { file: wText, passphrase: PASS })
+    ok(o.plan.signatures.length === 1 && o.plan.signatures[0].name === 'Studio hand' && o.plan.optIn.includes('signatures'), 'opened: your signature listed, to tick', o.plan.signatures)
+    const r = await spare.api('/backup/apply', { id: o.id, parts: { bots: false, connections: false, chief: false, signatures: true } })
+    const there = (await spare.api('/studio/sign/setup')).list
+    const one = there.find((x) => x.name === 'Studio hand')
+    const pic = one ? await rawFetch(`${spare.url}/api/studio/signature/${one.id}`, { headers: { cookie: `${spare.cookie.name}=${spare.cookie.value}` } }) : null
+    ok(r.signatures === 1 && !!one && one.width === w && pic?.status === 200 && Buffer.from(await pic.arrayBuffer()).equals(png), 'ticked: on Spare, the same picture, sealed again with Spare\'s own key', { r: r.signatures, there })
+    await spare.api(`/studio/signatures/${one.id}`, null, 'DELETE')
+  })
+
   // ---------- Restore, on Spare ----------
   await part('restore', async () => {
     await spare.api('/bots', { name: 'Pricing Desk' })
@@ -164,7 +188,8 @@ try {
     fs.writeFileSync(path.join(chiefThere, 'playbook.md'), '# Spare\'s playbook\n')
     // From a file, routines and MCP servers only when ticked: not given, none added.
     const o = await spare.api('/backup/open', { file: text, passphrase: PASS })
-    ok(JSON.stringify(o.plan.optIn) === '["routines","mcp","settings"]', 'from a file, routines, MCP servers and settings are to tick', o.plan.optIn)
+    ok(JSON.stringify(o.plan.optIn) === '["routines","mcp","settings","signatures"]', 'from a file, routines, MCP servers, settings and your signatures are to tick', o.plan.optIn)
+    ok(!o.plan.signatures.length, 'your signatures only when you ticked them as you backed up: none in this one', o.plan.signatures)
     ok(o.plan.settings.values?.location?.includes('Lisbon'), 'each setting shown with its value', o.plan.settings.values)
     const r0 = await spare.api('/backup/apply', { id: o.id, parts: { bots: false, connections: false, chief: false } })
     ok(!r0.routines.length && !r0.mcp.length && !r0.settings.length && !fs.existsSync(path.join(spare.home, '.claude.json')) && !(await spare.api('/settings')).user.location, 'not ticked: no routine, MCP server or setting added', r0)
