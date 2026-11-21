@@ -3142,6 +3142,9 @@ app.post('/api/remote/app-quit', (req, res) => {
     res.json(update && Date.now() - update < 10 * 60000 && remote.desktopSince() < update ? { ok: true, update: true } : remote.appQuit())
   } catch (e) { sayErr(res, e) }
 })
+// The desktop app here saying this computer's screen is locked, or unlocked (desktop/remote.js): a
+// device waits for it rather than trying a screen no app may take. Only from this computer.
+app.post('/api/remote/screen-lock', (req, res) => { try { remoteHere(req); res.json({ ok: remote.setLocked(req.body || {}) }) } catch (e) { sayErr(res, e) } })
 // Another computer's screen that didn't show here, or on a device of this one's (ScreenView.jsx): a
 // line in this log, with why, as that computer's own log has one.
 app.post('/api/remote/didnt-show', (req, res) => { const b = req.body || {}; res.json(remote.didntShow({ name: b.name, code: b.code, cause: b.cause, why: b.why, version: b.version }, atThisComputer(req) ? null : relay.deviceOf(req.headers['x-bridge-relay'])?.name || 'a device')) })
