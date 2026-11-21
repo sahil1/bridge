@@ -111,6 +111,8 @@ const SUITES = [
   { name: 'usage-counts', build: 'dist', browser: true, covers: [/^server\/(system|boards)\.js$/, /^src\/components\/crashReport\.css$/, /^src\/activeTime\.js$/, /^src\/main\.jsx$/, /^server\/counts\.js$/, /^shared\/telemetry-schema\.json$/, /^src\/components\/settings\/(UsageCounts\.jsx|counts\.css|About\.jsx)$/, /^server\/(index|agents)\.js$/] },
   { name: 'phone-parity', build: 'dist', browser: true, covers: [/^src\/App\.jsx$/, /^src\/components\/(More|Palette|Settings|Rail|Home|NeedsHome|Dock)\.jsx$/, /^src\/styles\.css$/] },
   { name: 'phone-fresh', build: 'dist', browser: true, covers: [/^src\/(fresh|App|api)\.jsx?$/, /^src\/components\/TopNotes\.jsx$/, /^relay\/web\//, /^server\/index\.js$/, /^test\/stand-ins\/relay\.mjs$/] },
+  // The phone page's service worker not getting there: Bridge AI opens with one that's active, or the page says why, with Try again.
+  { name: 'phone-worker', build: 'dist', browser: true, covers: [/^relay\/web\/(shell|sw|index)\./, /^relay\/build\.js$/, /^test\/stand-ins\/relay\.mjs$/] },
   { name: 'phone-meetings', build: 'dist', browser: true, covers: [/^src\/components\/meetings\//, /^src\/(App|api)\.jsx?$/, /^src\/styles\.css$/, /^server\/(meetings|speech|index)\.js$/] },
   { name: 'phone-composer', build: 'dist', browser: true, covers: [/^src\/components\/(Composer|ModelChip|Console|Handoff|Rail)\.jsx$/, /^src\/styles\.css$/, /^test\/stand-ins\/claude\.cjs$/] },
   { name: 'mention-meetings', build: 'dist', browser: true, covers: [/^src\/components\/Composer\.jsx$/, /^src\/styles\.css$/, /^server\/(meetings|machines|index)\.js$/, /^shared\/mentions\.js$/, /^test\/stand-ins\/(relay|older-meetings)\.mjs$/, /^test\/stand-ins\/claude\.cjs$/] },
