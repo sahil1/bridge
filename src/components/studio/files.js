@@ -41,11 +41,14 @@ export function partsOf(f, meta) {
     bytes: async (name) => { if (!got.has(name)) got.set(name, bytesOf(partUrl(f, meta, name)).then((b) => new Uint8Array(b))); return got.get(name) },
   }
 }
+// The slim zip of one in parts (server/studio.js slimFile): of the file as it was opened (mtime), or
+// one of its versions (version, its id).
+export const slimUrl = (f, { mtime = null, version = null } = {}) => `${BASE}/api/studio/slim?${q(f)}${mtime != null ? `&mtime=${encodeURIComponent(mtime)}` : ''}${version ? `&version=${encodeURIComponent(version)}` : ''}`
 // The file as its editor opens it: { data } its bytes (whole, or the slim zip of one in parts,
 // with parts its helper above), or { url } for pdf.js to read in parts.
 export async function loadFile(f, meta) {
   if (meta.inParts && meta.ext === '.pdf') return { data: null, url: rawUrl(f) }
-  if (meta.inParts) return { data: await bytesOf(`${BASE}/api/studio/slim?${q(f)}&mtime=${encodeURIComponent(meta.mtime)}`), parts: partsOf(f, meta) }
+  if (meta.inParts) return { data: await bytesOf(slimUrl(f, { mtime: meta.mtime })), parts: partsOf(f, meta) }
   return { data: await bytesOf(rawUrl(f)) }
 }
 export const textOf = (buf) => new TextDecoder().decode(buf)

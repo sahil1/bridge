@@ -5,7 +5,7 @@ import { PaneHeader, useMedia, store } from '../layout.jsx'
 import { WhiteboardPage } from '../../lazy.jsx'
 import { Menu, fileOp } from '../FileExtras.jsx'
 import { t, tx, locale } from '../../i18n/index.js'
-import { openFile, bytesOf, loadFile, rawUrl, versionUrl, saveFile, changedSince, restoreVersion, base64, extOf } from './files.js'
+import { openFile, bytesOf, loadFile, rawUrl, slimUrl, versionUrl, saveFile, changedSince, restoreVersion, base64, extOf } from './files.js'
 import { MidName } from '../files/names.jsx'
 import { useDesignPacks, PacksSection, packFor } from './packs.jsx'
 import { lineDiff, textFor, comparable } from './diff.js'
@@ -545,8 +545,13 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
   }
   const restore = async (id) => {
     if (dirty && !window.confirm(t('Restore this version? Your unsaved changes here are lost (what\'s in the file now is kept as a version).'))) return
+    // One that can't be put back (gone from the list meanwhile, its computer away) says why; the
+    // file as it was, and the page with it. Put back and not read again: said as a file that didn't open.
     writing.current++
-    try { await restoreVersion(f, id); await load() } finally { writing.current--; wrote.current++ }
+    try {
+      try { await restoreVersion(f, id) } catch (e) { setNote({ text: t("Couldn't restore that version: {error}", { error: e.message }), bad: true }); return }
+      try { await load() } catch (e) { setErr(e); return }
+    } finally { writing.current--; wrote.current++ }
     setNote({ text: t('Restored. What was there is kept as a version too.') })
   }
 
@@ -656,7 +661,7 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
           {!meta || !data ? opening
             : <Suspense fallback={opening}><Editor key={gen} file={{ ...meta, root, path: rel }} data={meta.url ? null : data} onDirty={edited} onStats={setStats} handle={handle} packs={packs.list} onOpen={onOpen} readOnly={readOnly} /></Suspense>}
         </div>
-        {panel === 'versions' && meta && <Versions f={f} ext={meta.ext} versions={meta.versions} keep={meta.keep} size={meta.size} name={name} onRestore={restore} onClose={() => setPanel(null)} />}
+        {panel === 'versions' && meta && <Versions f={f} ext={meta.ext} versions={meta.versions} keep={meta.keep} size={meta.size} slim={!!meta.parts} name={name} onRestore={restore} onClose={() => setPanel(null)} />}
       </div>
       {/* The status line: what the editor counts, what kind of file it is (tapped: what saving keeps),
           how many versions are kept, and whether it's saved. On a phone, Open in its app and Focus here
@@ -689,7 +694,8 @@ const BackBtn = ({ onBack, icon }) => <><button type="button" className="win-btn
 // keep: how many versions Studio keeps of this file (server/studio.js keepFor): fewer of a big one,
 // none of one too big to save; said at the top of the list.
 const KEEP_ALL = 60
-function Versions({ f, ext, versions, keep = KEEP_ALL, size = 0, onRestore, onClose }) {
+// slim: a big file opened in parts, compared by its words alone (its versions' XML, not their pictures).
+function Versions({ f, ext, versions, keep = KEEP_ALL, size = 0, slim = false, onRestore, onClose }) {
   const [compare, setCompare] = useState(null) // the version compared with the file as it is
   return (<>
     <aside className="sd-panel" aria-label={t('Versions')}>
@@ -708,21 +714,22 @@ function Versions({ f, ext, versions, keep = KEEP_ALL, size = 0, onRestore, onCl
         ))}
       </ol>
     </aside>
-    {compare && <Compare f={f} ext={ext} v={compare} onClose={() => setCompare(null)} />}
+    {compare && <Compare f={f} ext={ext} v={compare} slim={slim} onClose={() => setCompare(null)} />}
   </>)
 }
 
 // What changed from a version to the file as it is now, line by line (a Word file by its text):
-// what's gone in red, what's new in green, long stretches the same folded away.
-function Compare({ f, ext, v, onClose }) {
+// what's gone in red, what's new in green, long stretches the same folded away. A big Word or Excel
+// file (slim) is read without its pictures, so a phone gets its words, not the two files whole.
+function Compare({ f, ext, v, slim = false, onClose }) {
   const [rows, setRows] = useState(null)
   const [err, setErr] = useState(null)
   useEffect(() => {
     let on = true
-    Promise.all([bytesOf(versionUrl(f, v.id)), bytesOf(rawUrl(f))]).then(([a, b]) => Promise.all([textFor(ext, a), textFor(ext, b)]))
+    Promise.all(slim ? [bytesOf(slimUrl(f, { version: v.id })), bytesOf(slimUrl(f))] : [bytesOf(versionUrl(f, v.id)), bytesOf(rawUrl(f))]).then(([a, b]) => Promise.all([textFor(ext, a), textFor(ext, b)]))
       .then(([a, b]) => on && setRows(lineDiff(a, b)), (e) => on && setErr(e.message))
     return () => { on = false }
-  }, [f, ext, v.id])
+  }, [f, ext, v.id, slim])
   const shown = []
   if (rows) {
     for (let i = 0; i < rows.length; i++) {

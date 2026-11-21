@@ -673,10 +673,11 @@ app.put('/api/studio/file', express.raw({ type: () => true, limit: studio.SAVE_M
 // A big Word, Excel or PowerPoint file, opened in parts (studioparts.js): the file with its XML and
 // a marker for each picture or other big part, then each of those as it's shown (a picture at the
 // width it's drawn at, w). Through another computer's window or a phone, only what's shown goes.
+// version=<id>: one of its versions so, for Compare.
 app.get('/api/studio/slim', async (req, res) => {
   try {
     const q = sq(req)
-    const { bytes } = await studio.slimFile(await rootOf(q.root), q.path, req.query.mtime)
+    const { bytes } = await studio.slimFile(await rootOf(q.root), q.path, req.query.mtime, { version: req.query.version ? String(req.query.version) : null })
     res.set({ 'Content-Type': 'application/zip', 'Content-Length': String(bytes.length), 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' })
     res.end(bytes)
   } catch (e) { res.status(e.status === 409 ? 409 : e.status === 413 ? 413 : 404).json({ error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}), ...(e.data || {}) }) }

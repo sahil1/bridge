@@ -23,7 +23,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { createRequire } from 'node:module'
-import { startKit, startRelay, checks, until, sleep, browser, page, shot, browserNotice, phoneNotes, phoneSaw, phoneFaults, ROOT, IS_MAC } from '../lib/harness.mjs'
+import { startKit, startRelay, checks, until, sleep, browser, page, shot, browserNotice, phoneNotes, phoneSaw, phoneFaults, noServiceWorker, ROOT, IS_MAC } from '../lib/harness.mjs'
 import { bigDeck, withMore, bigPdf, photoPng } from '../lib/bigdeck.mjs'
 import { deckPptx, boardSlides } from '../lib/deckfile.mjs'
 import { richDocx } from '../lib/wordfile.mjs'
@@ -72,6 +72,12 @@ try {
   const wordPic = Object.keys(word.files).find((n) => /^word\/media\/.*\.png$/.test(n))
   word.file(wordPic, photoPng(2400, 1500, 7), { compression: 'STORE' })
   fs.writeFileSync(path.join(dir, 'Site report.docx'), await word.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }))
+  // A long Word file whose photos are at its end, a few screens down (printed: each of them there).
+  const D = require('docx')
+  const logBody = [new D.Paragraph({ heading: D.HeadingLevel.TITLE, children: [new D.TextRun('Site log')] })]
+  for (let i = 0; i < 120; i++) logBody.push(new D.Paragraph({ children: [new D.TextRun(`Line ${i + 1}: the turbines at the site were checked, and each one's output written down.`)] }))
+  for (let k = 0; k < 3; k++) logBody.push(new D.Paragraph({ children: [new D.ImageRun({ type: 'png', data: photoPng(2400, 1500, 3 + k), transformation: { width: 480, height: 300 } })] }))
+  fs.writeFileSync(path.join(dir, 'Site log.docx'), await D.Packer.toBuffer(new D.Document({ sections: [{ children: logBody }] })))
   // A workbook with a photo in it (ExcelJS): its cells in its XML, the photo in xl/media.
   const ExcelJS = require('exceljs')
   const book = new ExcelJS.Workbook()
@@ -287,7 +293,14 @@ try {
   }
 
   // ---------- on a computer ----------
-  const dk = await page(b, kit.url, { width: 1440, height: 900 })
+  // What a test turns on: the PDF's parts not coming (the link dropped), a version that can't be put back.
+  const fail = { ranges: false, restore: false }
+  // (No service worker, whose fetches WebKit's routes don't see.)
+  const dk = await page(b, kit.url, { width: 1440, height: 900, before: async (c) => {
+    await noServiceWorker(c)
+    await c.route(/\/raw\?path=Decks%2FSite%20survey\.pdf/, (r) => (fail.ranges && r.request().headers().range ? r.abort('failed') : r.continue()))
+    await c.route(/\/api\/studio\/restore/, (r) => (fail.restore ? r.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ error: 'No such version' }) }) : r.continue()))
+  } })
   contexts.push(dk.ctx)
   const p = dk.p
   // Asked again until it's open (the page may not be listening yet as it loads).
@@ -320,10 +333,60 @@ try {
   const note = await p.locator('.sd-panel .sd-v-note').innerText().catch(() => '')
   ok(/This file is big \(9\d\.\d MB\), so Studio keeps its last 6 versions, not 60\./.test(note), 'its versions say how many a file this big keeps', note)
   await shot(p, `${tag}studio-big-desktop-deck`)
+  // A version that can't be put back (gone meanwhile, its computer away): said, the file as it was.
+  fail.restore = true
+  const fileWas = sha(fs.readFileSync(file))
+  await p.locator('.sd-panel button', { hasText: 'Restore' }).first().click()
+  const notRestored = await p.locator('.sd-note-bar[role="alert"]').innerText({ timeout: 8000 }).catch(() => '')
+  fail.restore = false
+  ok(/Couldn't restore that version: No such version/.test(notRestored) && sha(fs.readFileSync(file)) === fileWas && !dk.errors.some((y) => /No such version/.test(y)), 'a version that can\'t be restored: "Couldn\'t restore that version", the file as it was', { said: notRestored, errors: dk.errors.slice(0, 2) })
+  await p.locator('.sd-panel button[aria-label="Close"]').first().click()
+  // Export › This slide as a picture: the slide whole, its photo in it, on the PNG (WebKit drew it
+  // in the top left quarter, without its photo).
+  const download = p.waitForEvent('download', { timeout: 30000 })
+  await p.locator('.sd-strip .sd-thumb').nth(0).locator('.sd-thumb-btn').click()
+  await p.locator('button[aria-label="Export"]').click()
+  await p.locator('[role="menu"] >> text=This slide as a picture').click()
+  const png = await download.then((d) => d.path()).then((f) => fs.readFileSync(f).toString('base64'), () => null)
+  const px = png && await p.evaluate(async (data) => {
+    const img = new Image(); img.src = `data:image/png;base64,${data}`; await img.decode()
+    const c = document.createElement('canvas'); c.width = img.width; c.height = img.height
+    const g = c.getContext('2d'); g.drawImage(img, 0, 0)
+    const at = (x, y) => [...g.getImageData(Math.round(x * img.width), Math.round(y * img.height), 1, 1).data]
+    return { w: img.width, h: img.height, photo: at(0.5, 0.58), corner: at(0.97, 0.97) }
+  }, png)
+  const photoShown = !!px && px.photo[3] === 255 && px.photo.slice(0, 3).some((v) => v < 200)
+  ok(!!px && px.w === 2560 && photoShown && px.corner.every((v) => v === 255), 'Export › This slide as a picture: the whole slide at twice its size, its photo in it, its corner the slide\'s white', px)
   // The Word file: its photo from its computer, as it's scrolled to.
   await openHere('Decks/Site report.docx')
   const wimg = await until(() => p.evaluate(() => { const i = document.querySelector('.sd-file .ProseMirror img[src*="/api/studio/part"]'); return i ? { src: i.getAttribute('src'), lazy: i.getAttribute('loading'), shown: i.complete && i.naturalWidth > 0 } : null }), 20000, 200)
   ok(!!wimg && /\/api\/studio\/part\?/.test(wimg.src) && wimg.lazy === 'lazy', 'an 11 MB Word file opens in parts: its photo from its computer, when it\'s scrolled to', wimg || await p.evaluate(() => ({ text: document.querySelector('.sd-file')?.innerText.slice(0, 300), imgs: [...document.querySelectorAll('.sd-file img')].map((i) => i.getAttribute('src')?.slice(0, 80)) })))
+  // Compare, on a big Word file: its words, not the two files whole (a phone got 2 x 11 MB for it).
+  await p.locator('.sd-file .ProseMirror p', { hasText: 'Revenue grew' }).first().click()
+  await p.keyboard.press('Home')
+  await p.keyboard.type('Checked on site. ')
+  await p.keyboard.press(`${MOD}+s`)
+  await until(async () => /Checked on site/.test(await (await JSZip.loadAsync(fs.readFileSync(path.join(dir, 'Site report.docx')))).file('word/document.xml').async('string')), 15000, 300)
+  await p.locator('.sd-head-icons button[aria-label="Versions"]').click()
+  let compared = 0
+  const counting = (r) => { if (/\/api\/(studio\/(version|slim)|agents\/home\/raw)\?/.test(r.url())) compared += Number(r.headers()['content-length'] || 0) }
+  p.on('response', counting)
+  await p.locator('.sd-panel button', { hasText: 'Compare' }).first().click()
+  const diff = await p.locator('.sd-compare .sd-diff').innerText({ timeout: 20000 }).catch(() => '')
+  p.off('response', counting)
+  ok(/\+ .*Checked on site\./.test(diff) && compared < 1e6, `Compare on an 11 MB Word file opened in parts: the change shown, from ${(compared / 1000).toFixed(0)} KB of its words (not the two files whole)`, { compared, diff: diff.slice(0, 200) })
+  await p.locator('.sd-compare button[aria-label="Close"]').click()
+  await p.locator('.sd-panel button[aria-label="Close"]').first().click()
+  // Printed, a long Word file's photos a few screens down: each one there when it prints (WebKit
+  // left a lazy one out, a blank where it was).
+  await openHere('Decks/Site log.docx')
+  await p.locator('.sd-file .ProseMirror p').first().waitFor({ timeout: 20000 })
+  await p.locator('.sd-file .ProseMirror p').first().click()
+  await p.keyboard.press(`${MOD}+p`)
+  await until(() => p.evaluate(() => !!document.querySelector('iframe.sd-print-frame')), 5000, 20)
+  await p.evaluate(() => { const f = [...document.querySelectorAll('iframe.sd-print-frame')].pop(); const hook = () => { try { f.contentWindow.print = () => { window.printedPictures = [...f.contentDocument.images].map((i) => i.complete && i.naturalWidth > 0) } } catch { /* not yet */ } }; hook(); f.addEventListener('load', hook) })
+  const printedPictures = await until(() => p.evaluate(() => window.printedPictures), 20000, 100)
+  ok(printedPictures?.length === 3 && printedPictures.every(Boolean), 'Print, on a long Word file: its three photos at the end each there as it prints', printedPictures)
   // The workbook: its cells, as Excel has them.
   await openHere(`Decks/${XL}`)
   const cells = await until(() => p.evaluate(() => !!document.querySelector('.sd-univer canvas')), 30000, 300)
@@ -337,6 +400,17 @@ try {
   await openHere('Decks/Site photos 2025.pptx')
   const ro = await p.locator('.sd-big-bar').innerText({ timeout: 30000 }).catch(() => '')
   ok(/Read-only here: it's 3\d\d\.\d MB, and Studio saves files up to 250 MB/.test(ro) && /Read-only/.test(await p.locator('.sd-status').innerText()), 'a 310 MB deck opens to read only, saying why and what to do', ro)
+  // The PDF of scans, its parts not coming (the link dropped): said, with Try again, which opens it
+  // once they come (pdf.js waited for them for ever, "Opening…").
+  fail.ranges = true
+  await openHere('Decks/Site survey.pdf')
+  const stuck = await p.locator('.sd-pdf-cover[role="alert"]').innerText({ timeout: 30000 }).catch(() => '')
+  ok(/Couldn't show this PDF/.test(stuck) && /the connection dropped/.test(stuck) && await p.locator('.sd-pdf-cover button', { hasText: 'Try again' }).count() === 1, 'a big PDF whose parts stop coming: "Couldn\'t show this PDF … the connection dropped", with Try again', stuck)
+  await shot(p, `${tag}studio-big-desktop-pdf-dropped`)
+  fail.ranges = false
+  await p.locator('.sd-pdf-cover button', { hasText: 'Try again' }).click()
+  const again = await until(() => p.evaluate(() => { const c = document.querySelector('.sd-pdf .page[data-page-number="1"] canvas'); return c && c.width > 0 }), 30000, 150)
+  ok(!!again && !(await p.locator('.sd-pdf-cover[role="alert"]').count()), 'Try again, once they come: its first page drawn')
   ok(!dk.errors.length, 'no page errors on the computer', dk.errors.slice(0, 3))
 } catch (err) {
   ok(false, `crashed: ${err.stack}`)

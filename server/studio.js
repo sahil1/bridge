@@ -371,8 +371,10 @@ export async function open(root, rel, { rootId = null, label = null } = {}) {
 
 // A file opened in parts, as the page gets it (studioparts.slim): its XML, a marker in each big
 // part's place. Only of the file as it was opened (mtime): changed since, the page opens it again.
-export async function slimFile(root, rel, mtime) {
+// version: one of its versions so (Compare reads a big one's words, not its pictures).
+export async function slimFile(root, rel, mtime, { version = null } = {}) {
   const { real, st } = await locate(root, rel)
+  if (version) return { bytes: await parts.slim((await versionFile(root, rel, version)).file), mtime: st.mtimeMs }
   if (mtime != null && mtime !== '' && Math.abs(st.mtimeMs - Number(mtime)) > 1) throw Object.assign(new Error('The file changed since it was opened. Open it again.'), { status: 409, code: 'changed' })
   return { bytes: await parts.slim(real), mtime: st.mtimeMs }
 }
