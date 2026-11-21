@@ -39,6 +39,8 @@ import path from 'node:path'
 import zlib from 'node:zlib'
 import { execFile } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { entriesIn, packedOf } from './zip.js'
+import { isLockFile } from '../shared/lockfile.js'
 
 export const MAX = 5 // files a run sends back, at most
 export const EACH = 25 * 1024 * 1024 // each at most
@@ -170,28 +172,20 @@ function* pdfStreams(buf) {
   }
 }
 // An Office file's XML parts (it's a zip), each read (inflated): the words of a document, a sheet's
-// cells, a deck's slides. A zip's central directory, read as office.js reads it.
+// cells, a deck's slides, from the zip's central directory (zip.js).
 function* officeParts(buf) {
-  let eocd = -1
-  for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65557); i--) if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break }
-  if (eocd < 0) return
-  const count = buf.readUInt16LE(eocd + 10)
-  let p = buf.readUInt32LE(eocd + 16)
+  const entries = entriesIn(buf)
+  if (!entries) return
   let left = INFLATED
-  for (let n = 0; n < count && n < 5000 && p + 46 <= buf.length && buf.readUInt32LE(p) === 0x02014b50; n++) {
-    const method = buf.readUInt16LE(p + 10)
-    const size = buf.readUInt32LE(p + 20)
-    const nameLen = buf.readUInt16LE(p + 28)
-    const local = buf.readUInt32LE(p + 42)
-    const name = buf.toString('utf8', p + 46, p + 46 + nameLen)
-    p += 46 + nameLen + buf.readUInt16LE(p + 30) + buf.readUInt16LE(p + 32)
-    if (!/\.(xml|rels|txt|json|csv)$/i.test(name) || local + 30 > buf.length) continue
-    const start = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28)
-    const data = buf.subarray(start, start + size)
-    const out = method === 0 ? data : method === 8 ? inflate(data, true, left) : null
+  let n = 0
+  for (const e of entries.values()) {
+    if (++n > 5000) break
+    if (!/\.(xml|rels|txt|json|csv)$/i.test(e.name)) continue
+    const data = packedOf(buf, e)
+    const out = !data ? null : e.method === 0 ? data : e.method === 8 ? inflate(data, true, left) : null
     if (!out) continue
     left -= out.length
-    yield { name, text: out.toString('utf8') }
+    yield { name: e.name, text: out.toString('utf8') }
   }
 }
 // The same of a file's bytes: a text file and a PDF all through (a PDF's compressed streams too), an
@@ -352,6 +346,7 @@ async function walk(root, names) {
 function namesSay(names, { config = false } = {}) {
   const name = names[names.length - 1]
   if (names.some((n) => n.startsWith('.'))) return name.startsWith('.') ? 'it\'s a hidden file' : 'it\'s in a hidden folder'
+  if (isLockFile(name)) return 'it\'s Office\'s lock file beside an open document (~$…), not a document'
   if (secretLike(name)) return 'its name says it holds keys, passwords or credentials'
   if (names.slice(0, -1).some((n) => secretLike(n, { folder: true }))) return 'it\'s in a folder whose name says it holds keys, passwords or credentials'
   if (!TYPES[extOf(name)]) return notAKind(name)

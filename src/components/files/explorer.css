@@ -209,7 +209,7 @@ button.fx-th:hover { color: var(--ink); }
 .fx-info { display: grid; align-content: start; gap: 10px; padding: 12px 14px 20px; }
 .fx-info-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; }
 .fx-info-title { display: grid; min-width: 0; }
-.fx-info-title b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fx-info-title b { overflow-wrap: anywhere; line-height: 1.3; }
 .fx-info-list { display: grid; gap: 8px; margin: 0; }
 .fx-info-row { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 8px; font-size: 12.5px; align-items: baseline; }
 .fx-info-row dt { color: var(--ink-3); text-align: right; }
@@ -224,7 +224,8 @@ button.fx-th:hover { color: var(--ink); }
 .fx-ql { display: grid; grid-template-rows: auto auto minmax(0, 1fr); width: min(1000px, 100%); height: min(760px, 100%); border-radius: 14px; overflow: hidden; background: var(--pane); box-shadow: var(--shadow-lg); outline: none; }
 .fx-ql-head { display: flex; align-items: center; gap: 10px; padding: 8px 10px 8px 16px; border-bottom: 1px solid var(--line); min-width: 0; }
 .fx-ql-title { flex: 1; display: grid; min-width: 0; }
-.fx-ql-title b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The whole name, wrapped: Quick Look and Get Info are where a long one is read in full. */
+.fx-ql-title b { overflow-wrap: anywhere; line-height: 1.3; }
 .fx-ql-title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fx-ql-acts { display: flex; align-items: center; gap: 4px; flex: none; }
 .fx-ql-note { display: flex; align-items: center; gap: 6px; margin: 0; padding: 6px 16px; background: var(--accent-soft); color: var(--ink-2); }

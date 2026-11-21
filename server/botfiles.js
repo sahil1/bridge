@@ -35,6 +35,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { dataFile } from './paths.js'
+import { isLockFile } from '../shared/lockfile.js'
 import { DIR as BOTS } from './bots.js'
 import { TYPES, KINDS, MAX, EACH, TOTAL, extOf, isProgram, notAKind, safe, sizeOf, readChecked, attachedIn, nameOf, keptOut, secretIn, dropManifest, carryManifest } from './botattach.js'
 
@@ -155,7 +156,7 @@ export async function collect(dir, { attach = [], folders = [], cwd = null, conf
   ents.sort((a, b) => a.name.localeCompare(b.name))
   for (const e of ents) {
     const name = e.name
-    if (name.startsWith('.')) continue
+    if (name.startsWith('.') || isLockFile(name)) continue
     const p = path.join(root, name)
     const st = await fs.promises.lstat(p).catch(() => null)
     if (!st) continue

@@ -62,7 +62,7 @@ export default function PdfView({ file, data, onStats, handle, onOpen }) {
     ;(async () => {
       const { lib, viewer: V } = await loadPdfjs()
       if (gone) return
-      task = openPdf(lib, data, { onPassword: (retry, wrong) => { if (!gone) { passwordRef.current = retry; setState({ phase: 'password', wrong }) } } })
+      task = openPdf(lib, data, { url: file.url || null, size: file.size || 0, onPassword: (retry, wrong) => { if (!gone) { passwordRef.current = retry; setState({ phase: 'password', wrong }) } } })
       const doc = await task.promise
       if (gone) return
       const bus = new V.EventBus()
@@ -113,7 +113,7 @@ export default function PdfView({ file, data, onStats, handle, onOpen }) {
       try { p?.viewer.setDocument(null) } catch { /* gone already */ }
       task?.destroy() // its document and worker with it
     }
-  }, [data])
+  }, [data, file.url])
 
   // The width it fits to follows the pane.
   useEffect(() => {
