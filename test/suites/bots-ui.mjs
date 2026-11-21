@@ -536,6 +536,14 @@ try {
       await x.p.waitForTimeout(300)
       faults = await fits(x.p, '.bp.phone')
       ok(!Object.keys(faults).length, `${mode}, a phone: its Settings fit`, faults)
+      // (Its Access line takes two lines on a phone: its box as tall as its words, on Settings and
+      // on its Overview, however long the page under it is.)
+      for (const tb of ['settings', 'overview']) {
+        await x.p.locator(`.bp.phone .sb-tabs [data-tab="${tb}"]`).click()
+        await x.p.locator('.bp.phone [data-setting="bots-access-line"]').waitFor({ timeout: 5000 })
+        const line = await x.p.locator('.bp.phone [data-setting="bots-access-line"]').evaluate((e) => { const r = e.getBoundingClientRect(); const s = e.querySelector(':scope > span').getBoundingClientRect(); return { box: Math.round(r.height), words: Math.round(s.height), spill: Math.round(s.bottom - (r.bottom - 1)) } })
+        ok(line.words > 30 && line.spill <= 0, `${mode}, a phone: its Access line on ${tb}, two lines, its box holding them`, line)
+      }
       ok(x.errors.length === 0, `${mode}, a phone: no page errors`, x.errors)
       await x.ctx.close()
     })
