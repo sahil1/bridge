@@ -235,6 +235,8 @@ export function MachineMenu({ phone = false, elsewhere = null }) {
               <Icon name={ctl.data.control?.on ? 'check' : 'keyboard'} size={13} /> {t('Let my other devices control this computer')}
             </button>
           )}
+          {/* Turned down (macOS not letting Bridge AI use the mouse and keyboard, say): why, here. */}
+          {screens && ctl.here && ctl.err && <p className="mc-err small" role="alert"><Icon name="alert" size={12} /> <span>{ctl.err}</span></p>}
           {(app || scans) && (
             <>
               <div className="menu-sep" />
