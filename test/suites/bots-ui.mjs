@@ -9,12 +9,17 @@
 //   Connections: a card saying it's connected, Test this connection (each check as the server ran it:
 //     what needs you first, the rest a click away; a check's fix), You here linked by a code sent to
 //     the app in a direct message (the card ticks by itself), the Chief picked and the specialists it
-//     reaches, Advanced folded with the app's tokens, Try a message (a dry run) and Telegram, coming.
+//     reaches, Advanced folded with the app's tokens and A slash command for each bot (a switch on
+//     its label's line), Try a message (a dry run), and nothing listed as coming. A bot given an app of
+//     its own there (An App of Its Own) has a card of the same kind under Slack, after the shared one,
+//     saying whose it is; set up, it offers to move the bot onto the shared one, which works: done,
+//     its card goes and that's said.
 //   Bots: the Chief first, then the specialists; New bot's three questions (what it's for, its
 //     folder, where it answers) sent as one (/bots/quick), the bot as asked for: its page opens.
 //   A bot's page: Overview, Settings, Memory, Activity; its Overview's sessions and Start a Test
 //     Session; Settings with five fields (name, what it's for, its folder, who can ask, edits files)
-//     and the rest under Advanced, commands among them (none in this version, saying why).
+//     and the rest under Advanced, commands among them (none in this version, saying why), and where
+//     it answers in one line, with Open in Connections (its connection's card, scrolled to).
 //   Sessions: every session (Hiring's in #launch with your change and Dana's question waiting, Front
 //     Desk's with Sam in a direct message, one ended), waiting for you first, filtered by bot and by
 //     how it stands; Start a test session, opening it. A session: its Thread (Dana's reply sent as
@@ -27,7 +32,7 @@
 //   session fitting the screen).
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, startSlack, checks, until, browser, page, shot, phoneFaults, changeAnswer, noServiceWorker, TEST } from '../lib/harness.mjs'
+import { startKit, startSlack, checks, until, sleep, browser, page, shot, phoneFaults, changeAnswer, noServiceWorker, TEST } from '../lib/harness.mjs'
 import { openSettings, lookers, M } from '../lib/bots.mjs'
 
 const { ok, done } = checks('bots-ui')
@@ -177,6 +182,12 @@ try {
     ok(!(await adv.evaluate((d) => d.open)) && !(await card.locator('[data-setting="slack-connect"]').isVisible().catch(() => false)), 'Advanced is folded: no tokens on the card itself')
     await adv.locator(':scope > summary').click()
     ok(await shown(p, `.bh-card[data-connection="${C}"] [data-setting="connection-advanced"] .cn-rename input`) && await shown(p, `.bh-card[data-connection="${C}"] [data-setting="connection-perbot"]`), 'opened: its name, a slash command for each bot, its tokens and manifest')
+    // (A slash command for each bot: its switch on its label's line, before it, as the other switches.)
+    const perBot = card.locator('[data-setting="connection-perbot"]')
+    const box = await perBot.locator('input').boundingBox()
+    const words = await perBot.locator('label b').boundingBox()
+    ok(!!box && !!words && Math.abs((box.y + box.height / 2) - (words.y + words.height / 2)) < 8 && box.x + box.width <= words.x, 'A slash command for each bot: its switch on the same line as its label', { box, words })
+    ok(!(await card.locator('[data-setting="slack-owner"]').count()), 'and no You in Slack picker: You Here is the one way')
     await adv.locator(':scope > summary').click()
     // Try a message: the server's own dry run.
     await card.locator('[data-setting="routing-try"] summary').click()
@@ -188,7 +199,9 @@ try {
     await card.locator('.ro-try textarea').fill('what does the team plan cost?')
     await card.locator('.ro-try button[type="submit"]').click()
     ok(!!(await until(async () => /the Chief, takes it/.test(await textOf(p, `.bh-card .ro-out[data-rule="chief"][data-bot="${FD}"]`)), 10000)), 'and one naming no bot goes to its Chief, Front Desk', await textOf(p, '.ro-out'))
-    ok(await shown(p, '[data-setting="connections-new"] [data-platform="telegram"]') && /Telegram: coming/.test(await textOf(p, '[data-setting="connections-new"]')), 'Telegram: coming')
+    const all = await p.locator('.bh [data-setting="bots-connections"]').innerText()
+    ok(!/coming|Telegram/i.test(all) && !(await p.locator('.bh [data-platform="telegram"]').count()), 'nothing listed as coming: no Telegram', all.slice(-300))
+    ok((await p.locator('.bh .bh-plat').evaluateAll((l) => l.map((e) => e.dataset.platform))).join() === 'slack', 'its connections under their platform: Slack')
     await shot(p, `${tag}bots-ui-connections-light`)
   })
 
@@ -237,6 +250,34 @@ try {
     ok(!!(await until(async () => (await textOf(p, '.bp .bp-name')) === 'Launch Bot', 8000)), 'its page opens')
   })
 
+  await part('a bot\'s own app, in Connections', async () => {
+    await p.locator('[data-setting="rail-bots"] .rail-nav-btn').click()
+    await p.locator('.bh-tabs [data-tab="connections"]').click()
+    const card = p.locator(`.bh-card[data-connection="${C}"]`)
+    await card.locator('[data-setting="connection-advanced"] > summary').click()
+    const own = card.locator('[data-setting="connection-own"]')
+    await own.locator('select').selectOption(LB)
+    await own.locator('button', { hasText: 'Give it its own app' }).click()
+    const O = await until(async () => (await kit.api('/connections')).connections.find((x) => x.own?.id === LB)?.id, 8000)
+    const oc = p.locator(`.bh-card[data-connection="${O}"]`)
+    ok(!!O && await shown(p, `.bh-card[data-connection="${O}"] [data-setting="slack-guide"]`), 'An App of Its Own: Launch Bot\'s own app, a card with its steps', O)
+    ok(/Launch Bot's own app/.test(await textOf(p, `.bh-card[data-connection="${O}"] [data-setting="connection-kind"]`)) && /Shared · 2 bots/.test(await textOf(p, `.bh-card[data-connection="${C}"] [data-setting="connection-kind"]`)), 'saying whose it is; the shared one, how many bots it carries')
+    ok((await p.locator('.bh .bh-plat[data-platform="slack"] .cn-card').evaluateAll((l) => l.map((e) => e.dataset.kind))).join() === 'shared,own', 'under Slack, the shared one first, then the bot\'s own')
+    await kit.api(`/connections/${O}/tokens`, { appToken: 'xapp-two', botToken: 'xoxb-two' })
+    ok(!!(await until(async () => /Connected to/.test(await textOf(p, `.bh-card[data-connection="${O}"] .cn-state`)), 15000)), 'set up: connected, said on its card')
+    const move = oc.locator('[data-setting="connection-share"][data-move="true"]')
+    ok(!!(await until(async () => /Your shared Slack connection, @tester_bot, reaches your other bots/.test(await move.innerText().catch(() => '')), 8000)), 'the shared one works: it offers to move Launch Bot onto it', await move.innerText().catch(() => ''))
+    await oc.locator('[data-setting="connection-advanced"] > summary').click()
+    await sleep(300)
+    await shot(p, `${tag}bots-ui-own-app-light`)
+    await move.locator('button', { hasText: 'Move Launch Bot to @tester_bot' }).click()
+    ok(/Its own app's tokens are deleted here/.test(await textOf(p, `.bh-card[data-connection="${O}"] .bh-share-sure`)), 'asking first, saying what happens')
+    await move.locator('.bh-share-sure .btn.primary').click()
+    ok(!!(await until(async () => !(await p.locator(`.bh-card[data-connection="${O}"]`).count()) && /Moved Launch Bot to @tester_bot/.test(await textOf(p, '[data-setting="connections-done"]')), 10000)), 'moved: its card goes, and that\'s said')
+    ok((await conn(C)).bots.some((x) => x.id === LB), 'Launch Bot reached through tester_bot again')
+    await p.locator('[data-setting="connections-done"] .icon-btn').click()
+  })
+
   await part('a bot\'s page', async () => {
     await p.locator('[data-setting="rail-bots"] .rail-nav-btn').click()
     await p.locator('.bh-tabs [data-tab="bots"]').click()
@@ -260,13 +301,22 @@ try {
     if (await adv.evaluate((d) => d.open)) await adv.locator(':scope > summary').click()
     ok(!(await p.locator('.bp [data-setting="slack-limits"]').count()) && !(await p.locator('.bp [data-setting="bots-mcp"]').count()), 'the rest folded under Advanced')
     await adv.locator(':scope > summary').click()
-    for (const [sel, name] of [['bots-where', 'where it answers'], ['slack-changes', 'changes'], ['bots-bash', 'commands'], ['slack-limits', 'limits and Longest Run'], ['bots-access-memory', 'memory'], ['slack-replies', 'how answers go'], ['bots-answer-in', 'Answer In'], ['slack-channels', 'channels'], ['slack-identity', 'icon, export and delete']]) ok(await shown(p, `.bp [data-setting="bot-advanced"] [data-setting="${sel}"]`), `Advanced: ${name}`)
+    for (const [sel, name] of [['bot-where', 'where it answers'], ['slack-changes', 'changes'], ['bots-bash', 'commands'], ['slack-limits', 'limits and Longest Run'], ['bots-access-memory', 'memory'], ['slack-replies', 'how answers go'], ['bots-answer-in', 'Answer In'], ['slack-channels', 'channels'], ['slack-identity', 'icon, export and delete']]) ok(await shown(p, `.bp [data-setting="bot-advanced"] [data-setting="${sel}"]`), `Advanced: ${name}`)
     ok(!(await p.locator('.bp [data-setting="bot-advanced"] [data-setting="slack-changes"] [data-mode="pr"]').count()) && /Proposes a PR \(waits for your OK\)/.test(await textOf(p, '.bp [data-setting="slack-changes"]')), 'one pull-request mode: Proposes a PR (waits for your OK)')
     ok(/Longest Run/.test(await textOf(p, '.bp [data-setting="slack-limits"]')) && /With no answer it carries on/.test(await textOf(p, '.bp [data-setting="slack-limits"]')), 'Longest Run, and silence carries on')
     ok((await kit.api(`/bots/${HI}`)).settings.limits.longest === 240, '(240 minutes, the server\'s)')
     // (No commands in this version: the reason, as the server gives it, and no switch.)
     const why = (await kit.api(`/bots/${HI}`)).commands?.why
     ok(!!why && !(await p.locator('.bp [data-setting="bots-bash"] [role="radio"]').count()) && (await textOf(p, '.bp [data-setting="bots-bash"]')).includes(why), 'Commands: none in this version, saying why, with no switch', { why, text: await textOf(p, '.bp [data-setting="bots-bash"]') })
+    // Where it answers: a line, and Open in Connections, its connection's card scrolled to.
+    const line = await textOf(p, '.bp [data-setting="bot-where"]')
+    ok(/Reached through @tester_bot\s*·\s*connected/.test(line) && !(await p.locator('.bp [data-setting="slack-connect"], .bp [data-setting="slack-guide"], .bp [data-setting="slack-owner"]').count()), 'where it answers, in one line: no connection set up here', line)
+    await p.locator('.bp [data-setting="bot-where"] button', { hasText: 'Open in Connections' }).click()
+    ok(!!(await until(async () => (await p.locator(`.bh[data-tab="connections"] .bh-card[data-connection="${C}"].cn-focus`).count()) > 0, 8000)), 'Open in Connections: its connection\'s card, picked out')
+    await p.locator('.bh-tabs [data-tab="bots"]').click()
+    await p.locator(`.bh .bo-card[data-bot="${HI}"]`).click()
+    await p.locator('.bp .sb-tabs [data-tab="settings"]').click({ timeout: 8000 })
+    if (!(await adv.evaluate((d) => d.open))) await adv.locator(':scope > summary').click()
     await adv.locator(':scope > summary').click()
     // Edits files, on and off.
     const before = (await kit.api(`/bots/${HI}`)).settings.changes

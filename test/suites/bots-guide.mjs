@@ -2,13 +2,16 @@
 // with stand-ins for Slack, Discord and Microsoft Teams (stand-ins/slack.mjs, discord.mjs,
 // teams.mjs) and Claude Code answering (stand-ins/helper-claude.cjs).
 //   Beta Features: the Bots line says what it is (all of it under More) and goes to its own place,
-//   Settings › Bots, and turned on offers Set up a bot, which opens Bots. With no bot yet, Make Your First Bot says what one is in a line, and AI Assist with no
-//   model offers the form. A bot made, each place it answers (Slack, Discord, Teams) has its checklist
-//   under its Settings' Where It Answers (Advanced): seven steps from the bot made to its first answer, each with the clicks on that
+//   Settings › Bots, and turned on offers Set up a bot, which opens Bots. With no bot yet, Make Your
+//   First Bot says what one is in a line, and AI Assist with no model offers the form. A bot made,
+//   its page says it isn't reached anywhere yet, with Open in Connections; there, each app of its
+//   own (Slack, Discord, Teams) has its checklist on its card: seven steps from the bot made to its
+//   first answer, each with the clicks on that
 //   platform's own site, a button to the page where there is one, and what to do when it doesn't
 //   work. Each step ticks itself as it's done: the app and its tokens, connected, you there,
 //   invited (or added to a server, or to Teams), and its first answer sent. All done, it folds away
-//   to a line, and How to set up brings it back. Light and dark, on a computer and a phone.
+//   to a line under the card's Advanced, and How to set up brings it back. Light and dark, on a
+//   computer and a phone.
 import fs from 'node:fs'
 import path from 'node:path'
 import { startKit, startSlack, startDiscord, startTeams, checks, until, sleep, browser, page, shot, phoneFaults, TEST } from '../lib/harness.mjs'
@@ -64,12 +67,22 @@ try {
     await p.locator('.bp .sb-tabs [data-tab="settings"]').waitFor({ timeout: 10000 })
     await sleep(400)
     // (Its page opens with AI Assist's chat beside it, which has the same steps: closed, so the
-    // checklist here is its Settings' own.)
+    // checklist is its card's, in Connections.)
     if (await p.locator('.bp-chat .ai-head-close').count()) await p.locator('.bp-chat .ai-head-close').click()
     await p.locator('.bp .sb-tabs [data-tab="settings"]').click({ timeout: 10000 })
     const adv = p.locator('.bp [data-setting="bot-advanced"]')
     if (!(await adv.evaluate((d) => d.open))) await adv.locator(':scope > summary').click()
-    ok(!!(await guide('slack').waitFor({ timeout: 10000 }).then(() => true, () => false)), 'with no model, AI Assist\'s form: its name, then its checklist under its Settings\' Advanced')
+    const reach = await p.locator('.bp [data-setting="bot-where"]').innerText()
+    ok(/Not on Slack, Discord or Microsoft Teams yet/.test(reach), 'with no model, AI Assist\'s form: its name; its page says it isn\'t reached anywhere yet', reach)
+    await p.locator('.bp [data-setting="bot-where"] button', { hasText: 'Open in Connections' }).click()
+    const add = p.locator('.bh [data-setting="connections-new"] .cn-new-one[data-platform="slack"]')
+    if (!(await add.evaluate((d) => d.open))) await add.locator(':scope > summary').click()
+    await add.locator('[data-setting="connection-own"] option', { hasText: 'Atlas' }).waitFor({ state: 'attached', timeout: 10000 })
+    await add.locator('[data-setting="connection-own"] select').selectOption({ label: 'Atlas' })
+    await add.locator('[data-setting="connection-own"] button', { hasText: 'Give it its own app' }).click()
+    ok(!!(await guide('slack').waitFor({ timeout: 10000 }).then(() => true, () => false)), 'Open in Connections, An App of Its Own: its checklist, on its card')
+    // (Its Advanced open: once every step's done, its checklist folds to a line there.)
+    await p.locator('.bh .cn-card[data-platform="slack"] [data-setting="connection-advanced"] > summary').click()
   })
 
   // ---------- Slack ----------
@@ -89,6 +102,7 @@ try {
     await slack.ask({ user: 'U0DANA', text: '<@UBOT> what\'s new? [answer All quiet.]' })
     await send('what\'s new')
     ok(!!(await until(async () => /Atlas is set up in Slack/.test(await textOf('slack')), 25000)), 'its first answer sent: every step done, and the checklist folds away to a line')
+    ok(await guide('slack').evaluate((e) => !!e.closest('[data-setting="connection-advanced"]')), 'under its card\'s Advanced')
     await guide('slack').locator('button', { hasText: 'How to set up' }).click()
     ok(!!(await until(async () => (await guide('slack').locator('li.g-done').count()) === 7, 5000)), 'How to set up: the checklist again, every step ticked')
     await guide('slack').locator('button', { hasText: 'Fold it away' }).click()
@@ -97,7 +111,9 @@ try {
 
   // ---------- Discord ----------
   await part('Discord', async () => {
-    await p.locator('.sb-where-tabs [data-platform="discord"]').click()
+    await kit.api('/bots/b1/own', { platform: 'discord' })
+    await guide('discord').waitFor({ timeout: 10000 })
+    await p.locator('.bh .cn-card[data-platform="discord"] [data-setting="connection-advanced"] > summary').click()
     const t0 = await textOf('discord')
     ok(/Set Up in Discord/.test(t0) && /1 of 7 done/.test(t0) && /Bot › Reset Token › Yes, do it!/.test(t0) && /Message Content Intent and Server Members Intent/.test(t0), 'Set Up in Discord: its steps, with the Developer Portal\'s clicks', t0.slice(0, 300))
     ok(await guide('discord').locator('a[href="https://discord.com/developers/applications"]').count() === 1, 'a button to the Developer Portal')
@@ -112,7 +128,9 @@ try {
 
   // ---------- Teams ----------
   await part('Teams', async () => {
-    await p.locator('.sb-where-tabs [data-platform="teams"]').click()
+    await kit.api('/bots/b1/own', { platform: 'teams' })
+    await guide('teams').waitFor({ timeout: 10000 })
+    await p.locator('.bh .cn-card[data-platform="teams"] [data-setting="connection-advanced"] > summary').click()
     const t0 = await textOf('teams')
     ok(/Set Up in Microsoft Teams/.test(t0) && /1 of 7 done/.test(t0) && /Create a resource › Azure Bot/.test(t0) && /New client secret/.test(t0) && /Upload a custom app/.test(t0), 'Set Up in Microsoft Teams: the Azure Bot, its IDs, the tunnel, the Teams app', t0.slice(0, 300))
     await kit.api('/bots/b1/teams', tm.app)
@@ -135,7 +153,8 @@ try {
   await ctx.close()
 
   // ---------- Light and dark, a computer and a phone ----------
-  await kit.api('/bots', { name: 'Pricing Desk' })
+  const PD = (await kit.api('/bots', { name: 'Pricing Desk' })).id
+  await kit.api(`/bots/${PD}/own`, { platform: 'slack' })
   for (const [mode, phone] of [['dark', false], ['light', true], ['dark', true]]) {
     await part(`${mode}${phone ? ', a phone' : ''}`, async () => {
       const x = await page(b, kit.url, { mode, theme: mode === 'dark' ? 'midnight' : 'sky', phone })
@@ -152,12 +171,23 @@ try {
       await x.p.locator('.bp .sb-tabs [data-tab="settings"]').click()
       const adv = x.p.locator('.bp [data-setting="bot-advanced"]')
       if (!(await adv.evaluate((d) => d.open))) await adv.locator(':scope > summary').click()
-      await x.p.locator('[data-setting="slack-guide"] li').first().waitFor({ timeout: 8000 })
-      ok(/1 of 7 done/.test(await x.p.locator('[data-setting="slack-guide"]').innerText()), `${mode}${phone ? ', a phone' : ''}: a new bot's checklist`)
+      const line = await x.p.locator('.bp [data-setting="bot-where"]').innerText()
+      ok(/Reached through @Pricing Desk\s*·\s*its own app\s*·\s*not set up/.test(line), `${mode}${phone ? ', a phone' : ''}: a new bot's own app, not set up, in a line`, line)
       if (phone) {
         await sleep(300)
         const faults = await phoneFaults(x.p, '.bp.phone .bp-main')
         ok(!Object.keys(faults).length, `${mode}, a phone: nothing too small, off the screen or cut short`, faults)
+      }
+      await x.p.locator('.bp [data-setting="bot-where"] button', { hasText: 'Open in Connections' }).click()
+      const card = x.p.locator('.bh .cn-card[data-platform="slack"]', { hasText: 'Pricing Desk\'s own app' })
+      await card.locator('[data-setting="slack-guide"] li').first().waitFor({ timeout: 8000 })
+      ok(/1 of 7 done/.test(await card.locator('[data-setting="slack-guide"]').innerText()), `${mode}${phone ? ', a phone' : ''}: its checklist, on its card in Connections`)
+      if (phone) {
+        await sleep(1000)
+        const faults = await phoneFaults(x.p, '[data-setting="phone-bots"]')
+        if (faults.covered) faults.covered = faults.covered.filter((y) => !/ under Sections <nav\.tabbar>$/.test(y))
+        if (!faults.covered?.length) delete faults.covered
+        ok(!Object.keys(faults).length, `${mode}, a phone: Connections fits`, faults)
       }
       await shot(x.p, `${tag}bots-guide-${mode}${phone ? '-phone' : ''}`)
       ok(x.errors.length === 0, `${mode}${phone ? ', a phone' : ''}: no page errors`, x.errors)

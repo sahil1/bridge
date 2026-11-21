@@ -2,11 +2,12 @@
 // Framework's signing keys, Microsoft Entra ID's sign-in and the Bot Connector, which sends the
 // bot signed messages) and a stand-in Claude Code answering (stand-ins/helper-claude.cjs), in the
 // browser named by BRIDGE_TEST_BROWSER.
-//   Settings › Bots › Where It Answers › Microsoft Teams: the steps for someone doing it the first
-//   time (the Azure Bot, its IDs and client secret, a tunnel of your own to the port shown, the
-//   messaging endpoint, the Teams app to upload), the three pasted and checked with Microsoft (a
-//   wrong secret said at once), the tunnel's address saved and checked. The Teams app downloaded.
-//   Who may ask, by Teams' people, and you in Teams. A message in a chat with the bot and a mention
+//   Bots › Connections › Add a Connection › Microsoft Teams › An App of Its Own: a card with the steps
+//   for someone doing it the first time (the Azure Bot, its IDs and client secret, a tunnel of your
+//   own to the port shown, the messaging endpoint, the Teams app to upload), the three pasted and
+//   checked with Microsoft (a wrong secret said at once), the tunnel's address saved and checked, all
+//   on the card until Teams has reached it. The Teams app downloaded. Its page says where it answers
+//   in a line. Who may ask, by Teams' people, and you in Teams (You Here). A message in a chat with the bot and a mention
 //   in a channel: one read-only agent briefed as a bot in Microsoft Teams, its draft in Needs You,
 //   sent as a reply in that chat or that post's thread ("typing…" for 👀, no reactions); a reply in
 //   that thread without a mention goes on from that answer. Answering in the channel (Answer In), a
@@ -21,7 +22,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { startKit, startTeams, checks, until, sleep, browser, page, shot, phoneFaults, TEST, IS_WIN } from '../lib/harness.mjs'
-import { lookers, ownFile, openBot } from '../lib/bots.mjs'
+import { lookers, ownFile, openBot, openBots } from '../lib/bots.mjs'
 import { unzip } from '../../server/teamsapp.js'
 
 const { ok, done } = checks('teams-bot')
@@ -53,13 +54,19 @@ try {
   await kit.api('/bots', { name: 'Atlas' })
   await kit.api('/bots/b1/settings', { readsFrom: ['~/pricing'], answerIn: 'thread' })
 
-  // ---------- Set up in Settings ----------
+  // ---------- Set up in Connections ----------
   let port = null
-  await part('connecting in Settings', async () => {
+  await part('connecting in Connections', async () => {
     const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
-    await openBot(p)
-    await p.locator('.sb-where-tabs [data-platform="teams"]').click()
-    const sec = p.locator('[data-setting="teams-connect"]')
+    await openBots(p, 'connections')
+    const add = p.locator('.bh [data-setting="connections-new"] .cn-new-one[data-platform="teams"]')
+    await add.locator(':scope > summary').click()
+    await add.locator('[data-setting="connection-own"] option', { hasText: 'Atlas' }).waitFor({ state: 'attached', timeout: 10000 })
+    await add.locator('[data-setting="connection-own"] select').selectOption({ label: 'Atlas' })
+    await add.locator('[data-setting="connection-own"] button', { hasText: 'Give it its own app' }).click()
+    const card = p.locator('.bh .cn-card[data-platform="teams"][data-kind="own"]')
+    const sec = card.locator('[data-setting="teams-connect"]')
+    await sec.waitFor({ timeout: 10000 })
     const steps = await sec.locator('.sb-steps').innerText()
     ok(/Create a resource › Azure Bot/.test(steps) && /Single Tenant/.test(steps) && /Microsoft App ID and the App Tenant ID/.test(steps) && /New client secret/.test(steps) && /tunnel of your own/.test(steps) && /Messaging endpoint/.test(steps) && /Upload a custom app/.test(steps), 'the steps for a first time: the Azure Bot, its IDs and secret, a tunnel, the messaging endpoint, the Teams app', steps)
     ok(/cloudflared tunnel --url http:\/\/localhost:\d+/.test(steps) && /devtunnel host -p \d+ --allow-anonymous/.test(steps), 'with the tunnel commands to run, for its port')
@@ -215,10 +222,8 @@ try {
     for (const [mode, phone] of [['dark', false], ['light', true], ['dark', true]]) {
       const { ctx, p, errors } = await page(b, kit.url, { mode, theme: mode === 'dark' ? 'midnight' : 'sky', phone })
       await openBot(p)
-      await p.locator('.sb-where-tabs [data-platform="teams"]').click()
-      await p.locator('[data-setting="teams-owner"]').waitFor({ timeout: 8000 })
-      const sec = await p.locator('[data-setting="teams-connect"]').innerText()
-      ok(/3 messages to it were turned away/.test(sec) && /Last heard from Teams/.test(sec), `${mode}${phone ? ', a phone' : ''}: what was turned away, and when it last heard from Teams`, sec.slice(0, 400))
+      const line = await p.locator('.bp [data-setting="bot-where"]').innerText()
+      ok(/Reached through Atlas\s*·\s*Microsoft Teams\s*·\s*its own app\s*·\s*connected/.test(line), `${mode}${phone ? ', a phone' : ''}: where it answers, in a line`, line)
       ok(/Dana Reyes\s*Microsoft Teams/.test(await p.locator('[data-setting="slack-askers"] .sb-askers').innerText()), `${mode}${phone ? ', a phone' : ''}: who may ask, with where they're from`)
       if (phone) {
         await sleep(300)
@@ -226,6 +231,20 @@ try {
         ok(!Object.keys(faults).length, `${mode}, a phone: nothing too small or wider than the screen`, faults)
       }
       await shot(p, `${tag}teams-bot-${mode}${phone ? '-phone' : ''}`)
+      await openBots(p, 'connections')
+      const card = p.locator('.bh .cn-card[data-platform="teams"]')
+      ok(/Tester/.test(await card.locator('[data-setting="connection-you"]').innerText()), `${mode}${phone ? ', a phone' : ''}: you in Teams, under You Here on its card`)
+      await card.locator('[data-setting="connection-advanced"] > summary').click()
+      const sec = await card.locator('[data-setting="teams-connect"]').innerText()
+      ok(/3 messages to it were turned away/.test(sec) && /Last heard from Teams/.test(sec), `${mode}${phone ? ', a phone' : ''}: what was turned away, and when it last heard from Teams`, sec.slice(0, 400))
+      if (phone) {
+        await sleep(300)
+        const f = await phoneFaults(p, '[data-setting="phone-bots"]')
+        if (f.covered) f.covered = f.covered.filter((x) => !/ under Sections <nav\.tabbar>$/.test(x))
+        if (!f.covered?.length) delete f.covered
+        ok(!Object.keys(f).length, `${mode}, a phone: its card fits`, f)
+      }
+      await shot(p, `${tag}teams-bot-card-${mode}${phone ? '-phone' : ''}`)
       ok(errors.length === 0, `${mode}${phone ? ', a phone' : ''}: no page errors`, errors)
       await ctx.close()
     }

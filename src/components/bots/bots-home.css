@@ -32,9 +32,21 @@
 .bh-gone-one { margin-left: 14px; }
 
 /* ---------- Bots › Connections ---------- */
-.bh-conns { display: grid; gap: 12px; min-width: 0; }
-.bh-conns > .st-sec.bh-card { padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--pane); box-shadow: var(--shadow); }
-.bh-conns > .cn-new { padding: 12px 0 0; }
+.bh-conns { display: grid; gap: 18px; min-width: 0; }
+.bh-plat { gap: 10px; }
+.bh-plat > .st-sec.bh-card { padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--pane); box-shadow: var(--shadow); transition: box-shadow .3s; }
+.bh-plat > .st-sec.bh-card.cn-focus { box-shadow: 0 0 0 2px var(--accent), var(--shadow); }
+.bh-conns > .cn-new { padding: 4px 0 0; }
+.bh-conns > .st-note { margin: 0; }
+.bh-conns > .st-note > span { flex: 1 1 220px; min-width: 0; }
+/* A bot's own app: its bot; one app for all your bots, or the bot moved onto the shared one. */
+.cn-its { flex-wrap: wrap; gap: 6px 10px; }
+.bh-share { gap: 8px; }
+.bh-share > span { color: var(--ink-2); line-height: 1.5; }
+.bh-share.strong { padding: 10px 12px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--line)); background: color-mix(in srgb, var(--warning) 8%, var(--pane)); }
+.bh-share.strong > span { color: var(--ink); }
+.bh-share .st-row { flex-wrap: wrap; }
+.bh-share-sure { border-color: color-mix(in srgb, var(--accent) 45%, var(--line-2)); background: var(--pane); }
 .bh-setup { display: grid; gap: 8px; min-width: 0; }
 .bh-setup .st-sec { padding-left: 0; padding-right: 0; }
 .bh-test { display: grid; gap: 8px; min-width: 0; }
@@ -61,9 +73,9 @@
 .bh-reach { gap: 6px; }
 .bh-chief { max-width: 420px; }
 .bh-adv > summary { font-weight: 600; }
-.bh-adv[open] { gap: 10px; }
+/* (A details element's own gap doesn't reach its contents: each part spaced by its margin.) */
+.cn-card > .bh-adv[open] > :not(summary, .st-sec) { margin-top: 12px; }
 .bh-adv .st-sec { padding-left: 0; padding-right: 0; }
-.bh-soon { display: flex; align-items: center; gap: 6px; margin: 4px 0 0; }
 
 /* ---------- Bots › Sessions ---------- */
 .bh-sessions { display: grid; gap: 10px; min-width: 0; }
@@ -123,6 +135,8 @@
 .bo-dl dt { font-size: 12px; color: var(--ink-2); font-weight: 500; }
 .bo-dl dd { margin: 0; display: flex; flex-wrap: wrap; gap: 4px 10px; min-width: 0; font-size: 13px; overflow-wrap: anywhere; }
 .bo-via { display: inline-flex; align-items: center; gap: 5px; }
+.bo-via.link-btn { color: var(--ink); }
+.bo-via.link-btn:hover { color: var(--accent); }
 .bs { display: grid; gap: 0; min-width: 0; }
 .bs-basic { gap: 12px; }
 .bs-field { display: grid; gap: 5px; min-width: 0; }

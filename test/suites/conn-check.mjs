@@ -16,6 +16,13 @@
 //   the same app (said at Slack's next hello too, to you in your direct messages, and gone once it
 //   is); Socket Mode turned off (link_disabled); a channel's bot where the app isn't; a paused
 //   connection. A Discord connection: its basic checks (tokens, you there, its bot).
+//   One app for all your bots (POST /connections/:id/share): a bot's own Slack app, not set up, isn't
+//   made the shared one; set up, it isn't while the shared one works (the bot moves onto that
+//   instead), nor replaces one that doesn't until that's said (replace: its id). Said: it's the
+//   shared one in place, its tokens where they were, its bot their Chief (there was none), the
+//   other bots moved onto it, the empty one gone with its folder; in the connection's record and
+//   each bot's; connected again as the shared one, a question naming a bot going to that bot; and
+//   once shared, not again.
 import fs from 'node:fs'
 import path from 'node:path'
 import WebSocket from 'ws'
@@ -224,6 +231,48 @@ try {
 
   const all = [JSON.stringify(await kit.api('/connections')), fs.readFileSync(path.join(kit.data, 'connections', C, 'check.json'), 'utf8')].join('\n')
   ok(!/xoxb-test|xapp-test|dtest\.bot-one/.test(all), 'no token in what\'s shown or kept of a test')
+
+  // ---------- One app for all your bots: a bot's own made the shared one ----------
+  // (The owner's case: a bot's own Slack app, connected, beside a shared one that has no tokens.)
+  await part('one app for all your bots', async () => {
+    const month = new Date().toISOString().slice(0, 7)
+    const trace = (id) => { try { return fs.readFileSync(path.join(kit.data, 'bots', id, 'trace', `${month}.jsonl`), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) } catch { return [] } }
+    const AT = (await kit.api('/bots', { name: 'Atlas', description: 'Says where the launch stands' })).id
+    const O = (await kit.api(`/bots/${AT}/own`, { platform: 'slack' })).connections?.slack?.id
+    const share = (id, body = {}) => kit.api(`/connections/${id}/share`, body).then((x) => x, (e) => e)
+    const early = await share(O)
+    ok(early?.status === 409 && /Set Atlas up first/.test(early.message), 'not set up yet: not made the shared one', early?.message)
+    await kit.api(`/connections/${O}/tokens`, { appToken: 'xapp-two', botToken: 'xoxb-two' })
+    ok(!!(await until(async () => (await conn(O)).state === 'connected', 15000)), 'Atlas\'s own Slack app, connected')
+    const moveInstead = await share(O)
+    ok(moveInstead?.status === 409 && /tester_bot, your shared Slack connection, is connected: move Atlas onto it instead/.test(moveInstead.message), 'a shared one that works: not replaced; the bot moves onto it instead', moveInstead?.message)
+    // The shared one, its tokens gone: it doesn't work.
+    await kit.api(`/connections/${C}/tokens`, null, 'DELETE')
+    ok(!!(await until(async () => (await conn(C)).state === 'no-tokens', 10000)), 'the shared one without tokens')
+    const unsaid = await share(O)
+    ok(unsaid?.status === 409 && /say to replace it/.test(unsaid.message), 'replacing it only when that\'s said', unsaid?.message)
+    const wrong = await share(O, { replace: 'c99' })
+    ok(wrong?.status === 409, 'and said of that one, not another', wrong?.message)
+    const tokens = path.join(kit.data, 'connections', O, 'slack.json')
+    const keys = () => { const j = JSON.parse(fs.readFileSync(tokens, 'utf8')); return `${j.appToken} ${j.botToken}` }
+    const before = keys()
+    const r = await share(O, { replace: C })
+    ok(r?.id === O && r.shared === true && r.own === null && r.bots.map((x) => x.id).sort().join() === [AT, PD].sort().join(), 'Atlas\'s app is the shared one now, reaching Atlas and Pricing Desk', r && { shared: r.shared, bots: r.bots })
+    ok(r?.chief?.id === AT && r.took?.chief === 'Atlas' && r.took?.from?.name === 'tester_bot' && r.took.from.bots.join() === 'Pricing Desk', 'with Atlas as their Chief (there was none), Pricing Desk moved from tester_bot', r && { chief: r.chief, took: r.took })
+    const gone = await conn(C).then(() => null, (e) => e)
+    ok(gone?.status === 404 && !fs.existsSync(path.join(kit.data, 'connections', C)) && (await kit.api('/connections')).connections.length === 2, 'the empty shared one is gone, its folder too (Discord\'s stays)', gone?.status)
+    ok(keys() === before && before === 'xapp-two xoxb-two' && JSON.parse(fs.readFileSync(path.join(kit.data, 'connections', O, 'connection.json'), 'utf8')).sharedFrom === AT, 'its tokens where they were, the same; it says whose it was')
+    ok((await routedOf(O)).some((e) => e.event === 'settings' && e.what === 'shared' && e.old === 'tester_bot' && e.new === 'Atlas' && e.chief === 'Atlas' && e.by === 'Tester'), 'in the connection\'s record', (await routedOf(O)).slice(0, 2))
+    ok(trace(PD).some((e) => e.type === 'settings.changed' && e.setting === 'connection' && e.old?.slack === 'tester_bot' && e.new?.slack === 'Atlas' && e.new.shared) && trace(AT).some((e) => e.type === 'settings.changed' && e.setting === 'connection' && e.old?.own && e.new?.shared), 'and in each bot\'s Activity')
+    ok((await kit.api(`/bots/${PD}`)).connections?.slack?.id === O && (await kit.api(`/bots/${AT}`)).connections?.slack?.shared === true, 'each bot reached through it')
+    // Made again as the shared one (the same tokens): connected, and a question by a bot's name goes
+    // to that bot through Atlas's app.
+    ok(!!(await until(async () => (await conn(O)).state === 'connected', 15000)), 'connected again, as the shared one')
+    await slack.ask({ user: 'U0OWNER', channel: 'C0LAUNCH', text: '<@UBOT2> Pricing Desk: what is the enterprise price, again? [answer $40 a seat.]' })
+    ok(!!(await startOf('enterprise price, again')) && !!(await until(async () => (await routedOf(O)).find((e) => e.why === 'name' && e.bot === PD), 10000)), 'a question naming Pricing Desk, to Atlas\'s app: Pricing Desk takes it')
+    const twice = await share(O)
+    ok(twice?.status === 409 && /shared Slack connection already/.test(twice.message), 'shared already: said so', twice?.message)
+  })
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
 } finally {

@@ -56,6 +56,7 @@ import WebSocket from 'ws'
 import { writeFileAtomic, ROOT } from './paths.js'
 import { failure, masked, sleep, split, REACTIONS } from './connector.js'
 import { safeName } from './safename.js'
+import { placeEn } from '../shared/places.js'
 
 const API = () => `${String(process.env.BRIDGE_DISCORD_URL || 'https://discord.com').replace(/\/+$/, '')}/api/v10`
 const VERSION = (() => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version } catch { return '0' } })()
@@ -413,7 +414,7 @@ export function makeDiscord({ id = 'discord', file, say = () => {}, threads = ()
     kept.guilds = Object.values(guilds).map((g) => ({ id: g.id, name: g.name }))
     if (kept.guild && guilds[kept.guild.id]) kept.guild.name = guilds[kept.guild.id].name
     if (!kept.guild && kept.guilds.length === 1) kept.guild = { ...kept.guilds[0] }
-    if (!kept.guilds.length) say({ what: 'no-server', ok: false, why: 'The bot isn\'t in a server yet: add it to yours with the invite link in Settings' })
+    if (!kept.guilds.length) say({ what: 'no-server', ok: false, why: `The bot isn't in a server yet: add it to yours with the invite link on its card in ${placeEn('connections')}` })
     else if (!kept.guild) say({ what: 'no-server', ok: false, why: 'The bot is in more than one server: pick the one it answers in, in Settings' })
     try { save() } catch { /* next time */ }
   }

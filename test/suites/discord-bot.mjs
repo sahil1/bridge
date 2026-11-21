@@ -1,10 +1,11 @@
 // Bots in Discord, end to end: a stand-in Discord (stand-ins/discord.mjs: its REST API and Gateway)
 // and a stand-in Claude Code answering (stand-ins/helper-claude.cjs), in the browser named by
 // BRIDGE_TEST_BROWSER.
-//   Settings › Bots › Where It Answers › Discord: the steps for someone doing it the first time
+//   A bot with no connection says so on its page, with Open in Connections; there, Add a Connection ›
+//   Discord › An App of Its Own gives it a card with the steps for someone doing it the first time
 //   (the Developer Portal, the token, the intents, the invite link), the token pasted and checked,
-//   the server picked when it's in two, connected; a wrong token said at once. Who may ask, by
-//   Discord's people (with their platform), and you in Discord. A mention: one read-only agent,
+//   the server picked when it's in two, right on the card, connected; a wrong token said at once.
+//   Who may ask, by Discord's people (with their platform), and you in Discord (You Here). A mention: one read-only agent,
 //   briefed as a bot in Discord with the question as someone else's words, its draft in Needs You
 //   (👀, then ⏳), sent into a thread started from the question (✅); a reply in that thread with no
 //   mention goes on from that answer. Answering in the channel (Answer In), a message there and no
@@ -24,7 +25,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { startKit, startDiscord, checks, until, sleep, browser, page, shot, phoneFaults, TEST, IS_WIN } from '../lib/harness.mjs'
-import { lookers, ownFile, openBot } from '../lib/bots.mjs'
+import { lookers, ownFile, openBot, openBots } from '../lib/bots.mjs'
 
 const { ok, done } = checks('discord-bot')
 const dc = await startDiscord('discord-bot')
@@ -60,28 +61,39 @@ try {
   await kit.api('/bots', { name: 'Atlas' })
   await kit.api('/bots/b1/settings', { readsFrom: ['~/pricing'], answerIn: 'thread' })
 
-  // ---------- Set up in Settings ----------
-  await part('connecting in Settings', async () => {
+  // ---------- Set up in Connections ----------
+  await part('connecting in Connections', async () => {
     const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
     await openBot(p)
-    const tabs = await p.locator('.sb-where-tabs [role="tab"]').allInnerTexts()
-    ok(tabs.map((x) => x.trim()).join('|').replace(/(not set up|connected|not connected)/g, '').split('|').map((x) => x.trim()).join() === 'Slack,Discord,Microsoft Teams', 'Where It Answers: Slack, Discord and Microsoft Teams', tabs)
-    await p.locator('.sb-where-tabs [data-platform="discord"]').click()
-    const steps = await p.locator('[data-setting="discord-guide"]').innerText()
-    ok(/Developer Portal/.test(steps) && /Reset Token/.test(steps) && /Message Content Intent/.test(steps) && /Server Members Intent/.test(steps) && /Add to Server/.test(steps) && /Mention @Atlas with a question/.test(steps), 'the steps for a first time, as a checklist: the Developer Portal, the token, the intents, adding it to your server, asking it', steps)
-    ok(await p.locator('[data-setting="discord-connect"] a[href="https://discord.com/developers/applications"]').count() === 1, 'with the Developer Portal a click away')
+    const line = await p.locator('.bp [data-setting="bot-where"]').innerText()
+    ok(/Not on Slack, Discord or Microsoft Teams yet/.test(line) && /Open in Connections/.test(line), 'its page: not on Slack, Discord or Microsoft Teams yet, with Open in Connections', line)
+    await p.locator('.bp [data-setting="bot-where"] button', { hasText: 'Open in Connections' }).click()
+    await p.locator('.bh [data-setting="connections-new"]').waitFor({ timeout: 10000 })
+    const adds = await p.locator('.bh [data-setting="connections-new"] .cn-new-one').evaluateAll((l) => l.map((e) => e.dataset.platform))
+    ok(adds.join() === 'slack,discord,teams', 'Connections: Slack, Discord and Microsoft Teams, each to add', adds)
+    const add = p.locator('.bh [data-setting="connections-new"] .cn-new-one[data-platform="discord"]')
+    await add.locator(':scope > summary').click()
+    await add.locator('[data-setting="connection-own"] option', { hasText: 'Atlas' }).waitFor({ state: 'attached', timeout: 10000 })
+    await add.locator('[data-setting="connection-own"] select').selectOption({ label: 'Atlas' })
+    await add.locator('[data-setting="connection-own"] button', { hasText: 'Give it its own app' }).click()
+    const card = p.locator('.bh .cn-card[data-platform="discord"][data-kind="own"]')
+    await card.locator('[data-setting="discord-guide"]').waitFor({ timeout: 10000 })
+    const steps = await card.locator('[data-setting="discord-guide"]').innerText()
+    ok(/Developer Portal/.test(steps) && /Reset Token/.test(steps) && /Message Content Intent/.test(steps) && /Server Members Intent/.test(steps) && /Add to Server/.test(steps) && /Mention @Atlas with a question/.test(steps), 'An App of Its Own: a card with the steps for a first time, as a checklist: the Developer Portal, the token, the intents, adding it to your server, asking it', steps)
+    ok(await card.locator('[data-setting="discord-connect"] a[href="https://discord.com/developers/applications"]').count() === 1, 'with the Developer Portal a click away')
     await shot(p, `${tag}discord-bot-steps`)
-    const input = p.locator('[data-setting="discord-connect"] input[type="password"]')
+    const input = card.locator('[data-setting="discord-connect"] input[type="password"]')
     await input.fill('dtest.not-a-real-token-000000')
-    await p.locator('[data-setting="discord-connect"] button[type="submit"]').click()
-    ok(!!(await until(async () => /turned the bot token down/.test(await p.locator('[data-setting="discord-connect"]').innerText()), 10000)), 'a wrong token: said, in Discord\'s words, at once')
-    await input.fill(T1)
-    await p.locator('[data-setting="discord-connect"] button[type="submit"]').click()
-    ok(!!(await until(async () => (await p.locator('.sb-server select').count()) === 1, 15000)), 'a bot in two servers: pick the one it answers in')
-    await p.locator('.sb-server select').selectOption('3001')
-    ok(!!(await until(async () => /Connected to Acme as @Bridge AI/.test(await p.locator('[data-setting="discord-connect"]').innerText()), 20000)), 'connected to its server, said', await p.locator('[data-setting="discord-connect"]').innerText().catch(() => ''))
-    ok(await p.locator('[data-setting="discord-connect"] a', { hasText: 'Add to Server' }).getAttribute('href').then((h) => /client_id=1001/.test(h || '')), 'with its invite link')
-    ok(/…cdef/.test(await p.locator('[data-setting="discord-connect"] .sb-have').innerText()) && !(await p.content()).includes(T1), 'its token shown only as its last four')
+    await card.locator('[data-setting="discord-connect"] button[type="submit"]').click()
+    ok(!!(await until(async () => /turned the bot token down/.test(await card.locator('[data-setting="discord-connect"]').innerText()), 10000)), 'a wrong token: said, in Discord\'s words, at once')
+    await card.locator('[data-setting="discord-connect"] input[type="password"]').fill(T1)
+    await card.locator('[data-setting="discord-connect"] button[type="submit"]').click()
+    ok(!!(await until(async () => (await card.locator('[data-setting="connection-fix"] .sb-server select').count()) === 1, 15000)), 'a bot in two servers: pick the one it answers in, right on its card')
+    await card.locator('.sb-server select').selectOption('3001')
+    ok(!!(await until(async () => /Connected to Acme as @Bridge AI/.test(await card.locator('.cn-state').innerText()), 20000)), 'connected to its server, said', await card.locator('.cn-state').innerText().catch(() => ''))
+    await card.locator('[data-setting="connection-advanced"] > summary').click()
+    ok(await card.locator('[data-setting="discord-connect"] a', { hasText: 'Add to Server' }).getAttribute('href').then((h) => /client_id=1001/.test(h || '')), 'with its invite link')
+    ok(/…cdef/.test(await card.locator('[data-setting="discord-connect"] .sb-have').innerText()) && !(await p.content()).includes(T1), 'its token shown only as its last four')
     await sleep(400)
     await shot(p, `${tag}discord-bot-connected`)
     ok(errors.length === 0, 'no page errors', errors)
@@ -307,9 +319,8 @@ try {
     for (const [mode, phone] of [['dark', false], ['light', true], ['dark', true]]) {
       const { ctx, p, errors } = await page(b, kit.url, { mode, theme: mode === 'dark' ? 'midnight' : 'sky', phone })
       await openBot(p)
-      await p.locator('.sb-where-tabs [data-platform="discord"]').click()
-      await p.locator('[data-setting="discord-owner"]').waitFor({ timeout: 8000 })
-      ok(/Tester/.test(await p.locator('[data-setting="discord-owner"]').innerText()), `${mode}${phone ? ', a phone' : ''}: you in Discord`)
+      const line = await p.locator('.bp [data-setting="bot-where"]').innerText()
+      ok(/Reached through @Atlas\s*·\s*Discord\s*·\s*its own app\s*·\s*connected/.test(line), `${mode}${phone ? ', a phone' : ''}: where it answers, in a line`, line)
       const asked = await p.locator('[data-setting="slack-askers"] .sb-askers').innerText()
       ok(/Dana\s*Discord/.test(asked), `${mode}${phone ? ', a phone' : ''}: who may ask, with where they're from`, asked)
       if (phone) {
@@ -318,6 +329,17 @@ try {
         ok(!Object.keys(faults).length, `${mode}, a phone: nothing too small or wider than the screen`, faults)
       }
       await shot(p, `${tag}discord-bot-${mode}${phone ? '-phone' : ''}`)
+      await openBots(p, 'connections')
+      const you = p.locator('.bh .cn-card[data-platform="discord"] [data-setting="connection-you"]')
+      ok(/Tester/.test(await you.innerText()), `${mode}${phone ? ', a phone' : ''}: you in Discord, under You Here on its card`)
+      if (phone) {
+        await sleep(300)
+        const f = await phoneFaults(p, '[data-setting="phone-bots"]')
+        if (f.covered) f.covered = f.covered.filter((x) => !/ under Sections <nav\.tabbar>$/.test(x))
+        if (!f.covered?.length) delete f.covered
+        ok(!Object.keys(f).length, `${mode}, a phone: its card fits`, f)
+      }
+      await shot(p, `${tag}discord-bot-card-${mode}${phone ? '-phone' : ''}`)
       ok(errors.length === 0, `${mode}${phone ? ', a phone' : ''}: no page errors`, errors)
       await ctx.close()
     }
