@@ -13,6 +13,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { asData, clean, SHAPES_URI } from './mcpdefs.js'
 import { placeEn } from '../shared/places.js'
+import { isLockFile } from '../shared/lockfile.js'
 
 const PAGE = 12_000
 const MAX_READ = 400_000
@@ -125,7 +126,7 @@ export function make({ on, sendOn, boards, meetings, places, files, studio, doct
       const items = await fsp.readdir(dir, { withFileTypes: true }).catch(() => [])
       for (const e of items) {
         if (++seen > 6000) return
-        if (e.name.startsWith('.') || SKIP.has(e.name)) continue
+        if (e.name.startsWith('.') || isLockFile(e.name) || SKIP.has(e.name)) continue
         const full = path.join(dir, e.name)
         if (e.isDirectory()) await go(full, depth + 1)
         else if (e.isFile() && studio.opens(e.name)) {

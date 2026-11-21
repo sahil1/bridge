@@ -8,6 +8,7 @@ import { WhiteboardsHome } from '../../lazy.jsx'
 import QuickLook from '../files/QuickLook.jsx'
 import { FileIcon } from '../files/art.jsx'
 import { usePick } from '../files/pick.js'
+import { MidName, holdName } from '../files/names.jsx'
 
 // Studio's lists of your files, beside your folders on its home (Studio.jsx): what you opened here,
 // the documents, sheets, decks and PDFs on this computer (server/studiofound.js: Spotlight on a Mac,
@@ -146,10 +147,10 @@ export function YourFiles({ files, group, q = '', refreshRecent, describe, onOpe
             const other = f.opens === false
             const go = openOf(f)
             return (
-              <div key={keyOf(f)} className={`sd-files-row${other ? ' other' : ''}${picked === f ? ' on' : ''}`} role="row" {...pick.itemProps(f)}>
+              <div key={keyOf(f)} className={`sd-files-row${other ? ' other' : ''}${picked === f ? ' on' : ''}`} role="row" {...pick.itemProps(f)} {...(tap ? holdName(f.name) : {})}>
                 <span role="gridcell" className="sd-file-name" title={d.full || f.path}>
                   <span className={`sd-file-ic${f.kind ? ` k-${f.kind}` : ''}`}><FileIcon e={f} art={f.kind === 'board' ? 'board' : null} size={32} /></span>
-                  <span className="sd-file-text"><b>{f.name}</b><small className="muted">{other ? t('{kind}, opened in its own app', { kind: d.kind }) : d.kind}</small></span>
+                  <span className="sd-file-text"><b><MidName name={f.name} /></b><small className="muted">{other ? t('{kind}, opened in its own app', { kind: d.kind }) : d.kind}</small></span>
                 </span>
                 <span role="gridcell" className="sd-file-dir" title={d.full || d.folder || ''}><Icon name="folder" size={12} /><span>{d.folder || '—'}</span></span>
                 <span role="gridcell" className="sd-file-when" title={f.changed ? new Date(f.changed).toLocaleString(locale()) : f.opened ? new Date(f.opened).toLocaleString(locale()) : ''}>{f.changed ? ago(f.changed) : f.opened ? t('Opened {when}', { when: ago(f.opened) }) : ''}</span>

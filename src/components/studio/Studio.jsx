@@ -5,7 +5,8 @@ import { PaneHeader, useMedia, store } from '../layout.jsx'
 import { WhiteboardPage } from '../../lazy.jsx'
 import { Menu, fileOp } from '../FileExtras.jsx'
 import { t, tx, locale } from '../../i18n/index.js'
-import { openFile, bytesOf, rawUrl, versionUrl, saveFile, changedSince, restoreVersion, base64, extOf } from './files.js'
+import { openFile, bytesOf, loadFile, rawUrl, versionUrl, saveFile, changedSince, restoreVersion, base64, extOf } from './files.js'
+import { MidName } from '../files/names.jsx'
 import { useDesignPacks, PacksSection, packFor } from './packs.jsx'
 import { lineDiff, textFor, comparable } from './diff.js'
 import { fontCss, lookOfPack } from './look.js'
@@ -47,12 +48,28 @@ const KIND_OF = {
   '.doc': tx('Word document, an older kind'), '.xls': tx('Excel workbook, an older kind'), '.ppt': tx('PowerPoint, an older kind'), '.pages': tx('Pages'), '.numbers': tx('Numbers'), '.key': tx('Keynote'), '.odt': tx('OpenDocument text'), '.ods': tx('OpenDocument spreadsheet'), '.odp': tx('OpenDocument presentation'),
 }
 const kindName = (kind, ext) => (kind === 'deck' && (ext === '.md' || ext === '.markdown') ? t('Markdown deck') : t(KIND_OF[ext] || KIND_LABEL[kind] || 'Studio'))
-const READ_ONLY = (kind) => kind === 'pdf'
+// Read-only: a PDF, and a file too big for Studio to save (server/studio.js SAVE_MAX), which opens to read.
+const READ_ONLY = (kind, meta = null) => kind === 'pdf' || meta?.saves === false
 // The kinds with AI Assist (a plain-text file has none; a PDF has it with Sign PDFs on).
 const ASSISTS = new Set(['doc', 'sheet', 'deck'])
 export const openStudio = (f) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail: f }))
 const when = (iso) => new Date(iso).toLocaleString(locale(), { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
-const sizeOf = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`)
+const sizeOf = (n) => (n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`)
+// A limit of Studio's, in round numbers (1 GB, 250 MB).
+const limitOf = (n) => (n >= 1e9 ? `${+(n / 1e9).toFixed(1)} GB` : `${Math.round(n / 1e6)} MB`)
+// Which app opens a kind on its computer, for what Studio says when it can't.
+const APP_FOR = { '.docx': 'Word', '.xlsx': 'Excel', '.xlsm': 'Excel', '.pptx': 'PowerPoint', '.csv': 'Excel', '.tsv': 'Excel' }
+// Why it didn't open, in words: too big (server/studio.js tooBig, its size and Studio's limit), else what the server said.
+function whyNot(e, ext) {
+  const d = e?.data || {}
+  if (e?.code === 'too-big' && d.size && d.max) {
+    const app = APP_FOR[ext]
+    if (d.whole) return app ? t('It\'s {size}, and a page holds a file of this kind whole, so Studio opens one up to {max}. Open it on its computer in {app}, or download it.', { size: sizeOf(d.size), max: limitOf(d.max), app }) : t('It\'s {size}, and a page holds a file of this kind whole, so Studio opens one up to {max}. Open it on its computer in a text editor, or download it.', { size: sizeOf(d.size), max: limitOf(d.max) })
+    return app ? t('It\'s {size}, and Studio opens files up to {max}. Open it on its computer in {app}, or download it.', { size: sizeOf(d.size), max: limitOf(d.max), app }) : t('It\'s {size}, and Studio opens files up to {max}. Open it on its computer, or download it.', { size: sizeOf(d.size), max: limitOf(d.max) })
+  }
+  if (e?.code === 'lock-file') return t('This is Office\'s lock file, kept beside a document while it\'s open in Word, Excel or PowerPoint (it says who has it open). It isn\'t a document: open the one without ~$ in its name.')
+  return e?.message || String(e)
+}
 // The file last open in Preview, kept in this browser for each computer, so Preview goes back to it.
 const lastOpen = () => store.get('cc-studio-last', null)
 const keepLast = (f) => store.set('cc-studio-last', f)
@@ -401,18 +418,19 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
   const folders = useFolders()
   const load = useCallback(async () => {
     const m = await openFile(f)
-    const buf = await bytesOf(rawUrl(f))
+    // A big one in parts (files.js loadFile): only what's shown comes, as it's shown.
+    const got = await loadFile(f, m)
     // Known at once, before it's drawn: the next look at the file goes from this.
-    metaRef.current = { ...m, root: f.root }
+    metaRef.current = { ...m, root: f.root, parts: got.parts || null, url: got.url || null }
     setMeta(metaRef.current)
-    setData(buf)
+    setData(got.data || got.url)
     setGen((g) => g + 1)
     setDirty(false)
     setConflict(null)
     keepLast({ root: f.root, path: f.path, name: m.name })
     return m
   }, [f])
-  const open = useCallback(() => { setMeta(null); setData(null); setErr(null); setStats(null); load().catch((e) => setErr(e.message)) }, [load])
+  const open = useCallback(() => { setMeta(null); setData(null); setErr(null); setStats(null); load().catch((e) => setErr(e)) }, [load])
   useEffect(open, [open])
   // "Saved." goes by itself after a few seconds (the status line still says it); what needs reading stays.
   useEffect(() => { if (!note?.brief) return undefined; const id = setTimeout(() => setNote(null), 4000); return () => clearTimeout(id) }, [note])
@@ -442,7 +460,7 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
     return () => { clearInterval(id); window.removeEventListener('focus', back) }
   }, [f, load])
   const save = useCallback(async ({ force = false, ok = false, auto = false, leaving = false } = {}) => {
-    if (!handle.current || !meta || READ_ONLY(meta.kind, meta.ext)) return
+    if (!handle.current || !meta || READ_ONLY(meta.kind, meta)) return
     // One at a time: asked while one's on its way, it's made after it. Leaving the file, what's in
     // it now is taken at once and saved after the one on its way.
     if (inFlight.current && !leaving) { queued.current = auto && queued.current !== 'you' ? 'auto' : 'you'; return }
@@ -467,12 +485,12 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
         if (bytes.notKept.length && !ok) { setWarn({ text: t('Saving here can\'t keep {what}. Save anyway? The file as it is now stays in its versions.', { what: bytes.notKept.join('; ') }) }); return }
         bytes = bytes.bytes
       }
-      const r = await saveFile(f, bytes, { mtime: was ?? mtime, force, auto })
+      const r = await saveFile(f, bytes, { mtime: was ?? mtime, force, auto, inParts: !!meta.parts })
       finish(r.mtime)
       // The page went on to another file meanwhile: what it shows now isn't this one's.
       if (shownFile.current !== f) return
-      metaRef.current = { ...metaRef.current, mtime: r.mtime, size: r.size, versions: r.versions }
-      setMeta((m) => ({ ...m, mtime: r.mtime, size: r.size, versions: r.versions }))
+      metaRef.current = { ...metaRef.current, mtime: r.mtime, size: r.size, versions: r.versions, keep: r.keep ?? metaRef.current?.keep }
+      setMeta((m) => ({ ...m, mtime: r.mtime, size: r.size, versions: r.versions, keep: r.keep ?? m.keep }))
       // Changed again while it saved: still unsaved, and saved again in a moment.
       if (edits.current === n) setDirty(false)
       else if (SAVES_ITSELF.has(meta.kind)) later()
@@ -516,7 +534,7 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
     if (!HERE) { setNote({ text: app ? t("{app} opens it on the computer it's on: open it there, in Bridge AI on that computer.", { app }) : t("Its app opens it on the computer it's on: open it there, in Bridge AI on that computer."), info: true }); return }
     // What's changed here goes into the file first, so the app opens it as it is now. A save that
     // can't be made says why, and it isn't opened.
-    if (dirtyRef.current && !READ_ONLY(meta.kind)) { await save(); if (dirtyRef.current || conflictRef.current) return }
+    if (dirtyRef.current && !READ_ONLY(meta.kind, meta)) { await save(); if (dirtyRef.current || conflictRef.current) return }
     try {
       const r = opener ? await api('/studio/open-in', { method: 'POST', body: f }) : await fileOp(root, 'open', rel)
       // Looked at every few seconds while it may be changed there (and at once on coming back), so
@@ -538,21 +556,29 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
   // On a computer, Files and Preview in the header; on a phone, the way back to Files.
   const tabs = wide && onBack ? <StudioTabs on="preview" onFiles={onBack} name={name} /> : null
   const back = (icon) => (!wide && onBack ? <BackBtn onBack={onBack} icon={icon} /> : null)
+  const title = <MidName name={name} />
   if (err) {
+    // Too big, or a lock file: Try again wouldn't change it; Download (and its app, on its computer) would.
+    const stays = err?.code === 'too-big' || err?.code === 'lock-file'
     return (
       <div className="sd-file">
-        <PaneHeader icon="layers" title={name} leading={back('layers')}>{tabs}</PaneHeader>
+        <PaneHeader icon="layers" title={title} leading={back('layers')}>{tabs}</PaneHeader>
         <div className="sd-empty" role="alert">
           <Icon name="alert" size={20} />
           <b>{t("Couldn't open {name}", { name })}</b>
-          <span className="muted small">{err}</span>
-          <span className="sd-empty-acts"><button type="button" className="btn small" onClick={open}><Icon name="refresh" size={12} /> {t('Try again')}</button>{onBack && <button type="button" className="ghost-btn" onClick={onBack}>{t('Back to Studio')}</button>}</span>
+          <span className="muted small">{whyNot(err, extOf(name))}</span>
+          <span className="sd-empty-acts">
+            {err?.code === 'too-big' && <a className="btn small" href={rawUrl(f)} download={name}><Icon name="download" size={12} /> {t('Download')}</a>}
+            {err?.code === 'too-big' && HERE && <button type="button" className="btn small" onClick={() => fileOp(root, 'open', rel).catch((e) => window.alert(e.message))}><Icon name="external" size={12} /> {t('Open in its app')}</button>}
+            {!stays && <button type="button" className="btn small" onClick={open}><Icon name="refresh" size={12} /> {t('Try again')}</button>}
+            {onBack && <button type="button" className="ghost-btn" onClick={onBack}>{t('Back to Studio')}</button>}
+          </span>
         </div>
       </div>
     )
   }
   const Editor = kind ? EDITORS[kind] : null
-  const readOnly = !!meta && READ_ONLY(meta.kind, meta.ext)
+  const readOnly = !!meta && READ_ONLY(meta.kind, meta)
   // AI Assist at the header's right end (in Focus, the status line's), with what the editor offers
   // as it opens (its handle's assist()): a document's words picked, a sheet's cells, a deck's
   // slides, a PDF to sign.
@@ -578,7 +604,7 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
       {/* In Focus, Studio's header folds away (on a Mac's desktop app, out of full screen, a strip
           for the window's buttons instead). */}
       {focus.on ? MAC_APP && !focus.full && <div className="sd-focus-title" title={name}><span>{name}</span></div> : (
-        <PaneHeader icon={ICON[kind] || 'layers'} title={name} leading={back(ICON[kind] || 'layers')}
+        <PaneHeader icon={ICON[kind] || 'layers'} title={title} leading={back(ICON[kind] || 'layers')}
           subtitle={<>
             <span className="sd-sub-kind">{meta ? `${kindName(kind, meta.ext)} · ${sizeOf(meta.size)}` : t('Opening…')}</span>
             {at && <span className="path-chip sd-sub-where" title={`${at.label} · ${at.full}`}><Icon name="folder" size={10} /> <span>{at.path}</span></span>}
@@ -605,6 +631,12 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
           <button type="button" className="win-btn" onClick={() => setNote(null)} aria-label={t('Close')} title={t('Close')}><Icon name="x" size={12} /></button>
         </div>
       )}
+      {meta?.saves === false && !note && (
+        <div className="sd-bar sd-note-bar sd-big-bar" role="status">
+          <Icon name="info" size={13} />
+          <span>{t('Read-only here: it\'s {size}, and Studio saves files up to {max}. To change it, open it on its computer in {app}, or ask an agent to.', { size: sizeOf(meta.size), max: limitOf(meta.limits?.save || 250e6), app: APP_FOR[meta.ext] || t('its own app') })}</span>
+        </div>
+      )}
       {conflict && (
         <div className="sd-bar sd-conflict" role="alert">
           <span><b>{t('{who} changed this file', { who: conflict.who })}</b> {t('while you were editing it. Your changes aren\'t saved yet.')}</span>
@@ -622,9 +654,9 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
       <div className={`sd-body${panel ? ' with-panel' : ''}`}>
         <div className="sd-editor">
           {!meta || !data ? opening
-            : <Suspense fallback={opening}><Editor key={gen} file={{ ...meta, root, path: rel }} data={data} onDirty={edited} onStats={setStats} handle={handle} packs={packs.list} onOpen={onOpen} /></Suspense>}
+            : <Suspense fallback={opening}><Editor key={gen} file={{ ...meta, root, path: rel }} data={meta.url ? null : data} onDirty={edited} onStats={setStats} handle={handle} packs={packs.list} onOpen={onOpen} readOnly={readOnly} /></Suspense>}
         </div>
-        {panel === 'versions' && meta && <Versions f={f} ext={meta.ext} versions={meta.versions} onRestore={restore} onClose={() => setPanel(null)} />}
+        {panel === 'versions' && meta && <Versions f={f} ext={meta.ext} versions={meta.versions} keep={meta.keep} size={meta.size} name={name} onRestore={restore} onClose={() => setPanel(null)} />}
       </div>
       {/* The status line: what the editor counts, what kind of file it is (tapped: what saving keeps),
           how many versions are kept, and whether it's saved. On a phone, Open in its app and Focus here
@@ -654,11 +686,15 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
 }
 const BackBtn = ({ onBack, icon }) => <><button type="button" className="win-btn back" onClick={onBack} aria-label={t('Back to Studio')} title={t('Back to Studio')}><Icon name="chevron" size={16} className="flip" /></button><span className="pane-icon"><Icon name={icon} size={15} /></span></>
 
-function Versions({ f, ext, versions, onRestore, onClose }) {
+// keep: how many versions Studio keeps of this file (server/studio.js keepFor): fewer of a big one,
+// none of one too big to save; said at the top of the list.
+const KEEP_ALL = 60
+function Versions({ f, ext, versions, keep = KEEP_ALL, size = 0, onRestore, onClose }) {
   const [compare, setCompare] = useState(null) // the version compared with the file as it is
   return (<>
     <aside className="sd-panel" aria-label={t('Versions')}>
       <div className="sd-panel-head"><b>{t('Versions')}</b><span className="muted small">{t('{n} kept', { n: versions.length })}</span><span className="sd-grow" /><button type="button" className="win-btn" onClick={onClose} aria-label={t('Close')}><Icon name="x" size={13} /></button></div>
+      {keep < KEEP_ALL && <p className="sd-v-note muted small" role="note">{keep === 0 ? t('Studio keeps no versions of a file this big ({size}): it opens here to read only.', { size: sizeOf(size) }) : t('This file is big ({size}), so Studio keeps its last {n} versions, not 60.', { size: sizeOf(size), n: keep })}</p>}
       <ol className="sd-versions">
         {versions.map((v, i) => (
           <li key={v.id} className={i === 0 ? 'now' : ''}>

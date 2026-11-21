@@ -3195,7 +3195,16 @@ ul.usage-now-says li:first-child { color: var(--ink-2); }
 .ctx-menu button:disabled { color: var(--ink-3); cursor: default; }
 .ctx-menu button:disabled:hover { background: none; color: var(--ink-3); }
 .ctx-menu button:disabled svg { opacity: .6; }
-.ctx-heading { padding: 6px 10px 4px; font-size: 11.5px; color: var(--ink-3); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A menu's heading is the whole name of what it's for, wrapped (a long press on a phone shows it). */
+.ctx-heading { padding: 6px 10px 4px; font-size: 11.5px; color: var(--ink-3); max-width: 260px; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
+/* A file's name cut in the middle (files/names.jsx): its start with … when it doesn't fit, its end
+   (with the extension) always shown; the whole name as its tooltip, and on a long press. */
+.mid-name { position: relative; display: flex; min-width: 0; max-width: 100%; white-space: nowrap; -webkit-touch-callout: none; }
+.mid-name::before { content: attr(data-head); min-width: 1.5em; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
+.mid-name::after { content: attr(data-tail); flex: none; white-space: pre; }
+.mid-name > .mid-text { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: pre; }
+.name-bubble { position: fixed; z-index: 260; max-width: min(340px, calc(100vw - 24px)); padding: 8px 11px; border-radius: 10px; background: var(--pane); color: var(--ink); border: 1px solid var(--line-2); box-shadow: var(--shadow-lg); font-size: 13px; line-height: 1.35; overflow-wrap: anywhere; pointer-events: none; opacity: 0; transform: translateY(2px); transition: opacity .12s ease, transform .12s ease; left: -9999px; top: 0; }
+.name-bubble.on { opacity: 1; transform: none; }
 .name-dialog { width: min(420px, 100%); }
 .name-dialog .input { width: 100%; height: 34px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane-2); color: var(--ink); font: inherit; }
 .name-dialog .input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }

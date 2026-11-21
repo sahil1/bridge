@@ -321,8 +321,11 @@ try {
       ok(viaPhone.found?.length === 1 && viaPhone.found[0].path === 'bridge-utils/store/ios/review-env/out/review-qr.png', 'on the phone, through the encrypted link: the same answer', viaPhone)
       const f = app()
       await until(() => f.evaluate(() => !!document.querySelector('.tabbar button')), 20000)
-      await f.evaluate((id) => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: id } })), pane)
-      await f.locator('.msg.assistant', { hasText: 'The page is' }).last().waitFor({ timeout: 20000 }).catch(() => {})
+      // The agent opened, and sent again until its chat shows: the app listens from an effect, after
+      // its tab bar is drawn, so one sent the moment the tab bar shows can come before that (it stays
+      // on Chief).
+      const said = f.locator('.msg.assistant', { hasText: 'The page is' }).last()
+      await until(async () => { await f.evaluate((id) => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: id } })), pane); return said.waitFor({ timeout: 2500 }).then(() => true, () => false) }, 30000, 100)
       await f.locator('.msg.assistant', { hasText: 'The page is' }).last().scrollIntoViewIfNeeded().catch(() => {})
       const pics = await until(async () => { const l = await f.locator('.reply-pic img').evaluateAll((x) => x.map((i) => i.naturalWidth)); return l.length === 2 && l.every((w) => w > 0) && l }, 20000)
       ok(!!pics, 'on the phone: the pictures show under the reply, through the relay', pics)
