@@ -7,11 +7,11 @@ import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import zlib from 'node:zlib'
 import { execFile } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { CACHE, IS_MAC, IS_WIN, ensureDir } from './paths.js'
 import { readWhole, copyOut } from './openread.js'
+import { entriesIn, dataOf } from './zip.js'
 
 export const OFFICE = {
   '.docx': 'document', '.doc': 'document', '.odt': 'document', '.rtf': 'document',
@@ -22,34 +22,16 @@ const MAX_ROWS = 2000
 const MAX_COLS = 80
 const MAX_ENTRY = 60 * 1024 * 1024 // unpacked size of one part of the file
 
-// ---------- zip (docx, pptx and xlsx are zip files of XML) ----------
+// ---------- zip (docx, pptx and xlsx are zip files of XML: zip.js) ----------
 // Read without blocking: the file is in your folders, where macOS can hold a read while it asks you.
 async function unzip(file) {
   const buf = await readWhole(file)
-  let eocd = -1
-  for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65557); i--) if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break }
-  if (eocd < 0) throw new Error("This file isn't in the newer Office format, or it's damaged")
-  const count = buf.readUInt16LE(eocd + 10)
-  let p = buf.readUInt32LE(eocd + 16)
-  const entries = new Map()
-  for (let n = 0; n < count && p + 46 <= buf.length && buf.readUInt32LE(p) === 0x02014b50; n++) {
-    const method = buf.readUInt16LE(p + 10)
-    const size = buf.readUInt32LE(p + 20)
-    const nameLen = buf.readUInt16LE(p + 28)
-    const extra = buf.readUInt16LE(p + 30)
-    const comment = buf.readUInt16LE(p + 32)
-    const local = buf.readUInt32LE(p + 42)
-    entries.set(buf.toString('utf8', p + 46, p + 46 + nameLen), { method, size, local })
-    p += 46 + nameLen + extra + comment
-  }
+  const entries = entriesIn(buf)
+  if (!entries) throw new Error("This file isn't in the newer Office format, or it's damaged")
   return (name) => {
     const e = entries.get(name)
-    if (!e) return null
-    const start = e.local + 30 + buf.readUInt16LE(e.local + 26) + buf.readUInt16LE(e.local + 28)
-    const data = buf.subarray(start, start + e.size)
-    if (e.method === 0) return data.toString('utf8')
-    if (e.method === 8) return zlib.inflateRawSync(data, { maxOutputLength: MAX_ENTRY }).toString('utf8')
-    return null
+    const data = e ? dataOf(buf, e, { max: MAX_ENTRY }) : null
+    return data ? data.toString('utf8') : null
   }
 }
 const ENT = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" }

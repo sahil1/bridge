@@ -10,6 +10,7 @@ import { t, tx } from '../../i18n/index.js'
 import { useFolder, sorted, kindName, fmtSize, fmtWhen, rawUrl, isPicture, isPdf, nameOf } from './fsapi.js'
 import { EntryIcon } from './art.jsx'
 import { peek, canPeek } from './peek.js'
+import { MidName, TileName, holdName } from './names.jsx'
 
 const noGlyph = () => null
 
@@ -23,10 +24,11 @@ function Marks({ e }) {
     </>
   )
 }
-// tap: a phone's, where a tap opens it (there's no double-click), and a long press is the menu.
+// tap: a phone's, where a tap opens it (there's no double-click), and a long press is the menu, its
+// heading the whole name (names.jsx: a phone's own long press doesn't always say it's one).
 const rowProps = (e, { sel, onSel, onOpen, onMenu, tap }) => ({
   'data-path': e.path, 'data-name': e.name, 'aria-selected': sel === e.path,
-  ...(tap ? { onClick: () => onOpen(e) } : { onMouseDown: (ev) => { if (ev.button === 0) onSel(e.path) }, onDoubleClick: () => onOpen(e) }),
+  ...(tap ? { onClick: () => onOpen(e), ...holdName(e.name, { onHold: (ev) => { onSel(e.path); onMenu(e, ev) } }) } : { onMouseDown: (ev) => { if (ev.button === 0) onSel(e.path) }, onDoubleClick: () => onOpen(e) }),
   onContextMenu: (ev) => { ev.preventDefault(); ev.stopPropagation(); onSel(e.path); onMenu(e, ev) },
 })
 
@@ -51,7 +53,7 @@ export function ListView({ entries, groups = null, sel, onSel, onOpen, onMenu, s
     <div key={e.path} role="row" className={`fx-tr fx-row ${sel === e.path ? 'on' : ''} ${e.hidden ? 'hid' : ''}`} {...rowProps(e, { sel, onSel, onOpen, onMenu, tap })}>
       <span className="fx-td fx-c-name" role="gridcell">
         <EntryIcon e={e} glyph={glyphOf(e)} size={18} />
-        <span className="fx-name" title={e.name}>{e.name}</span><Marks e={e} />
+        <MidName name={e.name} className="fx-name" /><Marks e={e} />
       </span>
       <span className="fx-td fx-c-mtime muted" role="gridcell">{e.mtime ? fmtWhen(e.mtime) : '--'}</span>
       {created && <span className="fx-td fx-c-btime muted" role="gridcell">{e.btime ? fmtWhen(e.btime) : '--'}</span>}
@@ -82,7 +84,7 @@ export function IconView({ entries, groups = null, sel, onSel, onOpen, onMenu, b
   const tile = (e) => (
     <div key={e.path} role="option" className={`fx-tile ${sel === e.path ? 'on' : ''} ${e.hidden ? 'hid' : ''}`} {...rowProps(e, { sel, onSel, onOpen, onMenu, tap })} title={e.name}>
       <Thumb base={base} root={root} e={e} cloud={cloud} size={size} glyph={glyphOf(e)} />
-      <span className="fx-tile-name">{e.name}</span>
+      <TileName name={e.name} className="fx-tile-name" />
       <Marks e={e} />
     </div>
   )
@@ -214,7 +216,7 @@ function Column({ base, root, dir, name, hidden, ver, sort, lit, last, onPick, o
           onMouseDown={(ev) => { if (ev.button === 0) onPick(e) }} onDoubleClick={() => onOpen(e)}
           onContextMenu={(ev) => { ev.preventDefault(); ev.stopPropagation(); onPick(e); onMenu(e, ev) }}>
           <EntryIcon e={e} glyph={glyphOf(e)} size={16} />
-          <span className="fx-name">{e.name}</span>
+          <MidName name={e.name} className="fx-name" />
           <Marks e={e} />
           {e.dir && <Icon name="chevron" size={10} className="fx-crow-go" />}
         </div>

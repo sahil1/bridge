@@ -35,6 +35,7 @@ import Assist from './files/Assist.jsx'
 import AiAssist from './AiAssist.jsx'
 import { useBusy } from '../busy.js'
 import { FindFile } from './FileLinks.jsx'
+import { MidName, holdName } from './files/names.jsx'
 // The kinds of file Studio opens (server/studio.js).
 export const STUDIO_OPENS = /\.(docx|md|markdown|txt|xlsx|xlsm|csv|tsv|pptx|pdf|html?)$/i
 
@@ -71,12 +72,12 @@ function TreeNode({ pane, entry, depth, selected, onOpen, expanded, toggle, show
       <button className={`tree-row ${selected === entry.path ? 'on' : ''} ${over ? 'drop-on' : ''}`} style={{ paddingLeft: 8 + depth * 14 }}
         onClick={() => (entry.dir ? toggle(entry.path) : onOpen(entry.path))} title={entry.path}
         draggable={canDrag} onDragStart={canDrag ? (e) => dragData(e, entry, pane) : undefined} {...drops}
-        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onMenu(entry, e) }}>
+        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onMenu(entry, e) }} {...holdName(entry.name, { onHold: (e) => onMenu(entry, e) })}>
         {entry.dir
           ? <Icon name="chevron" size={11} className={`tree-caret ${open ? 'rot90' : ''}`} />
           : <span className="tree-caret-sp" />}
         <Icon name={entry.dir ? (open ? 'folder-open' : 'folder') : iconFor(entry.name)} size={14} className={entry.dir ? 'ico-dir' : 'ico-file'} />
-        <span className="tree-name">{entry.name}</span>
+        <MidName name={entry.name} className="tree-name" title={false} />
       </button>
       {entry.dir && open && (data?.entries || []).map((e) => (
         <TreeNode key={e.path} pane={pane} entry={e} depth={depth + 1} selected={selected} onOpen={onOpen} expanded={expanded} toggle={toggle} showHidden={showHidden} ver={ver} onMenu={onMenu} onDropIn={onDropIn} />

@@ -43,13 +43,30 @@ export function openPdfAt(lib, url) {
   return lib.getDocument({ url, disableAutoFetch: true, disableStream: true, rangeChunkSize: 65536, BinaryDataFactory: BuiltIn, cMapUrl: 'cmaps/', standardFontDataUrl: 'standard_fonts/', wasmUrl: 'wasm/' })
 }
 
-// Opening a PDF's bytes (copied: pdf.js hands them to its worker). onPassword(retry, wrong): it's
-// locked with a password, asked of you.
-export function openPdf(lib, data, { onPassword } = {}) {
+// Opening a PDF's bytes (copied: pdf.js hands them to its worker), or a big one at its address (url),
+// read in the parts that are shown: the pages in view, as they're scrolled to (a 64 KB part at a time,
+// asked for with Range; through another computer's window or a phone, only those go). onPassword(retry,
+// wrong): it's locked with a password, asked of you.
+// (Each part asked for with Range here, so pdf.js never asks for the whole file first to see whether
+// it can ask for parts: through a phone's link, that alone sent megabytes before it stopped.) size:
+// the file's, from Studio's open.
+export function openPdf(lib, data, { onPassword, url = null, size = 0 } = {}) {
+  const ranged = url && size ? new Ranges(lib, url, size) : null
   const task = lib.getDocument({
-    data: new Uint8Array(data.slice(0)),
+    ...(ranged ? { range: ranged, disableAutoFetch: true, disableStream: true, rangeChunkSize: CHUNK } : url ? { url, disableAutoFetch: true, disableStream: true, rangeChunkSize: CHUNK } : { data: new Uint8Array(data.slice(0)) }),
     BinaryDataFactory: BuiltIn, cMapUrl: 'cmaps/', standardFontDataUrl: 'standard_fonts/', wasmUrl: 'wasm/',
   })
   if (onPassword) task.onPassword = (retry, reason) => onPassword(retry, reason === lib.PasswordResponses.INCORRECT_PASSWORD)
   return task
+}
+const CHUNK = 65536
+// pdf.js's way in for a file read in parts by someone else: it asks for a range, this fetches it.
+function Ranges(lib, url, size) {
+  const t = new lib.PDFDataRangeTransport(size, null)
+  t.requestDataRange = (begin, end) => {
+    fetch(url, { headers: { range: `bytes=${begin}-${end - 1}` }, credentials: 'same-origin' })
+      .then((r) => { if (!r.ok) throw new Error(`Couldn't read the PDF (${r.status})`); return r.arrayBuffer() })
+      .then((b) => t.onDataRange(begin, new Uint8Array(b)), () => t.abort?.())
+  }
+  return t
 }

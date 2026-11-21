@@ -479,7 +479,7 @@ function imageOf(d, cx, marks, wrap, whole) {
   }
   const pr = find(d, 'wp:docPr')
   const place = wrapOf(kid(d, 'wp:anchor'))
-  return withMarks({ type: 'image', attrs: { src: media.url, alt: av(pr, 'descr') || av(pr, 'title') || null, title: null, width: w || null, height: h || null, rid, raw: raw(d), w0: w, h0: h, float: !!kid(d, 'wp:anchor'), wrap: place.wrap, side: place.side, wrap0: place.wrap, side0: place.side } }, marks)
+  return withMarks({ type: 'image', attrs: { src: media.urlAt ? media.urlAt(w) : media.url, alt: av(pr, 'descr') || av(pr, 'title') || null, title: null, width: w || null, height: h || null, rid, raw: raw(d), w0: w, h0: h, float: !!kid(d, 'wp:anchor'), wrap: place.wrap, side: place.side, wrap0: place.wrap, side0: place.side } }, marks)
 }
 // How text goes round a picture Word floats (wp:anchor): square (wrapSquare, and tight and through,
 // which Studio draws the same), top and bottom, or none (in front of the text, or behind it); and
@@ -571,8 +571,11 @@ function pageOf(sect) {
   }
 }
 
-// urlOf(bytes, mime): how the editor shows a picture (a blob: URL in the browser).
-export async function readDocx(buf, { urlOf = () => '' } = {}) {
+// urlOf(bytes, mime): how the editor shows a picture (a blob: URL in the browser). far(path): a
+// picture left on its computer (a big file opened in parts: files.js partsOf), shown from there by
+// farUrl(path, w), about w px wide (its size on the page); a marker is in its place in the zip,
+// which saving keeps as it is.
+export async function readDocx(buf, { urlOf = () => '', far = () => false, farUrl = () => '' } = {}) {
   const zip = await JSZip.loadAsync(buf)
   const str = (p) => (zip.file(p) ? zip.file(p).async('string') : Promise.resolve(null))
   const top = relsOf(await str('_rels/.rels'))
@@ -610,6 +613,7 @@ export async function readDocx(buf, { urlOf = () => '' } = {}) {
       const path = resolve(p, r.target)
       const f = zip.file(path)
       if (!f) continue
+      if (far(path)) { m.set(r.id, { path, url: farUrl(path, 0), urlAt: (w) => farUrl(path, w) }); continue }
       const bytes = await f.async('uint8array')
       m.set(r.id, { path, url: urlOf(bytes, mimeOf(path)) })
     }

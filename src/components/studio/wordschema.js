@@ -276,7 +276,8 @@ const WordImage = Image.extend({
       return view
     }
   },
-}).configure({ inline: true, allowBase64: true, resize: { enabled: true, alwaysPreserveAspectRatio: true, minWidth: 24, minHeight: 16 } })
+  // A big file's pictures come from its computer only as they're scrolled to.
+}).configure({ inline: true, allowBase64: true, HTMLAttributes: { loading: 'lazy', decoding: 'async' }, resize: { enabled: true, alwaysPreserveAspectRatio: true, minWidth: 24, minHeight: 16 } })
 
 // ---------- Tables ----------
 // Its borders (its own, or its style's), its style and alignment, on the table the editor draws.
