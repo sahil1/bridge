@@ -210,6 +210,20 @@ try {
     delete j.paused; delete j.pausedWhy; delete j.pausedBy
     fs.writeFileSync(path.join(kit.data, 'connections', C, 'connection.json'), JSON.stringify(j))
   })
+  await part('Slack out of reach', async () => {
+    // (The network gone: the connection and the test say so in words, never the network library's
+    // code, and the test doesn't send you to copy a token that may be fine.)
+    await slack.away()
+    const v = await until(async () => { const c = await conn(C); return c.state !== 'connected' && /Couldn't reach Slack/.test(c.why || '') ? c : null }, 20000)
+    ok(!!v && /Couldn't reach Slack: (the connection was cut off|this computer seems to be offline|it didn't answer in time|the network didn't let it through)$/.test(v.why) && !/E[A-Z]{3,}|UND_ERR/.test(v.why), 'Slack out of reach: the connection says so in words, no network code', v && [v.state, v.why])
+    const r = await check(C)
+    ok(by(r).tokens?.state === 'fail' && /^Couldn't reach Slack: /.test(by(r).tokens.detail) && !/E[A-Z]{3,}|UND_ERR/.test(by(r).tokens.detail) && /internet connection/.test(by(r).tokens.fix || '') && !/Copy the|paste it/i.test(by(r).tokens.fix || ''), 'and Test this connection: not reached, check the internet, not copy the token again', by(r).tokens)
+    const bad = await kit.api(`/connections/${C}/tokens`, { appToken: 'xapp-test', botToken: 'xoxb-test' }).then(() => null, (e) => e)
+    ok(/^Couldn't reach Slack: .+\. Nothing was kept/.test(bad?.message || '') && !/E[A-Z]{3,}|UND_ERR|The bot token/.test(bad?.message || ''), 'tokens pasted meanwhile: not reached, nothing kept, not that the token is wrong', bad?.message)
+    await slack.back()
+    await kit.api(`/connections/${C}/connect`, {})
+    ok(!!(await until(async () => (await conn(C)).state === 'connected', 20000)), 'Slack back: connected again')
+  })
   await part('held to a read a minute', async () => {
     // (A distributed app outside the Marketplace: Slack holds its reads of a conversation back.)
     await slack.limit({ method: 'conversations.history', n: 1, wait: 25 })

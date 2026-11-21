@@ -54,7 +54,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import WebSocket from 'ws'
 import { writeFileAtomic, ROOT } from './paths.js'
-import { failure, masked, sleep, split, REACTIONS } from './connector.js'
+import { failure, masked, sleep, split, REACTIONS, unreached, UNREACHED_FIX } from './connector.js'
 import { safeName } from './safename.js'
 import { placeEn } from '../shared/places.js'
 
@@ -208,7 +208,7 @@ export function makeDiscord({ id = 'discord', file, say = () => {}, threads = ()
       try {
         res = await fetch(url, { method, headers: { ...(hook ? {} : { authorization: `Bot ${token}` }), 'user-agent': AGENT, ...(body ? { 'content-type': 'application/json' } : {}) }, body: form || (body ? JSON.stringify(body) : undefined), signal: AbortSignal.timeout(form ? 120000 : 20000) })
       } catch (e) {
-        throw failure(`Couldn't reach Discord: ${e.cause?.code || e.message}`, 'offline')
+        throw failure(`Couldn't reach Discord: ${unreached(e)}`, 'offline')
       }
       const left = res.headers.get('x-ratelimit-remaining')
       const reset = Number(res.headers.get('x-ratelimit-reset-after'))
@@ -310,7 +310,7 @@ export function makeDiscord({ id = 'discord', file, say = () => {}, threads = ()
       if (mine !== gen || socket !== ws) return
       drop(socket)
       ws = null
-      later(`The connection failed: ${e.message}`)
+      later(`The connection failed: ${unreached(e)}`)
     })
   }
 
@@ -322,7 +322,7 @@ export function makeDiscord({ id = 'discord', file, say = () => {}, threads = ()
     acked = true
     const one = () => {
       if (mine !== gen || socket !== ws) return
-      if (!acked) { drop(socket); ws = null; later('The connection went quiet; connecting again'); return }
+      if (!acked) { drop(socket); ws = null; later('The connection went quiet'); return }
       acked = false
       send(socket, { op: 1, d: seq })
     }
@@ -856,7 +856,7 @@ export function makeDiscord({ id = 'discord', file, say = () => {}, threads = ()
       const { me } = await whoami()
       out.push({ id: 'tokens', label: 'Tokens', state: 'ok', detail: `@${me?.username || 'the bot'}${kept.guild?.name ? ` in ${kept.guild.name}` : ''}`, fix: null })
     } catch (e) {
-      out.push({ id: 'tokens', label: 'Tokens', state: 'fail', detail: `The bot token: ${e.message}`, fix: 'Reset the token in the Developer Portal (Bot › Reset Token) and paste the new one' })
+      out.push({ id: 'tokens', label: 'Tokens', state: 'fail', detail: e.code === 'offline' ? e.message : `The bot token: ${e.message}`, fix: e.code === 'offline' ? UNREACHED_FIX : 'Reset the token in the Developer Portal (Bot › Reset Token) and paste the new one' })
       out.push({ id: 'owner', label: 'You here', state: 'skip', detail: 'Needs a working token first', fix: null })
       return out
     }
