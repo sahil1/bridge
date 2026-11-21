@@ -202,6 +202,7 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
   const can = !!st?.screen?.can || !!fixing
   useEffect(() => {
     if (!can) return
+    let mine = true // (a session closed since, for another, is closed once that one has started)
     heard.current = false
     setSess({ phase: 'connecting' })
     setGate(null)
@@ -237,16 +238,19 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
         message: (m) => { heard.current = true; onMessage(m) },
         // Closed before it said anything (the link dropped a moment): connected again once, by
         // itself; again, said. A fix offered in the session can't be chosen any more once it's closed.
+        // Closed later with nothing said (that computer says why it ends one: Stop there, an error):
+        // the link to it dropped, as it went to sleep or offline, or this device lost its network.
         closed: (code, reason) => {
+          if (!mine) return
           if (!heard.current && !retried.current) { retried.current = true; setRun((n) => n + 1); return }
           setWait(null)
           setErr((x) => (x ? (x.waits ? { ...x, fix: null, waits: false } : x) : heard.current ? x : { code: 'closed', why: reason || '' }))
-          setSess((x) => (x.phase === 'ended' ? x : { ...x, phase: 'ended' }))
+          setSess((x) => (x.phase === 'ended' ? x : { ...x, phase: 'ended', text: t('The connection to {name} dropped. It may have gone to sleep or offline, or this device lost its connection.', { name }) }))
         },
       },
     })
     conn.current = c
-    return () => { c.close(); conn.current = null; setViewing(session.current, false); session.current = null; if (lastUrl.current) { URL.revokeObjectURL(lastUrl.current); lastUrl.current = null } }
+    return () => { mine = false; c.close(); conn.current = null; setViewing(session.current, false); session.current = null; if (lastUrl.current) { URL.revokeObjectURL(lastUrl.current); lastUrl.current = null } }
   }, [can, base, run]) // eslint-disable-line react-hooks/exhaustive-deps
   // Which screen? up: a still of each, asked for (that computer sends them only in a session).
   useEffect(() => { if (choose && sess.phase === 'live') conn.current?.send({ t: 'thumbs?' }) }, [choose, sess.phase])

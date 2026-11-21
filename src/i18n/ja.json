@@ -5783,6 +5783,7 @@
   "The command": "コマンド",
   "The computer is on battery; it waits until it's plugged in.": "コンピュータがバッテリーで動いています。電源につながるまで待ちます。",
   "The connection to {name} closed before its screen showed.": "{name} の画面が表示される前に接続が閉じました。",
+  "The connection to {name} dropped. It may have gone to sleep or offline, or this device lost its connection.": "{name} との接続が切れました。スリープしたかオフラインになったか、このデバイスの接続が切れた可能性があります。",
   "The date to put in": "入れる日付",
   "The deck as Markdown, beside the slides": "デッキの Markdown をスライドの横に表示",
   "The deck, in Markdown": "デッキ（Markdown）",

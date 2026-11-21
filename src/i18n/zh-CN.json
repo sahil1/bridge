@@ -5783,6 +5783,7 @@
   "The command": "命令",
   "The computer is on battery; it waits until it's plugged in.": "电脑正在使用电池；它会等到接上电源。",
   "The connection to {name} closed before its screen showed.": "在 {name} 的屏幕显示之前，连接已关闭。",
+  "The connection to {name} dropped. It may have gone to sleep or offline, or this device lost its connection.": "与 {name} 的连接已断开。它可能已进入睡眠或离线，或者此设备的网络连接已断开。",
   "The date to put in": "要填入的日期",
   "The deck as Markdown, beside the slides": "在幻灯片旁显示 Markdown",
   "The deck, in Markdown": "幻灯片（Markdown）",

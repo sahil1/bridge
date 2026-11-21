@@ -5783,6 +5783,7 @@
   "The command": "कमांड",
   "The computer is on battery; it waits until it's plugged in.": "कंप्यूटर बैटरी पर है; चार्जर लगने तक यह इंतज़ार करता है।",
   "The connection to {name} closed before its screen showed.": "{name} से कनेक्शन उसकी स्क्रीन दिखने से पहले बंद हो गया।",
+  "The connection to {name} dropped. It may have gone to sleep or offline, or this device lost its connection.": "{name} से कनेक्शन टूट गया। हो सकता है वह स्लीप में चला गया हो या ऑफ़लाइन हो गया हो, या इस डिवाइस का कनेक्शन चला गया हो।",
   "The date to put in": "डाली जाने वाली तारीख",
   "The deck as Markdown, beside the slides": "डेक Markdown के रूप में, स्लाइड के पास",
   "The deck, in Markdown": "डेक, Markdown में",

@@ -5783,6 +5783,7 @@
   "The command": "Der Befehl",
   "The computer is on battery; it waits until it's plugged in.": "Der Computer läuft mit Akku; es wartet, bis er am Strom hängt.",
   "The connection to {name} closed before its screen showed.": "Die Verbindung zu {name} wurde geschlossen, bevor sein Bildschirm erschien.",
+  "The connection to {name} dropped. It may have gone to sleep or offline, or this device lost its connection.": "Die Verbindung zu {name} ist abgebrochen. Möglicherweise ist es in den Ruhezustand gegangen oder offline, oder dieses Gerät hat seine Verbindung verloren.",
   "The date to put in": "Das einzusetzende Datum",
   "The deck as Markdown, beside the slides": "Die Präsentation als Markdown, neben den Folien",
   "The deck, in Markdown": "Die Präsentation, in Markdown",
