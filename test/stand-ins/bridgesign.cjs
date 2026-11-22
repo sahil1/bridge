@@ -2,15 +2,13 @@
 // server's side (server/signauth.js) and the pad can be checked on any computer, with no window
 // over the screen, no pointer hidden and no Touch ID or password asked for. It reads what to do
 // from $BRIDGESIGN_STATE, a JSON file the test rewrites as it goes, each time it's started:
-//   { "probe": { "trackpad": true, "touchID": true, "auth": true },
+//   { "probe": { "trackpad": true, "touchID": true, "auth": true, "parent": true },
 //     ("probe": "fail": no answer at all)
 //     "auth": { "ok": true, "how": "touchid" } | { "ok": false, "code": "cancel", "error": "…" },
 //     "trackpad": [ { "d": [x, y, p] }, { "m": [x, y, p] }, …, { "u": 1 }, { "done": true } ],
-//     "gap": 15,                      ms between the trackpad's lines (a finger moving)
-//     "key": "<base64 of 32 bytes>" | { "error": "…" } }   the Keychain's key (one of its own when unset)
+//     "gap": 15 }                     ms between the trackpad's lines (a finger moving)
 // and notes each start (its arguments, and what it was told on stdin) in $BRIDGESIGN_LOG.
-//   probe                  what this "Mac" has
-//   key                    the "Keychain's" key for the saved signatures
+//   probe                  what this "Mac" has (and that it was started by Bridge AI)
 //   auth --reason <text>   answers as auth says, a moment later (as a person would)
 //   trackpad               {"ready"} with a trackpad's size, then trackpad's lines one by one; ends
 //                          at "done" or "cancel", or with {"cancel":"stop"} on "stop" or stdin closed.
@@ -33,11 +31,7 @@ if (cmd !== 'auth' && cmd !== 'trackpad') note(null)
 if (cmd === 'probe') {
   // (probe: "fail": it says nothing, as one killed before it answers.)
   if (state.probe === 'fail') process.exit(1)
-  say({ trackpad: true, touchID: true, auth: true, ...(state.probe || {}) })
-} else if (cmd === 'key') {
-  const k = state.key ?? Buffer.alloc(32, 7).toString('base64')
-  if (typeof k === 'object') { say({ error: k.error || 'locked', status: -25308 }); process.exit(1) }
-  say({ key: k })
+  say({ trackpad: true, touchID: true, auth: true, parent: true, ...(state.probe || {}) })
 } else if (cmd === 'auth') {
   firstLine(() => setTimeout(() => say(state.auth || { ok: true, how: 'touchid' }), 150))
 } else if (cmd === 'trackpad') {

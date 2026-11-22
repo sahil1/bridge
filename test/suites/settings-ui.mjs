@@ -31,8 +31,7 @@
 // native/callwatch (bin/callwatch.json says whether it's allowed) and tccutil (bin/tcc.log).
 import fs from 'node:fs'
 import path from 'node:path'
-import crypto from 'node:crypto'
-import { startKit, startModel, checks, until, sleep, browser, page, shot, phoneFaults, advanced, withoutCutOff, noServiceWorker, IS_MAC, ROOT } from '../lib/harness.mjs'
+import { startKit, startModel, checks, until, sleep, browser, page, shot, phoneFaults, advanced, withoutCutOff, noServiceWorker, IS_MAC, ROOT, appKeysFor, asWindow as windowPage } from '../lib/harness.mjs'
 import { SECTIONS as PLACE_SECTIONS, TABS as PLACE_TABS, NO_ACCOUNTS, placeEn } from '../../shared/places.js'
 
 const { ok, done } = checks('settings-ui')
@@ -43,9 +42,9 @@ const stand = (bin, name, source) => {
 }
 // The pages are the app's own window (its secret, server/windowkey.js), as Settings is in the app:
 // Studio's signatures are listed there, not "signing is done in the app".
-const WINDOW = crypto.randomBytes(32).toString('base64url')
-const asWindow = (ctx) => ctx.setExtraHTTPHeaders({ 'x-bridge-window': WINDOW })
-const kit = await startKit('settings-ui', { env: ({ bin }) => ({ BRIDGE_TEST_WINDOW_FILE: (fs.writeFileSync(path.join(bin, 'window-secret'), WINDOW), path.join(bin, 'window-secret')), ...(IS_MAC ? {
+let keys = null
+const asWindow = (ctx) => windowPage(ctx, keys.window)
+const kit = await startKit('settings-ui', { env: ({ bin }) => ({ BRIDGE_TEST_WINDOW_FILE: (keys = appKeysFor(bin)).file, ...(IS_MAC ? {
   BRIDGE_CALLWATCH: stand(bin, 'callwatch', `const fs = require('node:fs'), path = require('node:path')
 const read = () => { try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'callwatch.json'), 'utf8')) } catch { return {} } }
 const say = (o) => { process.stdout.write(JSON.stringify(o) + '\\n'); process.exit(0) }

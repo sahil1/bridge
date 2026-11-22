@@ -32,8 +32,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import zlib from 'node:zlib'
-import crypto from 'node:crypto'
-import { startKit, startRelay, startSlack, checks, until, browser, page, shot, TEST, IS_WIN } from '../lib/harness.mjs'
+import { startKit, startRelay, startSlack, checks, until, browser, page, shot, TEST, IS_WIN, appKeysFor, windowFetch } from '../lib/harness.mjs'
 import { lookers, openSettings, M, openBot } from '../lib/bots.mjs'
 import { linkAs } from '../lib/linkclient.mjs'
 
@@ -51,31 +50,31 @@ const slack = await startSlack('backup-move')
 // set to one of its own (chief.path).
 const kitWith = async (name, rel, { inHome = false, chief = null } = {}) => {
   let dataDir = null
-  // The app's window secret, given to the server at start as the app gives it (server/windowkey.js):
-  // what signatures are used and moved from.
-  const windowSecret = crypto.randomBytes(32).toString('base64url')
+  // The app's keys, given to the server at start as the app gives them (server/appkeys.js): its
+  // window (what signatures are used and moved from) and the signatures' key.
+  let keys = null
   const k = await startKit(`backup-move-${name.toLowerCase()}`, {
     config: { name: 'Tester', trials: { 'slack-bot': true, routines: true }, ...(chief ? { chief: { kind: 'claude', path: chief } } : {}) },
     env: ({ data, home, bin }) => {
-      fs.writeFileSync(path.join(bin, 'window-secret'), windowSecret)
+      keys = appKeysFor(bin)
       let d = data
       if (inHome) { d = path.join(home, '.bridge-ai'); fs.mkdirSync(d, { recursive: true }); fs.copyFileSync(path.join(data, 'config.json'), path.join(d, 'config.json')) }
       if (chief) fs.mkdirSync(path.join(home, chief.replace(/^~[\\/]/, ''), 'state'), { recursive: true })
       dataDir = d
       if (rel) fs.writeFileSync(path.join(d, 'relay.json'), JSON.stringify(rel.relayFile))
       for (const f of ['notes', 'inbox']) fs.mkdirSync(path.join(home, f), { recursive: true })
-      return { BRIDGE_COMPUTER_NAME: name, BRIDGE_SLACK_URL: slack.url, BRIDGE_SLACK_PING_MS: '1000', BRIDGE_HELPER_GONE_MS: '3000', BRIDGE_HELPER_STALL_MS: '8000', BRIDGE_BOT_HOLD_MS: '60000', BRIDGE_LINK_PING_MS: '1500', BRIDGE_TEST_WINDOW_FILE: path.join(bin, 'window-secret'), ...(inHome ? { BRIDGE_HOME: d } : {}) }
+      return { BRIDGE_COMPUTER_NAME: name, BRIDGE_SLACK_URL: slack.url, BRIDGE_SLACK_PING_MS: '1000', BRIDGE_HELPER_GONE_MS: '3000', BRIDGE_HELPER_STALL_MS: '8000', BRIDGE_BOT_HOLD_MS: '60000', BRIDGE_LINK_PING_MS: '1500', BRIDGE_TEST_WINDOW_FILE: keys.file, ...(inHome ? { BRIDGE_HOME: d } : {}) }
     },
   })
   k.dataDir = dataDir
   // As the app's own window asks: the JSON back, or a refusal thrown with its status and answer.
   k.win = async (p, body, method) => {
-    const r = await fetch(`${k.url}/api${p}`, { method: method || (body ? 'POST' : 'GET'), headers: { 'content-type': 'application/json', 'x-bridge-window': windowSecret }, body: body ? JSON.stringify(body) : undefined })
+    const r = await windowFetch(keys.window)(`${k.url}/api${p}`, { method: method || (body ? 'POST' : 'GET'), headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
     const j = await r.json().catch(() => ({}))
     if (!r.ok) throw Object.assign(new Error(j.error || `HTTP ${r.status}`), { status: r.status, j })
     return j
   }
-  k.windowSecret = windowSecret
+  k.windowSecret = keys.window
   kits.push(k)
   k.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'helper-claude.cjs'), 'utf8'))
   await k.api('/setup', { name: 'Tester' })
@@ -199,7 +198,7 @@ try {
     const r = await spare.win('/backup/apply', { id: o2.id, parts: { bots: false, connections: false, chief: false, signatures: true } })
     const there = (await spare.win('/studio/sign/setup')).list
     const one = there.find((x) => x.name === 'Studio hand')
-    const pic = one ? await fetch(`${spare.url}/api/studio/signature/${one.id}`, { headers: { 'x-bridge-window': spare.windowSecret } }) : null
+    const pic = one ? await windowFetch(spare.windowSecret)(`${spare.url}/api/studio/signature/${one.id}`) : null
     ok(r.signatures === 1 && !!one && one.width === w && pic?.status === 200 && Buffer.from(await pic.arrayBuffer()).equals(png), 'ticked: on Spare, the same picture, sealed again with Spare\'s own key', { r: r.signatures, there })
     await spare.win(`/studio/signatures/${one.id}`, null, 'DELETE')
   })

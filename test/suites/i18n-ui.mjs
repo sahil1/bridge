@@ -8,9 +8,8 @@
 // language; and picking one in Settings › You switches to it, in another open window too.
 import fs from 'node:fs'
 import path from 'node:path'
-import crypto from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { startKit, checks, until, browser, page, shot, noServiceWorker, ROOT } from '../lib/harness.mjs'
+import { startKit, checks, until, browser, page, shot, noServiceWorker, ROOT, appKeysFor, asWindow as windowPage } from '../lib/harness.mjs'
 
 const { ok, done } = checks('i18n-ui')
 const I18N = path.join(ROOT, 'src', 'i18n')
@@ -28,9 +27,9 @@ ok(LANGS.length > 0 && LANGS.every((l) => !!words[l]), 'every pack reads', LANGS
 
 // The pages are the app's own window (its secret, server/windowkey.js), so Studio's signing is
 // there to see in each language.
-const WINDOW = crypto.randomBytes(32).toString('base64url')
-const kit = await startKit('i18n-ui', { env: ({ bin }) => { fs.writeFileSync(path.join(bin, 'window-secret'), WINDOW); return { BRIDGE_TEST_WINDOW_FILE: path.join(bin, 'window-secret') } } })
-const asWindow = (ctx) => ctx.setExtraHTTPHeaders({ 'x-bridge-window': WINDOW })
+let keys = null
+const kit = await startKit('i18n-ui', { env: ({ bin }) => { keys = appKeysFor(bin); return { BRIDGE_TEST_WINDOW_FILE: keys.file } } })
+const asWindow = (ctx) => windowPage(ctx, keys.window)
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 const say = (l, en) => words[l]?.[en] || en

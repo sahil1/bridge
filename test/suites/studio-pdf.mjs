@@ -31,7 +31,7 @@ import zlib from 'node:zlib'
 import crypto from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { startKit, startModel, startRelay, checks, until, sleep, browser, page, shot, phoneFaults, noServiceWorker, rawFetch, ROOT } from '../lib/harness.mjs'
+import { startKit, startModel, startRelay, checks, until, sleep, browser, page, shot, phoneFaults, noServiceWorker, rawFetch, ROOT, appKeysFor, windowHeader, windowFetch, asWindow as windowPage } from '../lib/harness.mjs'
 import { linkAs } from '../lib/linkclient.mjs'
 
 const require = createRequire(path.join(ROOT, 'package.json'))
@@ -60,8 +60,9 @@ function png(w = 240, h = 80) {
 const IS_WIN = process.platform === 'win32'
 const relay = await startRelay('studio-pdf')
 let signState = null, signLog = null, pushLog = null
-// The app's window secret for this kit (given to its server at start, as the app gives it on a pipe).
-const WINDOW = crypto.randomBytes(32).toString('base64url')
+// The app's keys for this kit (given to its server at start, as the app gives them on a pipe): its
+// window secret (WINDOW), the signatures' key and this start's own secret.
+let keys = null, WINDOW = null
 const kit = await startKit('studio-pdf', {
   env: ({ bin, data }) => {
     fs.writeFileSync(path.join(data, 'relay.json'), JSON.stringify(relay.relayFile))
@@ -72,8 +73,9 @@ const kit = await startKit('studio-pdf', {
     signState = path.join(bin, 'bridgesign.json')
     signLog = path.join(bin, 'bridgesign.log')
     pushLog = path.join(bin, 'push.jsonl')
-    fs.writeFileSync(path.join(bin, 'window-secret'), WINDOW)
-    const env = { OLLAMA_HOST: 'http://127.0.0.1:9', LM_STUDIO_BASE_URL: 'http://127.0.0.1:9/v1', BRIDGE_COMPUTER_NAME: 'Studio Mac', BRIDGE_TEST_PUSH: pushLog, BRIDGE_SIGN_PHONE_MS: '15000', BRIDGE_TEST_WINDOW_FILE: path.join(bin, 'window-secret') }
+    keys = appKeysFor(bin, { store: 'keychain' })
+    WINDOW = keys.window
+    const env = { OLLAMA_HOST: 'http://127.0.0.1:9', LM_STUDIO_BASE_URL: 'http://127.0.0.1:9/v1', BRIDGE_COMPUTER_NAME: 'Studio Mac', BRIDGE_TEST_PUSH: pushLog, BRIDGE_SIGN_PHONE_MS: '15000', BRIDGE_TEST_WINDOW_FILE: keys.file }
     if (!IS_WIN) {
       fs.writeFileSync(path.join(bin, 'bridgesign'), `#!/bin/sh\nexec "${process.execPath}" "${path.join(ROOT, 'test', 'stand-ins', 'bridgesign.cjs')}" "$@"\n`, { mode: 0o755 })
       Object.assign(env, { BRIDGE_SIGNHELPER: path.join(bin, 'bridgesign'), BRIDGESIGN_STATE: signState, BRIDGESIGN_LOG: signLog })
@@ -90,16 +92,17 @@ const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 const api = kit.api
 const err = (p, body, method) => api(p, body, method).then(() => null, (e) => e)
-// As the app's own window asks (its secret, X-Bridge-Window: server/windowkey.js; the key is added
-// by the harness): what signing takes. A page of the app's gets the same (pageOf below).
+// As the app's own window asks (a MAC of its secret on each request, X-Bridge-Window:
+// server/windowkey.js; the key is added by the harness): what signing takes. A page of the app's
+// gets the same (asWindow).
 const win = async (p, body, method) => {
-  const r = await fetch(`${kit.url}/api${p}`, { method: method || (body ? 'POST' : 'GET'), headers: { 'content-type': 'application/json', 'x-bridge-window': WINDOW }, body: body ? JSON.stringify(body) : undefined })
+  const r = await windowFetch(WINDOW)(`${kit.url}/api${p}`, { method: method || (body ? 'POST' : 'GET'), headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
   const j = await r.json().catch(() => ({}))
   if (!r.ok) throw Object.assign(new Error(j.error || `HTTP ${r.status}`), { status: r.status, j })
   return j
 }
 const werr = (p, body, method) => win(p, body, method).then(() => null, (e) => e)
-const asWindow = async (ctx) => ctx.setExtraHTTPHeaders({ 'x-bridge-window': WINDOW })
+const asWindow = (ctx) => windowPage(ctx, WINDOW)
 const q = (f) => `root=${encodeURIComponent(f.root)}&path=${encodeURIComponent(f.path)}`
 const pages = []
 const links = [] // the phones, through the relay
@@ -195,7 +198,7 @@ try {
   const old = await win('/studio/sign/setup')
   const oldOne = old.list?.find((x) => x.kind === 'signature')
   ok(!!oldOne && oldOne.width === 200 && oldOne.height === 60 && oldOne.default && !fs.existsSync(path.join(sigDir, 'signature.png')) && !fs.existsSync(path.join(sigDir, 'index.json')) && fs.existsSync(path.join(sigDir, `${oldOne.id}.bin`)), 'a signature kept open before: sealed the first time it\'s read, and the open picture gone', { list: old.list, files: fs.readdirSync(sigDir) })
-  ok(old.sealed === (IS_WIN ? 'file' : 'keychain') && (IS_WIN || !fs.existsSync(path.join(sigDir, 'key'))), `sealed with a key ${IS_WIN ? 'in a file of its own (no Windows Hello here)' : 'from the Keychain (the stand-in\'s), none in the data folder'}`, { sealed: old.sealed, files: fs.readdirSync(sigDir) })
+  ok(old.sealed?.by === 'app' && old.sealed.store === 'keychain' && !fs.existsSync(path.join(sigDir, 'key')), 'sealed with the app\'s key (kept in its Keychain, given at start), none in the data folder', { sealed: old.sealed, files: fs.readdirSync(sigDir) })
   await win(`/studio/signatures/${oldOne.id}`, null, 'DELETE')
   // No model yet: it says so, and where to add one, rather than nothing.
   const none = await win('/studio/sign/setup')
@@ -223,8 +226,16 @@ try {
   // MCP), nor the windows' cookie, which can be made from the key.
   const byKey = await fetch(`${kit.url}/api/studio/signature/${setup.signature.id}`)
   const byCookie = await rawFetch(`${kit.url}/api/studio/signature/${setup.signature.id}`, { headers: { cookie: `${kit.cookie.name}=${kit.cookie.value}` } })
-  const byWindow = await fetch(`${kit.url}/api/studio/signature/${setup.signature.id}`, { headers: { 'x-bridge-window': WINDOW } })
-  const wrongWindow = await fetch(`${kit.url}/api/studio/signature/${setup.signature.id}`, { headers: { 'x-bridge-window': crypto.randomBytes(32).toString('base64url') } })
+  const picUrl = `${kit.url}/api/studio/signature/${setup.signature.id}`
+  const byWindow = await windowFetch(WINDOW)(picUrl)
+  const wrongWindow = await windowFetch(crypto.randomBytes(32).toString('base64url'))(picUrl)
+  // The secret itself, as a window sent it before, isn't taken; nor a window's MAC used again, or for another request.
+  const rawSecret = await fetch(picUrl, { headers: { 'x-bridge-window': WINDOW } })
+  const once = windowHeader(WINDOW, 'GET', picUrl)
+  const firstUse = await fetch(picUrl, { headers: { 'x-bridge-window': once } })
+  const replayed = await fetch(picUrl, { headers: { 'x-bridge-window': once } })
+  const elsewhere = await fetch(`${kit.url}/api/studio/signature/initials`, { headers: { 'x-bridge-window': windowHeader(WINDOW, 'GET', picUrl) } })
+  ok(rawSecret.status === 403 && firstUse.status === 200 && replayed.status === 403 && elsewhere.status === 403, 'the window\'s MAC is for one request, once: not the secret itself, not used again, not for another path', { raw: rawSecret.status, first: firstUse.status, again: replayed.status, elsewhere: elsewhere.status })
   ok(byKey.status === 403 && byCookie.status === 403 && wrongWindow.status === 403 && byWindow.status === 200 && Buffer.from(await byWindow.arrayBuffer()).equals(plain), 'its picture only to the app\'s own windows: refused to the key alone, the windows\' cookie and a wrong window secret', { byKey: byKey.status, byCookie: byCookie.status, wrongWindow: wrongWindow.status, byWindow: byWindow.status })
   // What you're signing: the text the page read, to the model.
   const said = await win('/studio/sign/explain', { ...F('agreement.pdf'), pages: [{ n: 1, text: lines.join('\n') }, { n: 2, text: 'Signed for Contoso Ltd' }], total: 2, lang: 'en' })
@@ -309,7 +320,7 @@ try {
     ok(vOrig.signings?.[0]?.how === 'touchid' && vOrig.signings[0].on === 'Studio Mac' && vOrig.signings[0].copy === withG.path && vOrig.signings[0].places.length === 3 && !!Date.parse(vOrig.signings[0].at), 'the original\'s versions: signed by you on Studio Mac with Touch ID, its places, the time and the copy', vOrig.signings?.[0])
     ok(vCopy.versions?.[0]?.by === 'signed' && vCopy.versions[0].signed?.how === 'touchid' && vCopy.versions[0].signed.places.length === 3, 'the copy\'s first version: signed, and how', vCopy.versions?.[0])
     const copySha = sha(path.join(dir, withG.path))
-    ok(vOrig.signings[0].verified === true && vOrig.signings[0].via === 'window' && vOrig.signings[0].sha256 === copySha && vCopy.versions[0].signed.verified === true && vCopy.versions[0].kept === false, 'the record: which way it was signed (the app\'s window), the copy\'s sha256, its MAC checked; the copy\'s version a line, not a copy', { orig: vOrig.signings[0], copy: vCopy.versions[0] })
+    ok(vOrig.signings[0].verified === true && vOrig.signings[0].via === 'window' && vOrig.signings[0].sha256 === copySha && vOrig.signings[0].fromSha256 === sha(path.join(dir, 'letter.pdf')) && vCopy.versions[0].signed.verified === true && vCopy.versions[0].kept === false, 'the record: which way it was signed (the app\'s window), the copy\'s and the original\'s sha256, its MAC checked; the copy\'s version a line, not a copy', { orig: vOrig.signings[0], copy: vCopy.versions[0] })
     // The record changed by hand in the versions' index: it says it can't be trusted.
     const idxFile = (await fs.promises.readdir(path.join(kit.data, 'studio', 'versions'), { recursive: true })).map((f) => path.join(kit.data, 'studio', 'versions', f)).find((f) => f.endsWith('index.json') && /"signed": \[/.test(fs.readFileSync(f, 'utf8')))
     const was = fs.readFileSync(idxFile, 'utf8')
@@ -331,7 +342,7 @@ try {
     // request says, and it goes to the helper on stdin, not in its arguments.
     const byKeyTp = await fetch(`${kit.url}/api/studio/sign/trackpad?hint=x`)
     const starts = signed1().filter((a) => a.args[0] === 'trackpad').length
-    const r = await fetch(`${kit.url}/api/studio/sign/trackpad?lang=de&hint=${encodeURIComponent('Something else')}`, { headers: { 'x-bridge-window': WINDOW } })
+    const r = await windowFetch(WINDOW)(`${kit.url}/api/studio/sign/trackpad?lang=de&hint=${encodeURIComponent('Something else')}`)
     const text = r.ok ? await r.text() : ''
     const tpRun = signed1().filter((a) => a.args[0] === 'trackpad')
     ok(byKeyTp.status === 403 && tpRun.length === starts + 1 && /^Zeichne mit einem Finger auf dem Trackpad/.test(tpRun.at(-1)?.said?.hint || '') && tpRun.at(-1).args.length === 1, 'the trackpad: not for a program with the key alone; its hint written by the server, in the page\'s language, given on stdin', { byKey: byKeyTp.status, run: tpRun.at(-1) })
@@ -504,8 +515,17 @@ try {
   const saveText = await p.locator('.sd-save').innerText()
   ok(/1 signature, 1 date, on page 2/.test(saveText) && /agreement \(signed\)\.pdf/.test(saveText) && /original stays as it is/.test(saveText) && /simple electronic signature/.test(await p.locator('.sd-sign-honest').innerText()) && /isn.t a certificate-based digital signature/.test(await p.locator('.sd-sign-honest').innerText()), 'before saving: what goes where, the copy\'s name, the original kept, and that it\'s a drawn signature, not a digital one', saveText)
   await shot(p, `${tag}studio-sign-save`)
-  await p.locator('.sd-save button', { hasText: 'Sign and save a copy' }).click()
+  // Changed on disk since the page showed it (an agent in that folder, say): nothing signed, and
+  // Sign this says why. Put back, it signs.
   const out2 = path.join(dir, '_signed', 'agreement (signed).pdf')
+  const agreementFile = path.join(dir, 'agreement.pdf')
+  const agreementWas = fs.readFileSync(agreementFile)
+  fs.appendFileSync(agreementFile, '\n% changed by something else\n')
+  await p.locator('.sd-save button', { hasText: 'Sign and save a copy' }).click()
+  const changedSaid = await until(async () => /The PDF changed since it was shown here/.test(await p.locator('.sd-save').innerText().catch(() => '')), 8000)
+  fs.writeFileSync(agreementFile, agreementWas)
+  ok(!!changedSaid && !fs.existsSync(out2), 'the PDF changed on disk after it was shown: nothing signed, and Sign this says why', await p.locator('.sd-save').innerText().catch(() => ''))
+  await p.locator('.sd-save button', { hasText: 'Sign and save a copy' }).click()
   ok(!!(await until(async () => fs.existsSync(out2) && /agreement \(signed\)\.pdf/.test(await p.locator('.sd-file .pane-head h2').innerText().catch(() => '')), 15000)), 'Sign and save: the copy in _signed, opened in Studio', await p.locator('.sd-file .pane-head').innerText().catch(() => ''))
   const sd = fs.existsSync(out2) ? await PDFDocument.load(fs.readFileSync(out2)) : null
   const fields = sd ? sd.getForm().getFields() : []
@@ -534,15 +554,15 @@ try {
   // Studio's home, at Your Signatures in its sidebar: your signatures, kept here, to draw again or
   // remove. While it's still asking the server, it says neither "not drawn yet" nor offers a pad
   // (the answer held back here; only Chromium takes a route added after the page opened).
-  const slow = which === 'chromium' ? async (r) => { await sleep(1500); await r.continue().catch(() => {}) } : null
-  if (slow) await p.route('**/api/studio/sign/setup*', slow)
+  const slow = which === 'chromium' ? async (r) => { await sleep(1500); await r.fallback().catch(() => {}) } : null
+  if (slow) await p.context().route('**/api/studio/sign/setup*', slow)
   await p.locator('.sd-file .sd-tabs [role="tab"]', { hasText: 'Files' }).click()
   await p.locator('.fx-side-row[data-shelf="signature"]').click({ timeout: 10000 })
   if (slow) {
     await p.locator('.sd-sign-home[aria-busy="true"]').waitFor({ timeout: 10000 })
     const waiting = await p.locator('.sd-sign-home').innerText()
     ok(!/Not drawn yet/.test(waiting) && !(await p.locator('.sd-sign-home .sd-pad, .sd-sign-home button', { hasText: /Draw/ }).count()), 'before it knows: no "not drawn yet", nothing to draw on', waiting)
-    await p.unroute('**/api/studio/sign/setup*', slow)
+    await p.context().unroute('**/api/studio/sign/setup*', slow)
   } else skip('before it knows, nothing half-ready', 'WebKit takes no route added after the page opened')
   // Read once it knows what's drawn (it asks the server after it shows).
   await p.locator('.sd-sign-home[aria-busy="false"]').waitFor({ timeout: 10000 })
