@@ -87,14 +87,15 @@ own on its own Cloudflare account:
 
 For the project's owner, or a fork's: what `npm run release` puts out, and who is offered it.
 
-- **The cadence.** Changes go to main through the week, each tested for what it changes on macOS
-  (Chromium, and WebKit for the tests in a browser), and your own computers get each night's main
-  (Nightly, below), tested for what changed since the night before. A merge to main runs no tests
-  of its own: its pull request's did, and the nightly's cover what changed since the last. A
-  release goes to everyone at the weekend: Friday night's run tests every test on main, and the
-  release runs every test again before it's built. Windows and Linux run in those full runs, where
-  a failure is said but doesn't stop the release. A fix that can't wait is a patch release at any
-  time.
+- **The cadence.** Changes go to main through the day. The owner's own are merged once the tests
+  for what they change pass on the computer they're made on (`npm test -- --browser both`, Chromium
+  and WebKit). The pull request's run on GitHub goes on in the background, and what it finds is
+  fixed in the next change. A pull request from anyone else is merged once its run on GitHub
+  passes. A merge to main runs no tests of its own. Every test runs on main each night, and your
+  own computers get each night's main (Nightly, below), tested for what changed since the night
+  before. A release runs every test again before it's built. Windows and Linux run in those full
+  runs, where a failure is said but doesn't stop the release. A fix that can't wait is a patch
+  release at any time.
 - **Shipping from your computer, a step at a time** (`npm run ship`, `scripts/ship.js`; git and the
   GitHub CLI signed in). `npm run ship` says where things stand: this branch, main's version, the
   newest nightly, beta and release, the runs going, and this computer's version and channel.
@@ -188,7 +189,7 @@ For the project's owner, or a fork's: what `npm run release` puts out, and who i
 
 ## Before you open a pull request
 
-- `npm run build` passes, and `npm test` (the tests for what you changed; `test/README.md` says what each covers). CI runs the tests for what the pull request changes on macOS, Windows and Linux; every test runs before a release.
+- `npm run build` passes, and `npm test` (the tests for what you changed; `test/README.md` says what each covers). CI runs the tests for what the pull request changes on macOS and Linux; every test runs each night and before a release.
 - No personal data: names, email addresses, company names, home folder paths or tokens. Settings belong in `~/.bridge-ai`, not in the repo.
 - `npm run check:private` passes. It looks for keys, tokens, home folder paths, email addresses, session transcripts and Bridge AI data files, plus your own name, places and hostnames from your `~/.bridge-ai` settings and the names in your Memory. `npm install` turns on git hooks that run it before every commit (the staged files) and every push (each commit being pushed, so something added and then deleted is still caught). Releases, app builds and CI run it too. `--no-verify` skips a hook; the push check still catches what that commit let through.
 - Commit messages say what changed, in your words. The hooks refuse a message with a link to an AI coding session or a line crediting an AI (`Claude-Session:`, `Co-Authored-By: Claude`, "Generated with Claude Code"): public history can't be taken back.

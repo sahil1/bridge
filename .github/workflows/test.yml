@@ -4,8 +4,7 @@
 #     request's ran, and the nightly runs what changed since the last one;
 #   a nightly build (nightly.yml, through release.yml): the tests for everything changed since the
 #     last nightly;
-#   a release's tag (release.yml), Friday night's run before the weekend's release, and a run by
-#     hand: every test.
+#   a release's tag (release.yml), the run each night, and a run by hand: every test.
 # The tests in a browser run in WebKit (the engine of Safari and the iPhone app) on macOS, which also
 # sees the Mac's own pages, and in Chromium on Linux, in up to four shares (GitHub gives many Linux
 # machines at once, and only five macOS ones); the tests in no browser run on macOS. Windows, and
@@ -17,9 +16,10 @@ name: Tests
 
 on:
   pull_request:
-  # Friday night in California: every test on main, so the weekend's release starts from a known state.
+  # Each night (12:30 AM in California, 1:30 in summer): every test on main, while nobody waits on
+  # it. What it finds is fixed in the next change.
   schedule:
-    - cron: '0 6 * * 6'
+    - cron: '30 8 * * *'
   workflow_call:
     inputs:
       base:
