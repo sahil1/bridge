@@ -91,7 +91,11 @@ const FLUSH_MS = 5000
 // Records a stream until stop() (the samples, an Int16Array) or cancel(). onLevel(0..1) for a meter.
 // onPcm(samples): each piece as it comes, every `every` ms (live words: dictation/controller.js).
 // sounding: settles once the sound starts coming, which can be a while after this returns (the
-// audio device starting up on a busy computer, a Bluetooth headset switching over to its mic).
+// audio device starting up on a busy computer, a Bluetooth headset switching over to its mic), and
+// keeps coming: two of the worklet's levels (each after about 96 ms of sound) 50 to 200 ms apart.
+// Not on its first piece: a device starting up can hand over a moment of sound and then little for
+// a second or more (CI's macOS WebKit did), and a hold timed from that moment had a fraction of
+// what was said ("Recording too short"). What comes before it settles is recorded all the same.
 export async function startPcm(stream, { onLevel, onPcm, every = 0 } = {}) {
   let ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: RATE })
   let input
@@ -108,8 +112,14 @@ export async function startPcm(stream, { onLevel, onPcm, every = 0 } = {}) {
   let flushed = null
   let heard
   const sounding = new Promise((resolve) => { heard = resolve })
+  let levelAt = null
   node.port.onmessage = (e) => {
-    if (e.data.level != null) { heard(); onLevel?.(e.data.level) }
+    if (e.data.level != null) {
+      const now = performance.now()
+      if (levelAt != null && now - levelAt >= 50 && now - levelAt <= 200) heard()
+      levelAt = now
+      onLevel?.(e.data.level)
+    }
     else if (e.data.pcm) { const c = new Int16Array(e.data.pcm); chunks.push(c); onPcm?.(c) }
     else if (e.data.flushed) flushed?.(e.data.flushed)
   }
