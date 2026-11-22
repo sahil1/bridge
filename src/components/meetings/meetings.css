@@ -656,6 +656,7 @@ button.mt-who:not(:disabled):hover { text-decoration: underline dotted; text-und
    the link follows them, rather than the icon, the words and the link each on a line of their own. */
 .mt-merged, .mt-interrupted { display: block; margin: 0; line-height: 1.5; }
 .mt-merged > svg, .mt-interrupted > svg { display: inline-block; vertical-align: -2px; margin-right: 6px; }
+.mt-merged-end { white-space: nowrap; }
 .mt-interrupted { padding: 7px 10px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--warning, #b7791f) 35%, var(--line-2)); background: color-mix(in srgb, var(--warning, #b7791f) 6%, var(--pane)); }
 .mt-interrupted svg { flex: none; color: var(--warning, #b7791f); }
 .mt-stopped > svg { color: var(--warning, #b7791f); }
