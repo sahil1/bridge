@@ -113,6 +113,40 @@ async function signKit(name, { probe = null, before = null, relay = null, more =
   }
   return me
 }
+// An event on the app's own feed (desktop/main.js hears these) while during() runs: its data, or null.
+async function feedEvent(kit, name, during, ms = 4000) {
+  const ctl = new AbortController()
+  const r = await rawFetch(`${kit.url}/api/events`, { headers: { authorization: `Bearer ${kit.key}`, 'x-bridge-desktop': '1' }, signal: ctl.signal })
+  const seen = (async () => {
+    let buf = ''
+    try {
+      for await (const c of r.body) {
+        buf += Buffer.from(c).toString('utf8')
+        const m = new RegExp(`event: ${name}\\ndata: (.*)\\n`).exec(buf)
+        if (m) return JSON.parse(m[1])
+      }
+    } catch { /* stopped */ }
+    return null
+  })()
+  await sleep(300)
+  await during()
+  const got = await Promise.race([seen, sleep(ms).then(() => null)])
+  ctl.abort()
+  return got
+}
+// A request as the app's window would make it by hand: its MAC over macBody, sending data with the
+// content type given (null: none).
+function sendRaw(kit, secret, method, p, { macBody = '', data = null, ct = 'application/json', chunked = false } = {}) {
+  return new Promise((resolve) => {
+    const url = `${kit.url}/api${p}`
+    const headers = { authorization: `Bearer ${kit.key}`, 'x-bridge-window': windowAuth.windowHeader(secret, method, url, { body: macBody }) }
+    if (ct) headers['content-type'] = ct
+    if (data != null && !chunked) headers['content-length'] = String(Buffer.byteLength(data))
+    const req = http.request(url, { method, headers }, (res) => { let b = ''; res.on('data', (c) => { b += c }); res.on('end', () => { let j = null; try { j = JSON.parse(b) } catch { /* not JSON */ } resolve({ status: res.statusCode, j }) }) })
+    req.on('error', () => resolve({ status: 0 }))
+    if (data != null && chunked) { const h = Math.floor(data.length / 2); req.write(data.slice(0, h)); setTimeout(() => req.end(data.slice(h)), 50) } else req.end(data ?? undefined)
+  })
+}
 // A PDF in a place of its own: its root and a query for it.
 async function aPdf(s, name = 'x.pdf', line = null) {
   const dir = path.join(s.kit.home, 'Deals')
@@ -450,6 +484,101 @@ try {
     ok(bare.inspector && !flagged.inspector && flagged.alive && /require\('\.\/serverflags\.js'\)\.SERVER_NODE_FLAGS, path\.join\(ROOT, 'server', 'index\.js'\)/.test(mainSrc), 'the app\'s server: SIGUSR1 opens no inspector (without its flags, it does), and it carries on', { bare, flagged })
   }
 
+  // ---------- Bodies the server didn't hash ----------
+  // A window's MAC over no body, sent with a body the server doesn't read as JSON (text/plain, or no
+  // type at all): not the window's. The same JSON sent in parts: hashed as it came, taken.
+  const otherBody = JSON.stringify({ on: false })
+  const plainBody = await sendRaw(kit, A_.keys.window, 'POST', '/studio/sign/ask/setting', { macBody: '', data: otherBody, ct: 'text/plain' })
+  const untyped = await sendRaw(kit, A_.keys.window, 'POST', '/studio/sign/ask/setting', { macBody: '', data: otherBody, ct: null })
+  const settingsBody = JSON.stringify({ purpose: 'settings' })
+  const chunked = await sendRaw(kit, A_.keys.window, 'POST', '/studio/sign/ask', { macBody: sha(settingsBody), data: settingsBody, chunked: true })
+  ok(plainBody.status === 403 && untyped.status === 403 && chunked.status === 200, 'a window\'s MAC with a body the server didn\'t hash (text/plain, no type): refused; JSON sent in parts: taken', { plain: plainBody.status, untyped: untyped.status, chunked: chunked.status })
+
+  // ---------- Start Over ----------
+  // The app's keys tried again and still not opening (appkeys.js startOver): Settings offers Start
+  // Over, only from the app's window, only once Touch ID (here the stand-in) was asked; then the app is
+  // told on its own feed to make new keys (desktop/main.js).
+  await kit.restart(() => A_.keys.write({ window: real.window, launch: real.launch, unreadable: true, startOver: true }))
+  const unread = (await win('GET', '/studio/sign/setup')).j
+  const noGrantOver = await win('POST', '/studio/sign/start-over', {})
+  const byProgOver = await prog('POST', '/studio/sign/start-over', {})
+  const og = (await win('POST', '/studio/sign/ask', { purpose: 'start-over' })).j
+  let overOk = null
+  const told = await feedEvent(kit, 'sign-start-over', async () => { overOk = await win('POST', '/studio/sign/start-over', { grant: og.grant }) })
+  ok(unread.keysUnreadable && unread.canStartOver && noGrantOver.status === 403 && byProgOver.status === 403 && !!og.grant && overOk?.status === 200 && !!told?.at, 'keys the app can\'t open, tried again: Start Over offered, refused without Touch ID and to the key alone; with it, the app told to make new keys', { offered: unread.canStartOver, noGrant: noGrantOver.status, byKey: byProgOver.status, ok: overOk?.status, told })
+  // (The app's side: the old keys kept beside, new ones made, not unreadable any more.)
+  const sdir = path.join(kit.dir, 'start-over-keys')
+  fs.mkdirSync(sdir, { recursive: true })
+  const skf = path.join(sdir, 'signing-keys')
+  const okStore = { isEncryptionAvailable: () => true, encryptString: (t) => Buffer.from(`ENC:${t}`), decryptString: (b) => { const t = b.toString(); if (!t.startsWith('ENC:')) throw new Error('not ours'); return t.slice(4) } }
+  const noStore = { ...okStore, decryptString: () => { throw new Error('denied') } }
+  const oldKey = JSON.parse(windowAuth.keysAt(skf, okStore).forStart()).key
+  const once = windowAuth.keysAt(skf, noStore)
+  const firstOffer = JSON.parse(once.forStart()).startOver
+  const twice = windowAuth.keysAt(skf, noStore)
+  const offered = JSON.parse(twice.forStart()).startOver
+  const started = twice.startOver()
+  const after = JSON.parse(twice.forStart())
+  const keptOld = fs.readdirSync(sdir).filter((f) => f.startsWith('signing-keys.unreadable-'))
+  const reopened = JSON.parse(windowAuth.keysAt(skf, okStore).forStart())
+  ok(!firstOffer && offered && started && !after.unreadable && !!after.key && after.key !== oldKey && keptOld.length >= 1 && reopened.key === after.key, 'Start Over, the app\'s side: offered only once tried again; the old keys kept beside, new ones made and kept', { firstOffer, offered, started, keptOld })
+  await kit.restart(() => A_.keys.write({ ...real }))
+
+  // ---------- The app's windows and a server it can't prove (desktop/servergate.js) ----------
+  // Something else on the app's address (the server gone): a window opening or reloading, a popout,
+  // the capture window, any request, a message from a page there, a permission for one (a screen)
+  // and the feed are all refused until a server proves it's the one the app started.
+  const servergate = require(path.join(ROOT, 'desktop', 'servergate.js'))
+  const senders = require(path.join(ROOT, 'desktop', 'senders.js'))
+  const screenpick = require(path.join(ROOT, 'desktop', 'screenpick.js'))
+  const GP = 7999
+  const gbase = `http://127.0.0.1:${GP}`
+  let provesNow = false, proofs = 0
+  const gate = servergate.create({ bundled: true, isServer: (u) => { try { const x = new URL(u); return x.hostname === '127.0.0.1' && Number(x.port) === GP } catch { return false } }, prove: async () => { proofs++; return provesNow } })
+  const asked = async (url, resourceType) => (await gate.request({ url, resourceType })).cancel
+  const refusedNow = {
+    reload: await asked(`${gbase}/`, 'mainFrame'),
+    popout: await asked(`${gbase}/?window=agent-1`, 'mainFrame'),
+    card: await asked(`${gbase}/?float=1`, 'mainFrame'),
+    capture: await asked(`${gbase}/?remote=capture&token=t`, 'mainFrame'),
+    script: await asked(`${gbase}/assets/index.js`, 'script'),
+    api: await asked(`${gbase}/api/config`, 'xhr'),
+  }
+  const elsewhere = await asked('https://example.com/', 'mainFrame')
+  const ipcCalls = { got: [], refused: [] }
+  const handlers = {}
+  const pages = senders.create(GP, { proven: () => gate.proven })
+  const ipc = pages.guard({ handle: (ch, fn) => { handlers[ch] = fn }, on: (ch, fn) => { handlers[ch] = fn } }, { refused: (ch) => ipcCalls.refused.push(ch) })
+  const CHANNELS = ['bridge:capture', 'bridge:remote-thumbs', 'bridge:pick-files', 'bridge:popout', 'bridge:open-machine']
+  for (const ch of CHANNELS) ipc.handle(ch, () => { ipcCalls.got.push(ch); return true })
+  const fromPage = { senderFrame: { url: `${gbase}/`, parent: null } }
+  for (const ch of CHANNELS) handlers[ch](fromPage)
+  let screenGiven = 'unset'
+  const sp = screenpick.create({ desktopCapturer: { getSources: async () => [{ id: 'screen:1:0', name: 'Screen' }] }, systemPreferences: { getMediaAccessStatus: () => 'granted' }, permits: pages.permits, platform: 'darwin' })
+  await sp.handler({ frame: { url: `${gbase}/?remote=capture`, parent: null } }, (x) => { screenGiven = x })
+  ok(Object.values(refusedNow).every(Boolean) && !elsewhere && proofs >= 4 && gate.blocked(-20, `${gbase}/`) && !ipcCalls.got.length && ipcCalls.refused.length === CHANNELS.length && !pages.permits('display-capture', { url: `${gbase}/` }) && !pages.permits('media', { url: `${gbase}/` }) && screenGiven === null && !gate.feed(), 'a server the app can\'t prove: every page (a reload, a popout, the card, the capture window) proved again first and refused, every request refused, no message from its pages taken, no screen or microphone for them, its feed not heard', { refusedNow, proofs, ipc: ipcCalls, screen: screenGiven })
+  provesNow = true
+  const reloadOk = !(await asked(`${gbase}/`, 'mainFrame'))
+  for (const ch of CHANNELS) handlers[ch](fromPage)
+  const nowProven = { reload: reloadOk, ipc: ipcCalls.got.length === CHANNELS.length, screen: pages.permits('display-capture', { url: `${gbase}/` }), feed: gate.feed() }
+  gate.set(false) // (its feed gone: main.js serverGone)
+  const goneAgain = await asked(`${gbase}/api/config`, 'xhr')
+  ok(Object.values(nowProven).every(Boolean) && goneAgain, 'once it proves itself: its pages, messages, the screen and the feed; its feed gone: refused again until it proves itself', { proven: nowProven, goneAgain })
+  // And main.js wires it so: every request to the server's address through the gate, a page held back
+  // shown as such (or its window closed), the messages and permissions, the feed, the card and the main
+  // window's page.
+  const mainJs = fs.readFileSync(path.join(ROOT, 'desktop', 'main.js'), 'utf8')
+  const wired = {
+    requests: /onBeforeRequest\(\{ urls: all \}, \(d, cb\) => \{\n\s+gate\.request\(d\)/.test(mainJs) && /const all = \[\.\.\.new Set\(\[PORT, SERVER_PORT\]\)\]\.map\(\(p\) => `http:\/\/127\.0\.0\.1:\$\{p\}\/\*`\)/.test(mainJs),
+    heldBack: /gate\.blocked\(code, url\)/.test(mainJs) && /if \(w === win\) w\.loadURL\(splash\(NOT_OURS\)\)/.test(mainJs),
+    messages: /senders\.create\(PORT, \{ ports: machinePorts, proven: \(\) => gate\.proven \}\)/.test(mainJs),
+    feed: /if \(!gate\.feed\(\)\) continue/.test(mainJs),
+    card: /function showFloat\(\) \{[^]*?if \(!gate\.proven\) return/.test(mainJs),
+    main: /async function mainReady\(\) \{[^]*?if \(BUNDLED && !\(await proveServer\(\)\)\) return null/.test(mainJs),
+    feedGone: /serverGone\(\)/.test(mainJs),
+  }
+  ok(Object.values(wired).every(Boolean), 'the app wires it so: every request to its server\'s address, held-back pages, messages and permissions, the feed, the card and the main window', wired)
+
   // ---------- Where the PIN is this computer's way ----------
   B_ = await signKit('sign-security-pin', { probe: { trackpad: false, touchID: false, auth: false }, more: { key: null, store: null } })
   await B_.prog('POST', '/setup', { name: 'Tester' })
@@ -521,6 +650,18 @@ try {
   const changedOnWay = await rawFetch(addUrl, { method: 'POST', headers: { ...auth, 'content-type': 'application/json', 'x-bridge-window': windowHeader(C_.keys.window, 'POST', addUrl, meant) }, body: swappedBody })
   const asMeant = await rawFetch(addUrl, { method: 'POST', headers: { ...auth, 'content-type': 'application/json', 'x-bridge-window': windowHeader(C_.keys.window, 'POST', addUrl, meant) }, body: meant })
   ok(changedOnWay.status === 403 && asMeant.status === 200, 'a window\'s request with its body changed on the way: refused; as sent: kept', { changed: changedOnWay.status, asSent: asMeant.status })
+  // config.json read again (a setting changed): still where the app talks to it.
+  const beforeSet = (await C_.prog('GET', '/settings')).j?.effective
+  await C_.prog('PATCH', '/settings', { name: 'Tester' })
+  const afterSet = (await C_.prog('GET', '/settings')).j?.effective
+  ok(beforeSet?.host === '127.0.0.1' && afterSet?.host === '127.0.0.1' && afterSet?.port === ck.port, 'a setting changed, config.json read again: still where the app talks to it (its host and port)', { before: beforeSet?.host, after: afterSet?.host, port: afterSet?.port })
+  // A PDF over the size Studio signs: said so, its size the reason (one limit for signing and for
+  // hashing it as it opens).
+  const bigPdf = await aPdf(C_, 'big.pdf')
+  fs.truncateSync(path.join(bigPdf.dir, 'big.pdf'), 81 * 1024 * 1024)
+  const tooBig = await C_.win('POST', `/studio/sign?${bigPdf.q}`, { sha256: 'a'.repeat(64), marks: MARKS })
+  const studioJs = fs.readFileSync(path.join(ROOT, 'server', 'studio.js'), 'utf8')
+  ok(tooBig.status === 413 && tooBig.j?.code === 'too-big' && /81 MB.*80 MB/.test(tooBig.j?.error || '') && /st\.size <= signStore\.MAX_PDF/.test(studioJs), 'a PDF over the size Studio signs: said so with its size (one limit for signing and for hashing it as it opens)', tooBig.j)
 
   // ---------- The app's keys file it can't open ----------
   // (safeStorage stood in for: once working, once refused, as a denied Keychain prompt is.)
