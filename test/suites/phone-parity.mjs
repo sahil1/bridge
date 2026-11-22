@@ -29,7 +29,7 @@
 // actions rather than places); "Settings › x" is the top bar's Settings, then its section x.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, checks, until, browser, page, shot, phoneFaults, ROOT, IS_MAC } from '../lib/harness.mjs'
+import { startKit, checks, until, browser, page, shot, phoneFaults, withoutCutOff, ROOT, IS_MAC } from '../lib/harness.mjs'
 
 const { ok, done } = checks('phone-parity')
 
@@ -442,7 +442,9 @@ try {
     ok(edit && !Object.keys(f).length && !(await ph.p.locator('.hm-edit-btn').count()), 'Home on: a long press on a section\'s name is the phone\'s Edit Home, and it fits', { edit, f })
     await shot(ph.p, `${tag}phone-edit-home`)
     await ph.p.locator('.hm-done').click({ force: true })
-    ok(!ph.errors.filter((e) => !/\/api\/\S+ due to access control checks|^TypeError: Importing a module script failed\.$/.test(e)).length, 'Home on: no page errors', ph.errors)
+    // (Bridge AI restarting cuts off the app's own files the page was fetching ahead, which WebKit
+    // reports as errors: withoutCutOff.)
+    ok(!withoutCutOff(ph.errors).filter((e) => !/^TypeError: Importing a module script failed\.$/.test(e)).length, 'Home on: no page errors', ph.errors)
     await ph.ctx.close()
   }
   await kit.api('/settings', { home: { on: false } }, 'PATCH')
