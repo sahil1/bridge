@@ -20,6 +20,11 @@
     "afterSign": "./notarize-app.js",
     "afterAllArtifactBuild": "./notarize-dmg.js",
     "npmRebuild": false,
+    "electronFuses": {
+      "runAsNode": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false
+    },
     "directories": {
       "output": "dist"
     },
@@ -37,6 +42,7 @@
       "screenpick.js",
       "remote.js",
       "apitoken.js",
+      "windowauth.js",
       "package.json",
       "!node_modules/uiohook-napi/{libuiohook,src,binding.gyp}{,/**}"
     ],

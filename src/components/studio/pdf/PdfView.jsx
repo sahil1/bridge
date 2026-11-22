@@ -24,6 +24,19 @@ export default function PdfView({ file, data, onStats, handle, onOpen }) {
   const inner = useRef(null)
   const pdf = useRef(null) // { lib, V, doc, viewer, bus }
   const [state, setState] = useState({ phase: 'loading' }) // loading | password | ready | error
+  // The sha256 of the bytes shown here (whole, not read in parts), for Sign this: what's signed has to
+  // be what you saw (server/signing.js). Worked out when it's asked for (a copy of the bytes, nothing
+  // redrawn meanwhile); null where the page can't hash (no secure context) or reads a big one in
+  // parts: the server then holds it to the bytes it had when you confirmed.
+  const hashed = useRef(null)
+  const shown = useCallback(async () => {
+    if (!data || !globalThis.crypto?.subtle) return null
+    if (hashed.current?.data === data) return hashed.current.sha
+    const h = await crypto.subtle.digest('SHA-256', data.slice(0))
+    const sha = [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, '0')).join('')
+    hashed.current = { data, sha }
+    return sha
+  }, [data])
   const [pages, setPages] = useState(0)
   const [page, setPage] = useState(1)
   const [pageText, setPageText] = useState('1')
@@ -112,8 +125,15 @@ export default function PdfView({ file, data, onStats, handle, onOpen }) {
       ac.abort()
       const p = pdf.current
       pdf.current = null
-      try { p?.viewer.setDocument(null) } catch { /* gone already */ }
-      task?.destroy() // its document and worker with it
+      // (Once its first page has come: pdf.js's viewer leaves a promise of its own unanswered when
+      // the document goes before that, which the page then reports as an error.)
+      const end = () => {
+        try { p?.viewer.setDocument(null) } catch { /* gone already */ }
+        task?.destroy() // its document and worker with it
+      }
+      const first = p?.viewer.firstPagePromise
+      if (first) Promise.race([first, new Promise((r) => setTimeout(r, 3000))]).then(end, end)
+      else end()
     }
   }, [data, file.url])
 
@@ -282,7 +302,7 @@ export default function PdfView({ file, data, onStats, handle, onOpen }) {
         </div>
         {signing && ready && (
           <Suspense fallback={<aside className="sd-sign"><p className="muted small sd-loading">{t('Opening…')}</p></aside>}>
-            <SignAssist file={file} pdf={pdf.current} setup={setup} marks={marks} setMarks={setMarks} picked={picked} setPicked={setPicked} onApprove={approve} dateText={dateText} setDateText={setDateText} using={using} setUsing={setUsing}
+            <SignAssist file={file} pdf={pdf.current} shown={shown} setup={setup} marks={marks} setMarks={setMarks} picked={picked} setPicked={setPicked} onApprove={approve} dateText={dateText} setDateText={setDateText} using={using} setUsing={setUsing}
               onShow={show} onPoint={point} onOpen={onOpen} onClose={() => { setSigning(false); setPicked(null) }} />
           </Suspense>
         )}

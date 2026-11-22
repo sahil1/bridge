@@ -1,11 +1,11 @@
 // native/bridgesign on a Mac (Studio's signing): whether this Mac has a trackpad and Touch ID, the
-// trackpad's finger streamed while you sign on it, Touch ID or the Mac's password asked for (Ask
-// Before Signing), and the Keychain's key for the saved signatures (signstore.js). See the helper's
+// trackpad's finger streamed while you sign on it, and Touch ID or the Mac's password asked for (Ask
+// Before Signing). It holds no key: the saved signatures' is the app's (appkeys.js). See the helper's
 // own comment for what each says. null with no helper (a copy run from a clone that didn't build the
 // helpers, any other system), where none of it is offered. What a call says (a reason, the trackpad's
 // hint) goes on the helper's stdin, never in its arguments, which any program can list.
 // BRIDGE_SIGNHELPER: a stand-in, in the tests only (BRIDGE_FIX_DRYRUN); they use no real one without
-// it (no window over the screen, no Touch ID, nothing in the Keychain).
+// it (no window over the screen, no Touch ID).
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
@@ -34,8 +34,19 @@ export function runHelper(args, said = null, ms = 15000) {
   })
 }
 
-// So many in so long, for what a key holder could otherwise ask again and again (Touch ID asked,
-// the trackpad started): true while under.
+// One budget for each of them (who: a key), so one can't use up another's (limiter, below).
+export function limiterBy(n, ms) {
+  const each = new Map()
+  return (who) => {
+    if (!each.has(who)) {
+      if (each.size >= 200) each.delete(each.keys().next().value)
+      each.set(who, limiter(n, ms))
+    }
+    return each.get(who)()
+  }
+}
+// So many in so long, for what could otherwise be asked again and again (Touch ID asked, the
+// trackpad started): true while under.
 export function limiter(n, ms) {
   const times = []
   return () => {

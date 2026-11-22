@@ -702,7 +702,7 @@ function Versions({ f, ext, versions, signings = [], keep = KEEP_ALL, size = 0, 
         <ol className="sd-versions sd-signings" aria-label={t('Signed copies')}>
           {signings.map((s) => (
             <li key={s.id} className="signed">
-              <span className="sd-v-who"><b><Icon name="signature" size={11} /> {signedLine(s)}</b><small className="muted">{when(s.at)}{s.places?.length ? ` · ${placesLine(s.places)}` : ''}</small>{s.verified === false && <small className="sd-v-bad">{t('Changed outside Bridge AI: this line can\'t be trusted')}</small>}</span>
+              <span className="sd-v-who"><b><Icon name="signature" size={11} /> {signedLine(s)}</b><small className="muted">{when(s.at)}{s.places?.length ? ` · ${placesLine(s.places)}` : ''}</small>{s.verified === false && <small className="sd-v-bad">{t('Changed outside Bridge AI: this line can\'t be trusted')}</small>}{s.copyChanged && <small className="sd-v-bad">{t('The signed copy changed after it was signed')}</small>}</span>
               {s.copy && onOpen && <span className="sd-v-acts"><button type="button" className="link-btn" onClick={() => onOpen({ root: f.root, path: s.copy })} title={s.copy}>{t('Open the copy')}</button></span>}
             </li>
           ))}
@@ -711,7 +711,7 @@ function Versions({ f, ext, versions, signings = [], keep = KEEP_ALL, size = 0, 
       <ol className="sd-versions">
         {versions.map((v, i) => (
           <li key={v.id} className={`${i === 0 ? 'now' : ''}${v.signed ? ' signed' : ''}`}>
-            <span className="sd-v-who"><b>{v.signed ? <><Icon name="signature" size={11} /> {signedLine(v.signed)}</> : v.by === 'agent' && v.name ? v.name : t(WHO[v.by] || v.by)}</b><small className="muted">{when(v.at)} · {v.signed?.places?.length ? `${placesLine(v.signed.places)} · ` : ''}{sizeOf(v.size)}</small>{v.signed?.verified === false && <small className="sd-v-bad">{t('Changed outside Bridge AI: this line can\'t be trusted')}</small>}</span>
+            <span className="sd-v-who"><b>{v.signed ? <><Icon name="signature" size={11} /> {signedLine(v.signed)}</> : v.by === 'agent' && v.name ? v.name : t(WHO[v.by] || v.by)}</b><small className="muted">{when(v.at)} · {v.signed?.places?.length ? `${placesLine(v.signed.places)} · ` : ''}{sizeOf(v.size)}</small>{v.signed?.verified === false && <small className="sd-v-bad">{t('Changed outside Bridge AI: this line can\'t be trusted')}</small>}{v.signed?.copyChanged && <small className="sd-v-bad">{t('The signed copy changed after it was signed')}</small>}</span>
             {i === 0 ? <small className="muted">{t('Now')}</small> : v.kept === false ? <small className="muted" title={t('A signed copy\'s versions are kept as a line each, never as a copy')}>{t('Not kept')}</small> : <span className="sd-v-acts">
               {comparable(ext) && <button type="button" className="link-btn" onClick={() => setCompare(v)}>{t('Compare')}</button>}
               <a className="link-btn" href={versionUrl(f, v.id)} target="_blank" rel="noreferrer">{t('Open')}</a>

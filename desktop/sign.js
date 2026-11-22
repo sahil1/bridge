@@ -8,8 +8,11 @@
 //     changes with every build, so each update asks again; signed with the same certificate every
 //     time, it doesn't. macOS doesn't need to trust it for this, only to see the same one.
 //   Ad hoc, as before, with neither (someone else building it).
-// Only a Developer ID build gets the hardened runtime: without a team the app couldn't load its own
-// Electron framework under it.
+// Both certificates sign with the hardened runtime, so no other code gets into the app (no DYLD_
+// variables, no debugger attached): a Developer ID build with entitlements.mac.plist, and one signed
+// with Bridge AI's own certificate with entitlements.own.mac.plist, which also lets it load its own
+// Electron framework and Node modules (that certificate has no Apple team for macOS to match them
+// against). An ad hoc build doesn't: it couldn't load its own framework under it.
 //
 // Where the certificate comes from, first found: BRIDGE_SIGN_P12 (the .p12, base64) and
 // BRIDGE_SIGN_PASSWORD (GitHub Actions), a Developer ID in your login keychain (Xcode › Settings ›
@@ -26,6 +29,7 @@ const os = require('node:os')
 const path = require('node:path')
 
 const LOCAL = path.join(os.homedir(), '.bridge-ai-signing', 'bridge-ai.p12')
+const OWN = path.join(__dirname, 'entitlements.own.mac.plist')
 const SERVICE = 'Bridge AI signing'
 const DEVELOPER_ID = /\b([0-9A-F]{40}) "(Developer ID Application: [^"]+)"/
 const security = (...args) => execFileSync('/usr/bin/security', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
@@ -95,7 +99,7 @@ module.exports = async function sign(opts) {
     if (kind === 'developer-id') return signAsync({ ...opts, identity: hash, ...(keychain ? { keychain } : {}) })
     // A self-signed certificate isn't one macOS trusts, so osx-sign is told not to check. No secure
     // timestamp either: that's Apple's server, over the network, and nothing here needs one.
-    return signAsync({ ...opts, identity: hash, identityValidation: false, keychain, optionsForFile: withEach({ hardenedRuntime: false, timestamp: 'none' }) })
+    return signAsync({ ...opts, identity: hash, identityValidation: false, keychain, optionsForFile: withEach({ hardenedRuntime: true, entitlements: OWN, timestamp: 'none' }) })
   })
 }
 module.exports.withIdentity = withIdentity

@@ -754,8 +754,8 @@ signing.setHelpers({
   contextOf: (id) => chatModels.contextOf(id), scanText: doctext.ocrBin() ? (file) => doctext.textOf(file, 200_000) : null,
 })
 // Who may sign (signing.js): one of the app's own windows on this computer (windowkey.js: a secret
-// the app gives its server and adds to its windows' requests, which a program that only has the key
-// can't make), or one of your phones: paired here, kept, let in (Which Devices May Connect), the
+// the app gives its server, each of its windows' requests carrying a MAC of it, which a program that
+// only has the key can't make), or one of your phones: paired here, kept, let in (Which Devices May Connect), the
 // relay proving it ran the request for it (relayproof.js). Never another computer, a device not kept
 // yet, Tailscale, a browser tab or a program with the key alone.
 windowkey.fromStart()
@@ -766,11 +766,14 @@ function signPhoneOf(req) {
   return d && d.kind !== 'computer' && !d.fresh && remote.admits(id) ? id : null
 }
 signing.routes(app, { wrap, rootOf, sq, window: signWindow, phone: signPhoneOf, nameOf: (req) => whoAsks(req), record: (x) => studio.noteSigned(x) })
-// The app giving its window secret again (a server it found running, or this one restarted): only
-// at this computer, and only the one the app started a server with (windowkey.js).
-app.post('/api/window/hello', async (req, res) => {
-  try { if (!atThisComputer(req)) throw Object.assign(new Error('Only the app on this computer'), { status: 403 }); res.json(await windowkey.hello(String(req.body?.secret || ''))) } catch (e) { res.status(e.status || 502).json({ error: e.message, ...(e.code ? { code: e.code } : {}) }) }
-})
+// The app checking this server before it sends anything (windowkey.js): that it's the one the app
+// started (proof, to the app's nonce), and that it has the app's window secret (hello: a nonce, then
+// the app's MAC of it; from source, with none yet, the secret itself once). Only at this computer.
+const windowHere = (req) => { if (!atThisComputer(req)) throw Object.assign(new Error('Only the app on this computer'), { status: 403 }) }
+const windowAnswer = (fn) => async (req, res) => { try { windowHere(req); res.json(await fn(req)) } catch (e) { res.status(e.status || 502).json({ error: e.message, ...(e.code ? { code: e.code } : {}) }) } }
+app.get('/api/window/proof', windowAnswer((req) => { const mac = windowkey.proof(String(req.query.n || '')); if (!mac) throw Object.assign(new Error('Not started by the app'), { status: 404, code: 'not-started' }); return { mac } }))
+app.get('/api/window/hello', windowAnswer(() => windowkey.helloNonce()))
+app.post('/api/window/hello', windowAnswer((req) => windowkey.hello({ nonce: req.body?.nonce, mac: req.body?.mac, secret: req.body?.secret })))
 // A signature kept open before 3.22, sealed at start (signstore.js), not only once Studio's signing opens.
 setTimeout(() => { signStore.atStart().catch((e) => console.error(`signing: an old signature couldn't be sealed yet: ${e.message}`)) }, 3000).unref()
 // Sign on Phone (signphone.js): your phones paired here, kept and let in, told on their own feed
@@ -1774,7 +1777,11 @@ app.get('/api/events', (req, res) => {
   // ...and what Remote Screen and Preview needs of it (remote.js): its capture window, a project's
   // app drawn off screen for a phone, and the badge that says this screen is being seen.
   const offRemote = appFeed ? remote.onDesktop((ev) => res.write(`event: remote\ndata: ${JSON.stringify(ev)}\n\n`)) : null
-  req.on('close', () => { clients.delete(res); off?.(); offRemote?.() })
+  // ...and your signatures' list's version and whether Ask Before Signing is on, which the app keeps
+  // where a copy of the list put back can't reach (signstore.js, appkeys.js).
+  const offSign = appFeed ? signStore.onChange((st) => res.write(`event: sign-state\ndata: ${JSON.stringify(st)}\n\n`)) : null
+  if (appFeed) signStore.olderNote().then((o) => (o ? null : signStore.state())).then((st) => { if (st && !res.writableEnded) res.write(`event: sign-state\ndata: ${JSON.stringify(st)}\n\n`) }, () => {})
+  req.on('close', () => { clients.delete(res); off?.(); offRemote?.(); offSign?.() })
 })
 // A switch to another herdr session: a fleet read before it is dropped, not shown or announced.
 let fleetGen = 0

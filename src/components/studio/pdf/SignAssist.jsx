@@ -47,7 +47,9 @@ function dateChoices() {
   return { list: out, first: currentLang() === 'en' ? out[0] : latin(own) ? own : out[5] }
 }
 
-export default function SignAssist({ file, pdf, setup, marks, setMarks, picked, setPicked, onApprove, dateText, setDateText, using, setUsing, onShow, onPoint, onOpen, onClose }) {
+// shown(): the sha256 of the PDF's bytes as this page has them (PdfView), sent with what's asked
+// and signed, so a file changed since it was shown is said, never signed (server/signing.js).
+export default function SignAssist({ file, pdf, shown = null, setup, marks, setMarks, picked, setPicked, onApprove, dateText, setDateText, using, setUsing, onShow, onPoint, onOpen, onClose }) {
   // Back where you were: at the places, once there are some.
   const [step, setStep] = useState(() => (marks.length ? 'place' : 'read'))
   const go = (s) => { setStep(s); body.current?.scrollTo?.({ top: 0 }) }
@@ -79,7 +81,7 @@ export default function SignAssist({ file, pdf, setup, marks, setMarks, picked, 
                   <div className="sd-step-body">
                     {id === 'read' && <Explain file={file} pdf={pdf} setup={setup} said={said} onSaid={(r) => { read.set(keyOf(file), r); setSaid(r) }} onPoint={onPoint} onNext={() => go('place')} onSkip={() => { setSkipped(true); go('place') }} />}
                     {id === 'place' && <Place file={file} pdf={pdf} setup={setup} marks={marks} setMarks={setMarks} picked={picked} setPicked={setPicked} onApprove={onApprove} dateText={dateText} setDateText={setDateText} using={using} setUsing={setUsing} onShow={onShow} onNext={() => go('save')} />}
-                    {id === 'save' && <Save file={file} setup={setup} marks={marks} dateText={dateText} using={using} onBack={() => go('place')} onOpen={onOpen} />}
+                    {id === 'save' && <Save file={file} shown={shown} setup={setup} marks={marks} dateText={dateText} using={using} onBack={() => go('place')} onOpen={onOpen} />}
                   </div>
                 )}
               </li>
@@ -305,8 +307,9 @@ function Place({ file, pdf, setup, marks, setMarks, picked, setPicked, onApprove
 const ASKED = {
   cancelled: tx('Not signed: Touch ID or the password was cancelled.'),
   'no-pin': tx('Ask Before Signing is on, and from here it asks for your signing PIN, but there isn\'t one yet. Set it in {place}, on the computer.'),
+  changed: tx('The PDF changed since it was shown here, so nothing was signed. Open it again to see it as it is now, then sign.'),
 }
-function Save({ file, setup, marks, dateText, using, onBack, onOpen }) {
+function Save({ file, shown, setup, marks, dateText, using, onBack, onOpen }) {
   const [check, setCheck] = useState(null)
   const [busy, setBusy] = useState(false)
   const [asking, setAsking] = useState(null)
@@ -327,19 +330,21 @@ function Save({ file, setup, marks, dateText, using, onBack, onOpen }) {
     if (e.code === 'pin-locked') return t('The signing PIN was wrong too many times, so it\'s locked until {time}.', { time: new Date(e.data?.until || Date.now()).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' }) })
     if (e.code === 'no-pin') return t(ASKED['no-pin'], { place: where('ask-before-signing') })
     if (e.code === 'cancelled' && way === 'device') return t(ASKED.cancelled)
+    if (e.code === 'changed') return t(ASKED.changed)
     return t("Couldn't make the signed copy: {error}", { error: e.message })
   }
   const save = async () => {
     setBusy(true); setErr(null)
     try {
+      const sha = shown ? await shown().catch(() => null) : null
       let grant = null
       if (way) {
         setAsking(way === 'device' ? (ask.touchID ? t('Touch ID, or your Mac\'s password, on this Mac…') : t('Your Mac\'s password, on this Mac…')) : way === 'hello' ? t('Windows Hello, on this computer…') : t('Checking your PIN…'))
-        const g = await api('/studio/sign/ask', { method: 'POST', body: { root: file.root, path: file.path, ...(way === 'pin' ? { pin } : {}) } })
+        const g = await api('/studio/sign/ask', { method: 'POST', body: { root: file.root, path: file.path, ...(sha ? { sha256: sha } : {}), ...(way === 'pin' ? { pin } : {}) } })
         grant = g.grant || null
       }
       setAsking(null)
-      const r = await api('/studio/sign', { method: 'POST', body: { root: file.root, path: file.path, grant, marks: ok.map(({ kind, page, x, y, w, h, align, field, fieldType, sig }) => ({ kind, page, x, y, w, h, align, field, fieldType, ...(kind === 'date' ? { text: dateText || '' } : { sig: sig || using?.[kind] || undefined }) })) } })
+      const r = await api('/studio/sign', { method: 'POST', body: { root: file.root, path: file.path, grant, ...(sha ? { sha256: sha } : {}), marks: ok.map(({ kind, page, x, y, w, h, align, field, fieldType, sig }) => ({ kind, page, x, y, w, h, align, field, fieldType, ...(kind === 'date' ? { text: dateText || '' } : { sig: sig || using?.[kind] || undefined }) })) } })
       setDone(r)
       setPin('')
       setTimeout(() => onOpen?.({ root: r.root || file.root, path: r.path }), 1400)

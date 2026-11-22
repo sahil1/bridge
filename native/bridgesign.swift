@@ -4,11 +4,12 @@
 // Studio › Ask Before Signing). Neither needs a permission: macOS asks nothing to start either.
 //
 //   bridgesign probe                          what this Mac has, then exits:
-//     {"trackpad":true,"touchID":true,"auth":true}
+//     {"trackpad":true,"touchID":true,"auth":true,"parent":true}
 //                                             trackpad: a built-in or Magic Trackpad is connected;
 //                                             touchID: Touch ID is set up and can be used now (the lid
 //                                             open, a finger enrolled); auth: this Mac can ask for its
-//                                             password (or Touch ID) at all.
+//                                             password (or Touch ID) at all; parent: the program that
+//                                             started it is Bridge AI (below).
 //   bridgesign trackpad                       draws on the trackpad. Its first line on stdin says
 //                                             how: {"hint":"…","seconds":120} (on stdin, not in its
 //                                             arguments, which any program can list).
@@ -35,11 +36,12 @@
 //     {"ok":true,"how":"touchid"|"password"}  or {"ok":false,"code":"cancel"|"failed"|"none","error":"…"}
 //                                             none: this Mac has no password or Touch ID to ask for.
 //
-// key and auth answer only the program that started them, when it's signed with the same
-// certificate as this helper (Bridge AI itself, the server on its Helper): another program running
-// this helper gets {"error":"parent"} (key) or {"ok":false,"code":"parent"} (auth), and probe says
-// auth false to it. A build of your own from a clone (scripts/calltap.js without --release) is
-// built with BRIDGESIGN_ANY_PARENT, which leaves that check out; release builds never are.
+// auth answers only the program that started it, when it's signed with the same certificate as this
+// helper (Bridge AI itself, the server on its Helper): another program running this helper gets
+// {"ok":false,"code":"parent"}, and probe says auth false (and parent false) to it. A build of your
+// own from a clone (scripts/calltap.js without --release) is built with BRIDGESIGN_ANY_PARENT, which
+// leaves that check out; release builds never are. It holds no key: your saved signatures' key is
+// the app's own (Electron's safeStorage), given to the server it starts (server/appkeys.js).
 //
 // It exits when the process that started it goes. Built for Apple silicon and Intel, as the other
 // helpers are (desktop/stage.js):
@@ -126,7 +128,7 @@ func probe() {
   let trusted = parentTrusted()
   let touch = trusted && ctx.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &err) && ctx.biometryType == .touchID
   let auth = trusted && LAContext().canEvaluatePolicy(.deviceOwnerAuthentication, error: nil)
-  say("{\"trackpad\":\(hasTrackpad()),\"touchID\":\(touch),\"auth\":\(auth)}")
+  say("{\"trackpad\":\(hasTrackpad()),\"touchID\":\(touch),\"auth\":\(auth),\"parent\":\(trusted)}")
   exit(0)
 }
 
@@ -163,30 +165,6 @@ func auth(_ reason: String) {
       done("{\"ok\":false,\"code\":\"\(cancel ? "cancel" : "failed")\",\"error\":\(quote(e?.localizedDescription ?? "Not confirmed"))}")
     }
   }
-}
-
-// ---------- key ----------
-func keychainKey() {
-  if !parentTrusted() { say("{\"error\":\"parent\",\"status\":0}"); exit(1) }
-  let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "dev.bridge-ai.signatures", kSecAttrAccount as String: "key"]
-  var q = base
-  q[kSecReturnData as String] = true
-  q[kSecMatchLimit as String] = kSecMatchLimitOne
-  var out: CFTypeRef?
-  let st = SecItemCopyMatching(q as CFDictionary, &out)
-  let why = { (s: OSStatus) in (SecCopyErrorMessageString(s, nil) as String?) ?? "status \(s)" }
-  if st == errSecSuccess, let d = out as? Data, d.count == 32 { say("{\"key\":\"\(d.base64EncodedString())\"}"); exit(0) }
-  if st != errSecItemNotFound { say("{\"error\":\(quote(why(st))),\"status\":\(st)}"); exit(1) }
-  var bytes = [UInt8](repeating: 0, count: 32)
-  guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else { say("{\"error\":\"random\",\"status\":0}"); exit(1) }
-  var add = base
-  add[kSecValueData as String] = Data(bytes)
-  add[kSecAttrLabel as String] = "Bridge AI signatures"
-  add[kSecAttrDescription as String] = "The key Bridge AI keeps your saved signatures with"
-  let made = SecItemAdd(add as CFDictionary, nil)
-  if made != errSecSuccess { say("{\"error\":\(quote(why(made))),\"status\":\(made)}"); exit(1) }
-  say("{\"key\":\"\(Data(bytes).base64EncodedString())\"}")
-  exit(0)
 }
 
 // ---------- trackpad ----------
@@ -346,8 +324,6 @@ var sigterm: DispatchSourceSignal?
 switch args.count > 1 ? args[1] : "" {
 case "probe":
   probe()
-case "key":
-  keychainKey()
 case "auth":
   if !parentTrusted() { say("{\"ok\":false,\"code\":\"parent\",\"error\":\"Only Bridge AI can ask with this helper\"}"); exit(1) }
   let said = firstLine()
@@ -360,6 +336,6 @@ case "trackpad":
   let secs = (said["seconds"] as? NSNumber)?.doubleValue ?? 120
   trackpad(seconds: max(5, min(600, secs)), hint: (said["hint"] as? String).map { String($0.prefix(160)) })
 default:
-  FileHandle.standardError.write("usage: bridgesign probe | bridgesign key | bridgesign trackpad | bridgesign auth (the trackpad's and auth's details on stdin)\n".data(using: .utf8)!)
+  FileHandle.standardError.write("usage: bridgesign probe | bridgesign trackpad | bridgesign auth (the trackpad's and auth's details on stdin)\n".data(using: .utf8)!)
   exit(2)
 }

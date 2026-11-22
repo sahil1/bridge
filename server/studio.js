@@ -18,6 +18,9 @@ import { isLockFile } from '../shared/lockfile.js'
 const DIR = path.join(DATA, 'studio')
 const VERSIONS = path.join(DIR, 'versions')
 const RECENT = path.join(DIR, 'recent.json')
+// The signed copies Studio has made (their hashes, as versions hash a file: below): known for one
+// wherever it's moved or copied to, not only in a _signed folder.
+const SIGNED = path.join(DIR, 'signed-copies.json')
 
 // What Studio opens, by kind: doc (Word, Markdown, text), sheet (Excel, CSV), deck (PowerPoint, and
 // a Markdown deck: marp: true in its front matter), pdf, page (HTML).
@@ -122,9 +125,22 @@ const versionsOf = (real) => inIndex(indexOf(real), () => readIndex(indexOf(real
 const MERGE_MS = 10 * 60_000
 // saved: what's in the file is what was just saved (a big one's version copied from the file, by the
 // system, rather than written again from memory).
-// A signed copy (in a _signed folder, signing.js) has your signature in it: its versions are kept as
-// a line each (when, who, its hash), never as a copy in Bridge AI's data folder.
-const noCopy = (real) => path.basename(path.dirname(real)) === '_signed'
+// A signed copy has your signature in it: its versions are kept as a line each (when, who, its hash),
+// never as a copy in Bridge AI's data folder. Known for one wherever it is: in a _signed folder at
+// any depth, by its hash (one Studio made, moved or copied anywhere), or by the mark signing put in
+// its own information (signing.js MARK: one changed since, as long as that's kept).
+const MARK = Buffer.from('/BridgeAISigned')
+let signedHashes = null
+const signedSet = async () => (signedHashes ||= new Set((await readJSON(SIGNED, { hashes: [] })).hashes || []))
+async function noCopy(real, h, buf) {
+  if (real.split(path.sep).includes('_signed')) return true
+  if (path.extname(real).toLowerCase() !== '.pdf') return false
+  if ((await signedSet()).has(h)) return true
+  try {
+    const bytes = buf || ((await fsp.stat(real)).size <= 100 * MB ? await fsp.readFile(real) : null)
+    return !!bytes && bytes.includes(MARK)
+  } catch { return false }
+}
 function snapshot(real, by, { name = null, buf = null, auto = false, saved = false, signed = null } = {}) {
   return inIndex(indexOf(real), async () => {
     // A big file is hashed as it's read, and copied by the system (on a Mac's disk, a copy that
@@ -142,7 +158,7 @@ function snapshot(real, by, { name = null, buf = null, auto = false, saved = fal
     const dir = path.dirname(indexOf(real))
     await fsp.mkdir(dir, { recursive: true })
     const id = `${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`
-    const file = noCopy(real) ? null : `${id}${path.extname(real).toLowerCase()}`
+    const file = (await noCopy(real, h, buf)) ? null : `${id}${path.extname(real).toLowerCase()}`
     if (file && buf) await fsp.writeFile(path.join(dir, file), buf)
     else if (file) await fsp.copyFile(real, path.join(dir, file))
     const at = new Date().toISOString()
@@ -196,28 +212,52 @@ function prune() {
 }
 // (kept: whether there's a copy to open or put back; a signed copy's lines have none.)
 const shown = (vs) => vs.map(({ id, at, by, name, size, signed, file }) => ({ id, at, by, name: name || null, size, kept: !!file, ...(signed ? { signed } : {}) }))
-// A signing's record as it's shown: checked against its MAC (signstore.js), so one changed in the
-// index says so (verified: false).
-const checkedRec = async (r) => ({ ...r, verified: await signStore.macOk(r).catch(() => false) })
-const shownChecked = async (vs) => Promise.all(shown(vs).map(async (v) => (v.signed ? { ...v, signed: await checkedRec(v.signed) } : v)))
+// A signing's record as it's shown: checked against its MAC (signstore.js), made over it and the two
+// files it's about, so one changed in the index, or one copied into another file's history, says so
+// (verified: false); and the signed copy, where it still is, against the hash it had when it was made
+// (copyChanged). docsOf: the two files' full paths, from the file whose history this is (side:
+// 'orig' or 'copy') and the record's own paths, relative to the place it was signed in.
+function docsOf(real, r, side) {
+  const rel = (x) => String(x || '').split('/').join(path.sep)
+  const mine = rel(side === 'orig' ? r.from : r.copy)
+  if (!mine || !(real === mine || real.endsWith(path.sep + mine))) return null
+  const base = real.slice(0, real.length - mine.length)
+  return side === 'orig' ? { orig: real, copy: base + rel(r.copy) } : { orig: base + rel(r.from), copy: real }
+}
+const fullHash = async (f) => { try { return crypto.createHash('sha256').update(await fsp.readFile(f)).digest('hex') } catch { return null } }
+async function checkedRec(r, real, side) {
+  const docs = docsOf(real, r, side)
+  const verified = !!docs && await signStore.macOk(r, docs).catch(() => false)
+  const now = docs && r.sha256 ? await fullHash(docs.copy) : null
+  return { ...r, verified, ...(now && now !== r.sha256 ? { copyChanged: true } : {}) }
+}
+const shownChecked = async (vs, real) => Promise.all(shown(vs).map(async (v) => (v.signed ? { ...v, signed: await checkedRec(v.signed, real, 'copy') } : v)))
 // Each time it was signed in Studio (signing.js): a line of its own, not a version (signing makes a
 // copy; this file stays as it was). Newest first.
-const signingsOf = (real) => inIndex(indexOf(real), () => readIndex(indexOf(real))).then((idx) => Promise.all((idx.signed || []).map(checkedRec)))
+const signingsOf = (real) => inIndex(indexOf(real), () => readIndex(indexOf(real))).then((idx) => Promise.all((idx.signed || []).map((r) => checkedRec(r, real, 'orig'))))
 const KEEP_SIGNED = 60
 // The record of one signing (signing.js made it, and its MAC over all of it): who (you), on which of
 // your devices, which way (your window or your phone), how it was asked (Touch ID, the Mac's
 // password, Windows Hello, the signing PIN; null when Ask Before Signing was off), the places (kind
 // and page) and when, the copy it made and that copy's sha256. Kept as it came, so its MAC checks.
 const cleanSigned = (r) => ({
+  id: /^s[0-9a-z]{6,30}$/.test(String(r?.id || '')) ? r.id : `s${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`,
   on: String(r?.on || '').slice(0, 80), via: r?.via === 'phone' ? 'phone' : 'window', how: ['touchid', 'password', 'hello', 'pin'].includes(r?.how) ? r.how : null, at: String(r?.at || new Date().toISOString()),
   places: (Array.isArray(r?.places) ? r.places : []).slice(0, 200).map((x) => ({ kind: ['signature', 'initials', 'date'].includes(x?.kind) ? x.kind : 'signature', page: Number(x?.page) || 1 })),
   copy: r?.copy ? String(r.copy).slice(0, 600) : null, from: r?.from ? String(r.from).slice(0, 600) : null,
-  sha256: /^[0-9a-f]{64}$/.test(String(r?.sha256 || '')) ? r.sha256 : null, mac: typeof r?.mac === 'string' ? r.mac.slice(0, 100) : null,
+  sha256: /^[0-9a-f]{64}$/.test(String(r?.sha256 || '')) ? r.sha256 : null, fromSha256: /^[0-9a-f]{64}$/.test(String(r?.fromSha256 || '')) ? r.fromSha256 : null,
+  mac: typeof r?.mac === 'string' ? r.mac.slice(0, 100) : null,
 })
 // A signing, in both files' history: the signed copy's first version says it was signed (and how),
 // and the original keeps a line for it.
 export async function noteSigned({ original, copy, rec }) {
   const r = cleanSigned(rec)
+  // (Its hash as versions take one: known for a signed copy wherever it goes.)
+  if (r.sha256) {
+    const set = await signedSet()
+    set.add(r.sha256.slice(0, 32))
+    writeFileAtomic(SIGNED, JSON.stringify({ hashes: [...set].slice(-5000) }))
+  }
   if (copy) await snapshot(copy, 'signed', { signed: r })
   if (!original) return
   const file = indexOf(original)
@@ -225,7 +265,7 @@ export async function noteSigned({ original, copy, rec }) {
     const idx = await readIndex(file)
     idx.path ||= original
     idx.versions ||= []
-    idx.signed = [{ id: `s${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`, ...r }, ...(idx.signed || [])].slice(0, KEEP_SIGNED)
+    idx.signed = [r, ...(idx.signed || [])].slice(0, KEEP_SIGNED)
     await fsp.mkdir(path.dirname(file), { recursive: true })
     writeFileAtomic(file, JSON.stringify(idx, null, 1))
   })
@@ -402,7 +442,7 @@ export async function open(root, rel, { rootId = null, label = null } = {}) {
     if (!partsOf && st.size > WHOLE_MAX) throw new Error(`Studio can't read the parts of this ${APP[ext] || 'Office'} file: it isn't in the newer Office format, or it's damaged or locked with a password. Open it on its computer in ${APP[ext] || 'its own app'}.`)
   }
   return {
-    path: r, name: path.basename(real), kind, ext, size: st.size, mtime: st.mtimeMs, versions: await shownChecked(await versionsOf(real)), signings: await signingsOf(real),
+    path: r, name: path.basename(real), kind, ext, size: st.size, mtime: st.mtimeMs, versions: await shownChecked(await versionsOf(real), real), signings: await signingsOf(real),
     inParts: inParts(ext, st.size) && (ext === '.pdf' || !!partsOf), ...(partsOf ? { left: partsOf.left, model: partsOf.model } : {}),
     saves: st.size <= SAVE_MAX, keep: keepFor(st.size), limits: { open: OPEN_MAX, save: SAVE_MAX, whole: WHOLE_MAX },
   }
@@ -468,7 +508,7 @@ export async function changed(root, rel, since) {
 
 export async function versions(root, rel) {
   const { real, st } = await locate(root, rel)
-  return { versions: await shownChecked(await versionsOf(real)), keep: keepFor(st.size), signings: await signingsOf(real) }
+  return { versions: await shownChecked(await versionsOf(real), real), keep: keepFor(st.size), signings: await signingsOf(real) }
 }
 // One version's copy, to show or download.
 export async function versionFile(root, rel, id) {

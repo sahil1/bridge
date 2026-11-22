@@ -132,17 +132,19 @@ const prompts = limiter(8, 60_000)
 // 'change' (your saved signatures, while it's on) and 'export' (them, into a backup or a move).
 const PURPOSES = ['sign', 'settings', 'change', 'export']
 // Whether it's on: as the sealed list says, or (it can't be read) as the mark beside it says, or the
-// list was set aside (it may have been): closed until you confirm.
+// list was set aside, or is older than the app last heard (a copy put back): closed until you confirm.
 export async function needed() {
   const a = await store.askOf().catch(() => null)
   if (a?.on || store.askMarked()) return true
   if (!a) return true
+  if (await store.olderNote().catch(() => null)) return true
   return !!(await store.setAsideNote().catch(() => null))
 }
 // Asked as this one is asked (pin: what they typed, where that's the way), then a grant for
 // purpose. how says which it was, for the record. reason: what Touch ID says it's for, written by
-// signing.js from the document itself. Export asks even with Ask Before Signing off.
-export async function ask({ here, device, purpose = 'sign', doc = null, reason = 'sign a document', pin = null }) {
+// signing.js from the document itself; sha256: the document's bytes as they were when you were
+// asked, which signing then has to find (signing.js). Export asks even with Ask Before Signing off.
+export async function ask({ here, device, purpose = 'sign', doc = null, sha256 = null, reason = 'sign a document', pin = null }) {
   if (!PURPOSES.includes(purpose)) throw err('Not something to ask for', 400)
   const a = await store.askOf().catch(() => null)
   const on = await needed()
@@ -172,10 +174,13 @@ export async function ask({ here, device, purpose = 'sign', doc = null, reason =
       how = 'hello'
     }
   }
+  // Confirmed by you: a list set aside, or older than the app last heard, no longer keeps signing
+  // closed (signstore.js clearSetAside).
+  if (how !== 'window') await store.clearSetAside().catch(() => {})
   sweep()
   if (grants.size >= MAX_GRANTS) grants.delete(grants.keys().next().value)
   const token = crypto.randomBytes(32).toString('base64url')
-  grants.set(token, { purpose, doc, who: who({ here, device }), how, until: Date.now() + GRANT_MS })
+  grants.set(token, { purpose, doc, sha256, who: who({ here, device }), how, until: Date.now() + GRANT_MS })
   return { needed: true, grant: token, how, until: Date.now() + GRANT_MS }
 }
 // The grant a signing (or a change) came with: for that, by that one, in time; used up either way.
@@ -201,8 +206,10 @@ export async function set({ on, pin, removePin = false, grant, here, device }) {
   if (!a) throw err('Your signatures can\'t be opened just now, so neither can this. Try again once they open.', 503, 'closed')
   const touchesPin = pin != null || removePin
   const asks = (await needed()) || touchesPin
-  const wayNow = here ? await wayHere() : 'pin'
-  if (here && !wayNow) throw err('Touch ID couldn\'t be asked just now. Try again.', 503, 'try-again')
+  // (This computer's own way, whoever is asking: kept when it's turned on, from a phone too.)
+  const wayComputer = await wayHere()
+  const wayNow = here ? wayComputer : 'pin'
+  if ((here || on === true) && !wayComputer) throw err('Touch ID couldn\'t be asked just now. Try again.', 503, 'try-again')
   // Setting a PIN where the computer has Touch ID or its password: only at the computer, with them.
   if (touchesPin && !here && (a.way === 'device' || a.way === 'hello')) throw err('Set or change the signing PIN on the computer, where Touch ID or its password is asked.', 403, 'here')
   const asked = grant ? use(grant, { purpose: 'settings', here, device }) : null
@@ -214,7 +221,7 @@ export async function set({ on, pin, removePin = false, grant, here, device }) {
   if (removePin) change.pin = null
   if (typeof on === 'boolean') {
     change.on = on
-    if (on) change.way = here ? wayNow : a.way || 'pin'
+    if (on) change.way = wayComputer
   }
   const pinAfter = 'pin' in change ? change.pin : a.pin
   const onAfter = 'on' in change ? change.on : a.on

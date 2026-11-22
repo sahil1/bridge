@@ -14,6 +14,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
 import WebSocket from 'ws'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -70,7 +71,28 @@ try {
     const shown = `${d.stderr}\n${d.stdout}`
     const by = /Authority=(.+)/.exec(shown)?.[1] || (/Signature=adhoc/.test(shown) ? 'ad hoc' : '?')
     if (process.env.BRIDGE_SIGN_P12 && !/certificate leaf = H"/.test(shown)) throw new Error(`a certificate was given, but it's signed ${by}`)
+    // Signed with a certificate (not ad hoc): under the hardened runtime, so no other code gets in
+    // (no DYLD_ variables, no debugger attached), the app and its Helper both.
+    if (by !== 'ad hoc') {
+      for (const f of [bundle, path.join(bundle, 'Contents', 'Frameworks', 'Bridge AI Helper.app')]) {
+        const v = spawnSync('codesign', ['-d', '-v', f], { encoding: 'utf8' })
+        if (!/flags=0x[0-9a-f]*\(.*runtime.*\)/.test(v.stderr)) throw new Error(`${path.basename(f)} isn't signed with the hardened runtime: ${(/flags=.*/.exec(v.stderr) || [''])[0]}`)
+      }
+    }
     return by
+  })
+  // Electron's fuses (desktop/package.json electronFuses): Node's own options (NODE_OPTIONS) and its
+  // inspector (--inspect) are off for the app and anything run on it; running as Node stays on, as
+  // the server runs that way.
+  await built('Electron\'s fuses are set', async () => {
+    const { getCurrentFuseWire, FuseV1Options } = createRequire(path.join(ROOT, 'desktop', 'package.json'))('@electron/fuses')
+    const FuseState = { DISABLE: 48, ENABLE: 49 } // ('0' and '1' in the wire: @electron/fuses' constants)
+    const bundle = process.platform === 'darwin' ? path.dirname(path.dirname(path.dirname(app.exe))) : app.exe
+    const wire = await getCurrentFuseWire(bundle)
+    const want = { [FuseV1Options.RunAsNode]: FuseState.ENABLE, [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: FuseState.DISABLE, [FuseV1Options.EnableNodeCliInspectArguments]: FuseState.DISABLE }
+    const off = Object.entries(want).filter(([k, v]) => wire[k] !== v).map(([k]) => FuseV1Options[k])
+    if (off.length) throw new Error(`not as set: ${off.join(', ')}`)
+    return 'RunAsNode on, NODE_OPTIONS and --inspect off'
   })
   // Studio's signing (server/signhelper.js): on a Mac its helper (native/bridgesign) is in the app and
   // says what this Mac has, asking nothing.

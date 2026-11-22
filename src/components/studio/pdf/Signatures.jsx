@@ -12,13 +12,23 @@ import './pdf.css'
 // your phone; kept only on this computer, sealed (server/signstore.js), and removed whenever you
 // like. Studio's home and Settings › Studio list them; Sign this on a PDF asks for one when it needs
 // one, and each place can have any of them.
+// sealed (server/signstore.js sealedWith): { by: 'app', store } with the key the app keeps in the
+// computer's keychain, or { by: 'file' } (a server started without the app: a key file).
 const KEPT_WHERE = {
   keychain: tx('Kept only on this computer, sealed with a key in this Mac\'s Keychain. Never sent to a model, a bot or anywhere else.'),
   dpapi: tx('Kept only on this computer, sealed with a key only your Windows account can open. Never sent to a model, a bot or anywhere else.'),
+  'secret-service': tx('Kept only on this computer, sealed with a key in your computer\'s keyring. Never sent to a model, a bot or anywhere else.'),
   file: tx('Kept only on this computer, sealed, in Bridge AI\'s data folder. Never sent to a model, a bot or anywhere else.'),
 }
 export const KEPT = KEPT_WHERE.file
-export const keptText = (sealed) => t(KEPT_WHERE[sealed] || KEPT_WHERE.file)
+export const keptText = (sealed) => t(KEPT_WHERE[sealed?.by === 'app' ? sealed.store : 'file'] || KEPT_WHERE.file)
+// Said where the key isn't kept anywhere safer than a file: other programs you run can read it.
+export function KeyWarning({ sealed }) {
+  if (!sealed) return null
+  const where = sealed.by === 'file' ? t('Your signatures\' key is in a file in Bridge AI\'s data folder, which other programs you run can read. In the Bridge AI app it\'s kept in this computer\'s keychain instead.')
+    : sealed.store === 'basic' ? t('This computer has no keychain for the app to keep your signatures\' key in, so other programs you run can read it.') : null
+  return where ? <p className="sd-warn small sd-key-warn" role="note"><Icon name="alert" size={11} /> {where}</p> : null
+}
 export const sigUrl = (id, at) => `${BASE}/api/studio/signature/${encodeURIComponent(id)}?v=${encodeURIComponent(at || '')}`
 const KIND_NAME = { signature: tx('Signature'), initials: tx('Initials') }
 
@@ -135,6 +145,9 @@ export function SignatureList({ setup }) {
   return (
     <div className="sd-siglist">
       {setup.data.sealError && <p className="error-text small" role="alert">{t('Your saved signatures can\'t be opened: {error}', { error: setup.data.sealError })}</p>}
+      <KeyWarning sealed={setup.data.sealed} />
+      {setup.data.older && <p className="sd-warn small" role="status"><Icon name="alert" size={11} /> {t('Your signatures\' list is older than the app last saw, as if a copy from before was put back. Signing asks that it\'s you each time until you confirm it once.')}</p>}
+      {setup.data.windowChanged && <p className="sd-warn small" role="status"><Icon name="alert" size={11} /> {t('The Bridge AI app\'s key for its windows changed on {date}. That happens when it\'s reinstalled or its Keychain item is reset; if neither happened, look at what runs on this computer.', { date: new Date(setup.data.windowChanged.at).toLocaleDateString(locale(), { dateStyle: 'medium' }) })}</p>}
       {setup.data.setAside?.n > 0 && <p className="sd-warn small" role="status"><Icon name="alert" size={11} /> {setup.data.setAside.n === 1 ? t('A saved signature couldn\'t be opened with this computer\'s key, so it was set aside.') : t('{n} saved signatures couldn\'t be opened with this computer\'s key, so they were set aside.', { n: setup.data.setAside.n })}</p>}
       <KindList kind="signature" setup={setup} />
       <KindList kind="initials" setup={setup} />

@@ -1,11 +1,13 @@
 // Your saved signatures and initials (Studio's Sign this), as Preview keeps them: as many as you
 // like, each named, one of each kind the default. Kept only on this computer, in
-// <data>/studio/signatures, encrypted (AES-256-GCM) with a key that isn't in the data folder where
-// the computer has somewhere safer for it:
-//   a Mac       its Keychain (native/bridgesign key: a login-keychain item only that helper reads
-//               without asking; never synced to iCloud Keychain)
-//   Windows     DPAPI: the key is in the folder, sealed to your Windows account
-//   elsewhere   a key file beside them, readable by you alone (Linux, Docker: no keychain to ask)
+// <data>/studio/signatures, encrypted (AES-256-GCM) with a key that isn't in the data folder when
+// the desktop app started this server:
+//   the app     it keeps the key in the Keychain (Electron's safeStorage: macOS's Keychain, Windows'
+//               DPAPI, a Linux secret service) and hands it to the server it starts on a pipe of its
+//               own (appkeys.js), so no helper or file hands it to another program
+//   otherwise   (npm start, the CLI, Docker) a key file beside them, readable by you alone; the app
+//               seals them again with its own key the first time it starts this server, and the file
+//               goes
 // Nothing in the folder is a picture anyone can open: each image and the list are sealed files
 // (BSIG1), each bound to its own name so one can't be swapped for another. They're never synced,
 // never sent to a model, a bot, MCP, a Share Link or a crash report; only Back Up & Move carries
@@ -14,14 +16,12 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import { execFile } from 'node:child_process'
-import { DATA, IS_MAC, IS_WIN, writeFileAtomic } from './paths.js'
-import { signBin, runHelper } from './signhelper.js'
+import { DATA, writeFileAtomic } from './paths.js'
+import { appKeys } from './appkeys.js'
 
 export const DIR = path.join(DATA, 'studio', 'signatures')
 const STORE = path.join(DIR, 'store.bin')
 const KEYFILE = path.join(DIR, 'key')
-const DPAPI = path.join(DIR, 'key.dpapi')
 // Ask Before Signing was turned on: said outside the sealed list too, so a list that can't be
 // opened (changed, or its key gone) leaves signing closed until you confirm, not open.
 const ASK_MARK = path.join(DIR, 'ask-before-signing')
@@ -33,54 +33,25 @@ const err = (message, status = 400, code) => Object.assign(new Error(message), {
 
 // ---------- The key ----------
 let keyP = null
-let where = null // 'keychain' | 'dpapi' | 'file'
-export const sealedWith = () => where
-const run = (bin, args, o = {}) => new Promise((resolve, reject) => {
-  execFile(bin, args, { timeout: 30000, maxBuffer: 1024 * 1024, windowsHide: true, ...o }, (e, out, errOut) => (e ? reject(Object.assign(e, { out: String(out || ''), errOut: String(errOut || '') })) : resolve(String(out || ''))))
-})
+let where = null // 'app' | 'file'
+// How they're sealed, for Settings › Studio: { by: 'app' | 'file', store } (store: where the app
+// keeps its key; 'basic' when that computer has nowhere safe for it). null until first opened.
+export const sealedWith = () => (where ? { by: where, store: where === 'app' ? appKeys().store || null : null } : null)
 
-// null when the helper won't give it to this server (a build of the app signed ad hoc: it answers
-// only Bridge AI signed with its own certificate), which then keeps a key file, as elsewhere.
-async function keychainKey() {
-  const out = await runHelper(['key'], null, 30000)
-  if (out?.error === 'parent') return null
-  const k = out?.key ? Buffer.from(out.key, 'base64') : null
-  if (k?.length === 32) return k
-  throw err(`This Mac's Keychain didn't give the key your signatures are kept with${out?.error ? `: ${out.error}` : ''}. Unlock the Keychain (it opens with your Mac's password) and try again.`, 503, 'keychain')
-}
-// Windows: a key sealed to your account by DPAPI (as Electron's safeStorage does there).
-const PS = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
-async function dpapi(how, b64) {
-  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(String(b64)) || !['Protect', 'Unprotect'].includes(how)) throw err('Not a key', 500)
-  const script = `Add-Type -AssemblyName System.Security; $b = [Convert]::FromBase64String('${b64}'); [Convert]::ToBase64String([Security.Cryptography.ProtectedData]::${how}($b, $null, 'CurrentUser'))`
-  const out = await run(PS, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')])
-  return Buffer.from(out.trim(), 'base64')
-}
-async function dpapiKey() {
-  try {
-    const k = await dpapi('Unprotect', (await fsp.readFile(DPAPI, 'utf8')).trim())
-    if (k.length === 32) return k
-  } catch (e) { if (e.code !== 'ENOENT') throw err(`Windows couldn't open the key your signatures are kept with: ${e.message}`, 503, 'dpapi') }
-  const k = crypto.randomBytes(32)
-  const sealed = await dpapi('Protect', k.toString('base64'))
-  writeFileAtomic(DPAPI, sealed.toString('base64'), { mode: 0o600 })
-  return k
-}
 const readFileKey = async () => { try { const k = Buffer.from((await fsp.readFile(KEYFILE, 'utf8')).trim(), 'base64'); return k.length === 32 ? k : null } catch { return null } }
 async function fileKey() {
   const have = await readFileKey()
   if (have) return have
-  // None yet, and signatures sealed already: by the Keychain's or Windows' key, which this copy of
-  // Bridge AI can't reach (run from a clone that didn't build the helper). Said, and nothing made
-  // over them, so they open again once it can.
-  if (fs.existsSync(STORE)) throw err(IS_MAC ? 'Your signatures are sealed with this Mac\'s Keychain by Bridge AI\'s signing helper, which isn\'t in this copy of Bridge AI (build it with npm run calltap, or use the app)' : 'Your signatures are sealed with a key this copy of Bridge AI can\'t reach', 503, 'no-key')
+  // None, and signatures sealed already: by the app's key, which a server started another way
+  // doesn't have. Said, and nothing made over them, so they open again in the app.
+  if (fs.existsSync(STORE)) throw err('Your signatures are sealed with the Bridge AI app\'s key: open them in the app', 503, 'no-key')
   const k = crypto.randomBytes(32)
   writeFileAtomic(KEYFILE, k.toString('base64'), { mode: 0o600 })
   return k
 }
-// Sealed with a key file before the Keychain (or DPAPI) could be used: each file sealed again with
-// the better key, then the key file overwritten and taken away. One that won't open with the old
-// key is left as it is.
+// Sealed with a key file before the app started this server: each file sealed again with the app's
+// key, then the key file overwritten and taken away. One that won't open with the old key is left
+// as it is.
 async function rekey(old, k) {
   for (const f of (await fsp.readdir(DIR)).filter((x) => x.endsWith('.bin'))) {
     const name = f === 'store.bin' ? 'store' : f.slice(0, -4)
@@ -92,18 +63,14 @@ async function rekey(old, k) {
 async function loadKey() {
   await fsp.mkdir(DIR, { recursive: true, mode: 0o700 })
   await fsp.chmod(DIR, 0o700).catch(() => {})
-  const bin = signBin()
-  let k = null
-  if (bin) { k = await keychainKey(); if (k) where = 'keychain' }
-  if (!k && !bin && IS_WIN && !process.env.BRIDGE_FIX_DRYRUN) {
-    try { k = await dpapiKey(); where = 'dpapi' } catch (e) { if (fs.existsSync(DPAPI)) throw e }
-  }
-  if (k) {
+  const app = appKeys().key
+  if (app) {
     const old = await readFileKey()
-    if (old) await rekey(old, k)
-    return k
+    if (old) await rekey(old, app)
+    where = 'app'
+    return app
   }
-  k = await fileKey()
+  const k = await fileKey()
   where = 'file'
   return k
 }
@@ -143,16 +110,35 @@ async function loadStore() {
   await key() // (first: a file sealed again with a better key is read after, not before)
   let s = { list: [], defaults: {} }
   try { s = JSON.parse((await open('store', await fsp.readFile(STORE))).toString('utf8')) } catch (e) {
-    if (e.code === 'sealed') s = { list: [], defaults: {}, setAside: await setAside() }
-    else if (e.code !== 'ENOENT') throw e
+    if (e.code === 'sealed') {
+      const aside = await setAside()
+      // Yours, set aside earlier when another key's list was put here (a server started with keys
+      // that aren't the app's): put back, as this key opens it.
+      s = { ...((await putBack(aside.folder)) || { list: [], defaults: {} }), setAside: { at: aside.at, n: aside.n } }
+    } else if (e.code !== 'ENOENT') throw e
   }
   s.list = Array.isArray(s.list) ? s.list.filter((x) => okId(x?.id) && KINDS.includes(x.kind)) : []
   s.defaults = s.defaults && typeof s.defaults === 'object' ? s.defaults : {}
+  s.v = Number.isInteger(s.v) && s.v >= 0 ? s.v : 0
   await migrate(s)
   if (s.setAside) await writeStore(s)
+  // Older than the app last heard (its version, kept by the app where a file put back can't reach:
+  // appkeys.js): a copy from before put back. Kept as it is, but signing asks first until you
+  // confirm it's you (signauth.js), and it's said; noted in the list itself, so changes made
+  // meanwhile can't make it look new again, and the app isn't told of them.
+  const was = appKeys().state
+  if (was && s.v < was.v && !s.older && !s.setAside) {
+    s.older = { at: new Date().toISOString(), was: was.v, is: s.v, ask: was.ask }
+    await writeStore(s)
+  }
   cache = s
   return s
 }
+// What the app is told after each change ({ v, ask }), to keep (desktop/main.js): see appkeys.js.
+const heard = new Set()
+export const onChange = (fn) => { heard.add(fn); return () => heard.delete(fn) }
+export const stateOf = (s) => ({ v: s.v || 0, ask: !!s.ask?.on })
+export const state = () => one(async () => stateOf(await readStore()))
 // Sealed with a key this computer doesn't have (the folder came from another computer, or the
 // Keychain's item was deleted): they can't be opened here, so they're moved aside, into a folder of
 // their own beside them (never deleted: with the old key they'd open again), and the list starts
@@ -162,14 +148,33 @@ async function setAside() {
   await fsp.mkdir(to, { recursive: true, mode: 0o700 })
   const files = (await fsp.readdir(DIR)).filter((f) => f.endsWith('.bin'))
   for (const f of files) await fsp.rename(path.join(DIR, f), path.join(to, f)).catch(() => {})
-  return { at: new Date().toISOString(), n: Math.max(0, files.length - 1) }
+  return { at: new Date().toISOString(), n: Math.max(0, files.length - 1), folder: path.basename(to) }
+}
+// The newest list set aside before (not just now) that this computer's key opens: its files moved
+// back, its folder gone, and the list. null when there's none.
+async function putBack(now) {
+  const k = await key()
+  const folders = (await fsp.readdir(DIR).catch(() => [])).filter((f) => f.startsWith('set-aside-') && f !== now).sort().reverse()
+  for (const f of folders) {
+    const from = path.join(DIR, f)
+    let list
+    try { list = JSON.parse(openWith(k, 'store', await fsp.readFile(path.join(from, 'store.bin'))).toString('utf8')) } catch { continue }
+    for (const x of (await fsp.readdir(from)).filter((y) => y.endsWith('.bin'))) await fsp.rename(path.join(from, x), path.join(DIR, x))
+    await fsp.rm(from, { recursive: true, force: true })
+    return list
+  }
+  return null
 }
 // Said until a new one is drawn: the list's set-aside note.
 export const setAsideNote = () => one(async () => (await readStore()).setAside || null)
+// A list older than the app last heard (above): { at, was, is, ask }, until you confirm it's you.
+export const olderNote = () => one(async () => (await readStore()).older || null)
 async function writeStore(s) {
   for (const k of KINDS) if (!s.list.some((x) => x.id === s.defaults[k] && x.kind === k)) s.defaults[k] = s.list.find((x) => x.kind === k)?.id || null
+  s.v = (s.v || 0) + 1 // each change a version higher
   writeFileAtomic(STORE, await seal('store', Buffer.from(JSON.stringify(s))), { mode: 0o600 })
   cache = s
+  if (!s.older) for (const fn of heard) { try { fn(stateOf(s)) } catch { /* one listener */ } }
 }
 
 // Before 3.22, the two were PNGs in this folder, in the open: sealed the first time they're read (and
@@ -318,27 +323,50 @@ export const withAsk = (fn) => one(async () => {
 })
 
 // ---------- The app's window secret (windowkey.js) ----------
-// Its hash, sealed here, so only the one the app started the server with is taken again.
-// Once you've confirmed (signauth.js set): a list set aside isn't a reason to keep signing closed.
+// Sealed here (not a hash: the server checks each window request's MAC with it), so a server started
+// again finds it. Replaced only by one the app gives with the list's own key (changed: said in
+// Settings › Studio for two weeks).
+export const windowSecret = () => one(async () => (await readStore()).window?.secret || null)
+export const setWindowSecret = (secret, { changed = false } = {}) => one(async () => {
+  const s = await readStore()
+  if (s.window?.secret === secret) return
+  s.window = { secret: String(secret), at: new Date().toISOString() }
+  if (changed) s.windowChanged = { at: s.window.at }
+  await writeStore(s)
+})
+export const windowChangedNote = () => one(async () => { const c = (await readStore()).windowChanged; return c && Date.now() - Date.parse(c.at) < 14 * 86400000 ? c : null })
+// Once you've confirmed (signauth.js set): a list set aside, or one older than the app last heard,
+// isn't a reason to keep signing closed (one put back takes the version the app knew, and Ask Before
+// Signing on if it was).
 export const clearSetAside = () => one(async () => {
   const s = await readStore()
-  if (!s.setAside) return
+  if (!s.setAside && !s.older) return
   delete s.setAside
+  if (s.older) {
+    if (s.older.ask) s.ask = { ...ASK0, ...(s.ask || {}), on: true }
+    s.v = Math.max(s.v || 0, s.older.was)
+    delete s.older
+  }
   await writeStore(s)
-  if (!s.ask?.on) await fsp.rm(ASK_MARK, { force: true })
+  if (s.ask?.on) writeFileAtomic(ASK_MARK, 'on\n', { mode: 0o600 })
+  else await fsp.rm(ASK_MARK, { force: true })
 })
-export const setWindowHash = (h) => one(async () => { const s = await readStore(); if (s.window?.hash === h) return; s.window = { hash: String(h), at: new Date().toISOString() }; await writeStore(s) })
-export const windowHash = () => one(async () => (await readStore()).window?.hash || null)
 
 // ---------- The record of a signing (studio.js) ----------
-// Each one's MAC, with a key of its own made from the list's (HKDF), so a record changed in the
-// versions' index.json shows as changed.
+// Each one's MAC, with a key of its own made from the list's (HKDF), over all of it, its id, and the
+// two files it's about (where the original and the signed copy are), so a record changed in the
+// versions' index.json, or one copied into another file's history, shows as not to be trusted.
+// docs: { orig, copy }, the two files' full paths.
 async function recordKey() { return Buffer.from(crypto.hkdfSync('sha256', await key(), Buffer.alloc(0), Buffer.from('bridge-ai signing record'), 32)) }
 const canon = (o) => JSON.stringify(Object.keys(o).sort().reduce((a, k) => { a[k] = o[k]; return a }, {}))
-export async function macOf(rec) { const { mac: _m, id: _i, verified: _v, ...rest } = rec; return crypto.createHmac('sha256', await recordKey()).update(canon(rest)).digest('base64url') }
-export async function macOk(rec) {
-  if (typeof rec?.mac !== 'string') return false
-  const want = Buffer.from(await macOf(rec)), got = Buffer.from(rec.mac)
+const RECORD = ['id', 'on', 'via', 'how', 'at', 'places', 'copy', 'from', 'sha256', 'fromSha256']
+export async function macOf(rec, docs) {
+  const o = Object.fromEntries(RECORD.map((k) => [k, rec?.[k] ?? null]))
+  return crypto.createHmac('sha256', await recordKey()).update(`${canon(o)}\n${String(docs?.orig || '')}\n${String(docs?.copy || '')}`).digest('base64url')
+}
+export async function macOk(rec, docs) {
+  if (typeof rec?.mac !== 'string' || !docs?.orig || !docs?.copy) return false
+  const want = Buffer.from(await macOf(rec, docs)), got = Buffer.from(rec.mac)
   return want.length === got.length && crypto.timingSafeEqual(want, got)
 }
 

@@ -11,7 +11,7 @@
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { PDFDocument, StandardFonts, PDFSignature, PDFTextField, PDFName, PDFRef, degrees, rgb } from 'pdf-lib'
+import { PDFDocument, StandardFonts, PDFSignature, PDFTextField, PDFName, PDFRef, PDFString, degrees, rgb } from 'pdf-lib'
 import { safePath } from './files.js'
 import * as store from './signstore.js'
 import * as auth from './signauth.js'
@@ -96,8 +96,16 @@ function cleanMarks(marks, pages) {
 // filled in, and a signature field you signed in taken off the form (it'd show as still waiting to
 // be signed). Saved beside the original in _signed, never over a file that's there. Each place has
 // the signature or initials it was given (m.sig, one of yours), else that kind's default.
-export async function sign(root, rel, marks) {
+// want: the sha256 of the bytes you were shown and confirmed (signauth.js grants it): the PDF must
+// still be those bytes, or nothing is signed (it changed since: an agent in that folder, say). The
+// copy is made from the very bytes checked, and says in its own information that it's a signed copy
+// (MARK), so it's known for one wherever it goes (studio.js keeps no copy of it).
+export const MARK = 'BridgeAISigned'
+export const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex')
+export async function sign(root, rel, marks, { want = null, id = null } = {}) {
   const { real, realRoot, bytes } = await pdfAt(root, rel)
+  const fromSha256 = sha256(bytes)
+  if (want && want !== fromSha256) throw Object.assign(new Error('The document changed since you confirmed: look at it again, then sign.'), { status: 409, code: 'changed' })
   const doc = await load(bytes)
   const pages = doc.getPages()
   const list = cleanMarks(marks, pages)
@@ -148,8 +156,10 @@ export async function sign(root, rel, marks) {
     }
   }
   doc.setModificationDate(new Date())
-  // Only the fields filled here get a new look; the rest of the form stays as it was drawn.
-  const out = await doc.save({ updateFieldAppearances: false })
+  try { doc.getInfoDict().set(PDFName.of(MARK), PDFString.of(String(id || 'yes'))) } catch { /* known by its hash still */ }
+  // Only the fields filled here get a new look; the rest of the form stays as it was drawn. (Its
+  // objects written out plainly, so the mark above can be found in its bytes.)
+  const out = await doc.save({ updateFieldAppearances: false, useObjectStreams: false })
   const dir = path.join(path.dirname(real), '_signed')
   await fsp.mkdir(dir, { recursive: true })
   // Still inside the folder it came from (a _signed that's a link to elsewhere isn't followed).
@@ -159,7 +169,7 @@ export async function sign(root, rel, marks) {
   for (let n = 1; n < 1000; n++) {
     const file = path.join(at, `${stem} (signed${n > 1 ? ` ${n}` : ''}).pdf`)
     try { await fsp.writeFile(file, out, { flag: 'wx' }) } catch (e) { if (e.code === 'EEXIST') continue; throw e }
-    return { path: path.relative(realRoot, file).split(path.sep).join('/'), name: path.basename(file), folder: '_signed', marks: list.length, pages: [...new Set(list.map((m) => m.page))].sort((a, b) => a - b), real: file, from: real, places: list.map(({ kind, page }) => ({ kind, page })) }
+    return { path: path.relative(realRoot, file).split(path.sep).join('/'), name: path.basename(file), folder: '_signed', marks: list.length, pages: [...new Set(list.map((m) => m.page))].sort((a, b) => a - b), real: file, from: real, places: list.map(({ kind, page }) => ({ kind, page })), sha256: sha256(out), fromSha256 }
   }
   throw new Error('There are too many signed copies of it in _signed already')
 }
@@ -317,7 +327,7 @@ export function routes(app, { wrap, rootOf, sq, window: fromWindow, phone: phone
     const here = fromWindow(req)
     const device = here ? null : phoneOf(req)
     let sigs
-    try { sigs = { ...(await mine()), setAside: await store.setAsideNote() } } catch (e) { sigs = { list: [], signature: null, initials: null, sealError: e.message } }
+    try { sigs = { ...(await mine()), setAside: await store.setAsideNote(), older: await store.olderNote(), windowChanged: await store.windowChangedNote() } } catch (e) { sigs = { list: [], signature: null, initials: null, sealError: e.message } }
     const p = here ? await probe() : { trackpad: false }
     return {
       ...sigs, sealed: store.sealedWith(), model: await modelInfo(String(req.query.model || '') || null), readsScans: !!helpers.scanText,
@@ -373,8 +383,13 @@ export function routes(app, { wrap, rootOf, sq, window: fromWindow, phone: phone
     const purpose = ['settings', 'change', 'export'].includes(req.body?.purpose) ? req.body.purpose : 'sign'
     const q = purpose === 'sign' ? sq(req) : null
     const real = q ? await realPdf(q) : null
+    // The document as it is now, and as the page showed it (its sha256, when it had it whole): the
+    // same, or you'd be confirming something other than what you saw. The grant is for these bytes.
+    const now = real ? sha256(await fsp.readFile(real)) : null
+    const shown = /^[0-9a-f]{64}$/.test(String(req.body?.sha256 || '')) ? req.body.sha256 : null
+    if (now && shown && shown !== now) throw Object.assign(new Error('The document changed since it was shown here: look at it again, then sign.'), { status: 409, code: 'changed' })
     const reason = real ? `sign "${path.basename(real).slice(0, 80)}"` : purpose === 'export' ? 'put your signatures in a backup' : purpose === 'change' ? 'change your saved signatures' : 'change Ask Before Signing'
-    return auth.ask({ ...a, purpose, doc: q ? { root: String(q.root), path: String(q.path) } : null, reason, pin: req.body?.pin != null ? String(req.body.pin) : null })
+    return auth.ask({ ...a, purpose, doc: q ? { root: String(q.root), path: String(q.path) } : null, sha256: now, reason, pin: req.body?.pin != null ? String(req.body.pin) : null })
   }))
   app.post('/api/studio/sign/ask/setting', answer((req) => auth.set({ ...asker(req), on: typeof req.body?.on === 'boolean' ? req.body.on : undefined, pin: req.body?.pin != null ? String(req.body.pin) : null, removePin: req.body?.removePin === true, grant: req.body?.grant })))
 
@@ -389,14 +404,20 @@ export function routes(app, { wrap, rootOf, sq, window: fromWindow, phone: phone
     const q = sq(req)
     const root = await rootOf(q.root)
     let how = null
+    // The bytes you were shown (the page's sha256), and with Ask Before Signing on, the ones you
+    // confirmed (the grant's): signing finds those or signs nothing.
+    let want = /^[0-9a-f]{64}$/.test(String(req.body?.sha256 || '')) ? req.body.sha256 : null
     if (await auth.needed()) {
       const g = auth.use(req.body?.grant, { purpose: 'sign', doc: { root: String(q.root), path: String(q.path) }, ...a })
       if (!g) throw Object.assign(new Error('Confirm it\'s you first: Ask Before Signing is on.'), { status: 403, code: 'ask' })
       how = g.how
+      if (want && g.sha256 && want !== g.sha256) throw Object.assign(new Error('The document changed since you confirmed: look at it again, then sign.'), { status: 409, code: 'changed' })
+      want = g.sha256 || want
     }
-    const r = await sign(root, q.path, req.body?.marks)
-    const rec = { on: nameOf(req), via: a.here ? 'window' : 'phone', how, places: r.places, at: new Date().toISOString(), copy: r.path, from: String(q.path), sha256: crypto.createHash('sha256').update(await fsp.readFile(r.real)).digest('hex') }
-    rec.mac = await store.macOf(rec).catch(() => null)
+    const id = `s${Date.now().toString(36)}${crypto.randomBytes(3).toString('hex')}`
+    const r = await sign(root, q.path, req.body?.marks, { want, id })
+    const rec = { id, on: nameOf(req), via: a.here ? 'window' : 'phone', how, places: r.places, at: new Date().toISOString(), copy: r.path, from: String(q.path), sha256: r.sha256, fromSha256: r.fromSha256 }
+    rec.mac = await store.macOf(rec, { orig: r.from, copy: r.real }).catch(() => null)
     await record({ original: r.from, copy: r.real, rec }).catch((e) => console.error(`signing: signed, but its versions couldn't say so: ${e.message}`))
     const { real: _r, from: _f, ...out } = r
     return { root: q.root, ...out, record: rec }

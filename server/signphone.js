@@ -17,7 +17,7 @@
 // What comes back is strokes (points as a share of the phone's pad), never a picture: the pad here
 // draws them in its own ink, and nothing is kept until you keep it there.
 import crypto from 'node:crypto'
-import { limiter } from './signhelper.js'
+import { limiterBy } from './signhelper.js'
 
 // (BRIDGE_SIGN_PHONE_MS: shorter, for the tests that see one run out.)
 const MS = Math.max(3000, Number(process.env.BRIDGE_SIGN_PHONE_MS) || 2 * 60_000)
@@ -25,8 +25,9 @@ const KEEP_ENDED = 10 * 60_000 // ended ones are remembered a while, to say so
 const MAX_POINTS = 20000
 const MAX_WAITING = 3 // waiting at once from one asker
 const MAX_ALL = 20 // kept at all (waiting and ended)
-const asks = limiter(10, 60_000) // a minute
-const pushes = limiter(4, 60_000) // notifications sent, a minute (more asks show on the phone's feed only)
+// Each asker its own (your window, each phone), so one using up its own leaves the others theirs.
+const asks = limiterBy(10, 60_000) // a minute
+const pushes = limiterBy(4, 60_000) // notifications sent, a minute (more asks show on the phone's feed only)
 const code = () => String(crypto.randomInt(0, 10000)).padStart(4, '0')
 const reqs = new Map() // id -> { id, nonce, what, doc, asker, askerName, targets, until, state, strokes, by, at, waiters }
 const err = (message, status, code) => Object.assign(new Error(message), { status, code })
@@ -63,14 +64,14 @@ export async function ask({ asker, askerName, what = 'signature', doc = '', to =
   const can = phones().filter((p) => (!to || p.id === to) && p.id !== asker.replace(/^d:/, ''))
   if (!can.length) throw err('No phone of yours can be asked now. Open Bridge AI on your phone (paired with this computer, and let in under Which Devices May Connect), then try again.', 409, 'no-phone')
   if ([...reqs.values()].filter((x) => x.asker === asker && x.state === 'waiting').length >= MAX_WAITING) throw err('Your phone is being asked already. Cancel that first, or wait for it.', 429, 'busy')
-  if (!asks()) throw err('Your phone was asked too often just now. Wait a minute and try again.', 429, 'too-often')
+  if (!asks(asker)) throw err('Your phone was asked too often just now. Wait a minute and try again.', 429, 'too-often')
   if (reqs.size >= MAX_ALL) { const old = [...reqs.values()].find((x) => x.state !== 'waiting'); if (old) reqs.delete(old.id); else throw err('Too many requests waiting', 429, 'busy') }
   const r = { id: crypto.randomBytes(18).toString('base64url'), nonce: crypto.randomBytes(18).toString('base64url'), pad: crypto.randomBytes(24).toString('base64url'), code: code(), what, doc: String(doc || '').slice(0, 120), asker, askerName: String(askerName || '').slice(0, 60), targets: can.map((p) => p.id), until: Date.now() + MS, state: 'waiting', strokes: null, by: null, at: Date.now(), waiters: [] }
   r.timer = setTimeout(() => end(r, 'expired'), MS)
   r.timer.unref?.()
   reqs.set(r.id, r)
   helpers.tell(r.targets)
-  if (pushes()) await helpers.notify(r, shownTo(r)).catch(() => {})
+  if (pushes(asker)) await helpers.notify(r, shownTo(r)).catch(() => {})
   return { id: r.id, pad: r.pad, code: r.code, until: r.until, to: can.map((p) => ({ id: p.id, name: p.name })) }
 }
 

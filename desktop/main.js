@@ -47,39 +47,32 @@ const fetch = (u, o = {}) => globalThis.fetch(u, ownServer(u) ? { ...o, headers:
 async function letInWindows() {
   try { await apiToken.letIn(session.defaultSession, { port: SERVER_PORT, token: apiKey() }) } catch (e) { console.warn(`Couldn't give the windows Bridge AI's key: ${e.message}`) }
 }
-// The app's own windows, told apart from any other program with the key (server/windowkey.js): a
-// secret made here, kept in the Keychain (safeStorage: macOS asks any other program before it can
-// read it), handed to the server this app starts on a pipe of its own (never the environment, a
-// file in the open or a link it hands out), and added to its windows' requests to the server's
-// /api outside their pages (X-Bridge-Window), so no page script ever has it. A server found
-// running is given it again (POST /api/window/hello), which takes it only if it's the one the app
-// started a server with before. Studio's signing works only from these windows (and your phone).
-const WINDOW_SECRET = path.join(DATA, 'cache', 'window-secret')
-let windowSecret = null
-function savedWindowSecret() {
-  try { return electron.safeStorage.isEncryptionAvailable() ? electron.safeStorage.decryptString(fs.readFileSync(WINDOW_SECRET)) : null } catch { return null }
-}
-function newWindowSecret() {
-  const s = require('node:crypto').randomBytes(32).toString('base64url')
-  try {
-    if (electron.safeStorage.isEncryptionAvailable()) {
-      fs.mkdirSync(path.dirname(WINDOW_SECRET), { recursive: true })
-      fs.writeFileSync(WINDOW_SECRET, electron.safeStorage.encryptString(s), { mode: 0o600 })
-    }
-  } catch { /* this run only: a server found running later isn't given it again */ }
-  return s
-}
-async function helloWindow() {
-  windowSecret ||= savedWindowSecret()
-  if (!windowSecret) return
-  await fetch(`http://127.0.0.1:${SERVER_PORT}/api/window/hello`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ secret: windowSecret }) }).catch(() => {})
+// The app's own windows, told apart from any other program with the key (server/windowkey.js), and
+// the key your saved signatures are sealed with (server/signstore.js), both made here and kept in the
+// Keychain (safeStorage: macOS asks any other program before it can read it; a process running the
+// app's code as plain Node has no safeStorage at all), handed to the server this app starts on a pipe
+// of its own (fd 3: server/appkeys.js), never the environment, a file in the open or a page. Before
+// it sends anything, the app checks the server is the one it started (it proves it has that start's
+// own secret); one that isn't is started again by the app when it's the app's own, and otherwise gets
+// nothing. Then each of its windows' requests to the server's /api carries a MAC of the window secret
+// (added outside the page, so no page script ever has it), never the secret itself. windowauth.js.
+const windowAuth = require('./windowauth.js')
+let keys = null
+const appKeys = () => (keys ||= windowAuth.keysAt(path.join(app.getPath('userData'), 'signing-keys'), electron.safeStorage))
+let serverProven = false
+// Checked now: the server the app started (built app), or, from source (no pipe: npm and node --watch
+// don't pass it on), one that has the app's window secret (given once, the first time).
+async function proveServer() {
+  serverProven = BUNDLED ? await windowAuth.proves(fetch, `http://127.0.0.1:${SERVER_PORT}`, appKeys().launch) : await windowAuth.hello(fetch, `http://127.0.0.1:${SERVER_PORT}`, appKeys().window, { tofu: true })
+  return serverProven
 }
 function windowsSendSecret() {
   const urls = [...new Set([PORT, SERVER_PORT])].map((p) => `http://127.0.0.1:${p}/api/*`)
   session.defaultSession.webRequest.onBeforeSendHeaders({ urls }, (d, cb) => {
     const h = d.requestHeaders
-    delete h['X-Bridge-Window']
-    if (windowSecret && ownServer(d.url)) h['X-Bridge-Window'] = windowSecret
+    for (const k of Object.keys(h)) if (k.toLowerCase() === 'x-bridge-window') delete h[k]
+    const mac = serverProven && ownServer(d.url) ? windowAuth.windowHeader(appKeys().window, d.method, d.url) : null
+    if (mac) h['X-Bridge-Window'] = mac
     cb({ requestHeaders: h })
   })
 }
@@ -146,17 +139,18 @@ async function startServer() {
     ? [NODE_BIN, [path.join(ROOT, 'server', 'index.js')]]
     : [process.platform === 'win32' ? 'node.exe' : 'node', ['scripts/start.js', ...(DEV ? ['dev'] : [])]]
   if (BUNDLED) env.ELECTRON_RUN_AS_NODE = '1'
-  // The windows' secret (above): a new one for each server this app starts, on the server's fd 3.
-  // From source (npm run desktop:dev) the server runs under npm and node --watch, which don't pass
-  // a pipe on: there it takes the first the app gives (BRIDGE_WINDOW_TOFU), once, and then only that.
-  windowSecret = (!BUNDLED && savedWindowSecret()) || newWindowSecret()
+  // The app's keys (above), on the server's fd 3, with a secret for this start only. From source (npm
+  // run desktop:dev) the server runs under npm and node --watch, which don't pass a pipe on: there it
+  // takes the first window secret the app gives (BRIDGE_WINDOW_TOFU), once, and then only that.
+  const given = BUNDLED ? appKeys().forStart() : null
   delete env.BRIDGE_WINDOW_FD
+  delete env.BRIDGE_WINDOW_TOFU
   if (BUNDLED) env.BRIDGE_WINDOW_FD = '3'
   else env.BRIDGE_WINDOW_TOFU = '1'
   // What it prints goes in logs/server.log, for a crash report's last lines.
   const log = crashes.serverLog(DATA)
   const child = require('node:child_process').spawn(cmd, args, { cwd: ROOT, env, detached: true, stdio: ['ignore', log, log, ...(BUNDLED ? ['pipe'] : [])], windowsHide: true })
-  if (BUNDLED) { try { child.stdio[3].on('error', () => {}); child.stdio[3].end(windowSecret) } catch { /* it reads none, and the windows can't sign */ } }
+  if (BUNDLED) { try { child.stdio[3].on('error', () => {}); child.stdio[3].end(given) } catch { /* it reads none, and the windows can't sign */ } }
   if (typeof log === 'number') try { fs.closeSync(log) } catch { /* the server has its own copy */ }
   // Same pid file as `npm start`, so `npm run stop` and "Quit and Stop Agents" both find it.
   if (BUNDLED) try { fs.mkdirSync(path.dirname(PID), { recursive: true }); fs.writeFileSync(PID, String(child.pid)) } catch { /* not fatal */ }
@@ -293,6 +287,24 @@ async function replaceStale() {
   if (!pid) return
   try { process.kill(pid, 'SIGTERM') } catch { return }
   for (let i = 0; i < 50 && await serverUp(); i++) await new Promise((r) => setTimeout(r, 100))
+}
+// A server of the app's own (Bridge AI's bundled one, by its command line) that isn't the one this app
+// started (it can't prove it has that start's secret: started by an older run, by hand, or not
+// handed the app's keys): stopped, so the app starts its own. Anything else on the port is left
+// alone, and gets nothing from the app's windows.
+async function replaceUnproven() {
+  let pid = null
+  try { const r = await fetch(`${URL_BASE}/api/version`, { signal: AbortSignal.timeout(1500) }); pid = r.ok ? (await r.json()).pid : null } catch { /* none */ }
+  if (!Number.isInteger(pid) || pid <= 1) return
+  if (process.platform !== 'win32') {
+    try { if (!/app-root[\\/]server[\\/]index\.js/.test(require('node:child_process').execFileSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' }))) return } catch { return }
+  }
+  try { process.kill(pid, 'SIGTERM') } catch { return }
+  for (let i = 0; i < 50 && await serverUp(); i++) await new Promise((r) => setTimeout(r, 100))
+  if (await serverUp()) return
+  await startServer()
+  for (let i = 0; i < 300 && !(await serverUp()); i++) await new Promise((r) => setTimeout(r, 100))
+  await proveServer()
 }
 
 // An agent in a window of its own (the ⧉ button in its header), one window per agent. Only the
@@ -669,6 +681,7 @@ ipc.handle('bridge:focus-popout', (e, paneId) => {
 async function connect() {
   // Never in the way of opening: if the check fails, use whatever server is there.
   if (await serverUp()) await replaceStale().catch(() => {})
+  if (await serverUp() && !(await proveServer()) && BUNDLED) await replaceUnproven().catch(() => {})
   if (await serverUp()) return win.loadURL(URL_BASE)
   win.loadURL(splash('Starting Bridge AI…'))
   // Dev mode needs both ports; a normal server already on the API port would block it.
@@ -681,7 +694,7 @@ async function connect() {
   // server can take longer the first time).
   for (let i = 0; i < 600; i++) {
     await new Promise((r) => setTimeout(r, 100))
-    if (await serverUp()) return win.loadURL(URL_BASE)
+    if (await serverUp()) { await proveServer(); return win.loadURL(URL_BASE) }
   }
   win.loadURL(splash(BUNDLED
     ? `Couldn't start Bridge AI on port ${PORT}.<br>Another program may be using it: set <code>"port"</code> in ~/.bridge-ai/config.json and reopen.`
@@ -752,8 +765,8 @@ async function watchFleet() {
       // x-bridge-desktop: this is the app's own feed, which also hears "allow it here" (onFixAsk).
       const res = await fetch(`${URL_BASE}/api/events`, { headers: { Accept: 'text/event-stream', 'x-bridge-desktop': app.getVersion() } })
       reportPerms()
-      // (A server found running, or one that restarted: its windows' secret given again.)
-      helloWindow()
+      // (A server found running, or one that restarted: checked again before the windows send it anything.)
+      await proveServer()
       if (!res.ok || !res.body) throw new Error(String(res.status))
       const dec = new TextDecoder()
       let buf = ''
@@ -765,9 +778,10 @@ async function watchFleet() {
           buf = buf.slice(i + 2)
           const fleet = /^event: fleet$/m.test(block)
           const rem = /^event: remote$/m.test(block)
-          if (!fleet && !rem && !/^event: fix-ask$/m.test(block)) continue
+          const sign = /^event: sign-state$/m.test(block)
+          if (!fleet && !rem && !sign && !/^event: fix-ask$/m.test(block)) continue
           const data = block.split('\n').filter((l) => l.startsWith('data: ')).map((l) => l.slice(6)).join('\n')
-          try { if (fleet) onFleet(JSON.parse(data)); else if (rem) remote?.onEvent(JSON.parse(data)); else onFixAsk(JSON.parse(data)) } catch { /* partial or bad frame */ }
+          try { if (fleet) onFleet(JSON.parse(data)); else if (rem) remote?.onEvent(JSON.parse(data)); else if (sign) { if (serverProven && BUNDLED) appKeys().heard(JSON.parse(data)) } else onFixAsk(JSON.parse(data)) } catch { /* partial or bad frame */ }
         }
       }
     } catch { /* server down or restarting; retry */ }
