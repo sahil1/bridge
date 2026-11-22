@@ -26,7 +26,7 @@ import FindBar from './FindBar.jsx'
 import { pageFinder, openFind } from '../find.js'
 import { t, tx } from '../i18n/index.js'
 import { whiteboards, isMermaid, boardFromMermaid } from './whiteboard/links.js'
-import { useTrial } from '../trials.js'
+import { useFeature } from '../trials.js'
 import { makeRoutine, fromMessage } from './routineDraft.js'
 import { sayPlace } from '../backForward.js'
 import { looksLikePath, hrefPath, BARE, tabPath, quickFind, ReplyPictures } from './FileLinks.jsx'
@@ -377,7 +377,7 @@ function QueuedMsg({ q, agent, actions }) {
 // your computer holds for it; delivered: what it sent it lately, until the chat shows each.
 function Chat({ agent, going = [], queued = [], delivered = [], outbox = [], queuedActions, onEdit, onUndo, editingText, onOpenTerminal, accounts, onLimit }) {
   const { data, error } = useLive(`/agents/${encodeURIComponent(agent.paneId)}/transcript`)
-  const routinesOn = useTrial('routines') // Make a routine of a message you sent
+  const routinesOn = useFeature('routines') // Make a routine of a message you sent (Scheduled Routines)
   const onOpenFile = useContext(PathCtx) // a picture under a reply, opened in Files
   // Stopped at its limit, for the account menu (its other accounts can pick it up now).
   const stopped = !!data?.limit

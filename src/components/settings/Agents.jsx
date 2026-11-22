@@ -6,14 +6,14 @@ import { api } from '../../api.js'
 import SignInButton, { canSignIn } from '../SignIn.jsx'
 import { useRecheck } from '../PermissionFix.jsx'
 import { More, reveal } from './Advanced.jsx'
-import { BetaSwitch } from './Beta.jsx'
-import { useSettings, SaveNote, DefaultAgent, ChiefOfStaff, AgentsAdvanced } from './General.jsx'
+import { useSettings, useSwitch, SaveNote, DefaultAgent, ChiefOfStaff, AgentsAdvanced } from './General.jsx'
 import { RecommendCard, StartsWith, useRecommended } from '../Recommended.jsx'
 import { t } from '../../i18n/index.js'
 
-// Settings › Agents & Models › Agents: Scheduled Routines' switch (a beta feature, it's about what
-// your agents do by themselves), the default agent and its model, picking up unfinished work, the
-// Chief of Staff (its agent, its helpers, and the models it can consult), then every agent CLI
+// Settings › Agents & Models › Agents: the default agent and its model, picking up unfinished work, the
+// Chief of Staff (its agent, its helpers, and the models it can consult), Scheduled Routines (what
+// your agents do by themselves: routines.on, on unless you turn it off, and a routine runs by itself
+// only once you give it a time), then every agent CLI
 // Bridge AI knows, whether it's installed and signed in, and one click to install it (in a terminal
 // tab you can watch) or start it. Their own sign-in, from here (SignIn.jsx); the others sign in the
 // first time they open. Under Claude Code (Recommended Settings): what's recommended for your plan,
@@ -28,6 +28,7 @@ export default function Agents({ onOpenAgent }) {
   const [busy, setBusy] = useState(null)
   const [msg, setMsg] = useState(null)
   const rec = useRecommended()
+  const [routinesOn, setRoutines] = useSwitch(s?.effective?.routines?.on !== false, (on) => save({ routines: { on } }))
   const load = () => {
     api('/agents/catalog').then(setList).catch((e) => setMsg({ error: e.message }))
     api('/consult').then(setConsult).catch(() => setConsult([]))
@@ -61,7 +62,6 @@ export default function Agents({ onOpenAgent }) {
   return (
     <div className="st-sections st-agents-tab">
       <SaveNote note={note} />
-      <BetaSwitch id="routines" />
       <DefaultAgent s={s} save={save} agents={list} onMore={() => reveal('agent-list')} />
       <ChiefOfStaff s={s} save={save} agents={list}>
         {consult && consult.length > 0 && (
@@ -78,6 +78,10 @@ export default function Agents({ onOpenAgent }) {
           </div>
         )}
       </ChiefOfStaff>
+      <section className="st-sec" data-setting="scheduled-routines">
+        <label className="st-check"><input type="checkbox" checked={routinesOn} onChange={(e) => setRoutines(e.target.checked)} />
+          <span><b>{t('Scheduled Routines')}</b> <span className="muted small">{t('Routines that run by themselves at the time you set, and History › Commands.')} <More>{t('Routines that run by themselves at the time you set ("every weekday at 9"), on this computer, each run\'s result kept; Make a routine from any message you sent; and History › Commands, what you asked your agents and Chief of Staff, kept on this computer, with a routine suggested when you ask the same thing on a schedule.')} {t('A routine runs by itself only once you give it a time. Off: routines only remind you when they\'re due.')}</More></span></span></label>
+      </section>
       <section className="st-sec st-agents-sec">
       <div className="st-row between">
         <h4>{t('Your Agents')}</h4>

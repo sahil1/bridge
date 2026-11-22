@@ -118,9 +118,10 @@ export async function edit({ text, instruction, model, reply }) {
   return { text: out }
 }
 
-// ---------- Tidy what I say (a trial: dictation-cleanup) ----------
+// ---------- Tidy What I Say (dictation.tidy) ----------
 // What you say from another app, tidied by a model before the dictation window pastes or sends it
-// (Settings › Voice & Meetings › Dictation, off until you turn it on): fillers, false starts and words said
+// (Settings › Meetings & Voice › Dictation; on to start with where the local model fits this computer,
+// index.js FEATURES): fillers, false starts and words said
 // twice taken out, punctuation and capitals fixed, nothing else changed. The local model built in
 // unless you pick another (index.js), so by default the words stay on this computer. It never holds
 // the words up for long or loses them: past a few seconds, on any error, or when the answer isn't

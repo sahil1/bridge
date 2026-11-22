@@ -91,14 +91,15 @@ const TAG = 16
 // The settings that mean the same on another computer, by their key in config.json. Left out: where
 // this one listens (port, host, allowedHosts), its runtime and herdr's session, its own name
 // (deviceName), its agents' paths, its local model, the terminal app, its update channel and
-// early-access code, the assistant's folder, whether outside apps may send to its agents through
-// Bridge AI's MCP server (mcpServer: each computer's own say), sign-ins, and what's only kept for
+// early-access code, the assistant's folder, Bridge AI's MCP server and whether outside apps may send
+// to its agents through it (mcpServer: each computer's own say), sign-ins, and what's only kept for
 // its own start.
-const SETTINGS = ['name', 'location', 'defaultAgent', 'chief', 'mail', 'market', 'mortgage', 'news', 'quota', 'simple', 'moreModels', 'keepAgents', 'trials', 'alertSounds', 'enterKey', 'notify', 'voice', 'studio', 'consult', 'resumeWork', 'filesAssist', 'modelJobs', 'jobModels', 'llmModel', 'dictation', 'meetings', 'calendar', 'commands', 'crashReports', 'counts']
+const SETTINGS = ['name', 'location', 'defaultAgent', 'chief', 'mail', 'market', 'mortgage', 'news', 'quota', 'simple', 'moreModels', 'keepAgents', 'trials', 'home', 'routines', 'alertSounds', 'enterKey', 'notify', 'voice', 'studio', 'consult', 'resumeWork', 'filesAssist', 'modelJobs', 'jobModels', 'llmModel', 'dictation', 'meetings', 'calendar', 'commands', 'crashReports', 'counts']
 // (Meetings' folder and the Chief of Staff's are folders of this computer's. And a beta feature that
 // lets another device see or use this screen is turned on only by someone at this computer:
-// remote-screen stays as it is.)
-const PER_COMPUTER_TRIALS = ['remote-screen']
+// remote-screen stays as it is; so does the MCP server's switch in a backup from before 3.22.0, when
+// it was a beta feature too.)
+const PER_COMPUTER_TRIALS = ['remote-screen', 'mcp-server']
 const settingsOf = (all) => {
   const out = {}
   for (const k of SETTINGS) if (all?.[k] !== undefined) out[k] = all[k]

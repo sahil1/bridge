@@ -54,7 +54,7 @@ const kitWith = async (name, rel, { inHome = false, chief = null } = {}) => {
   // window (what signatures are used and moved from) and the signatures' key.
   let keys = null
   const k = await startKit(`backup-move-${name.toLowerCase()}`, {
-    config: { name: 'Tester', trials: { 'slack-bot': true, routines: true }, ...(chief ? { chief: { kind: 'claude', path: chief } } : {}) },
+    config: { name: 'Tester', trials: { 'slack-bot': true }, ...(chief ? { chief: { kind: 'claude', path: chief } } : {}) },
     env: ({ data, home, bin }) => {
       keys = appKeysFor(bin)
       let d = data

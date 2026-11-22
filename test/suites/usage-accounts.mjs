@@ -606,7 +606,7 @@ try {
 
   // With Home on and its page opened first, Usage's heatmap: square, in its levels' colors.
   {
-    await kit.api('/settings', { trials: { home: true } }, 'PATCH')
+    await kit.api('/settings', { home: { on: true } }, 'PATCH')
     const w = await page(b, kit.url, { mode: 'light', theme: 'sky', before: fake })
     pages.push(w)
     const p = w.p

@@ -1,6 +1,6 @@
-// Meeting Insights and the people you meet, a beta feature (meeting-insights), on any platform, in
-// the browser named by BRIDGE_TEST_BROWSER. Off to start with: its routes refused saying how to turn
-// it on, and nothing in Meetings or ⌘K leading to it. On with no meetings, Insights and People say
+// Meeting Insights and the people you meet (meetings.insights, out of Beta Features), on any
+// platform, in the browser named by BRIDGE_TEST_BROWSER. Off to start with, with no meetings: its
+// routes refused saying where to turn it on, and nothing in Meetings or ⌘K leading to it. On with no meetings, Insights and People say
 // what they need. Then nine made-up meetings in the data folder (calls with named lines, a room with
 // voices told apart and one with none, one with nothing transcribed, one archived, one from months
 // ago), their invites listing what isn't a person too (a word like "schedule", rooms, a calendar's
@@ -21,7 +21,9 @@
 // people and 160 names in memory: the same pages, and Memory's page grouped, folded and searched,
 // in a light and a dark theme, and on 375, 390 and 430 px phones, each fitting the screen.
 // Last, a computer of its own with Meeting Insights never set: on by itself at the fifth meeting,
-// said once on Meetings with Turn off, shown in Beta Features, and not on again once turned off.
+// said once on Meetings with Turn off, its switch in Settings › Meetings & Voice › Meetings on and
+// saying when (and not in Beta Features), and not on again once turned off. And one from before
+// 3.22.0 with its Beta Features switch turned off: off, and not on by itself at the fifth.
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -173,9 +175,9 @@ try {
   await api('/setup', { name: 'Tester' })
   // ---------- Off to start with ----------
   const off = await err('/meetings/insights')
-  ok((await api('/config')).trials?.['meeting-insights'] === false && off?.status === 404 && /Meeting Insights is a beta feature\. Turn it on in Settings › About & Updates › Beta Features/.test(off.message)
+  ok((await api('/config')).features?.['meeting-insights'] === false && !('meeting-insights' in ((await api('/config')).trials || {})) && off?.status === 404 && /Meeting Insights is turned off\. Turn it on in Settings › Meetings & Voice › Meetings › Meeting Insights\./.test(off.message)
     && (await err('/meetings/people'))?.status === 404 && (await err('/meetings/people/merge', { a: 'x', b: 'y' }))?.status === 404,
-  'a beta feature, off to start with: its routes answer 404, saying how to turn it on', { off: off?.message, trials: (await api('/config')).trials })
+  'no Beta Feature; off to start with, with no meetings: its routes answer 404, saying where to turn it on', { off: off?.message, features: (await api('/config')).features })
   // On cue (held: { range, answer }), that range's insights are read at once and answered only
   // when the test says, with what the server said then.
   let held = null
@@ -213,7 +215,7 @@ try {
     'off: Meetings has no Insights or People tab (even one left open before), and ⌘K offers neither', hidden)
 
   // ---------- On, with no meetings ----------
-  await api('/settings', { trials: { 'meeting-insights': true } }, 'PATCH')
+  await api('/settings', { meetings: { insights: true } }, 'PATCH')
   let ins = await api('/meetings/insights')
   let ppl = await api('/meetings/people')
   ok(ins.total === 0 && ins.meetings === 0 && ppl.people.length === 0 && ppl.meetings === 0, 'turned on with no meetings: nothing to add up, nobody yet', { ins, ppl })
@@ -573,7 +575,7 @@ try {
   await openMeetings()
   await tabBtn('insights').click({ timeout: 10000 })
   await p.locator('.mi-tiles').waitFor({ timeout: 10000 })
-  await api('/settings', { trials: { 'meeting-insights': false } }, 'PATCH')
+  await api('/settings', { meetings: { insights: false } }, 'PATCH')
   ok((await err('/meetings/insights'))?.status === 404, 'turned off again: refused')
   const listed = async () => !(await tabBtn('insights').count()) && !(await tabBtn('people').count()) && !(await p.locator('.mi').count()) && (await p.locator('.mt-row').count()) > 0
   const shown = async () => ({ tabs: await tabBtn('insights').count(), mi: await p.locator('.mi').count(), rows: await p.locator('.mt-row').count() })
@@ -581,42 +583,55 @@ try {
   await p.reload()
   await openMeetings()
   ok(!!(await until(listed, 20000, 200)), 'and hidden after a reload: Meetings is its list again', await shown())
-  ok(!(await api('/meetings')).insightsOn && (await api('/config')).trials['meeting-insights'] === false, 'turned off by hand, it stays off with all these meetings')
+  ok(!(await api('/meetings')).insightsOn && (await api('/config')).features['meeting-insights'] === false, 'turned off by hand, it stays off with all these meetings')
 
   // ---------- On by itself ----------
   // A computer of its own where Meeting Insights was never set: off with 4 meetings, on with the
-  // fifth, said once on Meetings (with Turn off) and in Beta Features, and off for good once turned off.
+  // fifth, said once on Meetings (with Turn off) and at its switch, and off for good once turned off.
   const own = await startKit('meeting-insights-auto', { config: { name: 'Tester' } })
   kits.push(own)
   await own.api('/setup', { name: 'Tester' })
   const write = meetingIn(own)
   for (let i = 1; i <= 4; i++) write(`a${i}`, { title: `Weekly sync ${i}`, when: at(i * 2, 10), seconds: 1500, people: ['Priya Shah', 'Dan Ruiz', 'Tester'] })
   let list = await own.api('/meetings')
-  ok((await own.api('/config')).trials['meeting-insights'] === false && !list.insightsOn, '4 meetings: still off')
+  ok((await own.api('/config')).features['meeting-insights'] === false && !list.insightsOn, '4 meetings: still off')
   write('a5', { title: 'Weekly sync 5', when: at(1, 10), seconds: 1500, people: ['Priya Shah', 'Dan Ruiz', 'Tester'] })
   list = await own.api('/meetings')
   const conf = await own.api('/config')
-  ok(conf.trials['meeting-insights'] === true && list.insightsOn?.meetings === 5 && !!conf.trialsAuto?.['meeting-insights'] && (await own.api('/meetings/people')).people.length === 2,
-    'the fifth: on by itself, People with it, said on Meetings and kept when', { trials: conf.trials, auto: conf.trialsAuto, note: list.insightsOn })
+  ok(conf.features['meeting-insights'] === true && list.insightsOn?.meetings === 5 && !!conf.featuresAuto?.['meeting-insights'] && JSON.parse(fs.readFileSync(path.join(own.data, 'config.json'), 'utf8')).meetings?.insights === true && (await own.api('/meetings/people')).people.length === 2,
+    'the fifth: on by itself (saved as its own setting), People with it, said on Meetings and kept when', { features: conf.features, auto: conf.featuresAuto, note: list.insightsOn })
   const ow = await page(b, own.url, { store: { 'cc-rail-meetings': true } })
   pages.push(ow)
   await openMeetingsIn(ow.p)
   const note = ow.p.locator('.mt-insights-on')
-  ok(!!(await until(() => note.isVisible(), 10000)) && /Meeting Insights is on\. With 5 meetings recorded on this computer, Insights and People add them up/.test(await note.innerText()) && (await note.locator('button', { hasText: 'Turn off' }).count()) === 1 && (await ow.p.locator('.mt-view .seg button[data-view="people"]').count()) === 1,
-    'Meetings says so, with Show Insights and Turn off, and the Insights and People tabs are there', await note.innerText().catch(() => ''))
+  ok(!!(await until(() => note.isVisible(), 10000)) && /Meeting Insights is on\. With 5 meetings recorded on this computer, Insights and People add them up.*Its switch is in Settings › Meetings & Voice › Meetings › Meeting Insights\./s.test(await note.innerText()) && !/beta/i.test(await note.innerText()) && (await note.locator('button', { hasText: 'Turn off' }).count()) === 1 && (await ow.p.locator('.mt-view .seg button[data-view="people"]').count()) === 1,
+    'Meetings says so, with where its switch is, Show Insights and Turn off, and the Insights and People tabs are there', await note.innerText().catch(() => ''))
   await shot(ow.p, `${tag}insights-on-by-itself`)
-  await ow.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'about' } })))
-  const beta = ow.p.locator('.st-check', { hasText: 'Meeting Insights' })
+  await ow.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'meeting-insights' } })))
+  const sw = ow.p.locator('[data-setting="meeting-insights"] .st-check')
   // (What it is in full, that it turns on by itself once there are 5 meetings, is under its More.)
-  await beta.locator('.st-more').click({ timeout: 10000 }).catch(() => {})
-  ok(!!(await until(async () => /Turned on by itself on \w+ \d+[\s\S]*turns on by itself once 5 meetings are recorded here/.test(await beta.innerText().catch(() => '')), 10000)) && await beta.locator('input').isChecked(), 'Settings › About & Updates › Beta Features: on, saying it turned on by itself and when', await beta.innerText().catch(() => ''))
+  await sw.locator('.st-more').click({ timeout: 10000 }).catch(() => {})
+  ok(!!(await until(async () => /Turned on by itself on \w+ \d+[\s\S]*turns on by itself once 5 meetings are recorded here/.test(await sw.innerText().catch(() => '')), 10000)) && await sw.locator('input').isChecked() && !(await sw.locator('.st-chip.beta').count()), 'Settings › Meetings & Voice › Meetings: its switch on, no Beta mark, saying it turned on by itself and when', await sw.innerText().catch(() => ''))
+  await ow.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'about' } })))
+  await ow.p.locator('[data-setting="beta"]').waitFor({ timeout: 10000 })
+  ok(!(await ow.p.locator('[data-setting="beta"] [data-beta="meeting-insights"]').count()), 'and Beta Features no longer lists it')
   await ow.p.reload()
   await openMeetingsIn(ow.p)
   await note.locator('button', { hasText: 'Turn off' }).click()
-  ok(!!(await until(async () => !(await note.count()) && !(await ow.p.locator('.mt-view .seg button[data-view="insights"]').count()), 8000)) && (await own.api('/config')).trials['meeting-insights'] === false, 'Turn off: off, the note and the tabs gone')
+  ok(!!(await until(async () => !(await note.count()) && !(await ow.p.locator('.mt-view .seg button[data-view="insights"]').count()), 8000)) && (await own.api('/config')).features['meeting-insights'] === false, 'Turn off: off, the note and the tabs gone')
   write('a6', { title: 'Weekly sync 6', when: at(0, 8), seconds: 1500, people: ['Priya Shah', 'Tester'] })
-  ok((await own.api('/config')).trials['meeting-insights'] === false && !(await own.api('/meetings')).insightsOn, 'and it doesn\'t turn itself on again with more meetings')
+  ok((await own.api('/config')).features['meeting-insights'] === false && !(await own.api('/meetings')).insightsOn, 'and it doesn\'t turn itself on again with more meetings')
   ok(!real(ow.errors).length, 'no page errors on that computer', ow.errors)
+
+  // ---------- Turned off as a Beta Feature, before 3.22.0 ----------
+  // Its switch saved off in Beta Features: off, saved as its own setting, and not on by itself at the fifth.
+  const was = await startKit('meeting-insights-was', { config: { name: 'Tester', trials: { 'meeting-insights': false } } })
+  kits.push(was)
+  const writeWas = meetingIn(was)
+  for (let i = 1; i <= 5; i++) writeWas(`w${i}`, { title: `Weekly sync ${i}`, when: at(i * 2, 10), seconds: 1500, people: ['Priya Shah', 'Dan Ruiz', 'Tester'] })
+  const wasList = await was.api('/meetings')
+  const wasFile = JSON.parse(fs.readFileSync(path.join(was.data, 'config.json'), 'utf8'))
+  ok((await was.api('/config')).features['meeting-insights'] === false && !wasList.insightsOn && wasFile.meetings?.insights === false && !wasFile.trials, 'its Beta Features switch turned off before: off, saved as its own setting, and not on by itself at the fifth meeting', wasFile)
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
   console.log(kit.log().slice(-1500))

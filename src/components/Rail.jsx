@@ -13,7 +13,7 @@ import { openMeeting, useMeetings } from './meetings/recording.jsx'
 import { Dialog } from './meetings/tools.jsx'
 import { whiteboards } from './whiteboard/links.js'
 import { t, tn, tx } from '../i18n/index.js'
-import { useTrial } from '../trials.js'
+import { useFeature } from '../trials.js'
 
 // Mirrors herdr's sidebar: numbered workspaces, each with its tabs. Spaces fold,
 // every row shows the folder it works in, and a ⋯ menu covers rename/close/copy.
@@ -139,14 +139,14 @@ function HoverCard({ row, rect, git, preview }) {
 
 // New (Home: start something) and Meetings sit above the spaces, and Bots (a beta feature) just over
 // them; a red dot while a meeting records.
-// With Home on (a beta feature), Home is the first row, with what needs you on every device (needs).
+// With Home on (unless you turn it off), Home is the first row, with what needs you on every device (needs).
 // Dictations are a tab of Meetings (Meetings.jsx), so Meetings is marked while they show.
 export default function Rail({ fleet, live, collapsed, onToggle, selected, onOpen, onOpenInHerdr, onOpenFiles, onNewAgent, onNewTerminal, onHistory, onMeetings, recording, needs = 0 }) {
   // Studio, where there's a computer to keep files on (not the demo or the phone apps' Cloud agents):
   // its home is every file on your computers. Whiteboards are one of Studio's kinds and Folders its
   // home, so neither has a row of its own.
   const inStudio = String(selected || '').startsWith('view:studio')
-  const home = useTrial('home') // a beta feature (src/trials.js)
+  const home = useFeature('home') // Settings › You › Home
   const [launching, setLaunching] = useState(false)
   const [error, setError] = useState(null)
   const [closedWs, setClosedWs] = usePersisted('cc-rail-closed', {})

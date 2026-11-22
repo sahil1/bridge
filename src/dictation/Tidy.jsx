@@ -4,9 +4,10 @@ import { api } from '../api.js'
 import { t } from '../i18n/index.js'
 import { where } from '../components/settings/search.js'
 
-// Tidy what I say (a trial: dictation-cleanup): what you say from another app, tidied by a model
-// before the dictation window pastes it (controller.js tidyWords, server/dictation.js tidy). What
-// Settings › Voice & Meetings › Dictation and the dictation window both say about it.
+// Tidy What I Say (dictation.tidy, on to start with where the local model fits this computer): what
+// you say from another app, tidied by a model before the dictation window pastes it, or pasted as you
+// said it when the model is slow (controller.js tidyWords, server/dictation.js tidy). What Settings ›
+// Meetings & Voice › Dictation and the dictation window both say about it.
 
 // Why what you said went as you said it, in a few words (after "Pasted into Slack", or on the card).
 export function untidiedWhy(u) {

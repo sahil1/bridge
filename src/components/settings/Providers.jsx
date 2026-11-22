@@ -16,7 +16,7 @@ import CloudKeys from './CloudKeys.jsx'
 import { Advanced, More } from './Advanced.jsx'
 import { BetaSwitch } from './Beta.jsx'
 import { useSettings } from './General.jsx'
-import { useTrial } from '../../trials.js'
+import { useFeature } from '../../trials.js'
 import { ago } from '../Machines.jsx'
 import './providers.css'
 
@@ -703,7 +703,7 @@ export default function Providers() {
 // on; and the speech model and dictation's own (changed in their tabs).
 export function WhichModel() {
   const { s } = useSettings()
-  const tidyOn = useTrial('dictation-cleanup')
+  const tidyOn = useFeature('dictation-cleanup')
   const [providers, setProviders] = useState(null)
   const [subs, setSubs] = useState(null)
   const [agents, setAgents] = useState(null)

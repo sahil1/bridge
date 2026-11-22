@@ -208,8 +208,11 @@ export function stopTree(child, { itselfFirst = false } = {}) {
 
 // A server of its own. name: for its folder under test/.out. env: more settings for the server, or
 // a function of the kit's folders ({ bin, data, home, PATH }) giving them. config: written to its
-// config.json before it starts. node: what runs it, when not this Node.js (the app itself, as Node:
-// electronBin()).
+// config.json before it starts, over a test's own defaults: agents that stop with it, and Home off,
+// so a page opens where it did before Home was on for everyone (3.22.0) and a test of something else
+// isn't taken to Home first. Home's own tests, and those about where the app opens, set home
+// themselves; home: undefined leaves it as Bridge AI starts (on). node: what runs it, when not this
+// Node.js (the app itself, as Node: electronBin()).
 export async function startKit(name, { env = {}, config = {}, node = process.execPath } = {}) {
   const port = await freePort()
   const dir = path.join(OUT, 'kits', `${name}-${port}`)
@@ -218,7 +221,7 @@ export async function startKit(name, { env = {}, config = {}, node = process.exe
   const data = path.join(dir, '.bridge-ai') // a dot folder, as ~/.bridge-ai is
   const bin = path.join(dir, 'bin')
   for (const d of [home, data, bin]) fs.mkdirSync(d, { recursive: true })
-  fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify({ keepAgents: false, ...config }))
+  fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify({ keepAgents: false, home: { on: false }, ...config }))
   // A program on the server's PATH: a Node script, with a .cmd beside it on Windows. Its path.
   const program = (n, source) => {
     const js = path.join(bin, `${n}.cjs`)

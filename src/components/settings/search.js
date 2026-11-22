@@ -8,7 +8,8 @@ import { placePath } from '../../../shared/places.js'
 // data-setting Settings shows is one of these (test/suites/settings-ui.mjs checks), so nothing in
 // Settings is out of ⌘K's reach. near: what to show instead when it isn't there just now. when:
 // only in the desktop app ('desktop'), with the desktop's top bar ('wide'), or with a beta feature
-// on (its id, src/trials.js). Where it is: a section, or the tab it's in (shared/places.js).
+// on (its id, src/trials.js), or a feature out of beta (Scheduled Routines: routines; /config
+// features). Where it is: a section, or the tab it's in (shared/places.js).
 const at = (section, list) => list.map(([id, label, keywords = '', o = {}]) => ({ section, id, label, keywords, ...o }))
 
 export const SETTINGS = [
@@ -16,10 +17,10 @@ export const SETTINGS = [
     ['setup', tx('Set up'), 'setup install node homebrew developer tools speech model calendar mail full disk'],
   ]),
   ...at('you', [
-    ['beta-home', tx('Home'), 'beta home where bridge ai opens needs you start page'],
     ['name', tx('Your name'), 'first name call me morning brief'],
     ['location', tx('Location'), 'city weather morning brief place where'],
     ['layout', tx('Layout'), 'simple everything panels today board'],
+    ['home', tx('Home'), 'home where bridge ai opens needs you start page open where you were'],
     ['enter-key', tx('Enter Key'), 'enter return key send new line line break message box smart command ctrl shift typing'],
     ['color-mode', tx('Color Mode'), 'dark light system mode appearance'],
     ['theme', tx('Theme'), 'theme colors accent frame appearance'],
@@ -32,13 +33,13 @@ export const SETTINGS = [
     ['permissions', tx('Permissions'), 'allow access microphone accessibility calendars full disk files automation notifications privacy macos', { near: 'name' }],
   ]),
   ...at('agents', [
-    ['beta-routines', tx('Scheduled Routines'), 'beta routines schedule every weekday history commands'],
     ['default-agent', tx('Default agent'), 'claude codex gemini new agents chats routines'],
     ['default-model', tx('Default model'), 'model opus sonnet gpt flag', { near: 'default-agent' }],
     ['resume-work', tx('Pick up unfinished work after an update, a crash or a restart'), 'resume continue crash restart update', { near: 'default-agent' }],
     ['chief', tx('Chief of Staff runs on'), 'chief of staff agent'],
     ['chief-helpers', tx('Helpers at once'), 'chief of staff helpers delegate parallel queue queued at once', { near: 'chief' }],
     ['chief-helpers-edit', tx('Helpers may edit in their own work folder'), 'chief of staff helpers edit permission ask work folder', { near: 'chief' }],
+    ['scheduled-routines', tx('Scheduled Routines'), 'routines schedule scheduled every weekday run by itself time history commands'],
     ['consult', tx('Your Chief of Staff can consult'), 'consult second opinion bridge ask models', { near: 'chief' }],
     ['agent-list', tx('Install an agent'), 'agents install sign in claude codex gemini copilot cursor opencode cli'],
     ['plan-usage', tx('Plan usage'), 'quota limits read sign-in anthropic'],
@@ -64,13 +65,12 @@ export const SETTINGS = [
     ['models-elsewhere', tx('Speech and Dictation'), 'speech model parakeet whisper edit by voice tidy rewritten tidied'],
   ]),
   ...at('mcp', [
-    ['mcp-server', tx('Bridge AI as an MCP Server'), 'beta mcp server claude desktop cursor codex boards files meeting summaries'],
+    ['mcp-server', tx('Bridge AI as an MCP Server'), 'mcp server claude desktop cursor codex boards files meeting summaries other apps'],
     ['mcp-list', tx('MCP Servers'), 'mcp servers tools add install playwright github browser'],
   ]),
   ...at('meetings', [
     ['beta-meeting-board', tx('Live Meeting Board'), 'beta live board whiteboard decisions timeline'],
     ['beta-assist-answers', tx('Answers in AI Assist'), 'beta answers questions perplexity web'],
-    ['beta-meeting-insights', tx('Meeting Insights'), 'beta insights time people talk share'],
     ['beta-call-video', tx("Speakers From the Call's Video"), 'beta video speakers faces mouth names', { when: 'mac' }],
     ['transcribe', tx('Transcribe with'), 'speech engine transcription service local apple'],
     ['meetings-speech-model', tx('Speech models'), 'parakeet whisper download speech model', { near: 'transcribe' }],
@@ -87,6 +87,7 @@ export const SETTINGS = [
     ['meeting-remind', tx('Remind me before meetings'), 'remind reminder before meeting snooze later floating card join turn off', { when: 'desktop', near: 'calls' }],
     ['call-audio', tx('Record the other side of calls'), 'system audio zoom meet teams them', { near: 'calls' }],
     ['crop-shots', tx("Crop pictures of a call to what's shared"), 'crop pictures screenshots slide shared', { near: 'calls' }],
+    ['meeting-insights', tx('Meeting Insights'), 'insights time people talk share added up week series'],
     ['save-markdown', tx('Save every meeting as Markdown'), 'markdown obsidian save notes folder'],
     ['meeting-assist', tx('AI Assist in meetings'), 'ai assist suggest what to ask how often instructions summary'],
     ['who-spoke', tx('Who Spoke'), 'speakers voices room learn my voice remember voices names from the call screen recording', { near: 'meeting-assist' }],
@@ -95,11 +96,10 @@ export const SETTINGS = [
     ['save-notes', tx('Save notes as Markdown'), 'folder subfolders file name pattern front matter yaml speakers obsidian granola'],
   ]),
   ...at('dictation', [
-    ['beta-dictation-cleanup', tx('Tidy what I say'), 'beta tidy cleanup filler um model'],
     ['dictation', tx('Dictation'), 'dictation key talk hold fn background paste where typing'],
     ['dictation-more', tx('Cleanup and Mentions'), 'cleanup mentions dictation extras', { near: 'dictation' }],
     ['edit-by-voice', tx('Edit by voice'), 'rewrite selection voice edit', { when: 'desktop', near: 'dictation' }],
-    ['tidy', tx('Tidy what I say'), 'tidy cleanup filler um model', { when: 'dictation-cleanup', near: 'dictation' }],
+    ['tidy', tx('Tidy what I say'), 'tidy cleanup filler um false starts model local', { when: 'desktop', near: 'dictation' }],
     ['light-cleanup', tx('Light cleanup'), 'um uh capital full stop names', { near: 'dictation' }],
     ['mention-files', tx('Mention files by saying them'), 'at file mention say', { near: 'dictation' }],
     ['live-words', tx('Show the words as you talk'), 'live words as you talk', { near: 'dictation' }],
@@ -173,7 +173,7 @@ export const SETTINGS = [
     ['version', tx('Check for new versions'), 'version update check'],
     ['auto-update', tx("Update by itself while you're away"), 'auto update automatic', { when: 'desktop', near: 'version' }],
     ['channel', tx('Update Channel'), 'channel stable early access beta pre-release nightly testers'],
-    ['beta', tx('Beta Features'), 'beta trials home routines insights usage tidy board answers mcp slack bots remote screen share links'],
+    ['beta', tx('Beta Features'), 'beta trials usage board answers slack bots remote screen video speakers share links'],
     ['usage-counts', tx('Usage Counts'), 'telemetry analytics anonymous share privacy', { near: 'privacy' }],
     ['crash-reports', tx('Crash Reports'), 'crash reports send privacy', { near: 'privacy' }],
     ['privacy', tx('Privacy'), 'privacy usage counts crash reports what is sent'],
@@ -207,8 +207,9 @@ export function where(id, { accounts = accountsNow() } = {}) {
 export const placeOf = (x) => placePath(x.section, { accounts: !!x.accounts }).slice(1).map((p) => t(p)).join(' › ')
 
 // The ones that can show here: Mail's where Mail is read, Account's once Bold Bridge accounts exist,
-// the desktop app's in it, the top bar's with it, a Mac's on one, and a beta feature's while it's on.
+// the desktop app's in it, the top bar's with it, a Mac's on one, and a beta feature's (or one out of
+// beta's) while it's on.
 // (Each says whether there are accounts, for its section's name.)
 export const findable = (conf) => (cloudOnly ? [] : SETTINGS.filter((x) => (x.section !== 'mail' || conf?.mail) && (x.section !== 'account' || conf?.accounts)
   && (x.when !== 'desktop' || !!window.bridgeApp?.desktop) && (x.when !== 'wide' || matchMedia('(min-width: 900px)').matches) && (x.when !== 'mac' || conf?.platform === 'darwin')
-  && (!x.when || ['desktop', 'wide', 'mac'].includes(x.when) || conf?.trials?.[x.when] === true)).map((x) => ({ ...x, accounts: !!conf?.accounts })))
+  && (!x.when || ['desktop', 'wide', 'mac'].includes(x.when) || conf?.trials?.[x.when] === true || conf?.features?.[x.when] === true)).map((x) => ({ ...x, accounts: !!conf?.accounts })))

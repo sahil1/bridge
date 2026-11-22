@@ -12,10 +12,12 @@ import './features.css'
 
 // Settings › Your Features, where Settings opens: each feature as a card, with its switch where it
 // has one, how it's doing in a line ("Notes by Claude · 12 this week", "3 links open"), and Open,
-// to its place in Settings. The beta features after the rest, each marked Beta: none of them is
-// hidden here, on or off. Then Set up, what Bridge AI uses besides your agents (SetupAll).
-// Each line is one line, cut short if it's longer (all of it on hover), and only what this computer already knows, asked once as the page opens; a part that
-// can't be asked (Bots while it's off) just says Off.
+// to its place in Settings. Tidy What I Say only where dictation from other apps can work (the
+// desktop app, where this computer lets it hear the key). The beta features after the rest, each
+// marked Beta: none of them is hidden here, on or off. Then Set up, what Bridge AI uses besides
+// your agents (SetupAll). Each line is one line, cut short if it's longer (all of it on hover), and
+// only what this computer already knows, asked once as the page opens; a part that can't be asked
+// (Bots while it's off) just says Off.
 const open = (section) => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section } }))
 
 // One answer, asked once while on (null until then, or if it fails).
@@ -58,12 +60,17 @@ function BetaCard({ x, icon, line = null, why = null }) {
   return <Card id={x.id} icon={icon} name={t(x.label)} beta on={on} onSwitch={set} why={why} status={on ? line || t('On') : t(x.card)} to={x.setting} />
 }
 
-const BETA_ICON = { home: 'home', 'dictation-cleanup': 'wand', 'usage-everywhere': 'bar-chart', 'meeting-insights': 'trend', routines: 'repeat', 'meeting-board': 'shapes', 'assist-answers': 'sparkle', 'slack-bot': 'chat', 'mcp-server': 'link', 'remote-screen': 'screen', 'share-links': 'link', 'call-video': 'video' }
+const BETA_ICON = { 'usage-everywhere': 'bar-chart', 'meeting-board': 'shapes', 'assist-answers': 'sparkle', 'slack-bot': 'chat', 'remote-screen': 'screen', 'share-links': 'link', 'call-video': 'video' }
 
 export default function Features({ onOpenAgent }) {
   const { s, save } = useSettings()
   const { data: conf } = usePoll('/config', 10 * 60 * 1000)
   const trials = conf?.trials || {}
+  // The features out of beta, each with its switch here: as you set one, at once (saved behind it,
+  // and put back if that fails), else as the server says.
+  const [mine, setMine] = useState({})
+  useEffect(() => { setMine((m) => Object.fromEntries(Object.entries(m).filter(([k, v]) => conf?.features?.[k] !== v))) }, [conf])
+  const features = { ...(conf?.features || {}), ...mine }
   const mac = conf?.platform === 'darwin'
   const meetings = useOnce('/meetings')
   const chat = useOnce('/chat/models')
@@ -74,7 +81,12 @@ export default function Features({ onOpenAgent }) {
   const voice = useOnce(conf?.mail ? '/mail/voice' : null)
   const bots = useOnce('/bots', trials['slack-bot'] === true)
   const conns = useOnce('/connections', trials['slack-bot'] === true)
-  const mcp = useOnce('/mcp-server', trials['mcp-server'] === true)
+  const mcp = useOnce('/mcp-server', features['mcp-server'] === true)
+  const routines = useOnce('/routines', features.routines === true)
+  // Dictation from other apps, where the desktop app can hear the key there: Tidy What I Say's card.
+  const [fromApps, setFromApps] = useState(false)
+  useEffect(() => { window.bridgeApp?.dictateStatus?.().then((st) => setFromApps(!!st?.mode), () => {}) }, [])
+  const tidy = useOnce('/dictation/tidy', fromApps && features['dictation-cleanup'] === true)
   const [agents, setAgents] = useState(null)
   useEffect(() => { api('/agents/catalog').then(setAgents, () => setAgents([])) }, [])
   if (!s || !conf) return <div className="skeleton-rows"><div /><div /><div /></div>
@@ -124,20 +136,38 @@ export default function Features({ onOpenAgent }) {
   const added = (mcp?.apps || []).filter((a) => a.added).map((a) => a.label)
   const mcpLine = !mcp ? null : added.length ? t('Added to {apps}', { apps: added.join(', ') }) : t('Not added to an app yet')
 
-  const betaLine = { 'slack-bot': botLine, 'mcp-server': mcpLine, 'remote-screen': remoteLine, 'share-links': shareLine }
+  // Scheduled Routines: how many have a time to run at.
+  const timed = (routines?.routines || []).filter((r) => r.when && r.auto && !r.paused).length
+  const routineLine = !routines ? null : timed ? n(timed, tx('{n} routine on a schedule'), tx('{n} routines on a schedule')) : t('None on a schedule yet')
+  // Meeting Insights: on, or on by itself once there are meetings to add up (unless you set it).
+  const insightsLine = !features['meeting-insights'] && eff.meetings?.insights === undefined ? t('On by itself after 5 meetings') : t('Your meetings and people, added up')
+  // Tidy What I Say: the model it tidies with, or that there's none yet.
+  const tidyLine = !tidy ? null : tidy.model ? tidy.model.label : t("Not tidied: there's no model to tidy with yet.")
+
+  const betaLine = { 'slack-bot': botLine, 'remote-screen': remoteLine, 'share-links': shareLine }
   const betas = TRIALS.filter((x) => !x.mac || mac)
 
   const setDictation = async (v) => { await save({ dictation: { on: v } }); settingsChanged(); window.bridgeApp?.dictateConfigure?.({ ...d, on: v }).catch(() => {}) }
+  const turn = async (id, patch, v) => {
+    setMine((m) => ({ ...m, [id]: v }))
+    if (!(await save(patch))) setMine((m) => { const x = { ...m }; delete x[id]; return x })
+  }
+  const setTidy = async (v) => { await turn('dictation-cleanup', { dictation: { tidy: v } }, v); window.bridgeApp?.dictateConfigure?.({ ...d, tidy: v }).catch(() => {}) }
 
   return (
     <div className="st-sections ft">
       <ul className="ft-grid" aria-label={t('Your Features')}>
+        <Card id="home" icon="home" name={t('Home')} on={features.home === true} onSwitch={(v) => turn('home', { home: { on: v } }, v)} status={t('Your day at a glance')} to="home" />
         <Card id="meetings" icon="mic" name={t('Meetings')} status={meetingLine} to="meetings" />
+        <Card id="meeting-insights" icon="trend" name={t('Meeting Insights')} on={features['meeting-insights'] === true} onSwitch={(v) => turn('meeting-insights', { meetings: { insights: v } }, v)} status={insightsLine} to="meeting-insights" />
         <Card id="dictation" icon="keyboard" name={t('Dictation')} on={dictOn} onSwitch={setDictation} status={dictLine} to="dictation" />
+        {fromApps && <Card id="tidy" icon="wand" name={t('Tidy What I Say')} on={features['dictation-cleanup'] === true} onSwitch={setTidy} status={features['dictation-cleanup'] ? tidyLine : t('Cleans up what you dictate in other apps')} to="tidy" />}
         <Card id="chief" icon="sparkle" name={t('Chief of Staff')} status={chiefLine} to="chief" />
+        <Card id="routines" icon="repeat" name={t('Scheduled Routines')} on={features.routines === true} onSwitch={(v) => turn('routines', { routines: { on: v } }, v)} status={features.routines ? routineLine : t('Routines that run on a schedule')} to="scheduled-routines" />
         <Card id="phone" icon="phone" name={t('Phone')} status={phoneLine} to="phone" />
         {conf.mail && <Card id="mail" icon="mail" name={t('Mail & Calendar')} status={mailLine} to="mail" />}
         <Card id="notifications" icon="bell" name={t('Notifications')} status={noteLine} to="notifications" />
+        <Card id="mcp-server" icon="link" name={t('Bridge AI as an MCP Server')} on={features['mcp-server'] === true} onSwitch={(v) => turn('mcp-server', { mcpServer: { on: v } }, v)} why={!here ? t('Turned on and off at the computer itself.') : null} status={features['mcp-server'] ? mcpLine : t('Your boards and files in other AI apps')} to="mcp-server" />
       </ul>
       <h4 className="ft-head">{t('Beta')}<span className="muted small">{t('New parts of Bridge AI, each off until you turn it on.')}</span></h4>
       <ul className="ft-grid" aria-label={t('Beta Features')}>

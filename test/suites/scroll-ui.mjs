@@ -15,7 +15,7 @@ import { startKit, checks, until, browser, page, shot, withoutCutOff, TEST, ROOT
 
 const { ok, skip, done } = checks('scroll-ui')
 const trials = Object.fromEntries([...fs.readFileSync(path.join(ROOT, 'src', 'trials.js'), 'utf8').matchAll(/\{ id: '([a-z-]+)'/g)].map((m) => [m[1], true]))
-const kit = await startKit('scroll-ui', { config: { trials } })
+const kit = await startKit('scroll-ui', { config: { trials, home: undefined } }) // (every beta on, and Home as it starts)
 kit.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'claude.cjs'), 'utf8'))
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
