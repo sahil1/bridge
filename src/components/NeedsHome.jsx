@@ -5,6 +5,7 @@ import { useAgentMap } from './AgentMap.jsx'
 import { useCalendar, shortTitle } from './Agenda.jsx'
 import { PrepCard } from './meetings/prep.jsx'
 import { ago } from './Machines.jsx'
+import { outcomeOf } from './ChiefTasks.jsx'
 import { api, hostApi, machineId } from '../api.js'
 import { t, tx, locale } from '../i18n/index.js'
 import { sentTo } from '../sendbox.js'
@@ -654,7 +655,7 @@ function useReady(it, { phone, h, onRead }) {
   const l = it.kind === 'agent' ? { dot: 'done', kind: t('Finished'), title: a.title || t('Agent'), what: same(a.project, a.title) ? null : a.project, sub: gist(it.text, phone ? 90 : 140) || t('Finished, with nothing more to say.'), full: whole(it.text) }
     : it.kind === 'meeting' ? { icon: 'mic', kind: t('Meeting notes'), title: m.title, what: t('Meeting notes'), sub: sent || (left === 1 ? t('1 action item not handed on yet') : left > 1 ? t('{n} action items not handed on yet', { n: left }) : m.hasSummary ? t('The summary is ready') : m.status === 'recording' ? t('Recording') : t('No summary yet')) }
       : it.kind === 'board' ? { icon: 'shapes', kind: t('Whiteboard'), title: it.board.title, what: t('Whiteboard'), sub: it.board.changed === false ? t('Changed {when}', { when: ago(it.at) }) : t('Changed since you last looked') }
-        : tk.status === 'done' ? { icon: 'helm', kind: t('Chief of Staff finished'), title: tk.title, what: t('Chief of Staff finished'), sub: tk.outcome || tk.link || t('Done'), full: [tk.outcome, tk.link].filter(Boolean).join('\n') }
+        : tk.status === 'done' ? { icon: 'helm', kind: t('Chief of Staff finished'), title: tk.title, what: t('Chief of Staff finished'), sub: outcomeOf(tk.outcome) || tk.link || t('Done'), full: [outcomeOf(tk.outcome), tk.link].filter(Boolean).join('\n') }
           : { icon: 'helm', kind: t('Chief of Staff task'), title: tk.title, what: t('Chief of Staff task'), sub: tk.status === 'doing' ? t('On it now') : !tk.due ? t('To do') : tk.due < dayKey(Date.now()) ? t('Was due {date}', { date: dueOn(tk.due) }) : t('Due {date}', { date: dueOn(tk.due) }) }
   const opener = it.kind === 'agent' ? h.onOpen : it.kind === 'meeting' ? h.onOpenMeeting : it.kind === 'board' ? h.onOpenBoard : h.onOpenChief
   const canClear = it.kind === 'agent' && it.type === 'review' && !off && !it.old
@@ -1286,7 +1287,7 @@ export function Everything({ phone = false, onOpenAgent, onOpenMeeting, onOpenBo
     if (x.lane === 'needs') return { dot: x.type === 'failed' ? 'unknown' : 'blocked', title: [same(x.agent?.project, x.agent?.title) ? null : x.agent?.project, x.agent?.title].filter(Boolean).join(' · '), sub: x.text || t('Waiting on you') }
     if (x.lane === 'meeting') return { icon: 'mic', title: x.meeting.title, sub: x.meeting.status === 'recording' ? t('Recording') : x.unsent ? (x.unsent === 1 ? t('1 action item not handed on yet') : t('{n} action items not handed on yet', { n: x.unsent })) : x.meeting.hasSummary ? t('Notes ready') : ago(x.meeting.startedAt) }
     if (x.lane === 'board') return { icon: 'shapes', title: x.board.title, sub: x.board.changed ? t('Changed {when}, since you last looked', { when: ago(x.at) }) : t('Changed {when}', { when: ago(x.at) }) }
-    return { icon: 'helm', title: x.task.title, sub: x.task.status === 'waiting' ? x.task.needs || t('Waiting on you') : x.task.status === 'done' ? x.task.outcome || t('Done') : x.task.status === 'doing' ? t('On it now') : t('To do') }
+    return { icon: 'helm', title: x.task.title, sub: x.task.status === 'waiting' ? x.task.needs || t('Waiting on you') : x.task.status === 'done' ? outcomeOf(x.task.outcome) || t('Done') : x.task.status === 'doing' ? t('On it now') : t('To do') }
   }
   const item = (x, showDev) => {
     const l = line(x)

@@ -127,7 +127,7 @@ export async function hostApi(path, opts = {}) {
   const res = await fetch(`/api${path}`, { ...opts, headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) }, body: opts.body ? JSON.stringify(opts.body) : undefined })
   const data = await res.json().catch(() => ({}))
   if (res.status === 403) shutOut(`/api${path}`, data)
-  if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), { status: res.status, code: typeof data.code === 'string' ? data.code : undefined })
+  if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), { status: res.status, code: typeof data.code === 'string' ? data.code : undefined, data })
   return data
 }
 

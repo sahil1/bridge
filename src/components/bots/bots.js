@@ -24,6 +24,10 @@ export function statusOf(b) {
 export const STATUS = { on: tx('Answering'), needs: tx('Needs you'), paused: tx('Paused'), off: tx('Not connected yet'), draft: tx('Draft') }
 // How many of your bots' answers, changes and questions wait for you, from the list.
 export const needsCount = (list) => (list || []).reduce((n, b) => n + (b.draft ? 0 : (b.waiting || 0) + (b.state === 'error' ? 1 : 0)), 0)
+// The tab Bots opens at (the sidebar's row, the phone's More › Bots): what waits for you, in
+// Sessions; else a connection turned down, in Connections, where its card says why and what fixes
+// it; else the bots.
+export const firstTab = (list) => ((list || []).some((b) => !b.draft && b.waiting > 0) ? 'sessions' : (list || []).some((b) => !b.draft && b.state === 'error') ? 'connections' : 'bots')
 
 // Where Bots shows in the main area (App.jsx), each a tab of its own there:
 //   view:bots:<tab>      Bots (BotsHome.jsx), at Connections, Bots or Sessions; view:bots:new is

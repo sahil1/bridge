@@ -164,8 +164,9 @@ export function Routed({ c }) {
 
 // A bot's line about where it answers on one platform (its Set Up): through the shared connection
 // (with a way to give it its own), through its own (with Move to the shared one), or not yet (make
-// the shared one here, or give it its own below).
-export function BotReach({ d, platform, reload }) {
+// the shared one here, or give it its own below). offer: what's offered first where it's on none
+// (another bot's own app there, connected, for all your bots: BotChat.jsx).
+export function BotReach({ d, platform, reload, offer = null }) {
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState(null)
   const [moved, setMoved] = useState(null)
@@ -181,16 +182,18 @@ export function BotReach({ d, platform, reload }) {
     setBusy(false)
   }
   const s = platform === 'slack' ? { state: d.state } : d.where?.[platform] || {}
+  // (Its own app's tokens, where it has its own: none, it was never set up.)
+  const had = !!(platform === 'slack' ? d.tokens : s.tokens)
   const open = () => openBots('connections')
   return (
     <section className="st-sec cn-reach" data-setting="bots-reach" data-platform={platform}>
       {via?.shared && (
         <>
           <p className="small"><Icon name="link" size={13} /> {t('Reached through {name}, your shared {platform} connection.', { name: via.name, platform: label })} <span className={`sb-dot ${STATE[s.state] || 'warn'}`} aria-hidden="true" /> <span className="muted">{s.state === 'connected' ? t('connected') : t('not connected')}</span></p>
-          <p className="muted small">{platform === 'slack' ? t('People ask it with “{bot}: …” after @{name}, with {command}, or in a channel that goes to it. Its answers show its name.', { bot: d.name, name: via.name, command: d.command || '' }) : t('People ask it with “{bot}: …” after @{name}. Its answers show its name.', { bot: d.name, name: via.name })}</p>
+          <p className="muted small">{platform === 'slack' ? t('People ask it with “{bot}: …” after @{name}, with {command}, or in a channel that goes to it. Its answers show its name.', { bot: d.name, name: via.name, command: d.ownCommand || d.command || '' }) : t('People ask it with “{bot}: …” after @{name}. Its answers show its name.', { bot: d.name, name: via.name })}</p>
           <div className="st-row">
             <button type="button" className="btn small" onClick={open}><Icon name="link" size={12} /> {t('Connections')}</button>
-            <button type="button" className="ghost-btn" disabled={busy} onClick={() => go('own')}>{t('Give it its own connection')}</button>
+            <button type="button" className="ghost-btn" disabled={busy} onClick={() => { if (window.confirm(t('Give {bot} an app of its own on {platform}? Until you make that app and paste its tokens, {bot} isn\'t reached on {platform}.', { bot: d.name, platform: label }))) go('own') }}>{t('Give it its own connection')}</button>
           </div>
           <p className="muted small">{t('Its own connection is an app of its own on {platform}, for an identity of its own (a public support bot, say): you make that app once more, with the steps here.', { platform: label })}</p>
         </>
@@ -200,7 +203,7 @@ export function BotReach({ d, platform, reload }) {
           <p className="small"><Icon name="link" size={13} /> {t('Its own {platform} connection: an app of its own, {name}.', { platform: label, name: via.name })}</p>
           {shared && (
             <div className="st-row">
-              <button type="button" className="btn small" disabled={busy} onClick={() => { if (window.confirm(t('Move {bot} to {name}? Its own app\'s tokens are deleted here; delete that app on {platform} afterwards.', { bot: d.name, name: shared.name, platform: label }))) go('move', (x) => setMoved(x.moved)) }}>{t('Move to {name}', { name: shared.name })}</button>
+              <button type="button" className="btn small" disabled={busy} onClick={() => { if (window.confirm(had ? t('Move {bot} to {name}? Its own app\'s tokens are deleted here; delete that app on {platform} afterwards.', { bot: d.name, name: shared.name, platform: label }) : t('Move {bot} to {name}? Its own app, never set up, is removed.', { bot: d.name, name: shared.name }))) go('move', (x) => setMoved({ ...x.moved, had })) }}>{t('Move to {name}', { name: shared.name })}</button>
               <span className="muted small">{t('Then it\'s reached through your shared connection, like your other bots.')}</span>
             </div>
           )}
@@ -209,11 +212,12 @@ export function BotReach({ d, platform, reload }) {
       {!via && (
         <>
           <p className="small"><Icon name="info" size={13} /> {t('Not on {platform} yet.', { platform: label })}</p>
+          {offer}
           <MakeShared platform={platform} suggested={suggested} onMade={() => reload()} />
           <p className="muted small">{t('Or give {bot} an app of its own on {platform}, with the steps below.', { bot: d.name, platform: label })}</p>
         </>
       )}
-      {moved && <p className="st-note ok" role="status"><Icon name="check" size={13} /><span>{t('Moved to {to}. You can delete its old app, {from}, on {platform} now.', { to: moved.to, from: moved.from, platform: label })}</span></p>}
+      {moved && <p className="st-note ok" role="status"><Icon name="check" size={13} /><span>{moved.had ? t('Moved to {to}. You can delete its old app, {from}, on {platform} now.', { to: moved.to, from: moved.from, platform: label }) : t('Moved {bot} to {to}: it\'s reached through it now, like your other bots.', { bot: d.name, to: moved.to })}</span></p>}
       {note && <p className="error-text small" role="alert">{note}</p>}
     </section>
   )

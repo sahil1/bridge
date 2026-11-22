@@ -280,6 +280,13 @@ let asking = false // a pairing link's "Pair with …?" is up: the link to the r
 // none). What Bridge AI asks for goes through it, so Bridge AI waits for it (showApp); the link
 // doesn't, and comes up meanwhile.
 let worker = null
+// One that isn't there WORKER_MS after Bridge AI should open (a browser can leave it installing for
+// good): one the browser has made active is used all the same; otherwise the page says so, with Try
+// again (which loads the page afresh), rather than staying blank, whenever Bridge AI would show (the
+// link back after it dropped, too), and Bridge AI still opens if it comes meanwhile (slowWorker).
+const WORKER_MS = 10000
+let workerSlow = false // it wasn't there by then, and still isn't: said whenever Bridge AI would show
+let slowShown = false // that's what the start screen says now
 let readyWaiters = []
 let appShown = false
 let shown = 0 // each time Bridge AI is opened in the frame
@@ -350,7 +357,7 @@ function awayBanner(on = true) {
   if (!on) return
   bar(null)
   const relayDown = ws?.readyState !== 1 || !heardStatus
-  $('away-title').textContent = unchecked ? `Can't connect to ${thisComputer() === 'Your computer' ? 'your computer' : thisComputer()}: the answer through the relay couldn't be checked.` : silent ? `${thisComputer()} isn't answering.` : relayDown ? 'Can\'t reach your relay right now.' : `${thisComputer()} is offline${hostSeen ? ` since ${when(hostSeen)}` : ''}.`
+  $('away-title').textContent = unchecked ? `Can't connect to ${thisComputer() === 'Your computer' ? 'your computer' : thisComputer()}: the answer through the relay couldn't be checked.` : silent ? `${thisComputer()} isn't answering.` : relayDown ? 'Can\'t reach your relay right now.' : hostSeen ? `${thisComputer()} has been offline since ${when(hostSeen)}.` : `${thisComputer()} is offline.`
   $('away-text').textContent = `Showing what it last sent. Messages you send ${relayKeeps && !relayDown && !silent ? 'go out when it\'s back' : 'wait on this phone until it\'s back'}.`
   // The way to your other computers, Cloud Agents and the demo, in the apps.
   $('away-more').hidden = !others().length && !bundledUis.length
@@ -1302,6 +1309,7 @@ document.addEventListener('visibilitychange', () => {
 
 // ---------- the app ----------
 function showApp() {
+  if (workerSlow && worker) return slowScreen() // said so, until it comes (load) or the page is loaded afresh
   show(null)
   clearTimeout(stuckTimer)
   const f = $('app')
@@ -1312,9 +1320,16 @@ function showApp() {
   const src = openOnLoad ? `/?agent=${encodeURIComponent(openOnLoad)}` : `/${location.search}`
   openOnLoad = null
   const n = ++shown
-  const load = () => { if (appShown && n === shown) f.src = src }
-  if (worker) worker.then(load, (e) => waitScreen('Something went wrong', e.message, true))
-  else load()
+  const load = () => {
+    if (!appShown || n !== shown) return
+    if (workerSlow) { workerSlow = false; if (slowShown) { show(null); f.hidden = false; if (away) awayBanner() } }
+    f.src = src
+  }
+  if (worker) {
+    const w = worker
+    w.then(load, (e) => waitScreen('Something went wrong', e.message, true))
+    setTimeout(() => { if (worker === w && appShown && n === shown) slowWorker(w, load) }, WORKER_MS)
+  } else load()
   // Match the app's background and bar colour around it (the notch and the Home indicator area).
   f.onload = () => {
     try {
@@ -1338,7 +1353,21 @@ function showApp() {
   }
 }
 
+// The service worker still not there (showApp): active after all, Bridge AI opens; else it's said.
+async function slowWorker(w, load) {
+  const reg = await navigator.serviceWorker?.getRegistration('/').catch(() => null)
+  if (worker !== w) return
+  if (reg?.active) { worker = null; return load() }
+  workerSlow = true
+  if (!$('app').hidden) slowScreen() // (another start screen up: said once Bridge AI would show)
+}
+function slowScreen() {
+  waitScreen('Bridge AI is taking a while to open', 'This browser hasn\'t finished setting up this page. Try again loads it afresh; if Bridge AI still doesn\'t open, close this page and open it again.', true)
+  slowShown = true
+}
+
 function waitScreen(title, msg, retry) {
+  slowShown = false
   show('wait')
   $('wait-title').textContent = title
   $('wait-text').textContent = msg || ''
@@ -1351,7 +1380,7 @@ function waitScreen(title, msg, retry) {
   if (retry && paired?.hostKey && !adding) offline.hasCopy().then((has) => { $('saved-open').hidden = !has || $('wait').hidden }, () => {})
 }
 
-$('retry').onclick = () => { if (!appShown) watchStart(); reconnect() }
+$('retry').onclick = () => { if (workerSlow && worker) { location.reload(); return } if (!appShown) watchStart(); reconnect() }
 $('skip').onclick = () => { for (const w of readyWaiters.splice(0)) w.ok(); showApp() }
 $('pair-form').onsubmit = async (e) => {
   e.preventDefault()

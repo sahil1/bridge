@@ -169,6 +169,11 @@ try {
   ok(/^This link pairs this browser on this phone with Studio/.test(chrome.intro) && chrome.go === 'Pair this browser' && chrome.box && !chrome.open && chrome.get === 'https://boldbridge.ai/#android', 'in Chrome on Android: the same, with the Android app', chrome)
   const theApp = await said(await open(link, { ua: 'Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 Chrome/131 Mobile Safari/537.36 BridgeAIApp/3.20.0' }))
   ok(!theApp.box && theApp.go === 'Pair' && /so it can use Bridge AI there/.test(theApp.intro), 'and in the apps, none of it', theApp)
+  // Back in each app goes through the page's history, where the phone layout keeps each of its views
+  // a step (back-forward checks the page's side): Android's Back while the page can go back, an
+  // iPhone's swipe from the edge.
+  ok(/if \(w != null && w\.canGoBack\(\)\) w\.goBack\(\)/.test(main) && /web\?\.canGoBack\(\) == true/.test(main), 'Android: Back goes back in the page while it can, and leaves the app from its first view', null)
+  ok(/web\.allowsBackForwardNavigationGestures = true/.test(wvc), 'iPhone: a swipe from the edge goes back in the page', null)
   ok(/case "pair"|url\.host == "pair"/.test(wvc) && /usePairingLink\(link\)/.test(wvc.slice(wvc.indexOf('func open(_ url: URL)'))), 'the iPhone app pairs from bridgeai://pair?link=… (Open the Bridge AI app), asking first as ever', null)
 
   ok(!errors.length, 'no page errors', errors)

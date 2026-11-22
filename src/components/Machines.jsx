@@ -235,6 +235,8 @@ export function MachineMenu({ phone = false, elsewhere = null }) {
               <Icon name={ctl.data.control?.on ? 'check' : 'keyboard'} size={13} /> {t('Let my other devices control this computer')}
             </button>
           )}
+          {/* Turned down (macOS not letting Bridge AI use the mouse and keyboard, say): why, here. */}
+          {screens && ctl.here && ctl.err && <p className="mc-err small" role="alert"><Icon name="alert" size={12} /> <span>{ctl.err}</span></p>}
           {(app || scans) && (
             <>
               <div className="menu-sep" />
@@ -538,7 +540,12 @@ export function MachinesSettings({ embedded = false, focus = false }) {
   }, [focus, top])
   const run = async (what, fn) => {
     setBusy(what); setMsg(null)
-    try { const r = await fn(); refresh(); machinesChanged(); return r } catch (e) { setMsg({ error: true, text: e.message }) } finally { setBusy(null) }
+    try { const r = await fn(); refresh(); machinesChanged(); return r } catch (e) {
+      // Its relay not reached: in plain words, with what to check; the system's own words small under it.
+      setMsg(e.code === 'relayUnreachable' && e.data?.host
+        ? { error: true, text: t("Can't reach {host}. Check the address, this computer's network, or that the relay is up.", { host: e.data.host }), detail: e.data.detail || null }
+        : { error: true, text: e.message })
+    } finally { setBusy(null) }
   }
   if (!data) return <div className="skeleton-rows pad"><div /><div /></div>
   const Wrap = embedded ? Fragment : 'div'
@@ -608,7 +615,7 @@ export function MachinesSettings({ embedded = false, focus = false }) {
                           : m.state === 'removed' ? t('It unlinked this device') : m.state === 'changed' ? t('Its key changed') : m.state === 'expired' ? t('The ask expired') : t('Linking…')].filter(Boolean).join(' · ')}
                 </small>
                 {m.state === 'asking' && m.code && <small>{tn('On {name}, allow it if it shows {code}.', { name: m.name, code: <b className="ask-code">{m.code}</b> })}</small>}
-                {m.error && m.state === 'linked' && !m.online && !fixes[m.id] && <small className="muted">{m.error}</small>}
+                {m.error && m.state === 'linked' && !m.online && !fixes[m.id] && <small className="muted" title={m.unreachable?.detail || undefined}>{m.unreachable ? t("Can't reach {host}, the relay {name} uses. Check its address, this computer's network, or that the relay is up.", { host: m.unreachable.host, name: m.name }) : m.error}</small>}
                 {m.notLetIn && m.state === 'linked' && m.online && <small className="muted"><Icon name="lock" size={11} /> {t('{name} hasn\'t let {here} in. On {name}: {place}.', { place: where('remote-devices'), name: m.name, here: data.here.name })}</small>}
                 {m.state === 'changed' && <small className="muted">{t('{name} doesn\'t have the key it was linked with: it was set up again, or something is in between. On {name}, choose Pair a device and paste its link in Link a device below, to check it\'s really {name}.', { name: m.name })}</small>}
                 {m.state === 'removed' && <small className="muted">{t('{name} forgot this device. Link again asks it; allow it there after checking both show the same six digits.', { name: m.name })}</small>}
@@ -681,7 +688,7 @@ export function MachinesSettings({ embedded = false, focus = false }) {
           : !data.canBeLinked && <p className="muted small">{data.hostedAvailable
             ? t("Other devices reach this one through its relay, which isn't set up yet: sign in to Cloudflare (or use Bridge AI's relay) in the Phone tab. It can still link to them.")
             : t("Other devices reach this one through its relay, which isn't set up yet: sign in to Cloudflare in the Phone tab. It can still link to them.")}</p>}
-        {msg && <p className={`small ${msg.error ? 'error-text' : 'muted'}`}>{msg.text}</p>}
+        {msg && <p className={`small ${msg.error ? 'error-text' : 'muted'}`}>{msg.text}{msg.detail && <small className="muted mch-detail">{msg.detail}</small>}</p>}
       </section>}
     </Wrap>
   )

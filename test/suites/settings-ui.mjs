@@ -613,6 +613,19 @@ try {
     const opens = await p.locator('.modal.settings.phone .ft-open').evaluateAll((l) => l.map((e) => Math.round(e.getBoundingClientRect().height)))
     ok(!ff.wider && !ff.past && !ff.sideways && !ff.cut && opens.length >= CARDS && opens.every((h) => h >= 40), 'phone: Your Features, nothing wider than the screen or cut off, each Open a whole 40 px target', { ff, opens })
     await shot(p, `${tag}settings-ui-phone-features`)
+    // Every field in every section and tab, Advanced open, at 16 px or more: iOS zooms into a smaller
+    // one as it's tapped (Link a device's field, Notifications' Usage running low), and stays zoomed.
+    const zoomy = {}
+    for (const id of ['you', 'agents', 'providers', 'models', 'mcp', 'meetings', 'dictation', 'voice', 'spoken', 'bots', 'phone', 'machines', 'remote', 'sharing', 'notifications', 'backup', 'about']) {
+      await p.evaluate((s) => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: s } })), id)
+      await settled(p)
+      if (await p.locator('.modal.settings details.st-adv summary').first().isVisible().catch(() => false)) { await advanced(p); await settled(p) }
+      const small = await p.locator('.modal.settings .st-scroll').evaluate((el) => [...el.querySelectorAll('input:not([type=checkbox], [type=radio], [type=range], [type=color], [type=file]), select, textarea')]
+        .filter((e) => e.getBoundingClientRect().width > 0 && parseFloat(getComputedStyle(e).fontSize) < 16)
+        .map((e) => `${e.getAttribute('aria-label') || e.getAttribute('placeholder') || e.name || e.tagName} ${getComputedStyle(e).fontSize}`))
+      if (small.length) zoomy[id] = small
+    }
+    ok(!Object.keys(zoomy).length, 'phone: every field of every section and tab, Advanced open, at 16 px or more (iOS zooms into a smaller one as it\'s tapped)', zoomy)
     ok(errors.length === 0, 'phone: no page errors', errors)
     await ctx.close()
   }

@@ -8,8 +8,9 @@
 // the desktop app asks (its mouse buttons on Windows, a swipe on a Mac). Each place comes back as it
 // was: the agent's view, Meetings' tab, the meeting back in Meetings' tab, the folder, a long folder
 // at its scroll. Held or right-clicked, ‹ and › list the places that way, and one picked is shown. A
-// tab closed is passed over. On a phone nothing's added (its tabs, and the system's Back in the
-// phone apps, are its way around). Out of beta, a switch for it saved off from before changes
+// tab closed is passed over. On a phone, no ‹ and ›: its tabs and views (More's, a bot's page) are
+// steps in the browser's history, so Back (the Android app's, an iPhone's swipe, the browser's) shows
+// each view before and leaves only from the first, and the page's own ways back go back. Out of beta, a switch for it saved off from before changes
 // nothing, and Beta Features has no Back and Forward, Tab Groups, Recommended Settings or Files.
 import fs from 'node:fs'
 import path from 'node:path'
@@ -315,18 +316,73 @@ try {
   })
 
   // ---------- a phone: nothing added ----------
+  // ---------- a phone: the system's Back ----------
+  // (No ‹ and › on a phone: its tabs and views are each a step in the browser's history, so Back,
+  // the Android app's and an iPhone's swipe in the app, which go through it, shows the view before,
+  // and leaves Bridge AI only from the first. With Bots on: Agents, More, Bots, a bot, then Back.)
+  await kit.api('/settings', { trials: { 'slack-bot': true } }, 'PATCH')
+  const HI = (await kit.api('/bots', { name: 'Hiring', description: 'Answers hiring questions' })).id
   await part('phone', async () => {
-    const { ctx, p, errors } = await open({ phone: true })
+    const { ctx, p, errors } = await open({ phone: true, store: { [`cc-bot-assist-${HI}`]: 'shut' } })
     await p.locator('.tabbar').waitFor({ timeout: 20000 })
-    const was = await p.evaluate(() => history.length)
-    await p.locator('.tabbar button', { hasText: 'Agents' }).click()
-    await p.locator('.board, .m-body').first().waitFor()
-    await p.locator('.tabbar button', { hasText: 'Meetings' }).click()
-    await sleep(600)
-    await p.locator('.tabbar button', { hasText: 'Chief' }).click()
-    await sleep(600)
     ok((await p.locator('.nav-btn').count()) === 0, 'a phone: no ‹ and › in its top bar (its tabs are its way around)')
-    ok((await p.evaluate(() => history.length)) === was, 'and nothing added to the browser\'s history, so the system\'s Back in the phone apps does what it did', { was, now: await p.evaluate(() => history.length) })
+    // Where the phone is: its tab, and in More, the view it shows.
+    const where = () => p.evaluate(() => {
+      const shown = (s) => { const e = document.querySelector(s); return !!e && e.getClientRects().length > 0 }
+      const tab = document.querySelector('.tabbar button[aria-current="true"]')?.textContent?.trim() || ''
+      if (tab !== 'More') return tab
+      if (shown('.bp .bp-name')) return `More › Bots › ${document.querySelector('.bp .bp-name').textContent.trim()}`
+      if (shown('.bh[data-tab]')) return `More › Bots › ${document.querySelector('.bh[data-tab]').dataset.tab}`
+      if (shown('.m-more-row')) return 'More'
+      return 'More › ?'
+    })
+    const there = (want, ms = 8000) => until(async () => (await where()) === want, ms, 100)
+    await sleep(1700) // (what it opens at is the first step)
+    const first = await where()
+    const went = [first]
+    await p.locator('.tabbar button', { hasText: 'Agents' }).click()
+    await there('Agents'); await settle(); went.push(await where())
+    await p.locator('.tabbar button', { hasText: 'More' }).click()
+    await there('More'); await settle(); went.push(await where())
+    await p.locator('.m-more-row[data-id="bots"]').click()
+    await there('More › Bots › bots'); await settle(); went.push(await where())
+    await p.locator(`.bh .bo-card[data-bot="${HI}"]`).click()
+    await there('More › Bots › Hiring'); await settle(); went.push(await where())
+    ok(went.join(' | ') === `${first} | Agents | More | More › Bots › bots | More › Bots › Hiring`, 'a phone: Agents, More, Bots, Hiring', went)
+    const back = []
+    for (const want of ['More › Bots › bots', 'More', 'Agents', first]) {
+      await p.goBack()
+      back.push(await there(want) ? want : `${await where()} (not ${want})`)
+    }
+    ok(back.join(' | ') === `More › Bots › bots | More | Agents | ${first}`, 'Back: each view before, in turn, back to where it opened', back)
+    await p.goForward()
+    ok(!!(await there('Agents')), 'Forward: the next again', await where())
+    await p.goBack()
+    await there(first)
+    // (Only from the first does Back leave Bridge AI: the Android app then closes, as it did.)
+    await p.goBack().catch(() => null)
+    ok(!!(await until(() => !/^http/.test(p.url()), 5000)), 'and Back from the first leaves it', p.url())
+    ok(errors.length === 0, 'phone: no page errors', errors)
+    await ctx.close()
+  })
+  await part('phone, the way back in the page', async () => {
+    // (‹ Bots on a bot's page, and a tab tapped again: back to the view before, as Back would be,
+    // so Back afterwards doesn't show the bot again.)
+    const { ctx, p, errors } = await open({ phone: true, store: { [`cc-bot-assist-${HI}`]: 'shut' } })
+    await p.locator('.tabbar').waitFor({ timeout: 20000 })
+    await sleep(1700)
+    await p.locator('.tabbar button', { hasText: 'More' }).click()
+    await p.locator('.m-more-row[data-id="bots"]').waitFor({ timeout: 8000 }); await settle()
+    await p.locator('.m-more-row[data-id="bots"]').click()
+    await p.locator(`.bh .bo-card[data-bot="${HI}"]`).waitFor({ timeout: 10000 }); await settle()
+    await p.locator(`.bh .bo-card[data-bot="${HI}"]`).click()
+    await p.locator('.bp .bp-name').waitFor({ timeout: 10000 }); await settle()
+    const depth = await p.evaluate(() => history.length)
+    await p.locator('.m-view-back', { hasText: 'Bots' }).click()
+    await p.locator('.bh[data-tab="bots"]').waitFor({ timeout: 8000 }); await settle()
+    ok(!(await p.locator('.bp .bp-name').count()) && (await p.evaluate(() => history.length)) === depth, '‹ Bots: Bots again, as Back, with no step added', { depth, now: await p.evaluate(() => history.length) })
+    await p.goBack()
+    ok(!!(await until(async () => (await p.locator('.m-more-row').count()) > 0, 8000)), 'and Back from there: More, not the bot again')
     ok(errors.length === 0, 'phone: no page errors', errors)
     await ctx.close()
   })

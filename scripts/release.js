@@ -55,8 +55,16 @@ function notesFor(v, { android = false } = {}) {
   const mac = JSON.parse(fs.readFileSync(path.join(ROOT, 'desktop', 'package.json'), 'utf8')).build?.mac?.minimumSystemVersion
   if (!/^\d+(\.\d+)*$/.test(mac || '')) fail('desktop/package.json has no build.mac.minimumSystemVersion')
   const rollout = rolloutOf(m[1])
-  const section = withRollout(m[1], 100).trim()
+  let section = withRollout(m[1], 100).trim()
   if (!section) fail(`CHANGELOG.md's section "## ${v}" has only its rollout line; say what's in it`)
+  // A pre-release whose own section is only what it is (no ### What's new, ### Fixes) has the lists
+  // of the version it's of (3.22.0-rc.1, 3.22.0's), under its own paragraph.
+  const core = v.split('-')[0]
+  if (isPre(v) && !/^### /m.test(section)) {
+    const of = log.match(new RegExp(`^## ${core.replace(/\./g, '\\.')}\\s*\\n([\\s\\S]*?)(?=^## |(?![\\s\\S]))`, 'm'))
+    const lists = of && withRollout(of[1], 100).match(/^### [\s\S]*/m)
+    if (lists) section = `${section}\n\n${lists[0].trim()}`
+  }
   const apk = android ? 'The Android app is `Bridge-AI-android.apk`: open it on your phone to install it, or to update the one you have. It isn\'t on Google Play yet.\n\n' : ''
   const notes = `${section.replace(/^### /gm, '## ')}\n\n${apk}${isPre(v) ? `${EARLY}\n\n` : ''}The Mac app needs macOS ${mac.replace(/\.0$/, '')} or later. Checksums (SHA-256) are in \`SHA256SUMS.txt\`.\n\n${STAR}\n\n<!-- macOS ${mac} or later -->\n`
   return rollout == null ? notes : withRollout(notes, rollout)

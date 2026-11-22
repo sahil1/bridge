@@ -1,6 +1,6 @@
 # A nightly build of main, for the owner's own computers (scripts/nightly.js): each night when main
 # has changed since the last one, the release workflow runs the tests for what changed since the
-# last nightly on macOS, Windows and Linux (every test is for the weekend's release),
+# last nightly on macOS, Windows and Linux (every test runs each night on its own, test.yml),
 # builds it at a nightly version and publishes it as a pre-release that only computers on Nightly
 # are offered (server/updates.js). Stable and Early Access never get one, and GitHub's latest
 # release, the website's download and Docker's tags stay on regular releases. Running it by hand

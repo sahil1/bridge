@@ -241,6 +241,8 @@ try {
   const card = await kitAs('card', 'app')
   await card.api('/updates?refresh=1')
   const here = (await card.api('/updates')).current
+  // The version you have as the card names it: 3.22.0-rc.1 is 3.22.0 RC 1, -beta.2 Beta 2.
+  const named = here.replace(/^(\d+\.\d+\.\d+)-([a-z]+)\.(\d+)$/i, (_, core, kind, n) => `${core} ${kind.toLowerCase() === 'beta' ? 'Beta' : kind.toUpperCase()} ${n}`)
   // What the card shows, and how it sits: how many lines each takes (its height against its line
   // height: the title and the line under it one each, a highlight at most two, its label all on
   // its first), what's cut short, and anything outside the card or the window.
@@ -283,7 +285,7 @@ try {
       await shot(p, `${tag}update-card-${channel}-${what}`)
       const c = await look(p, '.topbar .update-pop').catch((e) => ({ error: e.message }))
       ok(c.title === title && !c.titleCut && c.lines, `the card (${channel}, ${what}): ${title}, on one line, cut short nowhere; each highlight at most two lines, its label on the first`, c)
-      ok(new RegExp(`^\\w{3} \\d{1,2} · ${kind ? `${kind} · ` : ''}you have ${here.replace(/\./g, '\\.')}$`).test(c.meta), `under it: the day it came out, ${kind ? 'Early Access, ' : ''}and the version you have`, c.meta)
+      ok(new RegExp(`^\\w{3} \\d{1,2} · ${kind ? `${kind} · ` : ''}you have ${named.replace(/\./g, '\\.')}$`).test(c.meta), `under it: the day it came out, ${kind ? 'Early Access, ' : ''}and the version you have`, c.meta)
       ok(c.items?.length >= 1 && c.items.length <= 4 && c.items.every((x) => !/\bTests?\b|\bCI\b|~\\|\.mjs\b|[0-9a-f]{7}/.test(x)), 'at most four highlights, none about the tests or a commit', c.items)
       if (channel === 'nightly') ok(JSON.stringify(c.labels) === JSON.stringify(groups.slice(0, c.items.length)) && c.items.length === Math.min(4, groups.length) && c.rows.includes(2), 'a nightly\'s: its first parts, each its label and first line, a long one on a second line rather than cut at the first', { shown: c.labels, groups, rows: c.rows })
       ok(/^Update now/.test(c.acts?.[0] || '') && c.acts?.[1] === "What's new" && c.foot === 'Update settings' && /update-foot/.test(c.last), 'then Update now and What\'s new, and Update settings last, on its own', c)

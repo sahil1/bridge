@@ -61,6 +61,7 @@ Write the app in English and wrap what people see in `t()` from `src/i18n/index.
 - **Updating a pack:** `node scripts/i18n.js todo es es-todo.json` writes what Spanish is missing, with the file each string shows in. Translate it (add `"to"` to each, or make a `{ "English": "Spanish" }` file), then `node scripts/i18n.js add es es-todo.json` puts it in, refusing anything with the wrong `{placeholders}`.
 - **A new language:** the same two commands with its code (`ko`, `it`, `zh-TW`). The pack's file is all it takes: Settings › Appearance lists it, named in its own words, and Match this computer picks it.
 - **Keeping them tidy:** `node scripts/i18n.js check` shows how far each pack has got and fails on a broken placeholder. `node scripts/i18n.js prune` takes out strings the app no longer uses.
+- **When:** the packs are brought up to date before each feature release (3.13.0), with its full run. Changes, nightlies and patch releases go in English, and a new string shows in English in every language until then.
 
 ## Running your own
 
@@ -86,11 +87,15 @@ own on its own Cloudflare account:
 
 For the project's owner, or a fork's: what `npm run release` puts out, and who is offered it.
 
-- **The cadence.** Changes go to main through the week, each tested for what it changes, and your
+- **The cadence.** Changes go to main through the day. The owner's own are merged once the tests
+  for what they change pass on the computer they're made on (`npm test -- --browser both`, Chromium
+  and WebKit). The pull request's run on GitHub goes on in the background, and what it finds is
+  fixed in the next change. A pull request from anyone else is merged once its run on GitHub
+  passes. A merge to main runs no tests of its own. Every test runs on main each night, and your
   own computers get each night's main (Nightly, below), tested for what changed since the night
-  before. A release goes to everyone at the weekend: Friday night's run tests every test on main,
-  and the release runs every test again before it's built. A fix that can't wait is a patch release
-  at any time.
+  before. A release runs every test again while it's built, and is published only once they pass.
+  Windows, and Linux's tests in no browser, run in the full run each night, where a failure is
+  said but doesn't stop anything. A fix that can't wait is a patch release at any time.
 - **Shipping from your computer, a step at a time** (`npm run ship`, `scripts/ship.js`; git and the
   GitHub CLI signed in). `npm run ship` says where things stand: this branch, main's version, the
   newest nightly, beta and release, the runs going, and this computer's version and channel.
@@ -184,7 +189,7 @@ For the project's owner, or a fork's: what `npm run release` puts out, and who i
 
 ## Before you open a pull request
 
-- `npm run build` passes, and `npm test` (the tests for what you changed; `test/README.md` says what each covers). CI runs the tests for what the pull request changes on macOS, Windows and Linux; every test runs before a release.
+- `npm run build` passes, and `npm test` (the tests for what you changed; `test/README.md` says what each covers). CI runs the tests for what the pull request changes on macOS and Linux; every test runs each night and before a release.
 - No personal data: names, email addresses, company names, home folder paths or tokens. Settings belong in `~/.bridge-ai`, not in the repo.
 - `npm run check:private` passes. It looks for keys, tokens, home folder paths, email addresses, session transcripts and Bridge AI data files, plus your own name, places and hostnames from your `~/.bridge-ai` settings and the names in your Memory. `npm install` turns on git hooks that run it before every commit (the staged files) and every push (each commit being pushed, so something added and then deleted is still caught). Releases, app builds and CI run it too. `--no-verify` skips a hook; the push check still catches what that commit let through.
 - Commit messages say what changed, in your words. The hooks refuse a message with a link to an AI coding session or a line crediting an AI (`Claude-Session:`, `Co-Authored-By: Claude`, "Generated with Claude Code"): public history can't be taken back.
