@@ -7399,6 +7399,7 @@
   "its name": "ihren Namen",
   "its own": "eigene",
   "its own app": "eigene App",
+  "its own command {command}": "eigener Befehl {command}",
   "its own effort": "eigener Aufwand",
   "its project": "seinem Projekt",
   "its repository": "sein Repository",

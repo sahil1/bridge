@@ -42,7 +42,7 @@
 // direct messages with it, once a day for each.
 import { idOf, bare, failure, PLATFORMS as NAMES } from './connector.js'
 import * as conns from './connections.js'
-import { commandOf, shortcutOf } from './slackbot.js'
+import { commandOf, commandsOf, shortcutOf } from './slackbot.js'
 import { placeEn } from '../shared/places.js'
 
 // The steps above, in order, as the Connections page shows them.
@@ -103,6 +103,8 @@ export function makeHubs({ bots, desk, make, you = () => 'the owner', enabled = 
   const botOf = (id) => bots().find((b) => b.id === id) || null
   // The bots a connection reaches that are listening now.
   const on = (c) => conns.botsOn(c, bots()).filter((b) => joins.has(`${b.id}:${c.platform}`))
+  // Each bot's own slash command on a shared app, as its manifest has them: from every bot on it.
+  const commandsOn = (c) => commandsOf(conns.botsOn(c, bots()), [commandOf(c.name)])
   const named = (id) => botOf(id)?.name || id
 
   function hubOf(c) {
@@ -142,7 +144,7 @@ export function makeHubs({ bots, desk, make, you = () => 'the owner', enabled = 
     const x = desk.info(list[0]?.id) || {}
     return {
       name: c.name, you: you(), computer: x.computer || null, paused: false, command: commandOf(c.name), shortcut: shortcutOf(c.name), shared: true,
-      bots: list.map((b) => ({ name: b.name, description: b.description || '', paused: b.paused, command: c.perBot ? commandOf(b.name) : null, channels: c.defaults.filter((d) => d.bot === b.id).map((d) => d.name || d.id) })),
+      bots: list.map((b) => ({ name: b.name, description: b.description || '', paused: b.paused, command: c.perBot ? commandsOn(c).get(b.id) : null, channels: c.defaults.filter((d) => d.bot === b.id).map((d) => d.name || d.id) })),
     }
   }
 
@@ -224,7 +226,8 @@ export function makeHubs({ bots, desk, make, you = () => 'the owner', enabled = 
     if (owed) return { to: ids.includes(owed) ? owed : list[0].id, why: 'limit' }
     // 1. A command.
     if (m.command && m.command !== commandOf(c.name)) {
-      const b = list.find((x) => commandOf(x.name) === m.command)
+      const each = commandsOn(c)
+      const b = list.find((x) => each.get(x.id) === m.command)
       if (b) return { to: b.id, why: 'command', detail: m.command }
     }
     const head = namedAt(text, list, { slash: m.via === 'slash' })
@@ -356,7 +359,7 @@ export function makeHubs({ bots, desk, make, you = () => 'the owner', enabled = 
     const slash = p === 'slack' ? /^\s*(\/[\w-]{1,32})(?:\s+([\s\S]*))?$/.exec(words) : null
     if (slash) {
       command = slash[1].toLowerCase()
-      if (command !== commandOf(c.name) && !(c.shared && c.perBot && list.some((b) => commandOf(b.name) === command))) return { ...out, rule: 'nothing', detail: 'no-command', command }
+      if (command !== commandOf(c.name) && !(c.shared && c.perBot && [...commandsOn(c).values()].includes(command))) return { ...out, rule: 'nothing', detail: 'no-command', command }
       via = 'slash'
       words = slash[2] || ''
     }

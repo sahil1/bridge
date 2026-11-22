@@ -190,7 +190,7 @@ export function BotReach({ d, platform, reload, offer = null }) {
       {via?.shared && (
         <>
           <p className="small"><Icon name="link" size={13} /> {t('Reached through {name}, your shared {platform} connection.', { name: via.name, platform: label })} <span className={`sb-dot ${STATE[s.state] || 'warn'}`} aria-hidden="true" /> <span className="muted">{s.state === 'connected' ? t('connected') : t('not connected')}</span></p>
-          <p className="muted small">{platform === 'slack' ? t('People ask it with “{bot}: …” after @{name}, with {command}, or in a channel that goes to it. Its answers show its name.', { bot: d.name, name: via.name, command: d.command || '' }) : t('People ask it with “{bot}: …” after @{name}. Its answers show its name.', { bot: d.name, name: via.name })}</p>
+          <p className="muted small">{platform === 'slack' ? t('People ask it with “{bot}: …” after @{name}, with {command}, or in a channel that goes to it. Its answers show its name.', { bot: d.name, name: via.name, command: d.ownCommand || d.command || '' }) : t('People ask it with “{bot}: …” after @{name}. Its answers show its name.', { bot: d.name, name: via.name })}</p>
           <div className="st-row">
             <button type="button" className="btn small" onClick={open}><Icon name="link" size={12} /> {t('Connections')}</button>
             <button type="button" className="ghost-btn" disabled={busy} onClick={() => { if (window.confirm(t('Give {bot} an app of its own on {platform}? Until you make that app and paste its tokens, {bot} isn\'t reached on {platform}.', { bot: d.name, platform: label }))) go('own') }}>{t('Give it its own connection')}</button>

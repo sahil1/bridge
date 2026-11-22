@@ -7399,6 +7399,7 @@
   "its name": "它的名称",
   "its own": "专属",
   "its own app": "专属应用",
+  "its own command {command}": "它自己的命令 {command}",
   "its own effort": "它自己的思考强度",
   "its project": "它的项目",
   "its repository": "它的仓库",

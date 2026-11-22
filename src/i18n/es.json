@@ -7399,6 +7399,7 @@
   "its name": "su nombre",
   "its own": "propia",
   "its own app": "app propia",
+  "its own command {command}": "su propio comando {command}",
   "its own effort": "su propio esfuerzo",
   "its project": "su proyecto",
   "its repository": "su repositorio",

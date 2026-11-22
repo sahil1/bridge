@@ -240,6 +240,20 @@ try {
     const JB = (await kit.api('/bots', { name: 'マーケティングボット', description: 'Answers marketing questions' })).id
     const x = await kit.api(`/connections/${C}/try`, { text: 'マーケティングボット: 来週の予定は？', person: 'you' })
     ok(x.rule === 'name' && x.bot?.id === JB && x.asked === '来週の予定は？', 'its name first: that bot, asked the whole question without its name', { rule: x.rule, bot: x.bot, asked: x.asked })
+    // A slash command for each bot, two of them with no Latin letters in their names: each its own,
+    // as Slack wants an app's commands to be, in its manifest, on its page, and each reaching its bot.
+    const JB2 = (await kit.api('/bots', { name: '採用ボット', description: 'Answers hiring questions' })).id
+    await kit.api(`/connections/${C}`, { perBot: true }, 'PATCH')
+    const cmds = Object.fromEntries((await conn(C)).bots.map((b) => [b.id, b.command]))
+    const n = (id) => id.replace(/\D/g, '')
+    ok(cmds[JB] === `/ask-bot-${n(JB)}` && cmds[JB2] === `/ask-bot-${n(JB2)}` && new Set(Object.values(cmds)).size === Object.keys(cmds).length, 'each bot\'s own command unique: /ask-bot and its number for a name with no Latin letters', cmds)
+    const listed = (await conn(C)).manifest.features.slash_commands.map((x) => x.command)
+    ok(listed.includes(cmds[JB]) && listed.includes(cmds[JB2]) && new Set(listed).size === listed.length && listed.every((x) => /^\/[a-z0-9_-]{1,31}$/.test(x)), 'its manifest: every command once, each one Slack takes', listed)
+    ok((await kit.api(`/bots/${JB2}`)).ownCommand === cmds[JB2], 'and its page says its own command', (await kit.api(`/bots/${JB2}`)).ownCommand)
+    const y = await kit.api(`/connections/${C}/try`, { text: `${cmds[JB2]} 面接はいつ？`, person: 'you' })
+    ok(y.rule === 'command' && y.bot?.id === JB2 && y.asked === '面接はいつ？', 'its command reaches it', { rule: y.rule, bot: y.bot, asked: y.asked })
+    await kit.api(`/connections/${C}`, { perBot: false }, 'PATCH')
+    await kit.api(`/bots/${JB2}`, undefined, 'DELETE')
     await kit.api(`/bots/${JB}`, undefined, 'DELETE')
     // (Connected again after the reads Slack held back, before what follows counts on it.)
     await until(async () => (await conn(C)).state === 'connected', 30000)

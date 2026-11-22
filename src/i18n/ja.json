@@ -7399,6 +7399,7 @@
   "its name": "名前",
   "its own": "専用",
   "its own app": "専用アプリ",
+  "its own command {command}": "専用コマンド {command}",
   "its own effort": "独自の推論レベル",
   "its project": "そのプロジェクト",
   "its repository": "そのリポジトリ",

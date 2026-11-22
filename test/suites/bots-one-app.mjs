@@ -170,6 +170,24 @@ try {
     ok(errors.length === 0, 'no page errors', errors)
     await ctx.close()
   })
+  // ---------- A slash command for each bot ----------
+  // (A bot named with no Latin letters: its own command, unique on the app, said on its page.)
+  await part('its own command', async () => {
+    const shared = (await botOf(S)).connections.slack.id
+    await kit.api(`/connections/${shared}`, { perBot: true }, 'PATCH')
+    const JB = (await kit.api('/bots', { name: '採用ボット', description: 'Answers hiring questions' })).id
+    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', store: { [`cc-bot-assist-${JB}`]: 'shut' } })
+    await p.locator('.rail').waitFor({ timeout: 20000 })
+    await p.evaluate((id) => window.dispatchEvent(new CustomEvent('bridge-open-bot', { detail: { id } })), JB)
+    await p.locator('.bp .sb-tabs [data-tab="overview"]').click({ timeout: 10000 })
+    const said = await until(async () => { const x = await textOf(p, '.bp [data-setting="bot-own-command"]'); return x || null }, 10000)
+    ok(said === `its own command /ask-bot-${JB.replace(/\D/g, '')}`, 'its page says its own command, unique on the app', said)
+    await kit.api(`/connections/${shared}`, { perBot: false }, 'PATCH')
+    await kit.api(`/bots/${JB}`, undefined, 'DELETE')
+    ok(errors.length === 0, 'no page errors', errors)
+    await ctx.close()
+  })
+
   // ---------- Its connection turned down ----------
   // (Socket Mode turned off for the app: every bot on it needs you. The sidebar's Bots and the
   // phone's More › Bots open at Connections, where the card says why, not at Sessions, where

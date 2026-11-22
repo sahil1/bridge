@@ -226,6 +226,25 @@ export function commandOf(name) {
   const slug = String(name || '').toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 31).replace(/-+$/, '')
   return slug ? `/${slug}` : '/ask-bot'
 }
+// Each bot's own slash command on a shared app (A slash command for each bot), by its id: its name's,
+// unique among them and apart from the app's own (reserved), as Slack wants each of an app's commands
+// to be. The first by its number keeps it plain; another with the same one, or a name with no Latin
+// letters (/ask-bot), has its number after it: /sales-4, /ask-bot-3. A bot keeps its command as others
+// come and go, unless one before it in number had the same.
+export function commandsOf(bots, reserved = []) {
+  const taken = new Set(reserved)
+  const out = new Map()
+  const num = (b) => Number(String(b.id).replace(/\D/g, '')) || 0
+  for (const b of [...bots].sort((x, y) => num(x) - num(y))) {
+    const n = String(num(b))
+    const base = commandOf(b.name)
+    let c = base
+    for (let k = 1; c === '/ask-bot' || taken.has(c); k++) { const suf = k === 1 ? `-${n}` : `-${n}-${k}`; c = `${base.slice(0, 32 - suf.length).replace(/-+$/, '')}${suf}` }
+    taken.add(c)
+    out.set(b.id, c)
+  }
+  return out
+}
 // Its message shortcut's name (Slack's: 25 characters at most).
 export function shortcutOf(name) {
   const n = String(name || '').trim()
@@ -239,7 +258,8 @@ export function shortcutOf(name) {
 export function connectionManifest(c = {}, bots = [], you = '') {
   const who = String(you || '').trim()
   const m = manifest({ name: c.name, description: bots.length ? `Answers for ${who || 'its owner'}: ${bots.map((b) => b.name).join(', ')}` : '' }, you)
-  if (c.perBot) m.features.slash_commands.push(...bots.map((b) => ({ command: commandOf(b.name), description: `Ask ${b.name} a question`.slice(0, 100), usage_hint: 'your question', should_escape: false })).filter((x) => x.command !== commandOf(c.name)).slice(0, 24))
+  const each = commandsOf(bots, [commandOf(c.name)])
+  if (c.perBot) m.features.slash_commands.push(...bots.map((b) => ({ command: each.get(b.id), description: `Ask ${b.name} a question`.slice(0, 100), usage_hint: 'your question', should_escape: false })).slice(0, 24))
   m.features.slash_commands[0].usage_hint = bots.length ? `${String(bots[0].name).toLowerCase().split(/\s+/)[0]} your question` : 'your question'
   m.oauth_config.scopes.bot = SHARED_SCOPES
   return m
