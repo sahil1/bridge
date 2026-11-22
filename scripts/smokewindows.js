@@ -107,6 +107,9 @@ export async function windows({ app, step, ROOT }) {
     proc.stderr.on('data', (d) => out.push(String(d)))
     browser = await until(() => chromium.connectOverCDP(`http://127.0.0.1:${cdp}`, { timeout: 3000 }), 30000, 300)
     if (!browser) throw new Error('its DevTools port never answered')
+    // (Connected again only when a window's page has gone unseen for a while, not as it first opens: a
+    // second connection left beside the first holds a service worker back as it starts.)
+    connectedAt = Date.now()
   }
   // A signal only to a process of the app this smoke started: its server (by the app's pid file) or a
   // window's renderer (by DevTools' own list), each checked to be a child of that app right then.
@@ -291,11 +294,21 @@ export async function windows({ app, step, ROOT }) {
     let sw = null
     await only('a service worker: its requests go once the server is proven', async () => {
       const p = await main()
+      // (What Chromium says of the worker as it goes, for a failure's message.)
+      const swSession = await p.context().newCDPSession(p)
+      const swSaid = []
+      swSession.on('ServiceWorker.workerErrorReported', (e) => swSaid.push(`error: ${e.errorMessage?.errorMessage} (${e.errorMessage?.sourceURL}:${e.errorMessage?.lineNumber})`))
+      swSession.on('ServiceWorker.workerVersionUpdated', (e) => { for (const v of e.versions || []) swSaid.push(`${v.status}/${v.runningStatus}`) })
+      await swSession.send('ServiceWorker.enable').catch((e) => swSaid.push(`enable: ${e.message}`))
       const reg = await p.evaluate(() => Promise.race([
         navigator.serviceWorker.register('/sw.js').then(() => navigator.serviceWorker.ready).then(() => 'ready', (e) => `refused: ${e.message}`),
         new Promise((r) => setTimeout(() => r('not ready in 15 s'), 15000)),
       ]))
-      if (reg !== 'ready') throw new Error(`registering /sw.js: ${reg}`)
+      if (reg !== 'ready') {
+        const state = await p.evaluate(async () => { const r = await navigator.serviceWorker.getRegistration('/'); return r ? { installing: r.installing?.state || null, waiting: r.waiting?.state || null, active: r.active?.state || null } : 'none' }).catch((e) => e.message)
+        const script = await p.evaluate(() => fetch('/sw.js').then((r) => `${r.status} ${r.headers.get('content-type')}`, (e) => `refused: ${e.message}`))
+        throw new Error(`registering /sw.js: ${reg} (${JSON.stringify(state)}; the page's own fetch of it: ${script}; Chromium: ${[...new Set(swSaid)].join(", ") || "nothing"})`)
+      }
       await p.reload({ waitUntil: 'load' })
       const c = await until(() => p.evaluate(() => (navigator.serviceWorker.controller ? navigator.serviceWorker.controller.scriptURL : null)), 15000)
       const viaWorker = await p.evaluate(() => performance.getEntriesByType('resource').filter((e) => /\/assets\//.test(e.name) && e.workerStart > 0).length)
