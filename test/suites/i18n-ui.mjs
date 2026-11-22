@@ -82,7 +82,7 @@ try {
     ok(inline === true || inline.ok, `${l}: and its link in the line`, inline)
     // Studio's signing, every string of it in this pack: Settings › Studio, and the pad (Add a
     // signature), its buttons whole in their words.
-    const SIGNING = ['Studio', 'Your Signatures', 'Ask Before Signing', 'Add a signature', 'Add initials', 'Draw', 'Trackpad', 'Phone', 'Keep it', 'Sign on Phone', 'Sign everywhere it asks', 'Sign with Touch ID', 'Signed by you on {computer} ({how})', 'Use', 'Make default', 'Signing PIN: none yet', 'Set a PIN']
+    const SIGNING = ['Studio', 'Your Signatures', 'Ask Before Signing', 'Add a signature', 'Add initials', 'Draw', 'Trackpad', 'Phone', 'Keep it', 'Sign on Phone', 'Sign everywhere it asks', 'Sign with Touch ID', 'Signed by you on {computer} ({how})', 'Use', 'Make default', 'Signing PIN: none yet', 'Set a PIN', 'Draw with your finger.', 'Draw with your pen.']
     ok(SIGNING.every((en) => typeof words[l]?.[en] === 'string' && words[l][en].trim()), `${l}: Studio's signing is in the pack`, SIGNING.filter((en) => !words[l]?.[en]))
     await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'studio' } })))
     ok(!!(await until(async () => (await p.locator('[data-setting="ask-before-signing"] h4').innerText().catch(() => '')).trim() === say(l, 'Ask Before Signing'), 8000)) && (await p.locator('.st-nav-item.on').innerText()).trim() === say(l, 'Studio'), `${l}: Settings › Studio, in its words`, await p.locator('[data-setting="ask-before-signing"]').innerText().catch(() => ''))

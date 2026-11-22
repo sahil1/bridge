@@ -253,10 +253,23 @@
 .sd-pad-inks { display: inline-flex; gap: 4px; }
 .sd-pad-inks button { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; }
 .sd-pad-inks button i { width: 14px; height: 14px; border-radius: 50%; box-shadow: 0 0 0 1px var(--line-2, rgb(0 0 0 / .12)); }
-.sd-pad-inks button.on { box-shadow: 0 0 0 2px var(--accent); }
+/* The ink picked: a ring round its own dot, the same size whatever the button's (40 px on a phone). */
+.sd-pad-inks button.on i { box-shadow: 0 0 0 2px var(--pane), 0 0 0 4px var(--accent); }
 
-/* Thumbnails beside the pages while there's room; Sign this under them on a phone. */
+/* Thumbnails beside the pages while there's room; Sign this under them on a phone, as one plain
+   sheet: its steps one under another with a line between, no card inside a card (no borders down
+   its sides), the pad a little shorter so it and its buttons fit in view together. */
 @media (max-width: 700px) {
+  .sd-sign-body { padding: 0 0 18px; }
+  .sd-steps { gap: 0; }
+  .sd-step, .sd-step.on { border: 0; border-radius: 0; box-shadow: none; background: none; }
+  .sd-step + .sd-step { border-top: 1px solid var(--line); }
+  .sd-step-head { border-radius: 0; }
+  .sd-sign .sd-sigcard, .sd-sign .sd-sigcard.compact, .sd-sign .sd-sigcard.drawing { padding: 0; border: 0; border-radius: 0; background: none; }
+  .sd-sign .sd-pad-box { height: 132px; }
+  .sd-sign .sd-pad.initials .sd-pad-box { height: 100px; }
+  .sd-sign .sd-sigcard.compact .sd-sigcard-acts { flex-basis: 100%; justify-content: flex-start; }
+  .sd-sign-honest { margin: 14px 16px 0; }
   .sd-pdf-thumbs { position: absolute; z-index: 7; left: 0; top: 0; bottom: 0; box-shadow: 4px 0 18px rgb(0 0 0 / .18); }
   .sd-pdf.signing .sd-pdf-body { flex-direction: column; }
   .sd-pdf.signing .sd-pdf-main { flex: 1 1 46%; min-height: 160px; }

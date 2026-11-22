@@ -669,10 +669,22 @@ try {
     f = await phoneFaults(ph.p, '.sd-sign')
     ok(!Object.keys(f).length, `phone, ${mode}: AI Assist's Sign this fits under the PDF, each control a whole 40 px target, each field 16 px`, f)
     await shot(ph.p, `${tag}studio-sign-phone-${mode}`)
-    // The pad on a phone: its buttons whole targets, none squeezed.
+    // The pad on a phone: Draw alone (the trackpad is the Mac's, and this is the phone), said for a
+    // finger; opened in view whole, its buttons whole targets, none squeezed; the panel one plain
+    // sheet (no card's border inside another's down its sides).
     await ph.p.locator('.sd-place .sd-sigcard[data-kind="signature"] button', { hasText: 'Draw again' }).click()
-    await ph.p.locator('.sd-place .sd-pad').scrollIntoViewIfNeeded()
-    await sleep(300)
+    await ph.p.locator('.sd-place .sd-pad').waitFor({ timeout: 5000 })
+    await sleep(400)
+    const how = (await ph.p.locator('.sd-place .sd-pad-how').innerText()).trim()
+    ok((await ph.p.locator('.sd-place .sd-pad-modes').count()) === 0 && how === 'Draw with your finger.', `phone, ${mode}: Draw only, said for a finger`, { modes: await ph.p.locator('.sd-place .sd-pad-modes').innerText().catch(() => null), how })
+    const inView = await ph.p.evaluate(() => {
+      const body = document.querySelector('.sd-sign-body').getBoundingClientRect()
+      const box = document.querySelector('.sd-place .sd-pad-box').getBoundingClientRect()
+      const acts = document.querySelector('.sd-place .sd-pad-acts').getBoundingClientRect()
+      return { whole: box.top >= body.top - 1 && acts.bottom <= body.bottom + 1, body: [Math.round(body.top), Math.round(body.bottom)], box: Math.round(box.top), acts: Math.round(acts.bottom) }
+    })
+    const sides = await ph.p.evaluate(() => [...document.querySelectorAll('.sd-sign .sd-step, .sd-sign .sd-sigcard')].filter((e) => e.offsetParent).map((e) => getComputedStyle(e).borderLeftWidth).filter((w) => w !== '0px'))
+    ok(inView.whole && !sides.length, `phone, ${mode}: the pad and its buttons in view together, and no border down the panel's sides inside it`, { inView, sides })
     f = await phoneFaults(ph.p, '.sd-place .sd-pad')
     const sq = await squeezed(ph.p, '.sd-place .sd-pad')
     ok(!Object.keys(f).length && !sq.length, `phone, ${mode}: the pad's buttons whole 40 px targets, none squeezed`, { f, sq })

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Icon from '../../Icon.jsx'
-import { api, BASE } from '../../../api.js'
+import { api, BASE, onThisComputer } from '../../../api.js'
 import { t, tx } from '../../../i18n/index.js'
 import { stroke, drawStroke, strokesToPng, unpackStrokes } from './ink.js'
 import './pdf.css'
@@ -17,6 +17,9 @@ import './pdf.css'
 //              be asked now (setup.phones).
 // Whichever way, the ink is drawn here, Undo takes the last stroke back, Clear starts again, and
 // Keep it keeps a PNG of just the strokes, three times the size drawn, so it stays sharp on a page.
+// Only the ways that work for the device in your hand: on a phone or a tablet (a touch screen first)
+// it's Draw alone, with your finger or a pen; the Trackpad only in the Mac's own window.
+const handheld = () => typeof matchMedia === 'function' && (matchMedia('(pointer: coarse)').matches || matchMedia('(hover: none)').matches || (navigator.maxTouchPoints > 0 && matchMedia('(max-width: 700px)').matches))
 const INKS = { black: '#15171c', blue: '#1d3f9a' }
 const MODES = [['draw', tx('Draw')], ['trackpad', tx('Trackpad')], ['phone', tx('Phone')]]
 const mmss = (ms) => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` }
@@ -33,7 +36,9 @@ export default function SignPad({ what = 'signature', busy = false, onSave, onCa
   const size = useRef({ w: 0, h: 0 })
   const [shape, setShape] = useState(null) // the trackpad's width / height, once it's said
   const phones = setup?.phones || []
-  const modes = MODES.filter(([m]) => m === 'draw' || (m === 'trackpad' && setup?.trackpad) || (m === 'phone' && phones.length))
+  const [inHand] = useState(handheld)
+  const [pen, setPen] = useState(false) // a pen was seen here: said so
+  const modes = MODES.filter(([m]) => m === 'draw' || (!inHand && m === 'trackpad' && setup?.trackpad && onThisComputer()) || (!inHand && m === 'phone' && phones.length))
 
   const paint = useCallback(() => {
     const c = canvas.current
@@ -79,6 +84,7 @@ export default function SignPad({ what = 'signature', busy = false, onSave, onCa
     return { x: e.clientX - r.left, y: e.clientY - r.top, t: e.timeStamp, p: e.pointerType === 'pen' && e.pressure > 0 ? e.pressure : null }
   }
   const down = (e) => {
+    if (e.pointerType === 'pen' && !pen) setPen(true)
     if (busy || mode !== 'draw' || (e.pointerType === 'mouse' && e.button !== 0)) return
     e.preventDefault()
     canvas.current.setPointerCapture?.(e.pointerId)
@@ -193,7 +199,8 @@ export default function SignPad({ what = 'signature', busy = false, onSave, onCa
             : asked?.ended === 'cancelled' ? (asked.by === 'phone' ? t('Cancelled on {phone}.', { phone: asked.name }) : t('Cancelled.'))
               : asked?.error ? t('Couldn\'t ask your phone: {error}', { error: asked.error })
                 : t('Your phone shows a pad over its whole screen: sign there with your finger, and it comes back here.')
-      : t('With a mouse or trackpad (hold the click down as you draw), a finger or a pen.')
+      : inHand ? (pen ? t('Draw with your pen.') : t('Draw with your finger.'))
+        : t('With a mouse or trackpad (hold the click down as you draw), a finger or a pen.')
   const box = mode === 'trackpad' ? { aspectRatio: String(shape || 1.6), height: 'auto' } : undefined
   return (
     <div className={`sd-pad ${what} m-${mode}`}>
@@ -204,7 +211,7 @@ export default function SignPad({ what = 'signature', busy = false, onSave, onCa
       )}
       <div className={`sd-pad-box${pad === 'on' ? ' listening' : ''}${waiting ? ' waiting' : ''}`} style={box}>
         <canvas ref={canvas} className="sd-pad-canvas" aria-label={label} role="img"
-          onPointerDown={down} onPointerMove={move} onPointerUp={end} onPointerCancel={end} onLostPointerCapture={end} />
+          onPointerOver={(e) => { if (e.pointerType === 'pen' && !pen) setPen(true) }} onPointerDown={down} onPointerMove={move} onPointerUp={end} onPointerCancel={end} onLostPointerCapture={end} />
         <span className="sd-pad-line" aria-hidden="true"><Icon name="x" size={12} /></span>
         {!strokes.length && !inking && (
           <span className="sd-pad-hint" aria-hidden="true">

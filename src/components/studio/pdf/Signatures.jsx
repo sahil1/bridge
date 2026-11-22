@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Icon from '../../Icon.jsx'
 import { api, BASE } from '../../../api.js'
 import { t, tx, locale } from '../../../i18n/index.js'
@@ -48,6 +48,10 @@ export function DrawCard({ kind, setup, again = null, onDone, onCancel, doc = ''
   useEffect(() => { setup.refresh() }, [])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
+  // Opened at the bottom of a panel (Sign this, on a phone, under the page): the pad and its
+  // buttons brought into view whole.
+  const card = useRef(null)
+  useEffect(() => { const pad = card.current?.querySelector('.sd-pad'); pad?.scrollIntoView?.({ block: 'nearest' }) }, [])
   const n = sigsOf(setup, kind).length
   const [name, setName] = useState('')
   const save = async ({ png }) => {
@@ -59,7 +63,7 @@ export function DrawCard({ kind, setup, again = null, onDone, onCancel, doc = ''
   }
   const placeholder = n ? `${t(KIND_NAME[kind])} ${n + 1}` : t(KIND_NAME[kind])
   return (
-    <div className="sd-sigcard drawing">
+    <div className="sd-sigcard drawing" ref={card}>
       <span className="sd-draw-head">
         <b className="sd-sigcard-name">{again ? (kind === 'initials' ? t('Draw your initials again') : t('Draw your signature again')) : kind === 'initials' ? t('Draw your initials') : t('Draw your signature')}</b>
         {!again && <input className="sd-sig-name" value={name} onChange={(e) => setName(e.target.value.slice(0, 60))} placeholder={placeholder} aria-label={t('Its name')} title={t('Its name, to tell it from the others')} disabled={busy} />}
