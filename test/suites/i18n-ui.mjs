@@ -3,7 +3,8 @@
 // Settings › You offers every pack, named in its own words. Then each language: the page says which it is, the
 // sidebar, Settings' sections and its look (You) are in its words, nothing is wider than the window (or
 // a phone, for the longest), Studio's signing (Settings › Studio, its pad's ways and buttons) in its
-// words with every string of it in the pack and no button squeezed, with no page errors; Match this computer follows the browser's
+// words with every string of it in the pack and no button squeezed, Share Links' Beta switch in its
+// words, with no page errors; Match this computer follows the browser's
 // language; and picking one in Settings › You switches to it, in another open window too.
 import fs from 'node:fs'
 import path from 'node:path'
@@ -94,6 +95,12 @@ try {
     const padLook = await p.locator('.sd-pad-box').evaluate((e) => ({ h: e.getBoundingClientRect().height, bg: getComputedStyle(e).backgroundColor, acts: getComputedStyle(e.closest('.sd-pad').querySelector('.sd-pad-acts')).display }))
     ok(padSays.includes(say(l, 'Keep it')) && padSays.includes(say(l, 'Draw your signature')) && !squeezedHere.length && padLook.h >= 100 && padLook.bg === 'rgb(255, 255, 255)' && padLook.acts === 'flex', `${l}: the pad in its words and its own look, no button squeezed`, { padSays, squeezedHere, padLook })
     await shot(p, `${tag}i18n-${l}-signing`)
+    // Settings › Devices & Access › Share Links: the beta feature's switch at the top, in its words.
+    await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'sharing' } })))
+    const beta = p.locator('.modal.settings [data-beta="share-links"]')
+    const short = say(l, "A link for people outside your devices to a file, a folder, a Studio document or an agent's app.")
+    const betaSaid = await until(async () => (await beta.locator('.st-beta-name').innerText().catch(() => '')).includes(say(l, 'Share Links')) && (await beta.locator('.st-beta-text > .muted').innerText().catch(() => '')).startsWith(short), 8000)
+    ok(!!betaSaid && (await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 1, `${l}: Settings › Devices & Access › Share Links, its Beta switch in its words, nothing wider than the window`, await beta.innerText().catch(() => ''))
     if (phone) {
       const ph = await page(b, kit.url, { ...look, phone: true, store: { 'cc-lang': l } })
       await ph.p.waitForSelector('.tabbar button', { timeout: 15000 })

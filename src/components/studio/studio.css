@@ -7,6 +7,8 @@
 .sd-shelf > * { max-width: 1040px; }
 .fx-body > .sd-new-sec { max-width: 1040px; margin: 16px 26px 12px; }
 .sd-home-say { margin: 0 0 16px; line-height: 1.5; }
+/* Shared: Share Links' beta switch over the links (settings/Beta.jsx). */
+.sd-shared > .st-beta { margin-bottom: 14px; }
 /* Studio's headers (its home, a file's page; a whiteboard's, in whiteboard.css, the same): every
    control one height, 30px, as the toolbar's under them are, so a row of them lines up top and
    bottom. */
