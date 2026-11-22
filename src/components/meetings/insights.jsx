@@ -4,7 +4,7 @@ import { usePoll } from '../../api.js'
 import { t, tx, locale } from '../../i18n/index.js'
 import { usePersisted, useWidth } from '../layout.jsx'
 
-// Meeting Insights, the Meetings section's second tab (a beta feature, meeting-insights): your
+// Meeting Insights, the Meetings section's second tab (meetings.insights): your
 // meetings added up the way Usage adds up tokens. Tiles against the days before, the weeks split
 // into series and one-off meetings, when in the week you meet, where the time goes (by day, series
 // and people, as a calendar's time insights have it), your share of the talk and the signals. The

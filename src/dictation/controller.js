@@ -489,14 +489,15 @@ async function transcribe(id) {
   }
 }
 
-// ---------- Tidy what I say (a trial: dictation-cleanup) ----------
+// ---------- Tidy What I Say (dictation.tidy) ----------
 // From another app (the dictation window; not for a window of Bridge AI's it listens for, which is
-// as if said in Bridge AI), with it on in Settings › Voice & Meetings › Dictation: the words go to the computer
+// as if said in Bridge AI), with it on in Settings › Meetings & Voice › Dictation (on to start with
+// where the local model fits the computer): the words go to the computer
 // to be tidied by a model before they're pasted or sent (server/dictation.js tidy).
 // The server gives it a few seconds; this waits a little longer for the answer, then stops waiting
 // too. Nothing is lost either way: { text, by } tidied, or { code, error, local } and the words go
 // as you said them, the dictation window saying why (Tidy.jsx). null: not tidied, nothing to say
-// (the trial was turned off meanwhile).
+// (it was turned off meanwhile).
 const TIDY_WAIT = 12_000
 export const tidyFor = (target) => cfg.tidy === true && target?.kind === 'hud' && !target.window
 async function tidyWords(text, target) {
@@ -507,7 +508,7 @@ async function tidyWords(text, target) {
     const r = await fetch(apiUrl('/dictation/tidy'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, app: target.app?.name || null }), signal: stop.signal })
     const j = await r.json().catch(() => ({}))
     if (r.ok && j.text) return { text: j.text, by: j.by || null }
-    if (r.status === 404 && j.trial) return null
+    if (r.status === 404 && (j.off || j.trial)) return null
     return { code: j.code || 'failed', error: j.error || `HTTP ${r.status}`, local: j.local || null }
   } catch (e) {
     return stop.signal.aborted ? { code: 'slow', error: null } : { code: 'failed', error: e.message }

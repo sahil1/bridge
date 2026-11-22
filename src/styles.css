@@ -1194,7 +1194,7 @@ a.btn:not(.primary), a.btn:not(.primary):visited { color: var(--ink); text-decor
 .r-form p { margin: 0; }
 .chip.r-chip.s-due, .chip.r-chip.s-never { color: var(--warning); }
 .chip.r-chip.s-overdue, .chip.r-chip.s-error, .chip.r-chip.s-missed { color: var(--critical); }
-/* Scheduled Routines (a beta feature): when each runs, its runs, the schedule picker, suggestions */
+/* Scheduled Routines: when each runs, its runs, the schedule picker, suggestions */
 .r-row.st-paused .r-state { background: var(--pane-3); color: var(--ink-3); }
 .r-row.st-missed .r-state { background: color-mix(in srgb, var(--critical) 14%, transparent); color: var(--critical); }
 .r-to { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--ink-3); }

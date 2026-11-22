@@ -22,7 +22,7 @@ import { botKit, lookers, openBot, newBotChat, M, M2, OWNER } from '../lib/bots.
 
 const { ok, done } = checks('bots-always-on')
 const HANDBOOK = '# Handbook\n\nEveryone gets ten days of leave a year.\n'
-const mac = await botKit('bots-always-on', { folders: ['docs'], config: { trials: { routines: true } }, env: { BRIDGE_ROUTINE_TICK_MS: '2000', BRIDGE_BOT_HOLD_MS: '600000' } })
+const mac = await botKit('bots-always-on', { folders: ['docs'], env: { BRIDGE_ROUTINE_TICK_MS: '2000', BRIDGE_BOT_HOLD_MS: '600000' } })
 const { slack, kit } = mac
 const docker = await botKit('bots-always-on-docker', { slack, folders: ['docs'], env: { BRIDGE_DOCKER: '1', BRIDGE_BOT_HOLD_MS: '600000' } })
 for (const k of [kit, docker.kit]) fs.writeFileSync(path.join(k.home, 'docs', 'handbook.md'), HANDBOOK)

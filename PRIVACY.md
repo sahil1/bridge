@@ -99,6 +99,12 @@ can't say, with what you had copied put back). That text and what you said go to
 for it: one on your computer (the local model built in, which it uses when you haven't picked one,
 Ollama, LM Studio) keeps them there; any other gets them, and Settings says so where you pick it. With nothing selected, nothing is sent anywhere, and with it off, nothing
 is read.
+Tidy what I say (in the desktop app; on to start with where the local model built in fits your
+computer, off where it doesn't) gives what you said from another app, before it's pasted, to the
+model picked for it: one on your computer (the local model built in, which it uses when you haven't
+picked one, Ollama, LM Studio) keeps it there; any other gets it, and Settings says so where you
+pick it. It never picks one that sends your words out by itself. With no model yet, or one that's
+slow, your words go as you said them.
 
 When you ask the Chief of Staff out loud, what you said goes to it as any message you type does,
 and its answer is read to you by a voice on the device you're using (its own voices, never one
@@ -129,13 +135,13 @@ the Chief of Staff's folder (`about-you.md`) for it to read, so its agent's prov
 gets the rest of what the Chief of Staff reads. Switched off, no model is given it and that file is
 deleted.
 
-With Scheduled Routines on (a beta feature), what you type into Bridge AI's boxes (an agent's or the
+With Scheduled Routines on (unless you turn it off in Settings › Agents & Models › Agents), what you type into Bridge AI's boxes (an agent's or the
 Chief of Staff's message box, New, the Tasks panel, an answer in Needs You) is kept on your computer,
 in `~/.bridge-ai/commands`, for History › Commands and to suggest a routine when you ask the same
 thing on a schedule: the words, when, and where they went (the agent, its folder, or the Chief of
 Staff). Not the files you attached, only how many. It's kept for 90 days unless you pick 30 days or
-a year, never leaves your computer, and Settings › General › Command History turns it off (then
-nothing new is kept) and deletes all of it. What agents send each other isn't kept.
+a year, never leaves your computer, and Settings › Agents & Models › Agents › Command History (under
+Advanced) turns it off (then nothing new is kept) and deletes all of it. What agents send each other isn't kept.
 
 Mail (on a Mac) is read from Apple Mail's own files on your computer: its index (in
 `~/Library/Mail`, opened read-only) for the list, and a message's file when you open it or when it's

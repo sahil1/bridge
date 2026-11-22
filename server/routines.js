@@ -5,12 +5,13 @@
 // Definitions live in routines.json (editable from the UI); manual "done" marks and
 // run history live in ~/.bridge-ai/cache/routines-log.json.
 //
-// With Scheduled Routines on (a beta feature), a routine can also have a time (at, with days or a
-// date: shared/schedule.js) and run by itself then (auto), on this computer: tick() starts each one
+// With Scheduled Routines on (unless you turn it off), a routine can also have a time (at, with days
+// or a date: shared/schedule.js) and run by itself then (auto), on this computer: tick() starts each one
 // whose time has come, once, and writes down what became of it, so a routine that didn't run says
 // why. A run missed while Bridge AI wasn't running or the computer was asleep goes when it's back,
 // up to 12 hours late; one missed by more is written down as missed. observe() follows each run's
-// agent to its end and keeps what it said last. Without the beta feature, routines are as before.
+// agent to its end and keeps what it said last. One with no time never runs by itself. With
+// Scheduled Routines off, routines are only reminders.
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -231,7 +232,7 @@ export const noteLaunch = (id, paneId, how = 'hand') => noteRun(id, { at: new Da
 export const noteFailed = (id, error, how = 'hand') => noteRun(id, { at: new Date().toISOString(), how, error })
 
 const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'routine'
-const BETA = `Scheduling a routine is a beta feature. Turn on Scheduled Routines in ${placeEn('beta')}.`
+const OFF = `Scheduled Routines is turned off. Turn it on in ${placeEn('scheduled-routines')}.`
 
 // A schedule as typed ("every weekday at 9"), read here too, so a routine is only ever saved with
 // one this computer understands. The time it was set from is where every n days or weeks count from.
@@ -249,7 +250,7 @@ export async function add({ name, command, cwd, every, workspace, detail, kind, 
   name = String(name || '').trim()
   command = String(command || '').trim()
   if (!name || !command) throw new Error(to === 'bot' ? 'Say what to post' : 'A routine needs a name and a command')
-  if (schedule && !scheduled) throw Object.assign(new Error(BETA), { status: 400 })
+  if (schedule && !scheduled) throw Object.assign(new Error(OFF), { status: 400 })
   if (to === 'bot') {
     if (!/^b\d{1,4}$/.test(String(bot || ''))) throw new Error('Say which bot posts it')
     if (!/^([CG][A-Z0-9]{2,20}|discord:\d{1,25}|teams:[^\s"<>]{3,300})$/.test(String(channel?.id || ''))) throw new Error('Pick the channel it posts in')
@@ -284,7 +285,7 @@ export function update(id, patch) {
   if (i < 0) throw new Error('No such routine')
   const allowed = ['name', 'detail', 'every', 'cwd', 'command', 'workspace']
   for (const k of allowed) if (patch[k] !== undefined) defs[i][k] = String(patch[k])
-  if ((patch.schedule !== undefined || patch.auto !== undefined || patch.paused !== undefined || patch.to !== undefined || patch.kind !== undefined) && !scheduled) throw Object.assign(new Error(BETA), { status: 400 })
+  if ((patch.schedule !== undefined || patch.auto !== undefined || patch.paused !== undefined || patch.to !== undefined || patch.kind !== undefined) && !scheduled) throw Object.assign(new Error(OFF), { status: 400 })
   // (A bot's post stays one: its bot and channel, not a folder or an agent.)
   const bot = defs[i].to === 'bot'
   if (bot) defs[i].cwd = ''
@@ -329,7 +330,7 @@ export async function tick({ start, live = () => null, told = () => {}, on = tru
       writeLog(log)
       const late = now - due
       const run = { at: now.toISOString(), slot: due.toISOString(), how: late > slack ? 'late' : 'auto' }
-      if (!on) { noteRun(def.id, { ...run, skipped: true, why: 'Scheduled Routines was off in Beta Features' }); continue }
+      if (!on) { noteRun(def.id, { ...run, skipped: true, why: 'Scheduled Routines was turned off' }); continue }
       if (late > LATE_MAX) {
         const missed = { ...run, missed: true, why: 'Bridge AI wasn\'t running then, or this computer was asleep' }
         noteRun(def.id, missed)
@@ -450,7 +451,7 @@ export function bring(list, { paused = false, bots = null } = {}) {
   invalidate()
   return out
 }
-// Those routines paused, or started again, by id, without the beta feature's say (a Move hands
+// Those routines paused, or started again, by id, whether Scheduled Routines is on or not (a Move hands
 // them from one computer to the other): the ones changed.
 export function setPaused(ids, on) {
   const want = new Set(ids)
