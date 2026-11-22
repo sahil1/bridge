@@ -395,12 +395,19 @@ export function makeMail(cfg = {}) {
     }
   }
 
+  // A look that began before a mark (Done, Remind me, their Undo) or new mail is read again: kept, its
+  // marks from before were what the next look got for a minute (Z's undo, then Done again in the list).
+  let gen = 0
   const get = async (force = false) => {
     if (!force && cache && Date.now() - at < 60 * 1000) return cache
     try {
-      const out = await load()
-      if (out.available) { cache = out; at = Date.now() }
-      return out
+      for (let tries = 0; ; tries++) {
+        const was = gen
+        const out = await load()
+        if (was !== gen && tries < 3) continue
+        if (out.available && was === gen) { cache = out; at = Date.now() }
+        return out
+      }
     } catch (e) {
       if (/authorization denied|unable to open|not permitted/i.test(e.message)) return { available: false, reason: 'noAccess', setup: SETUP.noAccess }
       throw e
@@ -556,6 +563,7 @@ export function makeMail(cfg = {}) {
   const fire = () => {
     fired = Date.now()
     at = 0
+    gen++
     bodies.clear()
     for (const fn of listeners) { try { fn() } catch { /* a listener gone */ } }
   }
@@ -582,6 +590,6 @@ export function makeMail(cfg = {}) {
     }
   }
   get.watching = () => !!watcher
-  get.invalidate = () => { at = 0 }
+  get.invalidate = () => { at = 0; gen++ }
   return get
 }

@@ -69,7 +69,10 @@ try {
     const shown = await until(async () => { const x = await bubbles(p); return x.length === 3 && x }, 8000, 100)
     ok(!!shown && same(shown.map((x) => x.text), msgs), `desktop ${look.mode}: the three show as queued, in order`, shown)
     await p.locator('.msg.queued', { hasText: 'Skip the old ones' }).locator('button', { hasText: 'Remove' }).click()
-    ok(!!(await until(async () => same(await queueOf(ag.paneId), [msgs[0], msgs[2]]), 5000, 100)), `desktop ${look.mode}: one taken back`, await queueOf(ag.paneId))
+    // (By your computer and in the chat: the chat hears of it from the computer a moment later, and
+    // what's read of it next counted the one taken back while it hadn't.)
+    const takenBack = await until(async () => same(await queueOf(ag.paneId), [msgs[0], msgs[2]]) && same((await bubbles(p)).map((x) => x.text), [msgs[0], msgs[2]]), 5000, 100)
+    ok(!!takenBack, `desktop ${look.mode}: one taken back`, { computer: await queueOf(ag.paneId), chat: await bubbles(p) })
     // While it works, the caret back in what's written: Enter is a new line there (it isn't queued),
     // and the hint says only ⌘⏎ interrupts and sends.
     const box = p.locator('.composer textarea')

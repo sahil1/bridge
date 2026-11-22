@@ -350,7 +350,11 @@ const EXAMPLES = () => [
 
 export default function BotChat({ id = null, draft = false, phone = false, d = null, save, reload, again, onClose, onMade, onCreated, onDiscarded }) {
   const [s, setS] = useState(null)
+  // What was said, applied or made, turned down (Settings' own check refusing your home folder): said
+  // until the next thing you do. The chat's look every 4 s cleared it, so the reason was gone in a
+  // moment, or before it was seen. unread: that look failing, said until one works.
   const [error, setError] = useState(null)
+  const [unread, setUnread] = useState(null)
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(null) // 'ask' | 'edit' | 'create' | 'apply'
   const [form, setForm] = useState(false)
@@ -363,7 +367,7 @@ export default function BotChat({ id = null, draft = false, phone = false, d = n
   // the chat just said, off the screen until the next one.)
   const seq = useRef(0)
   const fresh = (r) => { seq.current += 1; setS(r) }
-  const load = () => { const n = seq.current; return api(path).then((r) => { if (n !== seq.current) return; setS((x) => (id ? r : { ...r, messages: x?.messages || [] })); setError(null) }, (e) => { if (n === seq.current) setError(e.message) }) }
+  const load = () => { const n = seq.current; return api(path).then((r) => { if (n !== seq.current) return; setS((x) => (id ? r : { ...r, messages: x?.messages || [] })); setUnread(null) }, (e) => { if (n === seq.current) setUnread(e.message) }) }
   useEffect(() => {
     load()
     if (!id) return undefined
@@ -470,12 +474,12 @@ export default function BotChat({ id = null, draft = false, phone = false, d = n
             {!id && (form || noModel) && <NewBot form start={start} onMade={(bid) => onMade?.(bid)} />}
           </li>
         )}
-        {draft && s?.proposal && <li className="bc-msg bc-card-row"><ProposalCard p={s.proposal} options={s.options} onEdit={edit} onCreate={create} onDiscard={discardDraft} busy={busy === 'create'} error={busy !== 'ask' ? error : null} /></li>}
+        {draft && s?.proposal && <li className="bc-msg bc-card-row"><ProposalCard p={s.proposal} options={s.options} onEdit={edit} onCreate={create} onDiscard={discardDraft} busy={busy === 'create'} error={busy !== 'ask' ? error || unread : null} /></li>}
         {showConnect && <li className="bc-msg bc-card-row"><ConnectCard d={d} save={save} reload={reload} again={again} platform={s?.platform} /></li>}
         {live && s?.change && <li className="bc-msg bc-card-row"><ChangeCard change={s.change} busy={busy === 'apply'} onApply={() => apply(true)} onDiscard={() => apply(false)} /></li>}
         <li ref={end} className="bc-end" aria-hidden="true" />
       </ol>
-      {error && !(draft && s?.proposal) && <p className="error-text small bc-error" role="alert">{error}</p>}
+      {(error || unread) && !(draft && s?.proposal) && <p className="error-text small bc-error" role="alert">{error || unread}</p>}
       <form className="bc-say" onSubmit={(e) => { e.preventDefault(); ask(text) }}>
         <textarea className="st-input" rows={phone ? 2 : 3} value={text} onChange={(e) => { setText(e.target.value); enter.box.onSelect(e) }} onKeyDown={enter.onKeyDown} {...enter.box}
           placeholder={live ? t('Say what to change') : draft ? t('Say what to change in it') : t('What should it do, and who is it for?')} aria-label={live || draft ? t('Say what to change') : t('What should it do, and who is it for?')} disabled={busy === 'ask'} />

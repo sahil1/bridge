@@ -9,10 +9,13 @@ loop.enable()
 let since = { at: performance.now(), cpu: process.cpuUsage() }
 const routes = new Map() // route -> { n, ms, max }
 
-// Times each request, by its route ("/api/agents/:pane/subagents", not each pane's).
+// Times each request, by its route ("/api/agents/:pane/subagents", not each pane's). One asked
+// before the last reset isn't in the figures since: its time was mostly before them (a window's
+// first look at a repo, still waiting on git as a reset came, was 7 s of a 15 s look in the perf test).
 export function timing(req, res, next) {
   const start = performance.now()
   res.on('finish', () => {
+    if (start < since.at) return
     const k = `${req.method} ${req.route?.path || req.path.replace(/\/[0-9a-f-]{8,}(?=\/|$)/gi, '/:id')}`.slice(0, 120)
     const ms = performance.now() - start
     const r = routes.get(k) || { n: 0, ms: 0, max: 0 }
