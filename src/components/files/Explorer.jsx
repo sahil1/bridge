@@ -7,7 +7,7 @@
 // opens a document in Studio's editor and anything else in its own app, or shows it. Only to look
 // for now: nothing is renamed, moved or deleted from here. On a phone, one column at a time: the
 // sidebar, then a folder or a list, then a file (a tap opens it).
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'
 import { Handle, usePersisted, useWidth } from '../layout.jsx'
 import { api, machineId, onThisComputer } from '../../api.js'
@@ -219,6 +219,20 @@ export default function Explorer({ head = null, className = '', shelves = null, 
   }, [marks, loc.root, machine])
   const rootLabel = shelfRow ? shelfRow.label : loc.root === 'home' ? 'Home' : side.data?.drives?.find((d) => d.root === loc.root)?.label || side.data?.projects?.find((p) => p.root === loc.root && !p.path)?.label || t('Folder')
   const parts = loc.path ? loc.path.split('/') : []
+  // The path bar: the folders above shrink first (cut with …), and when even then it's wider than
+  // its room, it's scrolled to its end, so the folder you're in shows (it showed the start, the
+  // folder you're in out of sight past the right edge).
+  const pathRef = useRef(null)
+  useLayoutEffect(() => {
+    const el = pathRef.current
+    if (!el) return undefined
+    const toEnd = () => { el.scrollLeft = el.scrollWidth }
+    toEnd()
+    if (typeof ResizeObserver !== 'function') return undefined
+    const ro = new ResizeObserver(toEnd)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [loc.root, loc.path])
   const folderEntry = { name: parts.at(-1) || named(rootLabel), path: loc.path, dir: true, ...(loc.path ? {} : { drive: loc.root !== 'home' }) }
   // The one picked kept in view (after the arrow keys, a sort, a refresh).
   useEffect(() => {
@@ -328,6 +342,9 @@ export default function Explorer({ head = null, className = '', shelves = null, 
     if (mod || e.altKey) return
     if (k === ' ') return current && hit(() => setQl((v) => !v))
     if (k === 'Enter') return current && hit(() => openEntry(current))
+    // Esc: Get Info first, when it's open (opened by ⌘I or its button, focus stays on the folder,
+    // and its own Esc never came), then what's picked.
+    if (k === 'Escape' && info) return hit(() => setInfo(null))
     if (k === 'Escape' && sel) return hit(() => setSel(null))
     if (k === 'ArrowDown') return hit(() => step(view === 'icons' ? 10 : 1))
     if (k === 'ArrowUp') return hit(() => step(view === 'icons' ? -10 : -1))
@@ -503,7 +520,7 @@ export default function Explorer({ head = null, className = '', shelves = null, 
                 <button type="button" className="win-btn" onClick={forward} disabled={!hist.fwd.length} aria-label={t('Forward')} title={t('Forward (⌘])')}><Icon name="chevron" size={13} /></button>
               </>}
               {narrow && <h3 className="fx-path-title" title={loc.path || named(rootLabel)}>{machine && <span className="fx-crumb-pc"><Icon name="laptop" size={12} /> {computer?.name}</span>}{folderName}</h3>}
-              <nav className="fx-path" aria-label={t('Path')} hidden={narrow}>
+              <nav className="fx-path" ref={pathRef} aria-label={t('Path')} hidden={narrow}>
                 {machine && <span className="fx-crumb fx-crumb-pc"><Icon name="laptop" size={12} /> {computer?.name}</span>}
                 <button type="button" className="fx-crumb" onClick={() => go({ ...loc, path: '' })} aria-current={!parts.length ? 'location' : undefined}>{named(rootLabel)}</button>
                 {parts.map((p, i) => (

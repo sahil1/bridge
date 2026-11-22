@@ -119,6 +119,11 @@ try {
   put('.secret-note', 'shh')
   put('.ssh/id_test', 'PRIVATE KEY')
   for (let i = 0; i < 330; i++) put(`Archive/batch${i % 6}/match-${String(i).padStart(3, '0')}.txt`, `${i}`)
+  // Names as a Mac's own apps often write them, decomposed (é as e and its accent, デ as テ and its mark).
+  put('Archive/Café menu.txt'.normalize('NFD'), 'soup\n')
+  put('Archive/データ分析レポート.xlsx'.normalize('NFD'), 'x')
+  const DEEP = 'Clients/Very long folder name for the first level/Another quite long folder name here/Third level folder with a long name/Fourth/Site visit photos'
+  put(`${DEEP}/leaf.txt`, 'leaf\n')
   for (let i = 0; i < 1500; i++) fs.mkdirSync(path.join(h, 'Deep', `a${i % 30}`, `b${i}`), { recursive: true }) // a search that takes a moment
   fs.mkdirSync(path.join(h, 'Music'), { recursive: true })
   fs.mkdirSync(path.join(h, 'Library', 'Mobile Documents', 'com~apple~CloudDocs'), { recursive: true })
@@ -256,6 +261,10 @@ try {
     const found = s.results.map((x) => x.path)
     ok(found.includes('Projects/site/notes.md') && found.includes('notes.txt') && s.results.find((x) => x.path === 'Projects/site/notes.md')?.where === 'Projects/site', 'a search finds names in a folder and below it, with where each is', s.results)
     if (IS_MAC) ok(!found.some((x) => x.startsWith('Documents/')) && s.skipped.includes('Documents') && !looked('Documents').length, 'and doesn\'t go into a folder macOS hasn\'t asked about (Documents), saying so', { found, skipped: s.skipped })
+    // Typed composed (as a keyboard types them), found in names written decomposed.
+    const accents = await desk.api(`/files/search?root=home&path=Archive&q=${encodeURIComponent('café')}`)
+    const kana = await desk.api(`/files/search?root=home&path=Archive&q=${encodeURIComponent('データ')}`)
+    ok(accents.results.length === 1 && kana.results.length === 1, 'a search finds "café" and "データ" in names a Mac wrote decomposed', { accents: accents.results.map((x) => x.name), kana: kana.results.map((x) => x.name) })
     const many = await desk.api('/files/search?root=home&path=Archive&q=match-')
     ok(many.results.length === 300 && many.partial, 'bounded: the first 300, said to be only part', { n: many.results.length, partial: many.partial })
     const ctl = new AbortController()
@@ -386,6 +395,11 @@ try {
     const info = p.locator('.fx-info')
     ok(!!(await until(async () => { const x = await info.innerText().catch(() => ''); return /34 bytes/.test(x) && /Modified/.test(x) && /Where/.test(x) && /Markdown document/.test(x) }, 8000)), 'Get Info (⌘I): its kind, size, where it is, when it changed', await info.innerText().catch(() => ''))
     ok(await info.locator('button:disabled').count() === 0 && !/coming/i.test(await info.innerText()), 'no buttons that can\'t be used yet (nothing "coming")', await info.innerText().catch(() => ''))
+    // Esc closes it, opened from the keyboard (focus still on the folder), as its Close says.
+    await p.keyboard.press('Escape')
+    ok(!!(await until(async () => !(await info.count()), 3000)) && await p.locator('.fx-row[data-name="notes.md"][aria-selected="true"]').count() === 1, 'Esc closes Get Info opened with ⌘I (what\'s picked stays picked)', await info.count())
+    await p.keyboard.press(`${MOD}+i`)
+    await info.waitFor({ timeout: 4000 })
     await info.locator('button[aria-label="Close Info"]').click()
     await p.locator('.fx-path .fx-crumb', { hasText: 'Projects' }).click()
     await p.locator('.fx-row[data-name="site"]').click()
@@ -752,6 +766,25 @@ try {
     const n = await page(b, desk.url, { store: { 'cc-ws': ws } })
     ok(await n.p.locator('.fx.sd-home .fx-row[data-name="Projects"]').waitFor({ timeout: 15000 }).then(() => true, () => false) && (await n.p.locator('.fx-path .fx-crumb').allInnerTexts()).join(' › ') === 'Home', 'one that kept Folders at your home folder opens Studio there, not at a list')
     await n.ctx.close()
+  })
+
+  // ---------- a deep folder's path ----------
+  await part('a deep folder\'s path', async () => {
+    // Six folders down, long names: the one you're in shows whole at the bar's end, the ones above
+    // cut to fit (the bar showed its start, the folder you're in out of sight past its right edge).
+    for (const width of [1440, 950]) {
+      const o = await page(b, desk.url, { width, store: { 'cc-mtab': 'more', 'cc-more-view': 'view:studio', 'cc-ws': { tabs: ['view:studio'], active: 'view:studio', side: null, split: false, group: 'main' }, 'cc-fx-view': 'list', 'cc-fx-where:here': { root: 'home', path: DEEP } } })
+      await o.p.locator('.fx-row[data-name="leaf.txt"]').waitFor({ timeout: 15000 })
+      await sleep(300)
+      const at = await o.p.locator('.fx-path').evaluate((nav) => {
+        const here = nav.querySelector('.fx-crumb[aria-current="location"]')
+        const n = nav.getBoundingClientRect(), r = here.getBoundingClientRect()
+        return { text: here.textContent, whole: here.scrollWidth <= here.clientWidth + 1, inside: r.left >= n.left - 1 && r.right <= n.right + 1, crumbs: [...nav.querySelectorAll('.fx-crumb')].length }
+      })
+      ok(at.text === 'Site visit photos' && at.whole && at.inside && at.crumbs === 7, `${width} px: the path bar shows the folder you're in whole, six folders down`, at)
+      if (width === 950) await shot(o.p, `${tag}files-ui-deep-path-950`)
+      await o.ctx.close()
+    }
   })
 
   // ---------- dark, and a phone ----------
