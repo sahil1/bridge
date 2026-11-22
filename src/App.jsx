@@ -217,15 +217,16 @@ const VIEWS = { 'view:home': { title: tx('Home'), icon: 'home' }, 'view:everythi
 const BOARD = 'view:whiteboard:'
 // A Studio file's tab: its root (an agent's pane, or place:<id>) and path, each encoded. A
 // whiteboard in Studio's Preview is root board, its name the path.
-// A beta feature's tab (Home's), left open from before it was turned off (or opened on another
-// computer where it's on): says so, with the way to turn it on.
-function TrialOff({ name }) {
+// A beta feature's tab (Bots'), or Home's, left open from before it was turned off (or opened on
+// another computer where it's on): says so, with the way to turn it on. setting: its own switch, for
+// one that isn't a beta feature (Home's, in Settings › You).
+function TrialOff({ name, setting = null }) {
   return (
     <div className="trial-off" role="status">
       <Icon name="layers" size={20} />
-      <b>{t('{name} is a beta feature, off here.', { name })}</b>
-      <p className="muted small">{t('Turn it on in {place}.', { place: where('beta') })}</p>
-      <button type="button" className="btn small" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'about' } }))}>{t('Open Settings')}</button>
+      <b>{setting ? t('{name} is turned off here.', { name }) : t('{name} is a beta feature, off here.', { name })}</b>
+      <p className="muted small">{t('Turn it on in {place}.', { place: where(setting || 'beta') })}</p>
+      <button type="button" className="btn small" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: setting || 'about' } }))}>{t('Open Settings')}</button>
     </div>
   )
 }
@@ -350,11 +351,11 @@ function App() {
   // The live herdr view exists only when herdr is the runtime (see server/runtime).
   const confPoll = usePoll('/config', 10 * 60 * 1000)
   const conf = confPoll.data
-  // Meeting Insights and People, tabs of Meetings (a beta feature): ⌘K opens Meetings at either.
-  const insightsOn = conf?.trials?.['meeting-insights'] === true
-  // Home is a beta feature too: with it on, it's where the app opens, and what needs you opens there.
-  const homeOn = conf?.trials?.home === true
-  const routinesOn = conf?.trials?.routines === true
+  // Meeting Insights and People, tabs of Meetings: ⌘K opens Meetings at either.
+  const insightsOn = conf?.features?.['meeting-insights'] === true
+  // Home, on unless you turn it off (Settings › You): where the app opens, and what needs you opens there.
+  const homeOn = conf?.features?.home === true
+  const routinesOn = conf?.features?.routines === true // Scheduled Routines
   // Onboarding stays up from the first sign that setup is needed until you close it, so its last
   // screen (how Bridge AI works) isn't swept away the moment setup is saved.
   const [onboarding, setOnboarding] = useState(false)
@@ -534,8 +535,13 @@ function App() {
     if (relayActivity && fleet && !fleet.down) relayActivity(agents.map((a) => ({ id: a.paneId, name: nameOf(a), status: a.subagents?.running && (a.status === 'done' || a.status === 'idle') ? 'working' : a.status })), { session: fleet.session || null })
   }, [fleet]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Where the window opens (Home, below): whether it's gone there yet, and whether you've picked a
+  // place first (picked: a tap, a click, a key, or something opened here before then).
+  const homed = useRef(false)
+  const picked = useRef(false)
   // replace: the chief's thread bar shows another thread in the same tab.
   const openAgent = useCallback((paneId, { toSide = false, replace = null } = {}) => {
+    picked.current = true
     if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission()
     // Memory is a tab of Meetings and of Dictations, no longer a page of its own: ⌘K's Memory,
     // Settings › Voice & Meetings' Open Memory and anything else that still asks for view:memory get
@@ -771,13 +777,13 @@ function App() {
     window.addEventListener('bridge-open-event', on)
     return () => window.removeEventListener('bridge-open-event', on)
   }, [])
-  // Home on: a new window opens there (an agent a link names still comes after). A reload, or this
-  // window switched to another of your computers and back, opens what you were on there instead:
-  // each computer keeps its own tabs, layout and phone tab (layout.jsx), so Home only when there's
-  // nothing to go back to. Nor once you've tapped, clicked or pressed a key here before the page's
-  // first answers came: you've picked where you are (it used to take you to Home from there).
-  const homed = useRef(false)
-  const picked = useRef(false)
+  // Home on (as it is unless turned off): a new window opens there, the app starting too (an agent a
+  // link names still comes after). A reload, or this window switched to another of your computers
+  // and back, opens what you were on there instead: each computer keeps its own tabs, layout and
+  // phone tab (layout.jsx), so Home only when there's nothing to go back to. Nor once you've tapped,
+  // clicked or pressed a key here before the page's first answers came, or something was opened
+  // meanwhile (an agent, a card, a Today tab: the desktop app's notification, say): you've picked
+  // where you are, or it was picked for you (picked, above; it used to take you to Home from there).
   useEffect(() => {
     const on = (e) => { if (e.isTrusted) picked.current = true }
     window.addEventListener('pointerdown', on, true)
@@ -827,6 +833,7 @@ function App() {
   // The phone's Usage: a row of its own in More, Home on or off.
   const phoneUsage = () => { setMtab('more'); setMoreView('usage') }
   const showCard = (id) => {
+    picked.current = true
     store.set(`cc-card-${id}`, true)
     setView('command')
     setTodayTab('overview')
@@ -838,6 +845,7 @@ function App() {
 
   // Open a Today tab full size (desktop) or in the phone's Today tab.
   const showToday = (tab, detail) => {
+    picked.current = true
     setView('command')
     setTodayTab(tab)
     if (!wide) { if (tab === 'usage') phoneUsage(); else phoneToday() }
@@ -1123,7 +1131,7 @@ function App() {
   // Home off says how to turn it on, once the settings say it's off (until they're in, nothing).
   const viewFor = (id, { onBack } = {}) => (
     <ErrorBoundary key={id} name="This view" resetKey={id}>
-      {(id === 'view:home' || id === 'view:everything') && !homeOn ? <section className="pane view-pane">{conf && <TrialOff name={t('Home')} />}</section>
+      {(id === 'view:home' || id === 'view:everything') && !homeOn ? <section className="pane view-pane">{conf && <TrialOff name={t('Home')} setting="home" />}</section>
         : id === 'view:home' ? <section className="pane view-pane"><NeedsHome {...homeProps} onEverything={openEverything} /></section>
         : id === 'view:everything' ? <section className="pane view-pane"><Everything {...homeProps} onOpenAgent={(x) => openOn(x.machine, x.a.paneId, { device: x.device, title: x.a.name || x.a.title, kind: x.a.kind })} onBack={wide ? null : () => setHomeView('home')} /></section>
         : id === 'view:new' ? <Home fleet={fleet} onLaunched={fromHome} onMore={(init) => setNewAgent(init)} />

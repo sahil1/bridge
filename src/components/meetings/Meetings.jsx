@@ -30,7 +30,7 @@ import './meetings.css'
 import SpeechSetup, { MeetingsSetup } from './SpeechSetup.jsx'
 import { ActionItems, SinceLastTime } from './work.jsx'
 import { MergePick, MergeHint, Merged } from './merge.jsx'
-import { useTrial } from '../../trials.js'
+import { useFeature } from '../../trials.js'
 import { InsightsView } from './insights.jsx'
 import { PeopleView } from './people.jsx'
 import Memory from '../memory/Memory.jsx'
@@ -213,7 +213,7 @@ function InsightsOn({ n, onShow }) {
   return (
     <div className="mt-insights-on" role="status">
       <Icon name="trend" size={15} />
-      <p className="small"><b>{t('Meeting Insights is on.')}</b> {t('With {n} meetings recorded on this computer, Insights and People add them up: the time you spend in meetings, when, in which series and with whom. Worked out here and never sent. It\'s a beta feature, also in {place}.', { place: where('beta-meeting-insights'), n })}</p>
+      <p className="small"><b>{t('Meeting Insights is on.')}</b> {t('With {n} meetings recorded on this computer, Insights and People add them up: the time you spend in meetings, when, in which series and with whom. Worked out here and never sent. Its switch is in {place}.', { place: where('meeting-insights'), n })}</p>
       <div className="mt-insights-acts">
         <button type="button" className="btn small primary" disabled={busy} onClick={() => { onShow(); done() }}>{t('Show Insights')}</button>
         <button type="button" className="btn small" disabled={busy} onClick={() => done(true)}>{t('Turn off')}</button>
@@ -224,7 +224,7 @@ function InsightsOn({ n, onShow }) {
 }
 
 const SETUP = 'cc-meet-setup'
-// Memory always; Insights and People with Meeting Insights on (a beta feature). Dictations is a tab
+// Memory always; Insights and People with Meeting Insights on. Dictations is a tab
 // too once a dictation is kept, after Meetings: what you said with the dictation key
 // (dictations/Dictations.jsx), shown instead of all these with Meetings, Dictations and its own Memory
 // as its tabs. One row of tabs either way.
@@ -247,10 +247,10 @@ export function MeetingsHome({ onOpen }) {
   useEffect(() => { if (data && place && (place === ':archived' ? !archivedN : !folders.includes(place))) setPlace('') }, [data, place, archivedN, folders.join('|')]) // eslint-disable-line react-hooks/exhaustive-deps
   const hits = useSearch(q, place === ':archived')
   // Memory beside the list (memory/Memory.jsx), what came up in your meetings to start with; Insights
-  // and People too, a beta feature (insights.jsx). ⌘K opens any of them, through the tab kept here and
+  // and People too, with Meeting Insights on (insights.jsx). ⌘K opens any of them, through the tab kept here and
   // bridge-meetings-tab for a list already open (memory/open.js meetingsAt). And Dictations in place
   // of all of them, the meetings' own tab kept meanwhile (for the sidebar's Meetings).
-  const insightsOn = useTrial('meeting-insights')
+  const insightsOn = useFeature('meeting-insights')
   const [tabKept, setTab] = usePersisted('cc-meet-tab', 'list')
   const tab = tabKept === 'memory' || (insightsOn && ['insights', 'people'].includes(tabKept)) ? tabKept : 'list'
   const [kind, setKind] = usePersisted('cc-meet-kind', 'meetings')

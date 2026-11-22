@@ -68,9 +68,10 @@ const PHONE = [
 ]
 
 // What opened a section before it moved, and where that is now: General and Appearance are You,
-// Voice & Meetings is Meetings & Voice, the Bots beta's own id is Bots, and the config file is About
-// & Updates' (under Advanced).
-const ALIAS = { general: 'you', appearance: 'you', 'voice-meetings': 'meetings-voice', 'slack-bot': 'bots', config: 'config-file' }
+// Voice & Meetings is Meetings & Voice, the Bots beta's own id is Bots, the config file is About
+// & Updates' (under Advanced), and the Beta Features switches of the features out of beta (3.22.0)
+// are their own settings.
+const ALIAS = { general: 'you', appearance: 'you', 'voice-meetings': 'meetings-voice', 'slack-bot': 'bots', config: 'config-file', 'beta-home': 'home', 'beta-routines': 'scheduled-routines', 'beta-meeting-insights': 'meeting-insights', 'beta-dictation-cleanup': 'tidy' }
 
 // section: where Settings opens. "all" is Settings itself: the list on a phone, Your Features on a
 // wider screen. A section's id opens it (on a phone with ‹ Settings back to the list), and so does
