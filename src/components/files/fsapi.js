@@ -103,7 +103,7 @@ export const artOf = (e) => ART_OF[EXT(e.name)] || 'file'
 export const isPicture = (name) => /\.(png|jpe?g|gif|webp|avif|bmp|svg|ico)$/i.test(name)
 export const isPdf = (name) => /\.pdf$/i.test(name)
 
-export const fmtSize = (n) => (n == null ? '' : n >= 1e12 ? `${(n / 1e12).toFixed(1)} TB` : n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : n >= 1e3 ? `${Math.round(n / 1e3)} KB` : t('{n} bytes', { n }))
+export const fmtSize = (n) => (n == null ? '' : n >= 1e12 ? `${(n / 1e12).toFixed(1)} TB` : n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : n >= 1e3 ? `${Math.round(n / 1e3)} KB` : n === 1 ? t('1 byte') : t('{n} bytes', { n }))
 export function fmtWhen(ms, { long = false } = {}) {
   if (!ms) return ''
   const d = new Date(ms)

@@ -361,6 +361,18 @@ export default function Explorer({ head = null, className = '', shelves = null, 
   useEffect(() => { sayPlace(PLACE, { machine: loc.machine || null, root: loc.root, path: loc.path }, folderName) }, [loc.machine, loc.root, loc.path, folderName])
   const retry = () => setVer((v) => v + 1)
   const problem = (st) => {
+    // Another computer of yours that's offline (as the sidebar already says): said at once, not
+    // grey rows for the 12 s its link waits before it gives up, then its words in English.
+    if (machine && computer && computer.online === false) {
+      return (
+        <div className="fx-state" role="alert" data-state="offline">
+          <Icon name="laptop" size={22} />
+          <b>{t('{name} is offline', { name: computer.name })}</b>
+          <p className="muted">{t('Its files show here once it\'s on and connected again.')}</p>
+          <button type="button" className="ghost-btn" onClick={retry}><Icon name="refresh" size={12} /> {t('Try again')}</button>
+        </div>
+      )
+    }
     const g = st.guard || guard
     const where = g === 'volume' ? t('this drive') : g === 'iCloud Drive' ? t('iCloud Drive') : g ? t('your {folder} folder', { folder: t(g) }) : folderName
     if (st.loading) {
@@ -453,6 +465,8 @@ export default function Explorer({ head = null, className = '', shelves = null, 
     // On a computer, it picks on a click and opens on a double-click, its keys in shelfKeys (and the
     // keys back here once Quick Look closes); on a phone, a tap opens.
     if (shelf) return <div className="sd-shelf" data-shelf={shelf}>{shelves.render(shelf, { q, tap: narrow, keys: shelfKeys, focus: () => mainRef.current?.focus({ preventScroll: true }) })}</div>
+    // Another computer, offline: said, whatever this window had of it before.
+    if (machine && computer?.online === false) return problem(folder)
     if (searching) {
       return (
         <>
@@ -501,7 +515,7 @@ export default function Explorer({ head = null, className = '', shelves = null, 
 
   // A phone has no room for columns: the list instead.
   const shownView = narrow && view === 'columns' ? 'list' : view
-  const sideEl = <Sidebar side={side.data} error={side.error && (side.code === 'trial' && machine ? t('{name} has an older Bridge AI.', { name: computer?.name || '' }) : side.error)} computers={computers} machine={machine} loc={{ ...loc, machine }} onGo={(w) => go({ machine, ...w })} onComputer={toComputer}
+  const sideEl = <Sidebar side={side.data} error={machine && computer?.online === false ? t('{name} is offline', { name: computer.name }) : side.error && (side.code === 'trial' && machine ? t('{name} has an older Bridge AI.', { name: computer?.name || '' }) : side.error)} computers={computers} machine={machine} loc={{ ...loc, machine }} onGo={(w) => go({ machine, ...w })} onComputer={toComputer}
     shelves={shelves?.rows} shelf={shelf} onShelf={toShelf} />
   const showSide = !narrow || screen === 'side'
   const showMain = !narrow || screen === 'folder'

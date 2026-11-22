@@ -869,6 +869,8 @@ try {
         await q.locator('.fx-bar button[aria-label="As list"]').click()
         await q.locator('.fx-row[data-name="Plan.docx"]').waitFor({ timeout: 8000 })
         await sleep(200)
+        const oneByte = await q.locator('.fx-row[data-name="backup.zip"] .fx-c-size').innerText().catch(() => '')
+        ok(oneByte === '1 byte', `${at}: a file of one byte says "1 byte" (not "1 bytes")`, oneByte)
         await shot(q, `${tag}files-ui-list-${at}`)
         looks.push(`list-${at}`)
         await q.locator('.fx-bar button[aria-label="As icons"]').click()
@@ -885,6 +887,25 @@ try {
         await o.ctx.close()
       }
     }
+  })
+  // ---------- Laptop away ----------
+  await part('Laptop offline', async () => {
+    // Laptop gone (closed, asleep): Desk knows it's offline; its files, gone to from the sidebar,
+    // say so at once, in this window's language, with Try again (grey rows for 12 s, then
+    // "Laptop is offline" in English from the link).
+    lap.stop()
+    const away = await until(async () => (await desk.api('/machines')).machines.find((m) => m.name === 'Laptop' && !m.online), 30000, 300)
+    ok(!!away, 'Laptop stopped: Desk sees it offline')
+    const o = await page(b, desk.url, { store: { 'cc-fx-view': 'list', 'cc-fx-where:here': { root: 'home', path: '' } } })
+    await o.p.locator('.rail-nav-btn', { hasText: 'Studio' }).click()
+    await o.p.locator('.fx-row[data-name="Projects"]').waitFor({ timeout: 15000 })
+    const t0 = Date.now()
+    await o.p.locator('.fx-side-row[data-computer="Laptop"]').click()
+    const sideSaid = await o.p.locator('.fx-side-err').innerText({ timeout: 2000 }).catch(() => '')
+    ok(/Laptop is offline/.test(sideSaid) && Date.now() - t0 < 2000 && await o.p.locator('.fx-side-row[data-computer="here"]').count() === 1, 'its sidebar says so at once, with the way back to this computer', await o.p.locator('.fx-side').innerText().catch(() => ''))
+    const said = await o.p.locator('.fx-state[data-state="offline"]').innerText({ timeout: 2000 }).catch(() => '')
+    ok(/Laptop is offline/.test(said) && /once it's on and connected again/.test(said) && Date.now() - t0 < 4000 && await o.p.locator('.fx-state[data-state="offline"] button', { hasText: 'Try again' }).count() === 1, `an offline computer's files: "Laptop is offline", at once (${Date.now() - t0} ms), with Try again`, said)
+    await o.ctx.close()
   })
   console.log(`pictures: test/.out/shots/${tag}files-ui-{${[...shots, ...looks].join(',')},dark-list,dark-quicklook,dark-columns,phone-folder,phone-sidebar,phone-quicklook,phone-dark}.png`)
 } catch (e) {
