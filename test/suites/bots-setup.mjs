@@ -245,6 +245,18 @@ try {
     const tr = m.servers.find((x) => x.name === 'tracker')
     ok(tr && tr.tools?.map((x) => `${x.name}:${x.readOnly}`).sort().join() === 'create_issue:false,list_issues:true,search:true', 'its MCP servers: the tracker\'s tools listed, asked of it, with which only read', m)
     ok(!JSON.stringify(m).includes('tok-tracker-123'), 'never its token')
+    // One that stops reading as it answers (as one that ends at once does): said for it, and Bridge AI
+    // carries on. What was written to it then failed with EPIPE, and unheard that stopped Bridge AI
+    // (backup-move on Linux). A shell's, so not on Windows.
+    if (process.platform !== 'win32') {
+      const cj = path.join(home, '.claude.json')
+      const had = fs.readFileSync(cj, 'utf8')
+      const hi = JSON.stringify({ jsonrpc: '2.0', id: 1, result: { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'ends', version: '1' } } })
+      fs.writeFileSync(cj, JSON.stringify({ mcpServers: { ...JSON.parse(had).mcpServers, ends: { type: 'stdio', command: '/bin/sh', args: ['-c', `read line; exec 0<&-; printf '%s\\n' '${hi}'; sleep 1`] } } }))
+      const ends = (await kit.api(`/bots/${id}/mcp?fresh=1`).catch((e) => ({ servers: [], error: e.message }))).servers.find((x) => x.name === 'ends')
+      ok(/stopped .*before listing its tools/.test(ends?.problem || '') && !!(await kit.api('/config').catch(() => null)), 'a server that stops reading as it answers: said for it, and Bridge AI carries on', { ends, log: kit.log().split('\n').filter((l) => /nothing caught|EPIPE/.test(l)).slice(0, 2) })
+      fs.writeFileSync(cj, had)
+    }
     await kit.api(`/bots/${id}/settings`, { mcp: ['nope'] }).then(() => ok(false, 'a server you don\'t have refused'), (e) => ok(/isn't one of your MCP servers/.test(e.message), 'a server you don\'t have: refused, saying why', e.message))
     await kit.api(`/bots/${id}/settings`, { who: 'channels' })
     // Someone not named, in #launch: only the tools that read.
