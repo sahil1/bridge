@@ -130,10 +130,13 @@ try {
   ok(!!(await until(() => chip.isVisible(), 15000)), 'the screen picked as it starts, and recorded: the recording bar says so', await p.locator('.mt-recbar').innerText().catch(() => ''))
   const vOf = async () => (await api(`/meetings/${R.id}`)).videos?.[0]
   const first = await until(async () => { const v = await vOf(); return v?.bytes > 0 && v }, 12000)
-  await sleep(5000)
-  const later = await vOf()
   const file = first && path.join(dirOf(R.id), `video-${first.id}.${first.ext}`)
-  ok(!!first && later.state === 'recording' && later.bytes > first.bytes && fs.statSync(file).size === later.bytes && pieces.length >= 3, 'saved as it goes, a piece every few seconds, while it records', { first, later, pieces: pieces.length })
+  // Three pieces sent while it records, and then the file as big as the meeting says, the two read
+  // together. (Here a piece comes every 2 s; WebKit on CI handed over 2 in 7 s, as an MP4's piece
+  // comes at its encoder's keyframe, so 5 s after the first had 2. And a piece written between the
+  // two reads made them differ.)
+  const later = first && await until(async () => { const v = pieces.length >= 3 && await vOf(); return v?.state === 'recording' && v.bytes > first.bytes && fs.statSync(file).size === v.bytes && v }, 15000, 200)
+  ok(!!first && !!later, 'saved as it goes, a piece every few seconds, while it records', { first, now: await vOf(), file: file && fs.statSync(file).size, pieces: pieces.map((x) => x - pieces[0]) })
   ok(/\d+ MB/.test(await chip.innerText()) && /as a video on this computer/.test(await chip.getAttribute('title')), 'its size on the recording bar, and that it stays on this computer', { text: await chip.innerText(), title: await chip.getAttribute('title') })
   await shot(p, `${tag}video-recording`)
   const v0 = later
