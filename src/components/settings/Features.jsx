@@ -157,7 +157,7 @@ export default function Features({ onOpenAgent }) {
   return (
     <div className="st-sections ft">
       <ul className="ft-grid" aria-label={t('Your Features')}>
-        <Card id="home" icon="home" name={t('Home')} on={features.home === true} onSwitch={(v) => turn('home', { home: { on: v } }, v)} status={features.home ? t('Where Bridge AI opens') : t('Your day at a glance')} to="home" />
+        <Card id="home" icon="home" name={t('Home')} on={features.home === true} onSwitch={(v) => turn('home', { home: { on: v } }, v)} status={t('Your day at a glance')} to="home" />
         <Card id="meetings" icon="mic" name={t('Meetings')} status={meetingLine} to="meetings" />
         <Card id="meeting-insights" icon="trend" name={t('Meeting Insights')} on={features['meeting-insights'] === true} onSwitch={(v) => turn('meeting-insights', { meetings: { insights: v } }, v)} status={insightsLine} to="meeting-insights" />
         <Card id="dictation" icon="keyboard" name={t('Dictation')} on={dictOn} onSwitch={setDictation} status={dictLine} to="dictation" />

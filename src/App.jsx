@@ -140,11 +140,6 @@ function useLaunchMate(onOpen) {
 // The iPhone or Android app this page is in, when it's older than this page needs (src/fresh.js).
 const appTooOld = oldApp()
 
-// Whether this window has shown Bridge AI before: a reload, or a switch to another of your computers
-// (which loads that computer's page in the same window). Kept for the window's life alone, so a new
-// window (the app opening) starts afresh.
-const openedBefore = (() => { try { const was = sessionStorage.getItem('cc-opened') === '1'; sessionStorage.setItem('cc-opened', '1'); return was } catch { return false } })()
-
 // The phone apps' way back to their start screen, from the phone's Cloud agents (cloudOnly).
 const toStart = !cloudOnly ? null : window.bridgeAndroid?.home ? () => window.bridgeAndroid.home()
   : window.bridgeNative?.post ? () => window.bridgeNative.post({ type: 'home' }) : null
@@ -233,6 +228,19 @@ function TrialOff({ name, setting = null }) {
 const STUDIO = 'view:studio:'
 const studioId = (f) => `${STUDIO}${encodeURIComponent(f.root)}:${encodeURIComponent(f.path)}`
 const studioOf = (id) => { const [r, p] = id.slice(STUDIO.length).split(':'); return { root: decodeURIComponent(r || ''), path: decodeURIComponent(p || '') } }
+// Whether the meeting, file or whiteboard a tab was left at has been deleted since (Home opens in its
+// place: App's opening). Only a plain "not there" counts, never a computer that couldn't be asked.
+const notThere = (e) => e?.status === 404 || e?.code === 'ENOENT' || /no such|not found|no pane/i.test(e?.message || '')
+async function placeGone(id) {
+  let ask = null
+  if (id.startsWith('view:meeting:')) ask = `/meetings/${encodeURIComponent(id.slice(13))}`
+  else if (id.startsWith(STUDIO)) {
+    const f = studioOf(id)
+    if (f.root && f.path) ask = f.root === 'board' ? `/boards/${encodeURIComponent(f.path)}` : `/studio/changed?root=${encodeURIComponent(f.root)}&path=${encodeURIComponent(f.path)}`
+  }
+  if (!ask) return false
+  return api(ask).then(() => false, notThere)
+}
 const isView = (id) => typeof id === 'string' && id.startsWith('view:')
 // Whiteboards are one of Studio's kinds: its Files lists them and one opens in its Preview, so they
 // have no page or tab of their own. Folders is Studio's home, every file on your computers. Whatever
@@ -353,7 +361,8 @@ function App() {
   const conf = confPoll.data
   // Meeting Insights and People, tabs of Meetings: ⌘K opens Meetings at either.
   const insightsOn = conf?.features?.['meeting-insights'] === true
-  // Home, on unless you turn it off (Settings › You): where the app opens, and what needs you opens there.
+  // Home, on unless you turn it off (Settings › You): what needs you opens there, and the app starts
+  // there when there's nowhere to go back to.
   const homeOn = conf?.features?.home === true
   const routinesOn = conf?.features?.routines === true // Scheduled Routines
   // Onboarding stays up from the first sign that setup is needed until you close it, so its last
@@ -535,10 +544,13 @@ function App() {
     if (relayActivity && fleet && !fleet.down) relayActivity(agents.map((a) => ({ id: a.paneId, name: nameOf(a), status: a.subagents?.running && (a.status === 'done' || a.status === 'idle') ? 'working' : a.status })), { session: fleet.session || null })
   }, [fleet]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Where the window opens (Home, below): whether it's gone there yet, and whether you've picked a
-  // place first (picked: a tap, a click, a key, or something opened here before then).
+  // Where the window opens (below): whether that's been settled yet, whether you've picked a place
+  // first (picked: a tap, a click, a key, or something opened here before then), and the place it was
+  // left at, as this computer's tabs and phone tab were saved (none: it never had one).
   const homed = useRef(false)
   const picked = useRef(false)
+  const lastPlace = useRef(null)
+  if (lastPlace.current === null) lastPlace.current = { wide: W.active || null, phone: store.get('cc-mtab', null) }
   // replace: the chief's thread bar shows another thread in the same tab.
   const openAgent = useCallback((paneId, { toSide = false, replace = null } = {}) => {
     picked.current = true
@@ -777,13 +789,17 @@ function App() {
     window.addEventListener('bridge-open-event', on)
     return () => window.removeEventListener('bridge-open-event', on)
   }, [])
-  // Home on (as it is unless turned off): a new window opens there, the app starting too (an agent a
-  // link names still comes after). A reload, or this window switched to another of your computers
-  // and back, opens what you were on there instead: each computer keeps its own tabs, layout and
-  // phone tab (layout.jsx), so Home only when there's nothing to go back to. Nor once you've tapped,
-  // clicked or pressed a key here before the page's first answers came, or something was opened
-  // meanwhile (an agent, a card, a Today tab: the desktop app's notification, say): you've picked
-  // where you are, or it was picked for you (picked, above; it used to take you to Home from there).
+  // Where the window opens: where you were. The app starting (after a restart or an update too), a
+  // reload, or this window switched to another of your computers and back opens the place it was
+  // left at: each computer keeps its own tabs, layout and phone tab (layout.jsx). Home is never put
+  // over that; it's a click away (the sidebar, the phone's first tab). With Home on (as it is unless
+  // turned off), it's where the window starts only where there's no place to go back to: a new
+  // install, a window with no place of its own yet (another computer shown for the first time), the
+  // phone app's very first open, or a place that's gone (a closed agent, a meeting or a file deleted
+  // since), which says nothing and shows Home. Nor once you've tapped, clicked or pressed a key here
+  // before the page's first answers came, or something was opened meanwhile (an agent, a card, a
+  // Today tab: the desktop app's notification, say): you've picked where you are, or it was picked
+  // for you (picked, above). An agent a link names still comes after.
   useEffect(() => {
     const on = (e) => { if (e.isTrusted) picked.current = true }
     window.addEventListener('pointerdown', on, true)
@@ -794,10 +810,16 @@ function App() {
     if (homed.current || !fleet || !conf || cloudOnly) return
     homed.current = true
     if (!homeOn || picked.current) return
-    const back = openedBefore && (wide ? !!W.active && (isView(W.active) || isRemote(W.active) || !!byId[W.active]) : store.get('cc-mtab', null) != null)
-    if (back) return
-    if (wide) { setW((w) => ({ ...w, tabs: w.tabs.includes('view:home') ? w.tabs : ['view:home', ...w.tabs], active: 'view:home', group: 'main' })); set({ max: 'main' }) }
-    else { setMtab('home'); setHomeView('home') }
+    const toHome = () => {
+      if (wide) { setW((w) => ({ ...w, tabs: w.tabs.includes('view:home') ? w.tabs : ['view:home', ...w.tabs], active: 'view:home', group: 'main' })); set({ max: 'main' }) }
+      else { setMtab('home'); setHomeView('home') }
+    }
+    if (!wide) { if (lastPlace.current.phone == null) toHome(); return }
+    const at = lastPlace.current.wide
+    if (!at || (!isView(at) && !isRemote(at) && !byId[at])) { toHome(); return }
+    // A meeting, a file or a whiteboard it showed: Home instead if it's been deleted since (asked
+    // once; and only while it's still what's shown, with nothing picked meanwhile).
+    placeGone(at).then((gone) => { if (gone && !picked.current && wsRef.current?.active === at) toHome() })
   }, [fleet, conf]) // eslint-disable-line react-hooks/exhaustive-deps
   // Opened from a notification link (?agent=... or ?card=...): go there once agents have loaded.
   const linked = useRef(false)
