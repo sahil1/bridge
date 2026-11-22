@@ -55,6 +55,7 @@ server.stdout.on('data', (d) => log.push(String(d)))
 server.stderr.on('data', (d) => log.push(String(d)))
 
 let failed = false
+let marked = null // a build made for the smoke test of the app's windows (desktop/startgate.js): read below
 const step = async (name, fn) => {
   const t = Date.now()
   try { const note = await fn(); console.log(`ok   ${name} (${Date.now() - t} ms)${note ? `: ${note}` : ''}`) } catch (e) { failed = true; console.log(`FAIL ${name}: ${e.message}`) }
@@ -100,6 +101,45 @@ try {
     const off = Object.entries(want).filter(([k, v]) => wire[k] !== v).map(([k]) => FuseV1Options[k])
     if (off.length) throw new Error(`not as set: ${off.join(', ')}`)
     return 'RunAsNode on, NODE_OPTIONS and --inspect off'
+  })
+  // A release build doesn't start with DevTools' or Node's debugging switches or Chromium's stand-in
+  // for the keychain (desktop/startgate.js); only a build made for the smoke test of the app's windows
+  // carries the mark that lets it (bridgeSmokeBuild, in its archive's package.json).
+  const startGate = createRequire(import.meta.url)('../desktop/startgate.js')
+  const asar = path.join(path.dirname(app.root), 'app.asar')
+  marked = SOURCE ? null : (() => { try { return startGate.smokeBuild(JSON.parse(createRequire(path.join(ROOT, 'desktop', 'package.json'))('@electron/asar').extractFile(asar, 'package.json').toString('utf8'))) } catch { return null } })()
+  await built('a release build: no smoke test\'s mark', async () => {
+    if (marked == null) throw new Error(`couldn't read the package.json in ${asar}`)
+    if (marked && process.env.SMOKE_WINDOWS !== '1') throw new Error('this build carries the smoke test\'s mark (bridgeSmokeBuild): a release never may')
+    return marked ? 'marked: the smoke test\'s own build (SMOKE_WINDOWS)' : 'none'
+  })
+  if (marked === false && (process.platform !== 'linux' || process.env.DISPLAY)) await built('it doesn\'t start with DevTools\' or Node\'s debugging switches, or the stand-in keychain', async () => {
+    const values = { '--remote-debugging-port': '=0', '--remote-allow-origins': '=*', '--inspect-port': '=0', '--inspect-publish-uid': '=stderr' }
+    const tries = [...startGate.REFUSED.map((s) => `--${s}`), '-remote-debugging-port=0']
+    const results = []
+    for (const t of tries) {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-smoke-refused-'))
+      const name = t.replace(/^-+/, '').replace(/=.*/, '')
+      // (Each with the stand-in keychain and a profile and port of its own as well, so even one that
+      // started would reach no keychain and nothing of a copy installed here.)
+      const args = [`--user-data-dir=${path.join(dir, 'profile')}`, ...(name === 'use-mock-keychain' ? [] : ['--use-mock-keychain']), t.includes('=') ? t : `${t}${values[t] || ''}`]
+      const env = { ...process.env, BRIDGE_HOME: dir, BRIDGE_PORT: String(PORT + 3) }
+      delete env.ELECTRON_RUN_AS_NODE
+      const child = spawn(app.exe, args, { env, stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] })
+      const code = await new Promise((resolve) => { const t = setTimeout(() => resolve('still running'), 20000); child.on('exit', (c, s) => { clearTimeout(t); resolve(c ?? s) }) })
+      if (code === 'still running') {
+        // (Its server too, if it got that far: only as a child of this one.)
+        try { const pid = Number(fs.readFileSync(path.join(dir, 'cache', 'server.pid'), 'utf8')); if (Number(spawnSync('ps', ['-o', 'ppid=', '-p', String(pid)], { encoding: 'utf8' }).stdout.trim()) === child.pid) process.kill(pid, 'SIGTERM') } catch { /* none */ }
+        child.kill('SIGKILL')
+      }
+      let said = ''
+      try { said = fs.readFileSync(path.join(dir, 'logs', 'desktop.log'), 'utf8') } catch { /* none */ }
+      results.push({ t, code, said: said.includes(`--${name}`), opened: fs.existsSync(path.join(dir, 'desktop')) || fs.existsSync(path.join(dir, 'cache', 'server.pid')) })
+      try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* Windows may still hold files */ }
+    }
+    const bad = results.filter((r) => r.code !== 1 || !r.said || r.opened)
+    if (bad.length) throw new Error(JSON.stringify(bad))
+    return `each refused at once (exit 1, the reason in logs/desktop.log, no window profile or server): ${tries.join(' ')}`
   })
   // Studio's signing (server/signhelper.js): on a Mac its helper (native/bridgesign) is in the app and
   // says what this Mac has, asking nothing.
@@ -225,6 +265,7 @@ try {
   // Asked for (SMOKE_WINDOWS=1), as it opens the app's windows on the screen; a built Mac app's only.
   if (process.env.SMOKE_WINDOWS === '1') {
     if (SOURCE || process.platform !== 'darwin') console.log('--   the app\'s windows: a built Mac app\'s only')
+    else if (!marked) console.log('--   the app\'s windows: only in a build made for it (electron-builder ... -c.extraMetadata.bridgeSmokeBuild=true), as a release build refuses DevTools and the stand-in keychain')
     else await (await import('./smokewindows.js')).windows({ app, step, ROOT })
   }
 } finally {

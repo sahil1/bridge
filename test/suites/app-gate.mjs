@@ -68,6 +68,29 @@ const windowAuth = require(path.join(ROOT, 'desktop', 'windowauth.js'))
   ok(v.down === 'down' && v.slow === 'slow' && v.wrong === 'wrong', 'the proof says which: nothing there, no answer in time, or an answer without the secret', v)
 }
 
+// ---------- Started only as it was built (desktop/startgate.js) ----------
+{
+  const startGate = require(path.join(ROOT, 'desktop', 'startgate.js'))
+  const refused = [
+    [['--remote-debugging-port=9222'], 'remote-debugging-port'], [['-remote-debugging-port=0'], 'remote-debugging-port'], [['--remote-debugging-pipe'], 'remote-debugging-pipe'],
+    [['--remote-allow-origins=*'], 'remote-allow-origins'], [['--use-mock-keychain'], 'use-mock-keychain'], [['--inspect'], 'inspect'], [['--inspect-brk=9229'], 'inspect-brk'],
+    [['--INSPECT-PORT=0'], 'inspect-port'],
+  ]
+  const fine = [['--lang=en'], ['/remote-debugging-port=1'], ['-psn_0_12345'], ['/Users/me/inspect'], []]
+  const saw = refused.map(([a]) => startGate.given({ argv: a, platform: 'darwin' }))
+  const win = startGate.given({ argv: ['/remote-debugging-port=1'], platform: 'win32' })
+  const viaChromium = startGate.given({ argv: [], hasSwitch: (s) => s === 'use-mock-keychain' })
+  ok(refused.every(([, want], i) => saw[i].includes(want)) && fine.every((a) => !startGate.given({ argv: a, platform: 'darwin' }).length) && win.includes('remote-debugging-port') && viaChromium.includes('use-mock-keychain'), 'the switches a built app refuses: DevTools\' (a port, a pipe, which origins), Node\'s inspector and the stand-in keychain, however they\'re written (and /x on Windows); nothing else', { saw, win, viaChromium })
+  ok(startGate.smokeBuild({ bridgeSmokeBuild: true }) && startGate.smokeBuild({ bridgeSmokeBuild: 'true' }) && !startGate.smokeBuild({}) && !startGate.smokeBuild(null) && !startGate.smokeBuild({ bridgeSmokeBuild: 'yes' }), 'only a build marked for the smoke test is let start with them')
+  // main.js checks first of all, before anything else it loads; the packaged app has startgate.js;
+  // no release workflow sets the mark.
+  const mainJs = fs.readFileSync(path.join(ROOT, 'desktop', 'main.js'), 'utf8')
+  const firstRequire = /require\('\.\/([\w]+)\.js'\)/.exec(mainJs)?.[1]
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'desktop', 'package.json'), 'utf8'))
+  const workflows = fs.readdirSync(path.join(ROOT, '.github', 'workflows')).map((f) => fs.readFileSync(path.join(ROOT, '.github', 'workflows', f), 'utf8')).join('\n')
+  ok(firstRequire === 'startgate' && /require\('\.\/startgate\.js'\)\.check\(\{\n\s+app,/.test(mainJs) && pkg.build.files.includes('startgate.js') && !pkg.bridgeSmokeBuild && !/bridgeSmokeBuild/.test(workflows), 'main.js checks before anything else, the app is built with it, and no release carries the mark', { firstRequire })
+}
+
 // ---------- In Electron ----------
 const electron = electronBin()
 if (!electron || (process.platform === 'linux' && !process.env.DISPLAY)) skip('the gate in Electron', !electron ? 'Electron isn\'t installed (npm install in desktop/)' : 'no screen')

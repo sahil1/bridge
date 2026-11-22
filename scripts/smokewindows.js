@@ -4,7 +4,11 @@
 // the system's temporary folder: TMPDIR), at a port of its own (SMOKE_APP_PORT, else 7597), with
 // Chromium's own stand-in for the keychain (--use-mock-keychain: nothing in or from the Keychain) and
 // the tests' stand-in for the signing helper (test/stand-ins/bridgesign.cjs: no Touch ID asked), and
-// is driven through Chromium's DevTools port (as Playwright does, connectOverCDP). Checked:
+// is driven through Chromium's DevTools port (as Playwright does, connectOverCDP). Those two switches
+// work only in a build made for it (desktop/startgate.js: electron-builder ...
+// -c.extraMetadata.bridgeSmokeBuild=true); a release build doesn't start with them (smoke.js checks
+// that). Signals go only to the app it started and that app's own children (its server, a window's
+// renderer), never to a process found by name. Checked:
 //   - it opens on Bridge AI, not the page saying another program answers; a reload (what ⌘R does),
 //     a page whose renderer was killed, a popout, this computer in a window of its own and the
 //     floating card each open; how long the server's proof holds a page back;
@@ -69,7 +73,6 @@ export async function windows({ app, step, ROOT }) {
   fs.writeFileSync(path.join(data, 'bridgesign.json'), JSON.stringify({ probe: { trackpad: false, touchID: true, auth: true, parent: true }, auth: { ok: true, how: 'touchid' } }))
   const env = { ...process.env, BRIDGE_HOME: data, BRIDGE_PORT: String(PORT), BRIDGE_FIX_DRYRUN: '1', BRIDGE_SIGNHELPER: helper, BRIDGESIGN_STATE: path.join(data, 'bridgesign.json'), BRIDGESIGN_LOG: path.join(data, 'bridgesign.log') }
   delete env.ELECTRON_RUN_AS_NODE
-  const appRoot = path.dirname(path.dirname(path.dirname(app.exe)))
   const out = []
   let proc = null
   let browser = null
@@ -102,8 +105,28 @@ export async function windows({ app, step, ROOT }) {
     browser = await until(() => chromium.connectOverCDP(`http://127.0.0.1:${cdp}`, { timeout: 3000 }), 30000, 300)
     if (!browser) throw new Error('its DevTools port never answered')
   }
-  // Quit as the app quits (SIGTERM), not through DevTools.
-  async function quit() {
+  // A signal only to a process of the app this smoke started: its server (by the app's pid file) or a
+  // window's renderer (by DevTools' own list), each checked to be a child of that app right then.
+  // Nothing found by name.
+  const parentOf = (pid) => { try { return Number(execFileSync('ps', ['-o', 'ppid=', '-p', String(pid)], { encoding: 'utf8' }).trim()) } catch { return null } }
+  const signalChild = (pid, sig) => {
+    if (!proc || !Number.isInteger(pid) || parentOf(pid) !== proc.pid) throw new Error(`pid ${pid} isn't a process of the app this smoke started`)
+    process.kill(pid, sig)
+  }
+  const signalServer = (sig) => { const pid = serverPid(); signalChild(pid, sig); return pid }
+  const renderers = async () => {
+    const s = await browser.newBrowserCDPSession()
+    const { processInfo } = await s.send('SystemInfo.getProcessInfo')
+    await s.detach().catch(() => {})
+    return processInfo.filter((x) => x.type === 'renderer').map((x) => x.id).filter((pid) => parentOf(pid) === proc.pid)
+  }
+  // Quit as the app quits (SIGTERM), not through DevTools; its server (which outlives it, by design)
+  // stopped first when asked, while it's still the app's.
+  async function quit({ server = false } = {}) {
+    if (server && proc) {
+      const pid = serverPid()
+      if (pid && alive(pid) && parentOf(pid) === proc.pid) { process.kill(pid, 'SIGTERM'); await until(async () => !alive(pid), 10000) }
+    }
     browser = null
     if (proc && proc.exitCode == null) {
       proc.kill('SIGTERM')
@@ -180,15 +203,16 @@ export async function windows({ app, step, ROOT }) {
     })
     await only('a page whose renderer was killed opens again', async () => {
       const before = (await list()).length
-      const renderers = execFileSync('ps', ['-A', '-o', 'pid=,command='], { encoding: 'utf8' }).split('\n').filter((l) => l.includes(appRoot) && l.includes('--type=renderer')).map((l) => Number(l.trim().split(/\s+/)[0]))
-      if (!renderers.length) throw new Error('no renderer found')
-      for (const pid of renderers) { try { process.kill(pid, 'SIGKILL') } catch { /* gone */ } }
+      // (Its renderers by DevTools' own list of the app's processes, each a child of the app.)
+      const ids = await renderers()
+      if (!ids.length) throw new Error('no renderer found')
+      for (const pid of ids) { try { signalChild(pid, 'SIGKILL') } catch { /* gone */ } }
       await sleep(1500)
       // (A new connection: the old one is left, as closing it could close the app.)
       browser = await until(() => chromium.connectOverCDP(`http://127.0.0.1:${cdp}`, { timeout: 3000 }), 20000, 300)
       const p = await main()
       if (!p || !(await until(() => isApp(p), 30000))) throw new Error(`after: ${JSON.stringify(p ? await look(p) : null)}`)
-      return `${renderers.length} renderer(s) killed (${before} page(s)); the main window's page opened again`
+      return `${ids.length} renderer(s) killed (${before} page(s)); the main window's page opened again`
     })
     await only('a popout opens and loads', async () => {
       const p = await main()
@@ -223,7 +247,7 @@ export async function windows({ app, step, ROOT }) {
       const was = serverPid()
       seenNotOurs = []
       const t = Date.now()
-      process.kill(was, 'SIGKILL')
+      signalChild(was, 'SIGKILL')
       const now = await until(async () => { const n = serverPid(); return n && n !== was && alive(n) ? n : null }, 30000)
       if (!now) throw new Error('not started again')
       const back = await until(() => p.evaluate(() => fetch('/api/config').then((r) => r.status === 200, () => false)), 30000, 300)
@@ -238,7 +262,7 @@ export async function windows({ app, step, ROOT }) {
       const was = serverPid()
       seenNotOurs = []
       seenStarting = 0
-      process.kill(was, 'SIGKILL')
+      signalChild(was, 'SIGKILL')
       await sleep(50)
       await p.reload({ waitUntil: 'load', timeout: 5000 }).catch(() => {})
       const w = await until(async () => { const x = pages().find((q) => q.url() === `${BASE}/`); return x && await isApp(x) ? x : null }, 45000, 300)
@@ -250,10 +274,10 @@ export async function windows({ app, step, ROOT }) {
       const was = serverPid()
       seenNotOurs = []
       const t = Date.now()
-      process.kill(was, 'SIGSTOP')
+      signalChild(was, 'SIGSTOP')
       const r = p.reload({ waitUntil: 'load', timeout: 40000 }).catch((e) => e)
       await sleep(5000)
-      process.kill(was, 'SIGCONT')
+      signalChild(was, 'SIGCONT')
       await r
       const w = await until(async () => { const x = pages().find((q) => q.url() === `${BASE}/`); return x && await isApp(x) ? x : null }, 30000, 300)
       if (!w || seenNotOurs.length || serverPid() !== was || !alive(was)) throw new Error(`${w ? 'back' : 'not back'}; another program's page: ${seenNotOurs.length}; pid ${was} → ${serverPid()}`)
@@ -289,7 +313,7 @@ export async function windows({ app, step, ROOT }) {
       const was = serverPid()
       const keysBefore = fs.readFileSync(keysFile).toString('base64')
       const cookieName = `bridge-ai-${PORT}`
-      process.kill(was, 'SIGTERM')
+      signalChild(was, 'SIGTERM')
       if (!(await until(async () => !alive(was), 15000))) throw new Error('it didn\'t stop')
       await sleep(3500) // (the app sees its feed end)
       // Offline: the service worker answers the page with its own (as it does on a phone).
@@ -456,17 +480,11 @@ export async function windows({ app, step, ROOT }) {
     })
   } finally {
     clearInterval(watching)
-    await quit().catch(() => {})
-    // The server outlives the app by design: stopped here, and anything else of this copy's.
-    const pid = serverPid()
-    if (pid && alive(pid)) { try { process.kill(pid, 'SIGTERM') } catch { /* gone */ } await until(async () => !alive(pid), 10000) }
-    try {
-      for (const l of execFileSync('ps', ['-A', '-o', 'pid=,command='], { encoding: 'utf8' }).split('\n')) {
-        if (!l.trim().replace(/^\d+\s+/, '').startsWith(appRoot)) continue
-        const p = Number(l.trim().split(/\s+/)[0])
-        if (p && p !== process.pid) try { process.kill(p, 'SIGKILL') } catch { /* gone */ }
-      }
-    } catch { /* none */ }
+    // (The server outlives the app by design: stopped first, while it's still the app's; its
+    // terminals end with it, keepAgents being off.)
+    await quit({ server: true }).catch(() => {})
+    const left = serverPid()
+    if (left && alive(left)) console.log(`--   the app's server (pid ${left}) was left running: it wasn't the app's own child by then, so it wasn't stopped here`)
     if (process.env.SMOKE_KEEP) console.log(`kept: ${data}`)
     else fs.rmSync(data, { recursive: true, force: true })
     if (out.length && process.env.SMOKE_VERBOSE) console.log(out.join('').slice(-3000))
