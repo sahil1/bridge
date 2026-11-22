@@ -212,6 +212,10 @@ try {
     await until(async () => /Pricing Bot/.test(await p.locator('.bc-change').innerText().catch(() => '')), 15000)
     await p.locator('.bc-change .btn.primary').click()
     ok(await until(async () => /not the whole of it/.test(await p.locator('.bc').innerText()), 20000), 'one Settings refuses: said in the chat', await p.locator('.bc').innerText().catch(() => ''))
+    // (Still said once the chat has looked again, as it does every 4 s: that look cleared it, so it
+    // was there for a moment, or not long enough to see.)
+    await p.waitForResponse((r) => r.request().method() === 'GET' && new URL(r.url()).pathname === `/api/bots/${id}/assist`, { timeout: 8000 }).catch(() => {})
+    ok(!(await until(async () => !/not the whole of it/.test(await p.locator('.bc').innerText()), 1500, 100)), 'and still said after the chat looks again', await p.locator('.bc').innerText().catch(() => ''))
     const v = await botOf(id)
     ok(v.name === 'Pricing Desk' && !v.settings.readsFrom.includes('~'), 'and none of it applied, not even the new name', { name: v.name, readsFrom: v.settings.readsFrom })
     await p.locator('.bc-change .ghost-btn', { hasText: 'Leave it as it is' }).click()
