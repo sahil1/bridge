@@ -82,6 +82,13 @@ try {
     shared = (await kit.api('/connections', { platform: 'slack', name: 'team_bot' })).id
     const { ctx, p, errors } = await page(b, kit.url, { mode: 'light' })
     await p.locator('.rail').waitFor({ timeout: 20000 })
+    // New bot's questions: where it would answer isn't set up yet, said, with where to set it up.
+    await openBots(p, 'bots')
+    await p.locator('.bh [data-setting="bots-new"]').click()
+    const unset = await textOf(p, '.bh [data-setting="bots-quick-unset"]')
+    ok(/@team_bot isn't set up yet, so it isn't reached until it is\./.test(unset) && /Set it up in Connections/.test(unset), 'New bot: @team_bot, where it would answer, isn\'t set up yet, said with where to set it up', unset)
+    await p.locator('.bh [data-setting="bots-quick-unset"] button').click()
+    ok(await shown(p, '.bh[data-tab="connections"]'), 'which opens Connections')
     // marketing_bot's chat: Give it its own connection asks first. Not now, then yes.
     await openChat(p, M)
     const reach = p.locator('.bp-chat .bc-connect [data-setting="bots-reach"]')

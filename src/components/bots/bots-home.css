@@ -215,3 +215,5 @@
 .bh-status-words .link-btn { margin-left: 6px; }
 .bh-status-row > .btn { color: var(--ink); }
 .bh.phone .bh-tools .sb-grow { display: none; }
+.bh-quick-warn { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 6px; margin: 0; color: var(--ink-2); }
+.bh-quick-warn > .icon { flex: none; align-self: center; color: var(--warning); }
