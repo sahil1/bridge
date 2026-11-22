@@ -1,19 +1,20 @@
-# Bridge AI's tests (test/run.mjs) on macOS, Windows and Linux. How many depends on why it runs:
-#   a pull request, or a push to main: only the tests for the files it changes (each suite's
-#     `covers` in test/run.mjs), and none when no test covers them (a change to the docs);
+# Bridge AI's tests (test/run.mjs). How many depends on why it runs:
+#   a pull request: only the tests for the files it changes (each suite's `covers` in test/run.mjs),
+#     and none when no test covers them (a change to the docs). A merge to main runs none: its pull
+#     request's ran, and the nightly runs what changed since the last one;
 #   a nightly build (nightly.yml, through release.yml): the tests for everything changed since the
 #     last nightly;
 #   a release's tag (release.yml), Friday night's run before the weekend's release, and a run by
 #     hand: every test.
-# The app's tests run in Chromium everywhere, and in WebKit (the engine of Safari and the iPhone app)
-# on macOS too, on two machines. Beside them, the iPhone app is built for the Simulator on macOS and
-# the Android app on Linux, when every test runs or the change is to mobile/. When something fails,
-# the logs and screenshots are kept with the run for a week.
+# On macOS always, in Chromium, and in WebKit (the engine of Safari and the iPhone app) for the tests
+# in a browser, each in two shares side by side when there are many. Windows and Linux only when
+# every test runs, and a failure there is said but stops nothing (it's fixed on its own), so the Mac
+# is what a change waits for. Beside them, the iPhone app is built for the Simulator on macOS and the
+# Android app on Linux, when every test runs or the change is to mobile/. When something fails, the
+# logs and screenshots are kept with the run for a week.
 name: Tests
 
 on:
-  push:
-    branches: [main]
   pull_request:
   # Friday night in California: every test on main, so the weekend's release starts from a known state.
   schedule:
@@ -35,7 +36,7 @@ permissions:
   contents: read
 
 # A pull request's newer push calls off its older run, so the few macOS machines GitHub gives at once
-# go to what's current. Everything else (main, a nightly's or a release's tests, a run by hand) runs
+# (five) go to what's current. Everything else (a nightly's or a release's tests, a run by hand) runs
 # to its end.
 concurrency:
   group: tests-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
@@ -50,6 +51,7 @@ jobs:
       args: ${{ steps.s.outputs.args }}
       count: ${{ steps.s.outputs.count }}
       mobile: ${{ steps.s.outputs.mobile }}
+      machines: ${{ steps.s.outputs.machines }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -78,10 +80,23 @@ jobs:
             args=--all; mobile=true
           fi
           node test/run.mjs --list $args > scope.json
+          node test/run.mjs --list $args --browser-only > scope-browser.json
           count=$(node -p "require('./scope.json').names.length")
           echo "args=$args" >> "$GITHUB_OUTPUT"
           echo "count=$count" >> "$GITHUB_OUTPUT"
           echo "mobile=$mobile" >> "$GITHUB_OUTPUT"
+          # The machines: macOS in Chromium, and in WebKit when any test is in a browser, each in two
+          # shares from 16 tests (about 20 minutes on one); Windows and Linux only for every test,
+          # where a failure doesn't stop the run (optional).
+          ALL="$([ -z "$base" ] && echo 1)" node -e '
+            const n = require("./scope.json").names.length, b = require("./scope-browser.json").names.length
+            const parts = (k) => (k >= 16 ? [1, 2] : k ? [0] : [])
+            const m = []
+            for (const i of parts(n)) m.push({ os: "macos-15", name: i ? `macOS ${i} of 2` : "macOS", browser: "chromium", share: i ? `--shard ${i}/2` : "", optional: false })
+            for (const i of parts(b)) m.push({ os: "macos-15", name: i ? `macOS WebKit ${i} of 2` : "macOS WebKit", browser: "webkit", share: i ? `--browser-only --shard ${i}/2` : "--browser-only", optional: false })
+            if (process.env.ALL) m.push({ os: "windows-latest", name: "Windows", browser: "chromium", share: "", optional: true }, { os: "ubuntu-22.04", name: "Linux", browser: "chromium", share: "", optional: true })
+            require("fs").appendFileSync(process.env.GITHUB_OUTPUT, `machines=${JSON.stringify({ include: m })}\n`)
+          '
           if [ -n "$base" ]; then
             echo "### $count of the tests, for what changed since $base" >> "$GITHUB_STEP_SUMMARY"
             node -p "require('./scope.json').names.join(', ') || 'None: no test covers these changes.'" >> "$GITHUB_STEP_SUMMARY"
@@ -93,34 +108,18 @@ jobs:
     name: Tests (${{ matrix.name }})
     needs: scope
     if: needs.scope.outputs.count != '0'
+    # The machines the scope picked (above): on macOS every suite in Chromium, and the ones in a browser
+    # in WebKit too, as jobs side by side, each in two shares (test/run.mjs --shard, each about as
+    # long) when there are many, as in one every suite took 55 to 85 minutes; the suites in no browser
+    # run on macOS in the Chromium jobs. Windows and Linux, only for every test, can fail without
+    # failing the run.
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          # macOS runs every suite in Chromium, and the ones in a browser in WebKit too, as jobs side
-          # by side: WebKit's in two shares (test/run.mjs --shard), each about as long, as in one they
-          # took 70 to 85 minutes (103 suites, 20 Nov), close to the time limit. The suites that run
-          # in no browser run once on macOS, in the Chromium job.
-          - os: macos-15
-            name: macOS
-            browser: chromium
-          - os: macos-15
-            name: macOS WebKit 1 of 2
-            browser: webkit
-            share: --browser-only --shard 1/2
-          - os: macos-15
-            name: macOS WebKit 2 of 2
-            browser: webkit
-            share: --browser-only --shard 2/2
-          - os: windows-latest
-            name: Windows
-            browser: chromium
-          - os: ubuntu-22.04
-            name: Linux
-            browser: chromium
+      matrix: ${{ fromJSON(needs.scope.outputs.machines) }}
+    continue-on-error: ${{ matrix.optional }}
     runs-on: ${{ matrix.os }}
-    # Every suite takes 55 to 75 minutes in Chromium on the Mac and Windows runners, more with a test
-    # tried again; each WebKit share about 40.
+    # Every suite takes 55 to 85 minutes in Chromium on the Mac and Windows runners, more with a test
+    # tried again: in two shares, about half each.
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
