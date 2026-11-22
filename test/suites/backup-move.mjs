@@ -17,6 +17,8 @@
 //   saying why, so Slack gets no second connection; its scheduled routine paused; the Chief of
 //   Staff's playbook in its own folder there (the one there kept beside it), its folder setting
 //   left as it was; the MCP servers in Claude Code's config; Start connects it;
+//   A phone through its relay page, paired a moment ago and not kept yet: Back Up & Move says what to
+//   do on Studio, in the phone's language (German), and opens by itself once it's kept there.
 //   Move (Studio to Laptop, from a phone paired with Studio once it's kept): the phone can't make
 //   or open a file (that's on the computer itself) but can Move; one move at a time (a second calls
 //   the first off, one applied has to be undone first); Laptop shows what's coming, named as the

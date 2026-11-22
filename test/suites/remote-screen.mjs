@@ -67,7 +67,10 @@
 //     an ask, never to the device viewing, with Stop and Block This Device carried out at Studio, and
 //     a device through Laptop blocked on Laptop; the card in every other window; Settings saying where
 //     they go, and with nowhere set up, saying so;
-//   a phone through its relay page (the apps' page), end to end, through the relay and peer-to-peer.
+//   a phone through its relay page (the apps' page), end to end, through the relay and peer-to-peer;
+//   the devices menu's control switch turned down, said there; a viewer in German told why control
+//   is off (or on now) and why a session ended there in German, not Studio's English; and the link
+//   dropping mid-session, said with why it may have, and View again once it's back.
 import fs from 'node:fs'
 import path from 'node:path'
 import http from 'node:http'
