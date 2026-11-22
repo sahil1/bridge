@@ -93,9 +93,9 @@ For the project's owner, or a fork's: what `npm run release` puts out, and who i
   fixed in the next change. A pull request from anyone else is merged once its run on GitHub
   passes. A merge to main runs no tests of its own. Every test runs on main each night, and your
   own computers get each night's main (Nightly, below), tested for what changed since the night
-  before. A release runs every test again before it's built. Windows and Linux run in those full
-  runs, where a failure is said but doesn't stop the release. A fix that can't wait is a patch
-  release at any time.
+  before. A release runs every test again while it's built, and is published only once they pass.
+  Windows, and Linux's tests in no browser, run in the full run each night, where a failure is
+  said but doesn't stop anything. A fix that can't wait is a patch release at any time.
 - **Shipping from your computer, a step at a time** (`npm run ship`, `scripts/ship.js`; git and the
   GitHub CLI signed in). `npm run ship` says where things stand: this branch, main's version, the
   newest nightly, beta and release, the runs going, and this computer's version and channel.

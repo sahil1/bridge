@@ -157,14 +157,14 @@ const machinesFor = (browser, none, all = false) => {
     fs.writeFileSync(path.join(dir, 'scope-browser.json'), JSON.stringify({ names: Array(browser).fill('x') }))
     fs.writeFileSync(path.join(dir, 'scope-none.json'), JSON.stringify({ names: Array(none).fill('x') }))
     const out = path.join(dir, 'out')
-    execFileSync(process.execPath, ['-e', pick], { cwd: dir, env: { ...process.env, GITHUB_OUTPUT: out, ALL: all ? '1' : '' } })
+    execFileSync(process.execPath, ['-e', pick], { cwd: dir, env: { ...process.env, GITHUB_OUTPUT: out, ALL: all ? '1' : '', OPTIONAL: all === 'release' ? 'false' : '' } })
     return JSON.parse(fs.readFileSync(out, 'utf8').replace(/^machines=/, '')).include.map((m) => [m.os, m.browser, m.share, m.optional && 'optional'].filter(Boolean).join(' '))
   } catch (e) { return [`failed: ${e.message}`] } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 }
-const every = machinesFor(107, 46, true), big = machinesFor(107, 46), small = machinesFor(10, 3), quiet = machinesFor(0, 5)
+const every = machinesFor(107, 46, true), forRelease = machinesFor(107, 46, 'release'), big = machinesFor(107, 46), small = machinesFor(10, 3), quiet = machinesFor(0, 5)
 const lx = (n) => Array.from({ length: n }, (_, i) => `ubuntu-22.04 chromium --browser-only --shard ${i + 1}/${n}`)
 const mac = ['macos-15 chromium --no-browser', 'macos-15 webkit --browser-only --shard 1/2', 'macos-15 webkit --browser-only --shard 2/2']
-ok(JSON.stringify(big) === JSON.stringify([...mac, ...lx(4)]) && JSON.stringify(every) === JSON.stringify([...mac, ...lx(4), 'windows-latest chromium optional', 'ubuntu-22.04 chromium --no-browser optional']) && JSON.stringify(small) === JSON.stringify(['macos-15 chromium --no-browser', 'macos-15 webkit --browser-only', 'ubuntu-22.04 chromium --browser-only']) && JSON.stringify(quiet) === JSON.stringify(['macos-15 chromium --no-browser']), 'the tests in no browser on macOS, the ones in a browser in WebKit on macOS and in Chromium on Linux, in shares when there are many; Windows and the rest of Linux only for every test, and optional', { every, big, small, quiet })
+ok(JSON.stringify(big) === JSON.stringify([...mac, ...lx(4)]) && JSON.stringify(forRelease) === JSON.stringify(big) && JSON.stringify(every) === JSON.stringify([...mac, ...lx(4), 'windows-latest chromium optional', 'ubuntu-22.04 chromium --no-browser optional']) && JSON.stringify(small) === JSON.stringify(['macos-15 chromium --no-browser', 'macos-15 webkit --browser-only', 'ubuntu-22.04 chromium --browser-only']) && JSON.stringify(quiet) === JSON.stringify(['macos-15 chromium --no-browser']), 'the tests in no browser on macOS, the ones in a browser in WebKit on macOS and in Chromium on Linux, in shares when there are many; Windows and the rest of Linux only for every test, and optional, and not for a release', { every, forRelease, big, small, quiet })
 ok(/matrix: \$\{\{ fromJSON\(needs\.scope\.outputs\.machines\) \}\}/.test(job) && /continue-on-error: \$\{\{ matrix\.optional \}\}/.test(job) && /--list \$args --browser-only > scope-browser\.json/.test(scope) && /--list \$args --no-browser > scope-none\.json/.test(scope), 'the test job takes the machines the scope picked, an optional one failing without failing the run')
 ok(!/^  push:/m.test(test.split('\njobs:\n')[0]), 'a merge to main runs no tests of its own (its pull request\'s did, and the nightly covers what changed since)')
 const steps = job.split('\n    steps:\n')[1] || ''
@@ -174,7 +174,9 @@ const after = steps.split('\n      - id: share\n')[1]?.split('\n\n').slice(1).fi
 ok(after.length >= 6 && after.every((x) => /\n\s*if: steps\.share\.outputs\.count != '0'/.test(x)), 'and one with none (a WebKit share, for a change to no test in a browser) sets nothing up', after.map((x) => x.match(/name: (.+)|uses: (\S+)/)?.[0]))
 ok(/ios:\n\s*name: iPhone app\n\s*needs: scope\n\s*if: needs\.scope\.outputs\.mobile == 'true'/.test(test) && /android:\n\s*needs: scope\n\s*if: github\.ref_type != 'tag' && needs\.scope\.outputs\.mobile == 'true'/.test(test), 'the iPhone and Android builds with every test, or a change to mobile/')
 const release = yml('release.yml')
-ok(/test:\n\s*needs: guard\n\s*uses: \.\/\.github\/workflows\/test\.yml\n\s*with:\n\s*base: \$\{\{ needs\.guard\.outputs\.base \}\}/.test(release), 'release.yml: every test for a release, only what changed since for a nightly or a beta (the guard says from where)')
+ok(/test:\n\s*needs: guard\n\s*uses: \.\/\.github\/workflows\/test\.yml\n\s*with:\n\s*base: \$\{\{ needs\.guard\.outputs\.base \}\}\n\s*optional: false\n/.test(release), 'release.yml: every test for a release, only what changed since for a nightly or a beta (the guard says from where), without the machines that stop nothing')
+ok(/name: Build \(\$\{\{ matrix\.platform \}\}\)\n\s*needs: guard\n/.test(release) && /name: Android\n\s*needs: guard\n/.test(release) && /needs\.test\.result == 'success' && needs\.build\.result == 'success'/.test(release) && /needs: \[test, build, android\]/.test(release), 'release.yml: the builds while the tests run, and nothing published unless both pass')
+ok(/OPTIONAL: \$\{\{ inputs\.optional \}\}/.test(scope) && /optional:\n\s*description:[^\n]*\n\s*type: boolean\n\s*default: true/.test(test), 'test.yml: optional machines unless the caller says not (a run by hand or each night has them)')
 ok(/since=\$\(node scripts\/nightly\.js since\)/.test(yml('nightly.yml')) && /since: \$\{\{ needs\.plan\.outputs\.since \}\}/.test(yml('nightly.yml')), 'nightly.yml hands on the last nightly (or release) to test from')
 
 process.exit(done().fail ? 1 : 0)

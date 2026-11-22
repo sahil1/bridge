@@ -218,7 +218,7 @@ ok(/assembleRelease/.test(android) && /--v2-signing-enabled true/.test(android) 
 const build = android.split(/\n      - name: Build\n/)[1]?.split(/\n      - /)[0] || ''
 ok(!!build && !/secrets\./.test(build), 'Gradle\'s step never gets the key (only the signing step does)', build)
 const publish = release.split(/\n  release:\n/)[1] || ''
-ok(/^\s+if: \$\{\{ !cancelled\(\) && \(startsWith\(github\.ref, 'refs\/tags\/v'\) \|\| inputs\.nightly\) && needs\.build\.result == 'success' \}\}$/m.test(publish) && /needs: \[build, android\]/.test(publish), 'the release waits for the Android app but publishes on the desktop builds alone', publish.slice(0, 400))
+ok(/^\s+if: \$\{\{ !cancelled\(\) && \(startsWith\(github\.ref, 'refs\/tags\/v'\) \|\| inputs\.nightly\) && needs\.test\.result == 'success' && needs\.build\.result == 'success' \}\}$/m.test(publish) && /needs: \[test, build, android\]/.test(publish), 'the release waits for the Android app but publishes on the tests and the desktop builds alone', publish.slice(0, 400))
 ok(/name: bridge-ai-android\n\s+path: Bridge-AI-android\.apk/.test(android) && /merge-multiple: true/.test(publish) && /sha256sum Bridge-AI-\* > SHA256SUMS\.txt/.test(publish) && /subject-path: out\/Bridge-AI-\*/.test(publish) && /gh release create .* out\/Bridge-AI-\*/.test(publish), 'the APK reaches the release job with the installers, and its checksum, attestation and upload come with theirs (Bridge-AI-*)')
 ok(/gh release upload "\$TAG" Bridge-AI-android\.apk SHA256SUMS\.txt/.test(backfill) && /subject-path: out\/Bridge-AI-android\.apk/.test(backfill) && /workflow_dispatch:/.test(backfill), 'android-apk.yml adds it to a release already out, with its attestation and SHA256SUMS.txt')
 const job = tests.split(/\n  android:\n/)[1] || ''

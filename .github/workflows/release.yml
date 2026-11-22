@@ -79,15 +79,18 @@ jobs:
           fi
 
   # Every test for a release to everyone; a nightly or a beta, only those for what changed since.
+  # Not Windows, nor Linux's tests in no browser: they stop nothing, and the run each night has them.
+  # The builds go at the same time, and nothing is published unless the tests pass.
   test:
     needs: guard
     uses: ./.github/workflows/test.yml
     with:
       base: ${{ needs.guard.outputs.base }}
+      optional: false
 
   build:
     name: Build (${{ matrix.platform }})
-    needs: test
+    needs: guard
     strategy:
       fail-fast: false
       matrix:
@@ -218,7 +221,7 @@ jobs:
   # Signed with the release key (scripts/android-key.sh sets these three secrets).
   android:
     name: Android
-    needs: test
+    needs: guard
     if: ${{ !inputs.nightly }}
     uses: ./.github/workflows/android.yml
     secrets:
@@ -228,9 +231,10 @@ jobs:
 
   release:
     name: Publish the release
-    # Waits for the Android app, but only the desktop builds decide: the APK never holds a release up.
-    if: ${{ !cancelled() && (startsWith(github.ref, 'refs/tags/v') || inputs.nightly) && needs.build.result == 'success' }}
-    needs: [build, android]
+    # Waits for the tests and the Android app, but only the tests and the desktop builds decide: the
+    # APK never holds a release up.
+    if: ${{ !cancelled() && (startsWith(github.ref, 'refs/tags/v') || inputs.nightly) && needs.test.result == 'success' && needs.build.result == 'success' }}
+    needs: [test, build, android]
     runs-on: ubuntu-latest
     # Writes the release, and signs where each download was built (GitHub's build provenance:
     # gh attestation verify <file> --repo sahil1/bridge). A nightly's notes read the pull requests
