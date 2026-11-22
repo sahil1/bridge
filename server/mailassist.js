@@ -52,9 +52,9 @@ const TWEAKS = {
 export function makeMailAssist({ cfg, mail, calendar, meetings, chat, zone }) {
   let learning = null
   let learnError = null
-  // The model you picked for meeting notes, else Mail's for that much text (text: what goes to it;
-  // with Auto, a short one on this computer; none, as for a long one).
-  const pickModel = async (text) => cfg.meetings?.model || await chat.pick(text)
+  // Mail's model for that much text (Models for Each Task; text: what goes to it; with Auto, a
+  // short one on this computer; none, as for a long one).
+  const pickModel = async (text) => chat.pick(text)
 
   // What you said in meetings: on a call, your mic's lines (the call's sound is everyone else); in a
   // room, the voice Who spoke says is you; a line named for someone else is theirs. A room whose

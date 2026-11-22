@@ -24,8 +24,13 @@ const LINES = [['them', 2, 'I led the move to electric vans at Northwind Traders
 try {
   await kit.api('/setup', { name: 'Tester' })
   await kit.api('/agents/catalog')
-  await kit.api('/settings', { meetings: { model: 'cli:claude', autoSummary: false, cleanup: false, nameSpeakers: false, folder: path.join(kit.home, 'Meeting notes') } }, 'PATCH')
+  await kit.api('/settings', { meetings: { autoSummary: false, cleanup: false, nameSpeakers: false, folder: path.join(kit.home, 'Meeting notes') }, jobModels: { notes: ['cli:claude'] } }, 'PATCH')
   out(usual, true)
+  // Signed in to Claude Code, so it's one of the models reached: the notes on it, picked for them in
+  // Models for Each Task, and live AI Assist on its own row, Automatic, which is your sign-in first.
+  fs.writeFileSync(path.join(usual, '.credentials.json'), '{}')
+  await kit.api('/subscriptions?refresh=1')
+  await kit.api('/chat/models?refresh=1')
 
   // Your usual login out, and no other account: Assist says why.
   const J = await kit.api('/meetings', { title: 'Interview - Mara Lind', call: false })
