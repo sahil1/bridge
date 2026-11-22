@@ -1,13 +1,14 @@
-# Weekly pull requests for newer packages, GitHub Actions and the Docker image, once a version has
+# Monthly pull requests for newer packages, GitHub Actions and the Docker image, once a version has
 # been out for two weeks, the wait every package added here keeps to, so a bad publish is usually
 # pulled before we see it (at a week, a group's newest versions were often too new to merge).
-# Security fixes come as soon as they're out (Dependabot security updates, set on the repo).
+# Monthly, as each one runs most of the tests on the few Mac machines a change waits for. Security
+# fixes come as soon as they're out (Dependabot security updates, set on the repo).
 version: 2
 updates:
   - package-ecosystem: npm
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
     cooldown:
       default-days: 14
     groups:
@@ -16,7 +17,7 @@ updates:
   - package-ecosystem: npm
     directory: /desktop
     schedule:
-      interval: weekly
+      interval: monthly
     cooldown:
       default-days: 14
     groups:
@@ -25,13 +26,13 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
     cooldown:
       default-days: 14
   - package-ecosystem: docker
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
     cooldown:
       default-days: 14
     # The image stays on an LTS Node.js: odd majors never become one. Dependabot can't say "odd",

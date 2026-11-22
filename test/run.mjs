@@ -9,9 +9,11 @@
 //   --lanes N     how many at once (default 3; each has its own server and port)
 //   --browser webkit|chromium|both          which engine the app's tests run in (default chromium)
 //   --no-retry    report a failure straight away instead of running it once more on its own
-//   --browser-only   only the tests that run in a browser (CI's WebKit machines: the macOS one runs
-//                    the rest on the same system)
-//   --shard I/N   the I-th of N shares of those tests, each about as long (CI splits WebKit's in two)
+//   --browser-only   only the tests that run in a browser (CI's WebKit machines, and Linux's in
+//                    Chromium)
+//   --no-browser     only the tests that run in no browser (CI's macOS machine for them)
+//   --shard I/N   the I-th of N shares of those tests, each about as long (CI splits them across
+//                 machines)
 // The app is built first when its source is newer than the build. A test that fails, then passes
 // on its own, is reported as flaky rather than failed. Logs and pictures go in test/.out.
 import { spawn, spawnSync, execFileSync } from 'node:child_process'
@@ -269,8 +271,9 @@ else if (named.length) {
   }
 }
 if (flag('--browser-only')) pick = pick.filter((s) => s.browser)
+if (flag('--no-browser')) pick = pick.filter((s) => !s.browser)
 if (shard) pick = shareOf(pick, shard[0], shard[1])
-if (!pick.length && !flag('--list')) { console.log(`None of these tests is ${shard ? 'in this share' : 'in a browser'}.`); process.exit(0) }
+if (!pick.length && !flag('--list')) { console.log(`None of these tests is ${shard ? 'in this share' : flag('--no-browser') ? 'in no browser' : 'in a browser'}.`); process.exit(0) }
 if (flag('--list')) {
   console.log(JSON.stringify({ names: pick.map((s) => s.name), browser: pick.some((s) => s.browser) }))
   process.exit(0)

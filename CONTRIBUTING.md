@@ -61,6 +61,7 @@ Write the app in English and wrap what people see in `t()` from `src/i18n/index.
 - **Updating a pack:** `node scripts/i18n.js todo es es-todo.json` writes what Spanish is missing, with the file each string shows in. Translate it (add `"to"` to each, or make a `{ "English": "Spanish" }` file), then `node scripts/i18n.js add es es-todo.json` puts it in, refusing anything with the wrong `{placeholders}`.
 - **A new language:** the same two commands with its code (`ko`, `it`, `zh-TW`). The pack's file is all it takes: Settings › Appearance lists it, named in its own words, and Match this computer picks it.
 - **Keeping them tidy:** `node scripts/i18n.js check` shows how far each pack has got and fails on a broken placeholder. `node scripts/i18n.js prune` takes out strings the app no longer uses.
+- **When:** the packs are brought up to date before each feature release (3.13.0), with its full run. Changes, nightlies and patch releases go in English, and a new string shows in English in every language until then.
 
 ## Running your own
 
@@ -86,11 +87,14 @@ own on its own Cloudflare account:
 
 For the project's owner, or a fork's: what `npm run release` puts out, and who is offered it.
 
-- **The cadence.** Changes go to main through the week, each tested for what it changes, and your
-  own computers get each night's main (Nightly, below), tested for what changed since the night
-  before. A release goes to everyone at the weekend: Friday night's run tests every test on main,
-  and the release runs every test again before it's built. A fix that can't wait is a patch release
-  at any time.
+- **The cadence.** Changes go to main through the week, each tested for what it changes on macOS
+  (Chromium, and WebKit for the tests in a browser), and your own computers get each night's main
+  (Nightly, below), tested for what changed since the night before. A merge to main runs no tests
+  of its own: its pull request's did, and the nightly's cover what changed since the last. A
+  release goes to everyone at the weekend: Friday night's run tests every test on main, and the
+  release runs every test again before it's built. Windows and Linux run in those full runs, where
+  a failure is said but doesn't stop the release. A fix that can't wait is a patch release at any
+  time.
 - **Shipping from your computer, a step at a time** (`npm run ship`, `scripts/ship.js`; git and the
   GitHub CLI signed in). `npm run ship` says where things stand: this branch, main's version, the
   newest nightly, beta and release, the runs going, and this computer's version and channel.

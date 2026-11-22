@@ -56,8 +56,27 @@ ok(/schedule:\s*\n\s*- cron: '0 6 \* \* 6'/.test(test), 'Friday night (6:00 UTC 
 ok(/test:\n\s*name: Tests \(\$\{\{ matrix\.name \}\}\)\n\s*needs: scope\n\s*if: needs\.scope\.outputs\.count != '0'/.test(test) && /node test\/run\.mjs \$ARGS --lanes 2/.test(test), 'the test machines only when a test applies, running just those')
 ok(/- name: Tests\n\s*if: steps\.share\.outputs\.count != '0'\n\s*shell: bash\n\s*env:\n\s*ARGS: \$\{\{ needs\.scope\.outputs\.args \}\} \$\{\{ matrix\.share \}\}\n\s*run: node test\/run\.mjs \$ARGS /.test(test), 'the tests in bash on Windows too, where PowerShell reads $ARGS as its own empty list (and ran none, 16 Nov)')
 const job = test.split('\n  test:\n')[1]?.split('\n  ios:\n')[0] || ''
-const machines = [...job.matchAll(/- os: (\S+)\n\s*name: (.+)\n\s*browser: (\w+)(?:\n\s*share: (.+))?/g)].map((m) => ({ os: m[1], name: m[2], browser: m[3], share: m[4] || '' }))
-ok(JSON.stringify(machines.map((m) => [m.os, m.browser, m.share])) === JSON.stringify([['macos-15', 'chromium', ''], ['macos-15', 'webkit', '--browser-only --shard 1/2'], ['macos-15', 'webkit', '--browser-only --shard 2/2'], ['windows-latest', 'chromium', ''], ['ubuntu-22.04', 'chromium', '']]), 'every suite in Chromium on macOS, Windows and Linux; on macOS the ones in a browser in WebKit too, in two shares', machines)
+// The machines, as the scope picks them (its script run here on made-up counts of tests): those in no
+// browser on macOS; those in a browser in WebKit on macOS, in two shares from 16, and in Chromium on
+// Linux, a share for each 25 or so up to four; Windows, and Linux's in no browser, only for every
+// test, and optional there.
+const pick = scope.match(/node -e '\n([\s\S]*?)\n {10}'/)?.[1] || ''
+const machinesFor = (browser, none, all = false) => {
+  const dir = fs.mkdtempSync(path.join(ROOT, 'test', '.out', 'scope-'))
+  try {
+    fs.writeFileSync(path.join(dir, 'scope-browser.json'), JSON.stringify({ names: Array(browser).fill('x') }))
+    fs.writeFileSync(path.join(dir, 'scope-none.json'), JSON.stringify({ names: Array(none).fill('x') }))
+    const out = path.join(dir, 'out')
+    execFileSync(process.execPath, ['-e', pick], { cwd: dir, env: { ...process.env, GITHUB_OUTPUT: out, ALL: all ? '1' : '' } })
+    return JSON.parse(fs.readFileSync(out, 'utf8').replace(/^machines=/, '')).include.map((m) => [m.os, m.browser, m.share, m.optional && 'optional'].filter(Boolean).join(' '))
+  } catch (e) { return [`failed: ${e.message}`] } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+}
+const every = machinesFor(107, 46, true), big = machinesFor(107, 46), small = machinesFor(10, 3), quiet = machinesFor(0, 5)
+const lx = (n) => Array.from({ length: n }, (_, i) => `ubuntu-22.04 chromium --browser-only --shard ${i + 1}/${n}`)
+const mac = ['macos-15 chromium --no-browser', 'macos-15 webkit --browser-only --shard 1/2', 'macos-15 webkit --browser-only --shard 2/2']
+ok(JSON.stringify(big) === JSON.stringify([...mac, ...lx(4)]) && JSON.stringify(every) === JSON.stringify([...mac, ...lx(4), 'windows-latest chromium optional', 'ubuntu-22.04 chromium --no-browser optional']) && JSON.stringify(small) === JSON.stringify(['macos-15 chromium --no-browser', 'macos-15 webkit --browser-only', 'ubuntu-22.04 chromium --browser-only']) && JSON.stringify(quiet) === JSON.stringify(['macos-15 chromium --no-browser']), 'the tests in no browser on macOS, the ones in a browser in WebKit on macOS and in Chromium on Linux, in shares when there are many; Windows and the rest of Linux only for every test, and optional', { every, big, small, quiet })
+ok(/matrix: \$\{\{ fromJSON\(needs\.scope\.outputs\.machines\) \}\}/.test(job) && /continue-on-error: \$\{\{ matrix\.optional \}\}/.test(job) && /--list \$args --browser-only > scope-browser\.json/.test(scope) && /--list \$args --no-browser > scope-none\.json/.test(scope), 'the test job takes the machines the scope picked, an optional one failing without failing the run')
+ok(!/^  push:/m.test(test.split('\njobs:\n')[0]), 'a merge to main runs no tests of its own (its pull request\'s did, and the nightly covers what changed since)')
 const steps = job.split('\n    steps:\n')[1] || ''
 const share = steps.split('\n      - id: share\n')[1]?.split('\n\n')[0] || ''
 ok(/ARGS: \$\{\{ needs\.scope\.outputs\.args \}\} \$\{\{ matrix\.share \}\}/.test(share) && /node test\/run\.mjs --list \$ARGS > share\.json/.test(share) && /echo "count=/.test(share), 'each machine works out its own tests first', share)
