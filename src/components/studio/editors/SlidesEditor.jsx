@@ -1162,13 +1162,24 @@ function Slides({ doc, file, onDirty, onStats, handle, readOnly = false, onOpen 
       await img.decode?.().catch(() => {})
       const c = document.createElement('canvas')
       c.width = W * scale; c.height = H * scale
-      // WebKit draws the pictures in it only once it's drawn it before (the first time, a slide
-      // without its photos): drawn, then a moment later drawn again.
+      // WebKit draws the pictures in it only once it's decoded them, which a draw starts (the first
+      // time, a slide without its photos): drawn again and again, a little longer apart each time,
+      // until it comes out the same twice (three times at least; three seconds at most).
       const g = c.getContext('2d')
-      g.drawImage(img, 0, 0, W * scale, H * scale)
-      await new Promise((r) => setTimeout(r, 120))
-      g.clearRect(0, 0, c.width, c.height)
-      g.drawImage(img, 0, 0, W * scale, H * scale)
+      const small = document.createElement('canvas')
+      small.width = 64; small.height = 36
+      const sg = small.getContext('2d', { willReadFrequently: true })
+      const look = () => { sg.clearRect(0, 0, 64, 36); sg.drawImage(c, 0, 0, 64, 36); return sg.getImageData(0, 0, 64, 36).data.join(',') }
+      let drawn = null
+      const stopAt = Date.now() + 3000
+      for (let n = 0; ; n++) {
+        g.clearRect(0, 0, c.width, c.height)
+        g.drawImage(img, 0, 0, W * scale, H * scale)
+        const now = look()
+        if ((n >= 2 && now === drawn) || Date.now() > stopAt) break
+        drawn = now
+        await new Promise((r) => setTimeout(r, 120 * (n + 1)))
+      }
       const blob = await new Promise((ok, no) => { try { c.toBlob((b) => (b ? ok(b) : no(new Error(t('the browser couldn\'t draw it')))), 'image/png') } catch (e) { no(e) } })
       const a = document.createElement('a')
       a.href = URL.createObjectURL(blob)

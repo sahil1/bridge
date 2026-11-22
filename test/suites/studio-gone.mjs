@@ -50,10 +50,11 @@ try {
   // A document moved to another folder while it's typed in: said, found where it went, kept editing there.
   await openHere(p, 'Notes/Draft plan.md')
   await p.locator('.sd-page .ProseMirror', { hasText: 'Ship on Friday' }).waitFor({ timeout: 20000 })
-  fs.mkdirSync(path.join(dir, 'Moved'))
-  fs.renameSync(path.join(dir, 'Draft plan.md'), path.join(dir, 'Moved', 'Draft plan.md'))
+  // (In it first: the bar coming moves what's under a click.)
   await p.locator('.sd-page .ProseMirror').click()
   await p.keyboard.press(`${MOD}+End`)
+  fs.mkdirSync(path.join(dir, 'Moved'))
+  fs.renameSync(path.join(dir, 'Draft plan.md'), path.join(dir, 'Moved', 'Draft plan.md'))
   await p.keyboard.type(' Typed after it moved.')
   const said = await until(async () => { const x = await bar(p).innerText().catch(() => ''); return /It's in ~\/Notes\/Moved\/Draft plan\.md now/.test(x) ? x : null }, 20000, 200)
   ok(/^Draft plan\.md was moved or deleted while it was open\./.test(said || '') && /Your changes are still here, kept as a draft/.test(said || ''), 'a document moved while typed in: "Draft plan.md was moved or deleted while it was open", where it is now, and its changes kept', said || await bar(p).innerText().catch(() => ''))
@@ -111,10 +112,13 @@ try {
   const q = ph.p
   await openHere(q, 'Notes/Phone note.md')
   await q.locator('.sd-page .ProseMirror', { hasText: 'Call the site' }).waitFor({ timeout: 20000 })
-  fs.rmSync(path.join(dir, 'Phone note.md'))
+  // Typed in and saved; deleted; typed in again (the keyboard still in it: the bar coming moves what's under a tap).
   await q.locator('.sd-page .ProseMirror').click()
   await q.keyboard.press(`${MOD}+End`)
   await q.keyboard.type(' From the phone.')
+  await until(() => /From the phone/.test(fs.readFileSync(path.join(dir, 'Phone note.md'), 'utf8')), 10000, 200)
+  fs.rmSync(path.join(dir, 'Phone note.md'))
+  await q.keyboard.type(' And after.')
   const onPhone = await until(async () => { const x = await bar(q).innerText().catch(() => ''); return /Phone note\.md was moved or deleted/.test(x) && !/Looking for where it went/.test(x) ? x : null }, 20000, 200)
   ok(!!onPhone, 'on a phone: a note deleted while typed in, said', onPhone)
   await sleep(300)
@@ -124,7 +128,7 @@ try {
   const dl = q.waitForEvent('download', { timeout: 15000 })
   await bar(q).locator('button', { hasText: 'Download' }).click()
   const got = await dl.then((d) => d.path()).then((x) => fs.readFileSync(x, 'utf8'), () => '')
-  ok(/^# Phone note/.test(got) && /From the phone\./.test(got) && !drafts().length, 'Download: the note with what was typed, to the phone', got)
+  ok(/^# Phone note/.test(got) && /From the phone\. And after\./.test(got) && !!(await until(() => !drafts().length, 5000, 100)), 'Download: the note with what was typed, to the phone, and its draft let go', got)
   ok(!ph.errors.length, 'no page errors on the phone', ph.errors.slice(0, 3))
 } catch (err) {
   ok(false, `crashed: ${err.stack}`)

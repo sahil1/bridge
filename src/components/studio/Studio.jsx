@@ -415,14 +415,20 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
   const draftAt = useRef(null)
   // What's in the editor now, as the file's bytes (or text).
   const current = async () => { let b = await handle.current.save(); if (b && typeof b === 'object' && Array.isArray(b.notKept)) b = b.bytes; return b }
+  // Its draft kept and let go one after another, so one on its way never lands after it's let go
+  // (what's in the editor taken at once, sent in turn).
+  const draftOps = useRef(Promise.resolve())
+  const inTurnDraft = (fn) => (draftOps.current = draftOps.current.then(fn, fn))
   const keepNow = async () => {
     const m = metaRef.current
     if (!handle.current?.save || !m || READ_ONLY(m.kind, m)) return
     try {
-      await keepDraft(f, await current(), { kind: m.kind, inParts: !!m.parts })
+      const b = await current()
+      await inTurnDraft(() => keepDraft(f, b, { kind: m.kind, inParts: !!m.parts }))
       if (goneRef.current) setLost({ ...goneRef.current, draft: true, draftError: null })
     } catch (e) { if (goneRef.current) setLost({ ...goneRef.current, draftError: e.message }) }
   }
+  const letDraftGo = () => { clearTimeout(draftAt.current); return inTurnDraft(() => dropDraft(f).catch(() => {})) }
   const keepRef = useRef(null)
   keepRef.current = keepNow
   const lost = async () => {
@@ -636,8 +642,7 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
   // ---------- Gone: its bar's ways out ----------
   // Saved somewhere (where it went, or a copy): its draft goes, and that file opens in this tab.
   const doneWith = async (to) => {
-    clearTimeout(draftAt.current)
-    await dropDraft(f).catch(() => {})
+    await letDraftGo()
     dirtyRef.current = false
     setDirty(false)
     setLost(null)
@@ -674,8 +679,7 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
       a.download = m.name
       document.body.appendChild(a); a.click(); a.remove()
       setTimeout(() => URL.revokeObjectURL(a.href), 60_000)
-      clearTimeout(draftAt.current)
-      await dropDraft(f).catch(() => {})
+      await letDraftGo()
       dirtyRef.current = false
       setDirty(false)
       setLost({ ...goneRef.current, draft: false, error: null, downloaded: true })

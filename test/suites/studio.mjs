@@ -276,7 +276,9 @@ try {
   // Saved by you in another window: said as yours, not another app's.
   {
     const w2 = await page(b, kit.url, { width: 1200, height: 800, before: noServiceWorker })
-    await until(async () => { await w2.p.evaluate((detail) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail })), F('notes.md')); return /Changed by another app/.test(await w2.p.locator('.sd-page .ProseMirror').innerText().catch(() => '')) }, 20000, 700)
+    await w2.p.locator('.app').first().waitFor({ timeout: 20000 }).catch(() => {})
+    const second = await until(async () => { if (!(await w2.p.locator('.sd-file').count())) await w2.p.evaluate((detail) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail })), F('notes.md')); return /Changed by another app/.test(await w2.p.locator('.sd-page .ProseMirror').innerText().catch(() => '')) }, 40000, 1000)
+    if (!second) console.log('the second window, as far as it got:', (await w2.p.locator('body').innerText().catch(() => '')).slice(0, 400))
     await w2.p.locator('.sd-page .ProseMirror').click()
     await w2.p.keyboard.press(process.platform === 'darwin' ? 'Meta+End' : 'Control+End')
     await w2.p.keyboard.type(' From my other window.')
