@@ -26,6 +26,10 @@ on:
         description: Only the tests for what changed since this commit or tag (empty runs every test)
         type: string
         default: ''
+      optional:
+        description: With every test, Windows and Linux's tests in no browser too, which stop nothing (a release leaves them to the run each night)
+        type: boolean
+        default: true
   workflow_dispatch:
     inputs:
       base:
@@ -64,6 +68,7 @@ jobs:
           EVENT: ${{ github.event_name }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
           BEFORE: ${{ github.event.before }}
+          OPTIONAL: ${{ inputs.optional }}
         run: |
           if [ -n "$ASKED" ]; then base="$ASKED"
           elif [[ "$GITHUB_REF" == refs/tags/* ]]; then base=
@@ -90,7 +95,7 @@ jobs:
           # The machines: the tests in no browser on macOS; the ones in a browser in WebKit on macOS
           # (two shares from 16, about 20 minutes on one) and in Chromium on Linux (a share for each
           # 25 or so, up to four). Windows, and Linux's in no browser, only for every test, where a
-          # failure doesn't stop the run (optional).
+          # failure doesn't stop the run (optional), and not for a release, which would wait on them.
           ALL="$([ -z "$base" ] && echo 1)" node -e '
             const b = require("./scope-browser.json").names.length, none = require("./scope-none.json").names.length
             const shares = (k, most) => (k ? Array.from({ length: Math.min(most, Math.max(1, Math.ceil(k / 25))) }, (_, i) => i + 1) : [])
@@ -101,7 +106,7 @@ jobs:
             for (const i of wk) m.push({ os: "macos-15", name: `macOS WebKit${of(i, wk)}`, browser: "webkit", share: `--browser-only${wk.length > 1 ? ` --shard ${i}/${wk.length}` : ""}`, optional: false })
             const lx = shares(b, 4)
             for (const i of lx) m.push({ os: "ubuntu-22.04", name: `Linux${of(i, lx)}`, browser: "chromium", share: `--browser-only${lx.length > 1 ? ` --shard ${i}/${lx.length}` : ""}`, optional: false })
-            if (process.env.ALL) m.push({ os: "windows-latest", name: "Windows", browser: "chromium", share: "", optional: true }, { os: "ubuntu-22.04", name: "Linux, no browser", browser: "chromium", share: "--no-browser", optional: true })
+            if (process.env.ALL && process.env.OPTIONAL !== "false") m.push({ os: "windows-latest", name: "Windows", browser: "chromium", share: "", optional: true }, { os: "ubuntu-22.04", name: "Linux, no browser", browser: "chromium", share: "--no-browser", optional: true })
             require("fs").appendFileSync(process.env.GITHUB_OUTPUT, `machines=${JSON.stringify({ include: m })}\n`)
           '
           if [ -n "$base" ]; then

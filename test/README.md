@@ -37,7 +37,8 @@ ahead that `stand-ins/clock.mjs` reads (`remote-screen`: a locked screen's 15 mi
 GitHub Actions runs the tests on macOS, Windows and Linux (`.github/workflows/test.yml`), as many as
 the change needs: for a pull request or a push to main, the tests for the files it changes (each
 suite's `covers` below), and none when no test covers them; for a nightly build, those for what
-changed since the last nightly; and every test for a release (before it's built), each night (on
+changed since the last nightly; and every test for a release (while it's built, and published only
+once they pass; Windows and Linux's tests in no browser are left to the night's run), each night (on
 main, while nobody waits on it) and when run by hand (Actions › Tests ›
 Run workflow; give it a base to run only what changed since). `node test/run.mjs --list` says which
 it would run. On macOS the app's tests run in WebKit too, split between two machines
