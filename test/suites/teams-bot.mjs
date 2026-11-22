@@ -153,6 +153,8 @@ try {
     await x.p.locator('.needs-chip').click({ timeout: 15000 })
     const item = x.p.locator('.ny-item.t-slack', { hasText: 'demo ready' }).first()
     await item.waitFor({ timeout: 10000 })
+    const asked = await item.locator('.ny-text').innerText()
+    ok(/^Dana Reyes asked in Launch:/.test(asked), 'Needs You: asked in Launch, its channel as Teams names it (no #)', asked)
     await item.getByRole('button', { name: 'Send' }).click()
     const note = await until(async () => { const s = await x.p.locator('.ny-note').innerText().catch(() => ''); return /Sent to/.test(s) ? s : null }, 10000)
     ok(/Sent to Dana Reyes in Microsoft Teams/.test(note || ''), 'Send in Needs You: it says it went to Dana in Microsoft Teams', note)

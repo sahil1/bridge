@@ -373,7 +373,8 @@ export function OutsideItem({ it, onDone, setNote }) {
 // A run at its time limit is a card of its own (LimitItem); one stopped there for want of your
 // answer is a draft to write, with Continue as well, for a day.
 const sizeOf = (n) => (n == null ? '' : n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`)
-const whereOf = (it) => (it.place?.kind === 'dm' ? t('in a direct message') : it.place?.name ? t('in #{channel}', { channel: it.place.name }) : t('in a channel'))
+// (A Teams channel by its name alone, as Teams shows it: no # before it.)
+const whereOf = (it) => (it.place?.kind === 'dm' ? t('in a direct message') : it.place?.name ? (/^teams:/.test(String(it.place.id || it.conv || '')) ? t('in {place}', { place: it.place.name }) : t('in #{channel}', { channel: it.place.name })) : t('in a channel'))
 // Where it was asked, by the platform's own name: Discord's and Teams' places and conversations
 // carry their platform before them (server/connector.js), Slack's nothing.
 const platformOf = (it) => { const m = /^(discord|teams):/.exec(String(it.place?.id || it.conv || '')); return m ? (m[1] === 'teams' ? 'Microsoft Teams' : 'Discord') : 'Slack' }
