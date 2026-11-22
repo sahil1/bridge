@@ -27,6 +27,7 @@ import PermissionFix, { InstallFix, protectedFolder } from './PermissionFix.jsx'
 import { OfficeView, Menu, menuItems, NameDialog, fileOp, onComputer } from './FileExtras.jsx'
 import { MediaView, PictureView, OtherFile, useSave, canSave, saveLabel } from './FileMedia.jsx'
 import { ShareDialog } from './Share.jsx'
+import { useTrial } from '../trials.js'
 import { SendDialog, UploadSheet, TransferStrip, PlacesMenu, usePlaces, canCopyHere, copyHereLabel, canAddPlace, canDrag, dragData, dropOk, onDrop } from './Transfers.jsx'
 import { locale, t, tn, tx } from '../i18n/index.js'
 import { FileDrawing } from '../lazy.jsx'
@@ -477,6 +478,7 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
   const linked = (usePoll('/machines', 30000).data?.machines || []).some((m) => m.state === 'linked')
   const [send, setSend] = useState(null) // { src, here }
   const [sharing, setSharing] = useState(null) // what a Share Link is being made for (Share.jsx)
+  const shareOn = useTrial('share-links') // Share Link… only while Share Links (a beta feature) is on
   const [picked, setPicked] = useState(null) // files picked on this device, to send
   const [dropAt, setDropAt] = useState(false)
   const pickRef = useRef(null)
@@ -665,7 +667,7 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
             onOpen={({ rel, dir }) => { if (dir) { if (rel) open(rel, true) } else open(rel); if (narrow) setAssist(null) }} />
         </div>
       )}
-      {menu && <Menu x={menu.x} y={menu.y} items={menuItems(menu.entry, act, { onMention: place ? null : onMention, send: linked, copyHere: canCopyHere ? copyHereLabel() : null, assist: assistOn ? (e) => setAssist(e.path) : null, share: true })} onClose={closeMenu} />}
+      {menu && <Menu x={menu.x} y={menu.y} items={menuItems(menu.entry, act, { onMention: place ? null : onMention, send: linked, copyHere: canCopyHere ? copyHereLabel() : null, assist: assistOn ? (e) => setAssist(e.path) : null, share: shareOn })} onClose={closeMenu} />}
       {placesAt && <PlacesMenu x={placesAt.x} y={placesAt.y} agentName={agent.cwd.split(/[\\/]/).pop()} agentPath={agent.cwd.replace(/^\/Users\/[^/]+/, '~')} current={placeId} places={places}
         onPick={setPlaceId} onAdded={(p, gone) => { refreshPlaces(); if (p) setPlaceId(p.id); if (gone && gone.id === placeId) setPlaceId(null) }} onClose={() => setPlacesAt(null)} />}
       {send && <SendDialog src={send.src} here={send.here} onClose={() => setSend(null)} />}

@@ -143,7 +143,8 @@ export const SETTINGS = [
     ['remote-sessions', tx('Screen Activity'), 'screen activity record sessions who viewed controlled lockout denied', { when: 'remote-screen' }],
   ]),
   ...at('sharing', [
-    ['shares', tx('Share Links'), 'share link sharing shared public url outside people password email code expire stop qr'],
+    ['beta-share-links', tx('Share Links'), 'beta share link sharing shared public url outside people file folder document app'],
+    ['shares', tx('Links You Shared'), 'share link sharing shared public url outside people password email code expire stop qr', { when: 'share-links' }],
   ]),
   ...at('notifications', [
     ['this-device', tx('Notifications on this device'), 'notifications push turn on test'],
@@ -166,7 +167,7 @@ export const SETTINGS = [
     ['version', tx('Check for new versions'), 'version update check'],
     ['auto-update', tx("Update by itself while you're away"), 'auto update automatic', { when: 'desktop', near: 'version' }],
     ['channel', tx('Update Channel'), 'channel stable early access beta pre-release nightly testers'],
-    ['beta', tx('Beta Features'), 'beta trials usage board answers slack bots remote screen video speakers'],
+    ['beta', tx('Beta Features'), 'beta trials usage board answers slack bots remote screen video speakers share links'],
     ['usage-counts', tx('Usage Counts'), 'telemetry analytics anonymous share privacy', { near: 'privacy' }],
     ['crash-reports', tx('Crash Reports'), 'crash reports send privacy', { near: 'privacy' }],
     ['privacy', tx('Privacy'), 'privacy usage counts crash reports what is sent'],

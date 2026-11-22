@@ -58,14 +58,15 @@ let conf = (() => { try { const d = JSON.parse(fs.readFileSync(FILE, 'utf8')); r
 for (const s of conf.shares) { s.codes ||= {}; s.sent ||= {}; s.wrong ||= {}; s.passes ||= [] }
 const save = () => { ensureDir(path.dirname(FILE)); writeFileAtomic(FILE, JSON.stringify(conf, null, 2), { mode: 0o600 }) }
 
-// What the rest of Bridge AI gives this (index.js): where links open (relay.js shareAt: the link's
+// What the rest of Bridge AI gives this (index.js): whether Share Links is on (on: a beta feature,
+// src/trials.js 'share-links'), where links open (relay.js shareAt: the link's
 // page, and its content address when the relay has one), who shares (your name, else this
 // computer's), an app's port checked (isDevPort; devPortWhy: why not, when this computer couldn't
 // tell), the pages open on a link ended (endViewers) and counted (viewersOf), your devices told
 // (notify), the emails a link names told to the accounts service (namePeople) and a code emailed to
 // one of them (sendCode, account.js), and whether an email can be sent at all (canEmail).
 let hooks = {
-  shareAt: () => ({ why: 'relay' }), ready: async () => {}, relayLimits: () => null, owner: () => '', computer: () => 'This computer', isDevPort: async () => false, devPortWhy: () => null, ownPorts: () => [],
+  on: () => true, shareAt: () => ({ why: 'relay' }), ready: async () => {}, relayLimits: () => null, owner: () => '', computer: () => 'This computer', isDevPort: async () => false, devPortWhy: () => null, ownPorts: () => [],
   endViewers: () => {}, viewersOf: () => 0, waitingOf: () => 0, notify: () => {}, namePeople: async () => { throw new Error('No email') }, forgetPeople: async () => {}, sendCode: async () => { throw new Error('No email') }, canEmail: () => false, changed: () => {},
 }
 export const use = (h) => { hooks = { ...hooks, ...h } }
@@ -98,8 +99,16 @@ async function view(s, asker) {
 }
 const linkOf = (s) => `${s.at}/v/${s.id}#s=${s.secret}${hooks.owner() ? `&n=${encodeURIComponent(hooks.owner())}` : ''}`
 
+// Share Links is a beta feature, off until it's turned on. Off, no new link is made, here, from
+// another of your devices or by a bot (can, create). The links already made stay as they are: listed,
+// opened by whoever has them and stopped, until they end or you stop them (the link's page and what it
+// asks, answer(), never ask whether it's on), so nobody is cut off in the middle of what you shared.
+export const OFF = `Share Links is a Beta Feature: turn it on in ${placeEn('beta')}.`
+export const on = () => hooks.on() === true
+
 // Whether a link can be made here now, and why not.
 export function can() {
+  if (!on()) return { ok: false, why: 'trial', trial: 'share-links', text: OFF }
   const at = hooks.shareAt()
   if (at.why === 'relay') return { ok: false, why: 'relay', text: `Share Links go through a relay. Set one up in ${placeEn('phone')} first.` }
   if (at.why === 'hosted') return { ok: false, why: 'hosted', text: `Bridge AI's relay doesn't open Share Links yet: links work there once it's updated. A relay on your own Cloudflare account opens them now (${placeEn('phone')}).` }

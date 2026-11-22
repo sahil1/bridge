@@ -9,7 +9,9 @@
 // Whiteboards on the phone, in Studio (More has no Whiteboards row, nor a Dictations row: Dictations is
 // a tab of Meetings; nor a Folders row: Studio's home is your folders): the list, picked in Studio's
 // sidebar, a board opened from it (with its way back to Studio), and AI Assist's Draw this;
-// a phone that had the old Terminals tab open gets Terminals in More.
+// Share Links, a beta feature, on a phone as on a computer: its switch at the top of Settings › Devices
+// & Access › Share Links over the links, turned on from there, its Beta card in Your Features, and its
+// switch first in Studio › Shared; a phone that had the old Terminals tab open gets Terminals in More.
 //
 // Then Settings, as a phone's settings: it opens at the list of every section (a whole row each,
 // with its icon and what's in it), a section opens full width under ‹ Settings and its name, with
@@ -434,6 +436,39 @@ try {
     await ph.ctx.close()
   }
   await kit.api('/settings', { home: { on: false } }, 'PATCH')
+
+  // ---------- Share Links, a beta feature, on a phone ----------
+  // As on a computer: off, Settings › Devices & Access › Share Links has its switch at the top, then
+  // the links; turned on there from the phone, it's on, and Your Features has its Beta card, on;
+  // Studio › Shared has the switch first too.
+  {
+    const ph = await page(b, kit.url, { phone: true })
+    await ph.p.setViewportSize({ width: 375, height: 860 })
+    await ph.p.waitForSelector('.tabbar button', { timeout: 20000 })
+    await ph.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'sharing' } })))
+    const sw = ph.p.locator('.modal.settings .st-sections > .st-beta[data-beta="share-links"]:first-child')
+    const there = await sw.waitFor({ timeout: 8000 }).then(() => true, () => false)
+    ok(there && await sw.locator('.st-chip.beta').count() === 1 && !(await sw.locator('input[role="switch"]').isChecked()) && await ph.p.locator('.modal.settings [data-setting="shares"]').isVisible(), 'Share Links on a phone: Settings › Devices & Access › Share Links has its switch at the top, marked Beta and off, then the links')
+    const f = await phoneFaults(ph.p, '.modal.settings')
+    ok(!Object.keys(f).length, 'Share Links on a phone: it fits (nothing wider, cut off or too small to tap)', f)
+    await shot(ph.p, `${tag}phone-share-links-beta`)
+    await sw.locator('input[role="switch"]').click()
+    ok(!!(await until(async () => (await kit.api('/config')).trials?.['share-links'] === true, 5000)), 'Share Links on a phone: turned on there, it\'s on')
+    await ph.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'features' } })))
+    const card = ph.p.locator('.ft-card[data-feature="share-links"]')
+    ok(await card.waitFor({ timeout: 8000 }).then(() => true, () => false) && await card.locator('.st-chip.beta').count() === 1 && await card.locator('input[role="switch"]').isChecked(), 'Share Links on a phone: Your Features has its Beta card, its switch on')
+    await ph.p.locator('.modal.settings [aria-label="Close settings"]').click()
+    await ph.p.locator('.tabbar button', { hasText: 'More' }).click()
+    await ph.p.locator('.tabbar button', { hasText: 'More' }).click()
+    await ph.p.locator('.m-more-row', { hasText: 'Studio' }).click()
+    await ph.p.waitForSelector('.sd-home', { timeout: 15000 })
+    await ph.p.locator('.fx-bar button[aria-label="All locations"]').click()
+    await ph.p.locator('.fx-side-row[data-shelf="shared"]').click()
+    ok(await ph.p.locator('.sd-shared > .st-beta[data-beta="share-links"]:first-child input[role="switch"]').waitFor({ timeout: 8000 }).then(() => true, () => false), 'Share Links on a phone: Studio › Shared has its switch first')
+    ok(!ph.errors.filter((e) => !/\/api\/\S+ due to access control checks|^TypeError: Importing a module script failed\.$/.test(e)).length, 'Share Links on a phone: no page errors', ph.errors)
+    await ph.ctx.close()
+    await kit.api('/settings', { trials: { 'share-links': false } }, 'PATCH')
+  }
 
   // A phone that had the Terminals tab open (before More): Terminals, in More.
   const old = await page(b, kit.url, { phone: true, store: { 'cc-mtab': 'herdr' } })

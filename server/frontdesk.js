@@ -401,8 +401,9 @@ function sendsOf({ plat, you, outbox, attach = null, config = false }) {
 // A bot that changes files (route.to 'write') is told where its copy of each write folder is, and that
 // Bridge AI makes the change; one that hands changes to files on (handsTo: [{ name, description,
 // folders }]) is told to answer HAND TO <name> for one of those.
-// A session's (session: { bash: { on, why }, roster, push, notes }): what it can run, the bots a
-// Chief hands to or asks, that a push waits for you; consulted: a bot it asked has answered.
+// A session's (session: { bash: { on, why }, roster, push, notes, linksOff }): what it can run, the
+// bots a Chief hands to or asks, that a push waits for you, that Share Links is off (it has no
+// share_link then); consulted: a bot it asked has answered.
 export function briefOf({ bot, you, q, route, folders, ins, ctx, pending, auto, memory = [], attached = [], agents = null, scheduled = null, github = [], noChange = false, outbox = null, attach = null, turns = [], earlier = [], resumed = null, handsTo = [], session = null, consulted = null }, max = BRIEF_MAX) {
   const who = (p) => (p?.masked ? p.name : nameSafe(p?.name) || 'someone')
   // (Where it was asked: Slack, Discord or Microsoft Teams, and what people call the place there.)
@@ -433,6 +434,8 @@ export function briefOf({ bot, you, q, route, folders, ins, ctx, pending, auto, 
     head.push('')
   }
   if (session?.notes?.length) head.push(...session.notes, '')
+  // (Share Links turned off, a beta feature: no share_link, and a link asked for said to be off.)
+  if (session?.linksOff) head.push(`Share Links is off in Bridge AI: it's a Beta Feature ${you} hasn't turned on, so you have no way to give anyone a link to a file or a folder. If you're asked for one, say so, and that ${you} can turn it on in ${placeEn('beta')}.`, '')
   if (route.to === 'agent') head.push(`This is a copy of the conversation of ${you}'s agent working on "${route.name}" in this folder: answer from what it knows and what's here. Don't carry on with its work.${folders.length > 1 ? ` You can read these folders too: ${folders.slice(1).join(', ')}.` : ''}`, '')
   else if (route.to === 'write') { if (folders.length) head.push(`You can read ${folders.length > 1 ? 'these folders' : 'this folder'} too: ${folders.join(', ')}.`, '') }
   else if (folders.length) head.push(`You can read ${folders.length > 1 ? 'these folders' : 'this folder'}: ${folders.join(', ')}${folders.length > 1 ? ' (the first is the one you\'re in)' : ''}. Answer from what's in ${folders.length > 1 ? 'them' : 'it'}, and name the files an answer comes from.`, '')
@@ -1706,8 +1709,10 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     // commands change and the push it may ask for.)
     const fullRepo = full ? await changes.stateOf(route.cwd).catch(() => null) : null
     // (Every session may ask for a Share Link, but a bot a Chief asks: made at once for you alone,
-    // else after your OK, shareFor.)
-    const sessionOpts = s ? { push: !!tree || !!fullRepo?.remote, share: !q.consult, roster, who: ownerName(bot), bash: bash.on ? { domains: bot.domains || [], cwd: route.cwd, dirs: route.dirs, writable: !!(stage || tree) || route.to === 'throwaway', tmp: botsessions.tmpOf(s.id) } : null } : null
+    // else after your OK, shareFor. Only while Share Links, a beta feature, is on: off, its brief
+    // says so instead.)
+    const linksOff = !!s && !q.consult && !shares.on()
+    const sessionOpts = s ? { push: !!tree || !!fullRepo?.remote, share: !q.consult && shares.on(), roster, who: ownerName(bot), bash: bash.on ? { domains: bot.domains || [], cwd: route.cwd, dirs: route.dirs, writable: !!(stage || tree) || route.to === 'throwaway', tmp: botsessions.tmpOf(s.id) } : null } : null
     if ((bot.mcp?.length || outbox || guarded || s) && route.kind === 'claude') {
       try { mcp = await botmcp.runFolder(bot, { all, key: s ? s.id : `${q.id}-${q.runs.length + 1}`, outbox, write: guarded, attach: attachFrom, reads, own, session: sessionOpts, full: full ? { undo: path.join(SESSIONS, s.id, 'undo'), roots: paths } : null }) } catch (e) { mcp = { dir: null, servers: [], missing: [], problem: oneLine(e.message, 200) } }
       // (Without its hook, it doesn't run: nothing that changes files starts unchecked.)
@@ -1748,7 +1753,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     const handsTo = bot.changes === 'none' && !q.routine ? (bot.handsTo || []).map((x) => botOf(x)).filter((x) => x && !x.draft && editsFiles(x) && bots.has(x.id)).map((x) => ({ id: x.id, name: x.name, description: x.description, folders: x.writesTo })) : []
     let { text: brief, cut } = route.resume
       ? { text: turnTextOf({ bot, q, pending, ctx, attached, notes, consulted, editsHere: !!stage || !!tree, full }), cut: null }
-      : briefOf({ bot, you: ownerName(bot), q, route, folders: at0.filter((d) => !inside(d, FILES) && !inside(d, botmcp.RUNS) && !inside(d, botfiles.OUTBOX) && !inside(d, SESSIONS) && !(route.to === 'throwaway' && inside(d, ANSWERS))).map(shown), ins, ctx, pending, auto, memory, attached, agents: agentsNow, scheduled: q.routine ? { where: whereSafe(q.place) } : null, github, noChange: !!unable, outbox: outbox && tools ? outbox : null, attach: attaches, turns, earlier, resumed: resume ? { ran: resume.ran, minutes: resume.minutes, fork: resumed } : null, handsTo, session: s ? { bash, roster, push: !!tree || !!fullRepo?.remote, share: !!sessionOpts?.share, notes } : null, consulted })
+      : briefOf({ bot, you: ownerName(bot), q, route, folders: at0.filter((d) => !inside(d, FILES) && !inside(d, botmcp.RUNS) && !inside(d, botfiles.OUTBOX) && !inside(d, SESSIONS) && !(route.to === 'throwaway' && inside(d, ANSWERS))).map(shown), ins, ctx, pending, auto, memory, attached, agents: agentsNow, scheduled: q.routine ? { where: whereSafe(q.place) } : null, github, noChange: !!unable, outbox: outbox && tools ? outbox : null, attach: attaches, turns, earlier, resumed: resume ? { ran: resume.ran, minutes: resume.minutes, fork: resumed } : null, handsTo, session: s ? { bash, roster, push: !!tree || !!fullRepo?.remote, share: !!sessionOpts?.share, linksOff, notes } : null, consulted })
     // On Windows (and when a test asks), the brief goes in a file of its own the agent is pointed to.
     let briefFile = null
     if (BRIEF_FILE && kind !== 'model' && !s) {

@@ -15,7 +15,9 @@
 //   the people in the conversation by their email; someone else's waits for your OK (Needs You, your
 //   direct messages), approved, made and posted; containment refusals (outside its folders, hidden,
 //   a key inside) said. Made at once only for you alone: the emails it names, or the channel (never
-//   anyone in it who may not ask the bot), wait for your OK, which says exactly who.
+//   anyone in it who may not ask the bot), wait for your OK, which says exactly who. Share Links
+//   turned off (a Beta Feature): its session has no share_link, its brief says links are off and
+//   where they're turned on, asked for one it makes none, and the links made before stay.
 //   Names: someone who may not ask chose a display name that's an instruction: their masked message
 //   is said as "someone who can't ask me (1)", their mention in your words as "@someone", and the name
 //   reaches no session; a name of someone who may ask is given made safe. A post an app made as you
@@ -37,6 +39,7 @@ await s0.name({ user: 'U0EVE', name: NAME })
 const { slack, kit, draftOf, startOf, startsOf, logOf, botOf, connected, events, posted, needs, briefOf } = await botKit('bots-full', {
   slack: s0,
   folders: ['proj'],
+  config: { trials: { 'share-links': true } }, // (a Beta Feature: turned off again below)
   env: ({ PATH }) => ({ BRIDGE_TEST_BOT_FULL_OFF: '0', BRIDGE_SESSION_TOTAL_DELETES: '1', ...(gitDir ? { PATH: `${PATH}${path.delimiter}${gitDir}`, BRIDGE_PATH: `${PATH}${path.delimiter}${gitDir}` } : {}) }),
 })
 const part = async (name, fn) => { try { await fn() } catch (e) { ok(false, `${name}: crashed: ${e.stack}`) } }
@@ -255,6 +258,23 @@ try {
     const s = startsOf('From an app, untyped').at(-1)
     ok(limitedArgs(argsOf(s)), 'one Slack didn\'t mark as typed runs limited, not with Full Access', s?.args)
     ok(events().some((e) => e.type === 'session.started' && /wasn't typed in Slack/.test(e.fullWhy || '')), 'and its record says why', events().filter((e) => e.type === 'session.started').map((e) => e.fullWhy).filter(Boolean))
+  })
+
+  // ---------- Share Links turned off (a Beta Feature): no share_link, and it says so ----------
+  await part('share links off', async () => {
+    const before = (await kit.api('/shares')).shares
+    await kit.api('/settings', { trials: { 'share-links': false } }, 'PATCH')
+    const q = await slack.ask({ user: OWNER.id, text: `${M} Links are off. [share report.html] [answer No link.]` })
+    const ans = await replyIn(q.ts, /No link\./)
+    const s = startsOf('Links are off.').at(-1)
+    const a = argsOf(s)
+    ok(!!s && fullArgs(a) && !a.includes('share_link') && a.includes('mcp__bridge_session__'), 'off: its session has its other tools, but no share_link', s?.args)
+    const brief = briefOf(s)
+    ok(/Share Links is off in Bridge AI: it's a Beta Feature Tester hasn't turned on/.test(brief) && /If you're asked for one, say so, and that Tester can turn it on in Settings › About & Updates › Beta Features\./.test(brief) && !/call your share_link tool/.test(brief), 'its brief says links are off, and where Tester turns them on', brief.split('\n').filter((l) => /share/i.test(l)))
+    const now = (await kit.api('/shares')).shares
+    ok(/couldn't share report\.html: I have no tool for it/.test(ans?.text || '') && now.length === before.length, 'asked for one, it has no way to make it, and none is made', ans?.text)
+    ok(before.some((x) => !x.ended) && before.filter((x) => !x.ended).every((x) => now.find((y) => y.id === x.id && !y.ended)), 'the links it made before are still listed, still open', now.map((x) => ({ title: x.title, ended: x.ended })))
+    await kit.api('/settings', { trials: { 'share-links': true } }, 'PATCH')
   })
 
   // ---------- Turned off: yours are limited too ----------

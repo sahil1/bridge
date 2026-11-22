@@ -17,6 +17,8 @@ import { YourFiles, useYourFiles, kindsHere, KIND_ICON } from './HomeFiles.jsx'
 import Explorer from '../files/Explorer.jsx'
 import AiAssist from '../AiAssist.jsx'
 import { ShareDialog, SharesList } from '../Share.jsx'
+import { BetaSwitch } from '../settings/Beta.jsx'
+import { useTrial } from '../../trials.js'
 import './studio.css'
 import './home.css'
 
@@ -284,7 +286,8 @@ export function StudioHome({ onOpen }) {
       { id: 'shared', icon: 'link', label: t('Shared'), hint: t('Share Links you gave people outside your devices: who opened them, and Stop Sharing') },
     ],
     render: (id, { q, tap, keys, focus }) => (id === 'packs' ? <PacksSection packs={packs} />
-      : id === 'shared' ? <section className="sd-shared"><p className="muted small sd-home-say">{t('What you shared with people outside your devices, from here, Files and the Preview tab. Each link goes through your relay, end-to-end encrypted, while this computer is on.')}</p><SharesList /></section>
+      // (Share Links is a beta feature: its switch first, then the links made, on or off.)
+      : id === 'shared' ? <section className="sd-shared"><BetaSwitch id="share-links" /><p className="muted small sd-home-say">{t('What you shared with people outside your devices, from here, Files and the Preview tab. Each link goes through your relay, end-to-end encrypted, while this computer is on.')}</p><SharesList /></section>
       : id === 'signature' ? <Suspense fallback={null}><SignatureHome /></Suspense>
         : <>
           {id === 'recent' && !q && <p className="muted small sd-home-say">{t('Your folders on every computer, and these lists of your documents. Documents, sheets, decks, PDFs and pages open here to edit, by you or your agents, with every version kept; anything else opens in Quick Look or its own app.')}</p>}
@@ -373,6 +376,7 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
   const [conflict, setConflict] = useState(null) // { by, name } changed on disk while yours is unsaved
   const [panel, setPanel] = useState(null) // 'versions'
   const [sharing, setSharing] = useState(false) // making a Share Link for it (Share.jsx)
+  const shareOn = useTrial('share-links') // Share Links, a beta feature (src/trials.js)
   const [ask, setAsk] = useState(null) // { selection }
   const [warn, setWarn] = useState(null) // the first save of a Word file (to say what's kept), or { text } what a save can't keep
   const [gen, setGen] = useState(0) // a new load (not a save): the editor starts again from it
@@ -612,7 +616,7 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
           <span className="sd-head-icons">
             <button type="button" className={`win-btn${panel === 'versions' ? ' on' : ''}`} onClick={() => setPanel(panel === 'versions' ? null : 'versions')} aria-pressed={panel === 'versions'} title={t('Versions: yours, your agents\' and changes from outside')} aria-label={t('Versions')} disabled={!meta}><Icon name="clock" size={15} /></button>
             <a className="win-btn sd-dl-btn" href={rawUrl(f)} download={name} title={t('Download {name}', { name })} aria-label={t('Download')}><Icon name="download" size={15} /></a>
-            {f.root !== 'board' && <button type="button" className="win-btn sd-share-btn" onClick={() => setSharing(true)} disabled={!meta} title={t('Share Link: view-only, always its latest, for people outside your devices')} aria-label={t('Share Link')}><Icon name="link" size={15} /></button>}
+            {f.root !== 'board' && shareOn && <button type="button" className="win-btn sd-share-btn" onClick={() => setSharing(true)} disabled={!meta} title={t('Share Link: view-only, always its latest, for people outside your devices')} aria-label={t('Share Link')}><Icon name="link" size={15} /></button>}
             <button type="button" className="win-btn sd-focus-btn" onClick={focus.enter} disabled={!meta} title={focusTip} aria-label={t('Focus')}><Icon name="focus" size={15} /></button>
           </span>
           {assist && assist('btn small sd-head-btn', { labelClass: 'sd-btn-label' })}
