@@ -21,8 +21,8 @@
 //     Cloud first: your sign-in or key first, a model here only when there's nothing else. The
 //     default, so a local model downloaded for dictation doesn't start writing meeting notes until you
 //     pick Auto.
-// A model picked for a job where it's used (Settings › Voice & Meetings, a meeting's own pick, Studio's
-// writer) always comes first; this is only for when there's none (one that's in the job's own list
+// A model picked for a job where it's used (a meeting's own pick for its notes, Studio's writer)
+// always comes first; this is only for when there's none (one that's in the job's own list
 // falls back along it all the same). Edit by voice and Tidy what I say have their own picks and keep
 // to this computer by themselves (index.js), and AI Assist's look at a folder never sends names out
 // unless you pick a model there (fileinsights.js). Every job finds its model through index.js

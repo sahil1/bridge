@@ -2313,15 +2313,16 @@ function marksFor(notes, captures = []) {
 let helpers = { reply: null, pickModel: null, pickFor: null, models: null, ownOf: null, ran: null, mailRelated: null, mailMessage: null }
 export const setHelpers = (h) => { helpers = { ...helpers, ...h } }
 
-// The model for a job on a meeting: the one asked for, the meeting's own pick, Settings › Voice &
-// Meetings' pick, else the one for that kind of job (Settings › Model Providers) by what it reads
-// (text): its own model, or with Auto the local model for a short one. { id, anywhere, auto, own,
-// passed, job }: anywhere, it may go to a model elsewhere when the one here can't run it (Auto put it
-// here; you didn't); auto: how pickFor chose; own: the job's own list, which a model in it falls back
-// along instead (passed: the ones in it passed over first, and why). Set to stay on this computer,
-// or a list none of which can run now: the error says why.
+// The model for a job on a meeting: the one asked for, the meeting's own pick for its notes (the
+// summary's Model), else the one for that kind of job (Settings › Models for Each Task) by what it
+// reads (text): its own model, or with Auto the local model for a short one. A meeting's pick is for
+// its notes only: live suggestions, the board and the cleanup go by their own rows. { id, anywhere,
+// auto, own, passed, job }: anywhere, it may go to a model elsewhere when the one here can't run it
+// (Auto put it here; you didn't); auto: how pickFor chose; own: the job's own list, which a model in
+// it falls back along instead (passed: the ones in it passed over first, and why). Set to stay on
+// this computer, or a list none of which can run now: the error says why.
 async function choose(m, model, job, text, o = {}) {
-  const set = model || m?.summaryModelPick || cfg.meetings?.model
+  const set = model || (job === 'notes' ? m?.summaryModelPick : null)
   const own = helpers.ownOf?.(job) || null
   if (set) return { id: set, anywhere: false, auto: null, own, passed: [], job }
   if (!helpers.pickFor) return { id: await helpers.pickModel(), anywhere: false, auto: null, own, passed: [], job }

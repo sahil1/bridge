@@ -878,7 +878,8 @@ export function MeetingPage({ id, onBack }) {
   })
   const cleanUp = () => act('clean', async () => {
     setMsg({ text: t('Cleaning up the transcript: fixing misheard words and names, and leaving out what nobody said…') })
-    const r = await api(`/meetings/${encodeURIComponent(id)}/cleanup`, { method: 'POST', body: { model: opts?.model || undefined } })
+    // (On its own row's model, Titles and tidy-ups: the summary's Model is the notes'.)
+    const r = await api(`/meetings/${encodeURIComponent(id)}/cleanup`, { method: 'POST', body: {} })
     setMsg({ text: r.fixed || r.dropped ? t('Fixed {n} lines and left out {left}. Each says what was heard; Undo puts one back.', { n: r.fixed, left: r.dropped }) : t('Nothing needed fixing.') })
   })
   const uncleanAll = () => act('clean', async () => { await api(`/meetings/${encodeURIComponent(id)}/cleanup/undo`, { method: 'POST', body: {} }); setMsg({ text: t('The transcript is back to what was heard.') }) })

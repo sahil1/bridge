@@ -158,6 +158,8 @@ ensureDir(DATA)
 // computer (the folder, so nothing in it can be reached).
 try { fs.chmodSync(DATA, 0o700) } catch { /* Windows, or a folder that isn't yours */ }
 ensureDir(CACHE)
+// Meeting notes' model, picked in Meetings & Voice before 3.22.0: moved to Models for Each Task.
+try { settings.moveNotesModel() } catch { /* the file as it is */ }
 const cfg = loadConfig()
 labs.configure(cfg) // more models (Qwen, DeepSeek, Kimi, GLM): hidden unless cfg.moreModels
 llm.configure(cfg) // the local model you picked in Settings › Model Providers (llmModel), if any
@@ -738,11 +740,10 @@ app.post('/api/studio/ask', wrap(async (req) => {
   await studio.noteAsk(root, q.path, adapter(kind).label)
   return { ...out, name: adapter(kind).label }
 }))
-// AI Assist's Sign this (signing.js): a PDF explained by the model meeting notes use when you've
-// picked one, else AI Assist's (pickFor), then signed in a copy in _signed beside it. A scan is read
-// on a Mac (doctext.js).
+// AI Assist's Sign this (signing.js): a PDF explained by AI Assist's model (pickFor), then signed in
+// a copy in _signed beside it. A scan is read on a Mac (doctext.js).
 signing.setHelpers({
-  reply: replyFor('assist'), pickModel: (text) => (cfg.meetings?.model ? Promise.resolve(cfg.meetings.model) : pickModelFor('assist', { text })),
+  reply: replyFor('assist'), pickModel: (text) => pickModelFor('assist', { text }),
   describe: (id) => chatModels.describe(id), via: async (id) => (await chatModels.models().catch(() => [])).find((m) => m.id === id)?.via || null,
   contextOf: (id) => chatModels.contextOf(id), scanText: doctext.ocrBin() ? (file) => doctext.textOf(file, 200_000) : null,
 })
@@ -820,17 +821,16 @@ app.post('/api/studio/deck/comment', async (req, res) => {
 })
 // The change an agent asked in place wrote beside the file, taken once (studio.takeProposal).
 app.get('/api/studio/proposal', wrap(async (req) => { const q = sq(req); return studio.takeProposal(await rootOf(q.root), q.path) }))
-// Decks written by a model (the one meeting notes use when you've picked one, else AI Assist's): a
-// whole deck from what it's about or a document, a slide rewritten, a slide added. The page shows it
-// before it's taken.
-app.get('/api/studio/models', wrap(async () => ({ models: (await chatModels.models().catch(() => [])).map(({ id, label, provider, via }) => ({ id, label, provider, via })), pick: cfg.meetings?.model || await pickModelFor('assist').catch(() => null) })))
+// Decks written by a model (the one picked in Studio, else AI Assist's): a whole deck from what it's
+// about or a document, a slide rewritten, a slide added. The page shows it before it's taken.
+app.get('/api/studio/models', wrap(async () => ({ models: (await chatModels.models().catch(() => [])).map(({ id, label, provider, via }) => ({ id, label, provider, via })), pick: await pickModelFor('assist').catch(() => null) })))
 app.post('/api/studio/deck/ai', wrap(async (req) => {
   const b = req.body || {}
   const mode = ['deck', 'slide', 'add'].includes(b.mode) ? b.mode : 'deck'
   const source = await studio.deckSource(b.from?.root ? { root: await rootOf(String(b.from.root)), path: String(b.from.path || '') } : null, b.upload)
   if (mode === 'deck' && !String(b.prompt || '').trim() && !source) throw new Error('Say what the deck is about, or pick a document to make it from')
   const ask = studio.deckAsk({ mode, prompt: b.prompt, slides: Array.isArray(b.slides) ? b.slides.map(String) : [], at: b.at, source: source?.text, sourceName: source?.name, count: b.count })
-  const use = String(b.model || '') || cfg.meetings?.model || await pickModelFor('assist', { text: ask.prompt })
+  const use = String(b.model || '') || await pickModelFor('assist', { text: ask.prompt })
   if (!use) throw Object.assign(new Error(`No model to write with yet: sign in to an agent (Claude Code, Codex…) or add a key in ${placeEn('providers')}.`), { code: 'noModel' })
   const r = await replyFor('assist')(use, [{ role: 'user', text: ask.prompt }], { system: ask.system, feature: 'studio' })
   return { ...studio.deckAnswer(r?.text), model: r.model, by: await byName(r.model) }
@@ -4131,7 +4131,7 @@ app.get('/api/chat/models', wrap(async (req) => {
   const models = await chatModels.models({ fresh: !!req.query.refresh })
   const automatic = await pickModelFor('notes').catch((e) => (e.code === 'not_ready' ? null : pickMeetingModel()))
   let short = null
-  if (modelJobs.setting(cfg, 'notes') === 'auto' && automatic && !chatModels.isLocal(automatic)) {
+  if (modelJobs.setting(cfg, 'notes') === 'auto' && !modelJobs.listOf(cfg, 'notes') && automatic && !chatModels.isLocal(automatic)) {
     const local = await localFor(await ranked()).catch(() => null)
     const limit = local && await localLimit(local).catch(() => null)
     if (local && limit) short = { id: local.id, label: local.label, minutes: Math.floor(limit.tokens / modelJobs.PER_MINUTE) }

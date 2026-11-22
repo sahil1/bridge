@@ -9,8 +9,10 @@
 //   A job's own list (modeljobs.js): kept as ids, each once, at most six; its first that can run now,
 //   the ones before it passed over with why; none, an error saying why rather than anything else.
 //   The server: every model and the providers a key would reach, to pick from; the pick used for
-//   meeting notes, diagrams and AI Assist; a pick where it's used still first (Settings › Meetings &
-//   Voice, a meeting's own); a provider over its limit and one with no key passed over for the
+//   meeting notes, diagrams and AI Assist; a notes model picked as Meetings & Voice had it going
+//   first in Meeting notes' row (sent, or saved before and moved as Bridge AI starts), for the notes
+//   only (live AI Assist, the board and the cleanup on their own rows), and a meeting's own pick for
+//   its notes still first; a provider over its limit and one with no key passed over for the
 //   next, each said in the job's last run, the usage log and under the notes; a list none of which
 //   can run says so and runs nothing; a model on this computer that can't run never goes elsewhere
 //   unless the list says so.
@@ -103,14 +105,44 @@ try {
   let m = await notes('Its own model')
   ok(m.summaryModel === 'ollama:gemma3:4b' && ollama.sent().length > 0 && anth.asked === 0, 'Meeting notes on a model of its own: written by it (Ollama, on this computer), not the cloud model Automatic would use', { model: m.summaryModel, error: m.summaryError })
   ok((await jobOf('notes')).last?.model === 'ollama:gemma3:4b', 'its last run says so')
-  // A pick where it's used still comes first.
+  // Meeting notes' model has one place, its row here. One picked as Meetings & Voice had it
+  // (meetings.model: before 3.22.0, or an app that still sends it) goes first in that row.
   await kit.api('/settings', { meetings: { model: 'openai:gpt-5' } }, 'PATCH')
+  let user = (await kit.api('/settings')).user
+  ok(JSON.stringify(user.jobModels?.notes) === '["openai:gpt-5","ollama:gemma3:4b"]' && !('model' in (user.meetings || {})), 'a notes model picked as Meetings & Voice had it goes first in Meeting notes\' row, and nowhere else', { notes: user.jobModels?.notes, meetings: user.meetings })
   let n = openaiAsked()
   m = await notes('Meetings & Voice picks')
-  ok(m.summaryModel === 'openai:gpt-5' && openaiAsked() > n, 'Settings › Meetings & Voice\' model still comes first', m.summaryModel)
-  await kit.api('/settings', { meetings: { model: null } }, 'PATCH')
+  ok(m.summaryModel === 'openai:gpt-5' && openaiAsked() > n, 'and writes the notes', m.summaryModel)
+  // It's for the notes only: live AI Assist, the live board and the transcript's cleanup go by their
+  // own rows, Automatic here (your first model, Anthropic's), as before; nor does a meeting's own pick
+  // for its notes change them. Each row's last run names the model that answered.
+  await kit.api('/settings', { trials: { 'meeting-board': true } }, 'PATCH')
+  const L = await meeting('Notes picked, the rest their own')
+  await kit.api(`/meetings/${L}/summary`, { model: 'openai:gpt-5' })
+  await until(async () => { const x = await kit.api(`/meetings/${L}`); return !x.summarizing && (x.summary || x.summaryError) }, 30000)
+  const before = anth.asked
+  await kit.api(`/meetings/${L}/assist`, {}).catch(() => {})
+  await kit.api(`/meetings/${L}/board`, {}).catch(() => {})
+  await kit.api(`/meetings/${L}/cleanup`, {}).catch(() => {})
+  const rows = Object.fromEntries(await Promise.all(['notes', 'live', 'diagrams', 'tidy'].map(async (j) => [j, (await jobOf(j)).last])))
+  ok(rows.notes?.model === 'openai:gpt-5' && (await kit.api(`/meetings/${L}`)).summaryModel === 'openai:gpt-5', 'the notes on the model picked for them, and their row says so', rows.notes)
+  ok(['live', 'diagrams', 'tidy'].every((j) => rows[j]?.model === 'anthropic:claude-opus-5-5') && anth.asked >= before + 3, 'live AI Assist, the board and the cleanup on their own rows (Automatic: Anthropic), not the notes\' model, each row naming the model that answered', rows)
+  await kit.api('/settings', { trials: { 'meeting-board': false } }, 'PATCH')
+  await own('notes', ['ollama:gemma3:4b'])
+  // Saved before 3.22.0 (Meetings & Voice's own pick in the file): moved into Meeting notes' row as
+  // Bridge AI starts, the other rows as they were.
+  await own('diagrams', ['openai:gpt-5'])
+  await kit.restart(() => {
+    const f = path.join(kit.data, 'config.json')
+    const c = JSON.parse(fs.readFileSync(f, 'utf8'))
+    fs.writeFileSync(f, JSON.stringify({ ...c, meetings: { ...c.meetings, model: 'anthropic:claude-opus-5-5' } }))
+  })
+  user = (await kit.api('/settings')).user
+  ok(JSON.stringify(user.jobModels?.notes) === '["anthropic:claude-opus-5-5","ollama:gemma3:4b"]' && JSON.stringify(user.jobModels?.diagrams) === '["openai:gpt-5"]' && !user.jobModels?.live && !('model' in (user.meetings || {})), 'one saved before: in Meeting notes\' row once Bridge AI starts, the other rows as they were', { jobModels: user.jobModels, meetings: user.meetings })
+  await own('diagrams', null)
+  await own('notes', ['ollama:gemma3:4b'])
   m = await notes('The meeting picks', 'anthropic:claude-opus-5-5')
-  ok(m.summaryModel === 'anthropic:claude-opus-5-5', 'and so does a meeting\'s own pick', m.summaryModel)
+  ok(m.summaryModel === 'anthropic:claude-opus-5-5', 'a meeting\'s own pick for its notes comes first', m.summaryModel)
 
   // Diagrams on Anthropic, over its limit for now: the next in its list draws, and why is kept.
   anth.busy = true
@@ -225,6 +257,16 @@ try {
   await row.locator('.pv-job-model').click()
   await row.locator('[data-model-pick] [data-key="together"]').click()
   ok(!!(await until(async () => (await row.locator('[data-key-form="together"]').count()) === 1, 5000, 100)) && !(await saved()).notes, 'Together AI: its key form, and nothing picked until there\'s a model')
+  // Settings › Meetings & Voice: which model writes the notes, as this row has it, and Change it to
+  // come here: no picker of its own.
+  await own('notes', ['openai:gpt-5'])
+  await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'notes-model' } })))
+  const notesSec = p.locator('.modal.settings [data-setting="notes-model"]')
+  ok(!!(await until(async () => /^gpt-5, at OpenAI:/.test(await notesSec.locator('[data-notes-where]').innerText().catch(() => '')), 10000)) && (await notesSec.locator('select').count()) === 0, 'Meetings & Voice says which model writes the notes, as Models for Each Task has it, with no picker of its own', await notesSec.innerText().catch(() => ''))
+  await shot(p, `model-jobs-${which}-4-meetings`)
+  await notesSec.locator('[data-notes-pick] button', { hasText: 'Change it' }).click()
+  ok(!!(await until(async () => (await p.locator('[data-model-jobs] li[data-job="notes"]').isVisible().catch(() => false)) && /gpt-5/.test(await p.locator('[data-model-jobs] li[data-job="notes"] .pv-job-model').innerText().catch(() => '')), 8000)), 'Change it: Models for Each Task, at Meeting notes\' row')
+  await own('notes', null)
   ok(!errors.length, 'no page errors', errors)
   await ctx.close()
 

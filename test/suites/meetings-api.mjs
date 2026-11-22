@@ -512,9 +512,11 @@ try {
   ok(!await until(() => boardAsks().length > b0, 4000) && (await kit.api(`/meetings/${LB2.id}`)).liveBoard.id === null, 'off for a meeting, nothing is sent and there\'s no board')
   await kit.api(`/meetings/${LB2.id}/stop`, {})
 
-  // With a model on this computer (Ollama, the stand-in's): it's asked there, and the meeting says so.
+  // With a model on this computer (Ollama, the stand-in's) for the board and live AI Assist (their
+  // own rows in Models for Each Task, whatever writes the notes): it's asked there, and the meeting
+  // says so.
   await kit.api('/providers/ollama', { values: { OLLAMA_HOST: model.url } }, 'PUT')
-  await kit.api('/settings', { meetings: { model: 'ollama:llama3.1:8b' } }, 'PATCH')
+  await kit.api('/settings', { jobModels: { diagrams: ['ollama:llama3.1:8b'], live: ['ollama:llama3.1:8b'] } }, 'PATCH')
   const LL = await kit.api('/meetings', { title: 'Offsite plan', call: false })
   await kit.api(`/meetings/${LL.id}/board`, { on: true })
   said(LL.id, [['them', 2, `We decided to hold the offsite in Lisbon. ${WORDS}`]])
@@ -537,7 +539,7 @@ try {
   ok(laAsked.length === 1 && laAsked[0].path === '/api/chat' && laAsked[0].model === 'llama3.1:8b' && laAsked[0].format === 'json_schema' && la.length === 1 && la[0].model === 'ollama:llama3.1:8b' && /time difference between Lisbon and London/.test(la[0].q), 'answers with a model on this computer: asked there, held to the schema, and it answers', { asked: laAsked.map((x) => [x.path, x.model, x.format]), la })
   await kit.api(`/meetings/${LA.id}/stop`, {})
   await kit.api(`/meetings/${LA.id}/assist`, { on: false })
-  await kit.api('/settings', { meetings: { model: 'openai:gpt-5', board: false }, trials: { 'meeting-board': false, 'assist-answers': false } }, 'PATCH')
+  await kit.api('/settings', { meetings: { board: false }, jobModels: { diagrams: null, live: null }, trials: { 'meeting-board': false, 'assist-answers': false } }, 'PATCH')
 
   // ---------- Files you got lately ----------
   // In Downloads or on the Desktop, from around when it was: one named after someone in it, a

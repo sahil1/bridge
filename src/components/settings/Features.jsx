@@ -84,7 +84,7 @@ export default function Features({ onOpenAgent }) {
   // Meetings: how many this week, and the model that writes their notes.
   const since = Date.now() - WEEK
   const week = meetings?.meetings ? meetings.meetings.filter((m) => Date.parse(m.startedAt || 0) > since).length : null
-  const notesId = eff.meetings?.model || chat?.automatic
+  const notesId = chat?.automatic // (Models for Each Task's Meeting notes, or Automatic's)
   const notes = notesId && (chat?.models || []).find((m) => m.id === notesId)
   const meetingLine = [notes ? t('Notes by {model}', { model: notes.label }) : chat ? t('No model for notes yet') : null, week != null ? t('{n} this week', { n: week }) : null].filter(Boolean).join(' · ')
 
