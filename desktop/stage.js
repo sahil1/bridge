@@ -140,3 +140,10 @@ if (fs.existsSync(prebuilds)) for (const d of fs.readdirSync(prebuilds)) {
   const h = path.join(prebuilds, d, 'spawn-helper')
   if (fs.existsSync(h)) fs.chmodSync(h, 0o755)
 }
+
+// Every file of the copy, with its SHA-256 (rootlist.js), into the app's own archive: the app checks
+// its copy against it before it starts the server or opens its keys.
+require('./rootlist.js').make(OUT).then((text) => {
+  fs.writeFileSync(path.join(__dirname, 'app-root.list'), text)
+  console.log(`Listed ${text.split('\n').length - 1} files of the copy (app-root.list).`)
+}, (e) => { console.error(`Couldn't list the copy's files: ${e.message}`); process.exit(1) })

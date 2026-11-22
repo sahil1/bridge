@@ -3761,12 +3761,12 @@ async function servedUi() {
 // in: this browser or program is let in (the page saying how to get in looks, to open by itself).
 // With Bots on, each bot's connection too, asked on this computer (the Docker image's health check
 // says it): its name and whether it's connected, and why not. And, asked on this computer, which
-// server this is (bundled, build, pid), for the desktop app to tell an older one of its own from
-// anything else before it sends this server its key (desktop/main.js replaceStale).
+// build this is (bundled, build), for the desktop app to tell an older one of its own before it
+// sends this server its key (desktop/main.js replaceStale).
 const localAsk = (req) => !req.headers['x-bridge-relay'] && !guard.viaTailnet(req) && /^(::1|127\.\d+\.\d+\.\d+|::ffff:127\.\d+\.\d+\.\d+)$/.test(String(req.socket?.remoteAddress || ''))
 app.get('/api/health', (req, res) => res.json({
   ok: true, app: 'Bridge AI', version: VERSION, in: auth.allowed(req),
-  ...(localAsk(req) ? { bundled: !!process.versions.electron, build: BUILD, pid: process.pid } : {}),
+  ...(localAsk(req) ? { bundled: !!process.versions.electron, build: BUILD } : {}),
   ...(localAsk(req) && trialOn('slack-bot') ? { bots: botsStore.live().map((b) => { const st = desk.channel(b.id)?.state() || { state: 'off' }; return { id: b.id, name: b.name, state: st.state, why: st.why || null, paused: b.paused, where: Object.fromEntries(Object.entries(st.platforms || {}).filter(([, x]) => x.state !== 'no-tokens').map(([k, x]) => [k, { state: x.state, why: x.why || null }])) } }) } : {}),
 }))
 // A one-time link that lets a browser on this computer in (apiauth.js): View › Open in Browser in

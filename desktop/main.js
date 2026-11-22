@@ -5,12 +5,11 @@
 //   from source (npm run desktop)     your clone, with `node scripts/start.js`
 const electron = require('electron')
 const { app, BrowserWindow, Menu, Tray, shell, globalShortcut, Notification, session, nativeTheme, ipcMain, powerMonitor, powerSaveBlocker, screen, nativeImage, systemPreferences, dialog, desktopCapturer } = electron
-// First of all: a built app given Chromium's or Node's debugging switches, or Chromium's stand-in for
-// the keychain, doesn't start (startgate.js), before any window, profile or key.
+// First of all: a built app given any switch (or Electron's logging in the environment) doesn't
+// start (startgate.js), before any window, profile or key.
 require('./startgate.js').check({
   app,
   data: process.env.BRIDGE_HOME || require('node:path').join(require('node:os').homedir(), '.bridge-ai'),
-  pkg: (() => { try { return require('./package.json') } catch { return null } })(),
 })
 const dictation = require('./dictation.js')
 const contextMenu = require('./contextmenu.js')
@@ -70,8 +69,39 @@ async function letInWindows() {
 // (added outside the page, so no page script ever has it), never the secret itself. windowauth.js.
 const windowAuth = require('./windowauth.js')
 let keys = null
+// The app's own copy of Bridge AI (app-root) as it was built (rootlist.js, the list inside the app's
+// archive): checked before the app starts a server or opens its keys, which it does neither of while
+// the copy isn't as built (built app only: from source there's no list).
+const rootList = require('./rootlist.js')
+let rootOk = !BUNDLED
+let rootAt = 0
+let rootWhy = null
+async function checkRoot() {
+  if (!BUNDLED) return true
+  let list = null
+  try { list = fs.readFileSync(path.join(__dirname, 'app-root.list'), 'utf8') } catch { /* said below */ }
+  const r = list ? await rootList.verify(ROOT, list).catch((e) => ({ ok: false, error: e.message })) : { ok: false, missing: ['app-root.list'] }
+  rootOk = r.ok
+  rootAt = Date.now()
+  rootWhy = r.ok ? null : r
+  if (!r.ok) {
+    const what = [...(r.changed || []), ...(r.added || []), ...(r.missing || [])]
+    const line = `Bridge AI's own files aren't as they were built (${r.error || `${what.slice(0, 3).join(', ')}${what.length > 3 ? `, and ${what.length - 3} more` : ''}`}): it won't start its server or open its keys.`
+    console.error(line)
+    try { fs.mkdirSync(path.join(DATA, 'logs'), { recursive: true }); fs.appendFileSync(path.join(DATA, 'logs', 'desktop.log'), `${new Date().toISOString()} ${line}\n`) } catch { /* not this time */ }
+  }
+  return r.ok
+}
+const CHANGED = () => {
+  const what = [...(rootWhy?.changed || []), ...(rootWhy?.added || []), ...(rootWhy?.missing || [])]
+  return `Bridge AI's own files have changed since it was built${what.length ? ` (${what.slice(0, 2).map((f) => `<code>${f.replace(/[<>&]/g, '')}</code>`).join(', ')}${what.length > 2 ? `, and ${what.length - 2} more` : ''})` : ''}, so it won't start its server or open your keys.<br>Install Bridge AI again, then open it.`
+}
 // (The server listens where the app talks to it, 127.0.0.1:<its port>, and nowhere else: listen.)
-const appKeys = () => (keys ||= windowAuth.keysAt(path.join(app.getPath('userData'), 'signing-keys'), electron.safeStorage, { listen: { host: '127.0.0.1', port: SERVER_PORT } }))
+// (And never opened while the app's own copy isn't as built: checkRoot.)
+const appKeys = () => {
+  if (!rootOk) throw new Error('Bridge AI\'s own files aren\'t as built')
+  return (keys ||= windowAuth.keysAt(path.join(app.getPath('userData'), 'signing-keys'), electron.safeStorage, { listen: { host: '127.0.0.1', port: SERVER_PORT } }))
+}
 // Checked now: the server the app started, over the connection the app itself makes to it (built
 // app: servergate.js holds everything back until it has, and checks again before each page loads),
 // or, from source (no pipe: npm and node --watch don't pass it on), one that has the app's window
@@ -195,7 +225,13 @@ const NODE_BIN = (() => {
   return fs.existsSync(helper) ? path.resolve(helper) : process.execPath
 })()
 
+// false: not started, as the app's own copy isn't as built (checkRoot, checked again for each start
+// unless it just was), and the main window says so.
 async function startServer() {
+  if (BUNDLED && (!rootOk || Date.now() - rootAt > 10000) && !(await checkRoot())) {
+    if (win && !win.isDestroyed()) win.loadURL(splash(CHANGED())).catch(() => {})
+    return false
+  }
   const env = { ...process.env, PATH: PATH_READY ? await PATH_READY : process.env.PATH }
   // Built app: run the bundled server on Electron's Node. It keeps running when the window
   // closes, like `npm start`, so agents carry on; quit it from the Bridge AI menu.
@@ -230,6 +266,7 @@ async function startServer() {
   })
   child.unref()
   startedServer = true
+  return true
 }
 let stoppingServer = false
 // The server this app started, while it runs (null once it has ended).
@@ -238,20 +275,35 @@ let serverChild = null
 // started again for those, nor when it ends by itself without an error.
 const STOPS = ['SIGTERM', 'SIGINT', 'SIGHUP']
 // The server ended by itself (a crash, an error, killed outright): started again while the app runs,
-// three times in five minutes at most, checked as at the start, and the main window shown its page
-// again if it was left waiting (a reload while it was down). Its windows' pages reconnect by
-// themselves once it has proved itself (servergate.js).
+// three times in five minutes at most, and checked as at the start: the main window shows its page
+// again once it proves itself (its other windows reconnect by themselves: servergate.js), another
+// program's answer said as such, one that doesn't answer said too (showServer). One that doesn't come
+// back, or a fourth time in five minutes, is said in the main window, with Restart (RESTART).
 const restarts = []
+const RESTART_BUTTON = () => `<button onclick="document.title='${RESTART}'" style="-webkit-app-region:no-drag;margin-top:14px;padding:8px 18px;border:0;border-radius:8px;background:#3b6df5;color:#fff;font:inherit;cursor:pointer">Restart</button>`
+const NOT_BACK = () => `Bridge AI's server stopped and didn't come back.<br>${RESTART_BUTTON()}`
+function notBack() { if (win && !win.isDestroyed()) win.loadURL(splash(NOT_BACK())).catch(() => {}) }
 async function restartServer() {
   const now = Date.now()
   while (restarts.length && now - restarts[0] > 5 * 60_000) restarts.shift()
-  if (restarts.length >= 3) return
+  if (restarts.length >= 3) return notBack()
   restarts.push(now)
   await new Promise((r) => setTimeout(r, 500))
   if (quitting || stoppingServer || serverChild || await serverUp() || serverChild) return
-  await startServer()
+  if (!(await startServer())) return
   for (let i = 0; i < 300 && !(await serverUp()); i++) await new Promise((r) => setTimeout(r, 100))
-  if (await proveServer() && win && !win.isDestroyed() && !isLocal(win.webContents.getURL())) win.loadURL(URL_BASE).catch(() => {})
+  if (!(await serverUp())) return notBack()
+  if (win && !win.isDestroyed() && (!(await proveServer()) || !isLocal(win.webContents.getURL()))) await showServer()
+}
+// The Restart on that page (and on the one saying the server isn't answering): the page's title set
+// to this, only from the main window's own page of that (a data: page of the app's), never from a
+// page of the server's address.
+const RESTART = 'bridge-ai-restart-server'
+function restartAsked(title) {
+  if (title !== RESTART || !win || win.isDestroyed() || !win.webContents.getURL().startsWith('data:')) return
+  restarts.length = 0
+  win.loadURL(splash(STARTING)).catch(() => {})
+  connect().catch(() => {})
 }
 
 function loadBounds() {
@@ -352,6 +404,8 @@ async function createWindow() {
   // Its title as the page says it (what waits on you, and which computer it is, for the Dock's and
   // the Window menu's list of windows); the count also goes on the Dock's badge.
   win.webContents.on('page-title-updated', (e, title) => { e.preventDefault(); win?.setTitle(title); updateBadge(title) })
+  // (Restart, from the main window's own page saying its server didn't come back: RESTART.)
+  win.webContents.on('page-title-updated', (_e, title) => restartAsked(title))
   win.webContents.on('did-fail-load', (_e, code) => { if (code !== -3) setTimeout(connect, 1500) })
   // The page went away (a crash, out of memory): written down, and opened again, which then offers
   // to report it. Ended from outside, it's opened again without a report. At most once a minute,
@@ -376,25 +430,24 @@ async function replaceStale() {
   const mine = (() => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')) } catch { return {} } })()
   const theirs = await whoAnswers()
   if (theirs?.bundled === false || (theirs?.bundled && theirs.version === app.getVersion() && theirs.build === (mine.bridgeBuild || null))) return
-  // Servers from before 3.22 don't say who they are without the key, and ones from before 2.2.1 not
-  // at all: only the app's own bundled server, by its pid file.
-  const pid = Number.isInteger(theirs?.pid) ? theirs.pid : pidFile()
+  // Only the server this app's data folder says it last started (its pid file), and only if it's the
+  // app's own bundled one: never a pid that whatever answers names (it could name another copy's).
+  const pid = pidFile()
   if (!bundledServer(pid)) return
   try { process.kill(pid, 'SIGTERM') } catch { return }
   for (let i = 0; i < 50 && await serverUp(); i++) await new Promise((r) => setTimeout(r, 100))
 }
-// Who answers at the app's address, as it says itself: /api/health, which says it to a program on this
-// computer without the key (none goes there before the server proves itself).
+// Who answers at the app's address, as it says itself (its version, whether it's a built app's):
+// /api/health, which needs no key (none goes there before the server proves itself).
 async function whoAnswers() {
   try { const r = await fetch(`${URL_BASE}/api/health`, { signal: AbortSignal.timeout(1500) }); return r.ok ? await r.json() : null } catch { return null }
 }
 const pidFile = () => { try { return Number(fs.readFileSync(PID, 'utf8')) || null } catch { return null } }
-// Whether pid is a bundled server of the app's own (its command line: app-root/server/index.js; on
-// Windows, which can't be asked here, the one the app last started, by its pid file), and never the
-// one this app is running now.
+// Whether pid (the pid file's) is a bundled server of the app's own (its command line:
+// app-root/server/index.js; Windows can't be asked here), and never the one this app is running now.
 function bundledServer(pid) {
   if (!Number.isInteger(pid) || pid <= 1 || pid === process.pid || pid === serverChild?.pid) return false
-  if (process.platform === 'win32') return pidFile() === pid
+  if (process.platform === 'win32') return true // (the pid file's, written as the app started it)
   try { return /app-root[\\/]server[\\/]index\.js/.test(require('node:child_process').execFileSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' })) } catch { return false }
 }
 // A server of the app's own (Bridge AI's bundled one, by its command line) that answers the proof
@@ -404,13 +457,12 @@ function bundledServer(pid) {
 // and gets nothing from the app's windows.
 async function replaceUnproven() {
   if (!gate.wrong()) return
-  const said = (await whoAnswers())?.pid
-  const pid = Number.isInteger(said) ? said : pidFile()
+  const pid = pidFile() // (never what the answer says: replaceStale)
   if (!bundledServer(pid)) return
   try { process.kill(pid, 'SIGTERM') } catch { return }
   for (let i = 0; i < 50 && await serverUp(); i++) await new Promise((r) => setTimeout(r, 100))
   if (await serverUp()) return
-  await startServer()
+  if (!(await startServer())) return
   for (let i = 0; i < 300 && !(await serverUp()); i++) await new Promise((r) => setTimeout(r, 100))
   await proveServer()
 }
@@ -804,9 +856,11 @@ async function showServer() {
     if (!said) { said = true; win.loadURL(splash(STARTING)).catch(() => {}) }
     await new Promise((r) => setTimeout(r, 1000))
   }
-  return win.loadURL(splash(`Bridge AI's server on port ${PORT} isn't answering.<br>Quit Bridge AI from its menu and open it again.`))
+  return win.loadURL(splash(`Bridge AI's server on port ${PORT} isn't answering.<br>${RESTART_BUTTON()}`))
 }
 async function connect() {
+  // (The app's own copy as built, before anything else: checkRoot.)
+  if (BUNDLED && !rootOk && !(await checkRoot())) return win.loadURL(splash(CHANGED()))
   // Never in the way of opening: if the check fails, use whatever server is there.
   if (await serverUp()) await replaceStale().catch(() => {})
   if (await serverUp() && BUNDLED && !(await proveServer())) await replaceUnproven().catch(() => {})
@@ -819,7 +873,7 @@ async function connect() {
     if (api) return win.loadURL(splash(`Bridge AI is already running without hot reload.<br>Run <code>npm run stop</code>, then <code>npm run desktop:dev</code> again.`))
   }
   // (And again when the one it started has ended since: stopped with `npm run stop`, say.)
-  if (!startedServer || (BUNDLED && !serverChild)) await startServer().catch(() => {})
+  if ((!startedServer || (BUNDLED && !serverChild)) && await startServer().catch(() => true) === false) return
   // The server is usually up in under half a second, so check often (for up to a minute; the dev
   // server can take longer the first time).
   for (let i = 0; i < 600; i++) {
@@ -936,7 +990,7 @@ async function startOverServer() {
   stopServer()
   for (let i = 0; i < 50 && await serverUp(); i++) await new Promise((r) => setTimeout(r, 100))
   stoppingServer = false
-  await startServer()
+  if (!(await startServer())) return
   for (let i = 0; i < 300 && !(await serverUp()); i++) await new Promise((r) => setTimeout(r, 100))
   if (win && !win.isDestroyed()) await showServer().catch(() => {})
 }
@@ -1114,7 +1168,8 @@ function buildMenu() {
       { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' },
       { type: 'separator' },
       { role: 'togglefullscreen' },
-      { role: 'toggleDevTools' },
+      // (DevTools only from source: a built app's windows aren't opened to them.)
+      ...(app.isPackaged ? [] : [{ role: 'toggleDevTools' }]),
     ] },
     { role: 'windowMenu' },
   ]))
