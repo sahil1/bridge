@@ -67,6 +67,10 @@ function overStdio(raw, talk) {
       } catch (e) { return done(reject, e) }
       child.on('error', (e) => done(reject, new Error(`it couldn't start: ${e.message}`)))
       child.on('exit', (code) => done(reject, new Error(`it stopped (${code ?? 'killed'}) before listing its tools`)))
+      // It can stop reading before what's sent is written (it stopped, or was stopped): its exit or
+      // the wait says so. Unheard, that write's EPIPE stopped Bridge AI itself (a server that ends at
+      // once, Linux on CI).
+      child.stdin.on('error', () => {})
       let buf = ''
       const waiting = new Map()
       child.stdout.on('data', (d) => {

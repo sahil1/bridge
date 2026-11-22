@@ -101,7 +101,7 @@ const ALL = {
   'Speech Models': ['button|Download'],
   'Spoken Answers': ['select|Voice', 'select|Speed', 'button|Test'],
   Dictation: ['input|Talk to your agents', 'button|Change', 'input|Light cleanup', 'input|Mention files by saying them', 'input|Show the words as you talk', 'input|Keep a history of what you dictate', 'input|30 days', 'input|1 year', 'input|Always', 'input|Keep the recordings too', 'button|Delete all dictations'],
-  Meetings: ['input|Live Meeting Board', 'input|Answers in AI Assist', 'input|Meeting Insights', 'input|On this computer', 'input|OpenAI', 'input|Groq', 'input|Deepgram', 'input|AssemblyAI', 'input|Another OpenAI-style service', 'button|Speech models', 'select|Meeting language', 'button|Open Memory', 'input|More words to listen for', 'input|Record the other side of calls', 'select|Model for meeting notes', 'input|Write the summary when a meeting ends', 'input|Clean up the transcript when a meeting ends', 'input|Suggest what to ask, in every meeting', 'select|How often AI Assist suggests something', ...(IS_MAC ? ['input|Prepare for each meeting', "input|Speakers From the Call's Video"] : []), 'input|Name who spoke on the call', 'textarea|Your own instructions for every summary', 'input|Tell voices apart in a room', 'input|Tell voices apart on a call', 'input|Learn my voice', 'input|Remember voices you name', 'select|The key that mentions a meeting', 'input|Notice calls', 'input|Stop by itself when the call ends', 'select|What to save', 'input|Folder', 'input|Subfolders', 'input|File name', 'input|Front matter', 'input|Your mic, as', 'input|The call, as', 'input|Keep saved notes up to date', 'input|Save every meeting as Markdown'],
+  Meetings: ['input|Live Meeting Board', 'input|Answers in AI Assist', 'input|Meeting Insights', 'input|On this computer', 'input|OpenAI', 'input|Groq', 'input|Deepgram', 'input|AssemblyAI', 'input|Another OpenAI-style service', 'button|Speech models', 'select|Meeting language', 'button|Open Memory', 'input|More words to listen for', 'input|Record the other side of calls', 'button|Change it', 'input|Write the summary when a meeting ends', 'input|Clean up the transcript when a meeting ends', 'input|Suggest what to ask, in every meeting', 'select|How often AI Assist suggests something', ...(IS_MAC ? ['input|Prepare for each meeting', "input|Speakers From the Call's Video"] : []), 'input|Name who spoke on the call', 'textarea|Your own instructions for every summary', 'input|Tell voices apart in a room', 'input|Tell voices apart on a call', 'input|Learn my voice', 'input|Remember voices you name', 'select|The key that mentions a meeting', 'input|Notice calls', 'input|Stop by itself when the call ends', 'select|What to save', 'input|Folder', 'input|Subfolders', 'input|File name', 'input|Front matter', 'input|Your mic, as', 'input|The call, as', 'input|Keep saved notes up to date', 'input|Save every meeting as Markdown'],
   'Mail & Calendar': ['input|Learn it again now and then', 'button|Mon', 'button|Sun', 'input|From', 'input|To', 'select|Kept clear around meetings', 'select|Around a meeting somewhere else', 'select|How many times to offer'],
   Bots: ['input|Bots', 'button|Open Bots'],
   'MCP Servers': ['input|Bridge AI as an MCP Server', 'button|Add server', 'button|Refresh'],
@@ -606,6 +606,19 @@ try {
     const opens = await p.locator('.modal.settings.phone .ft-open').evaluateAll((l) => l.map((e) => Math.round(e.getBoundingClientRect().height)))
     ok(!ff.wider && !ff.past && !ff.sideways && !ff.cut && opens.length >= CARDS && opens.every((h) => h >= 40), 'phone: Your Features, nothing wider than the screen or cut off, each Open a whole 40 px target', { ff, opens })
     await shot(p, `${tag}settings-ui-phone-features`)
+    // Every field in every section and tab, Advanced open, at 16 px or more: iOS zooms into a smaller
+    // one as it's tapped (Link a device's field, Notifications' Usage running low), and stays zoomed.
+    const zoomy = {}
+    for (const id of ['you', 'agents', 'providers', 'models', 'mcp', 'meetings', 'dictation', 'voice', 'spoken', 'bots', 'phone', 'machines', 'remote', 'sharing', 'notifications', 'backup', 'about']) {
+      await p.evaluate((s) => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: s } })), id)
+      await settled(p)
+      if (await p.locator('.modal.settings details.st-adv summary').first().isVisible().catch(() => false)) { await advanced(p); await settled(p) }
+      const small = await p.locator('.modal.settings .st-scroll').evaluate((el) => [...el.querySelectorAll('input:not([type=checkbox], [type=radio], [type=range], [type=color], [type=file]), select, textarea')]
+        .filter((e) => e.getBoundingClientRect().width > 0 && parseFloat(getComputedStyle(e).fontSize) < 16)
+        .map((e) => `${e.getAttribute('aria-label') || e.getAttribute('placeholder') || e.name || e.tagName} ${getComputedStyle(e).fontSize}`))
+      if (small.length) zoomy[id] = small
+    }
+    ok(!Object.keys(zoomy).length, 'phone: every field of every section and tab, Advanced open, at 16 px or more (iOS zooms into a smaller one as it\'s tapped)', zoomy)
     ok(errors.length === 0, 'phone: no page errors', errors)
     await ctx.close()
   }

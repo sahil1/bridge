@@ -100,7 +100,7 @@ export function Merged({ data, onDone, onMsg }) {
   const [busy, setBusy] = useState(false)
   const last = (data.merged || [])[(data.merged || []).length - 1]
   if (!last?.kept || data.status !== 'done') return null
-  const until = new Date(last.until).toLocaleDateString(locale(), { month: 'short', day: 'numeric' })
+  const until = new Date(last.until).toLocaleDateString(locale(), { month: 'short', day: 'numeric' }).replace(/ /g, '\u00a0')
   const separate = async () => {
     setBusy(true)
     try {
@@ -110,10 +110,16 @@ export function Merged({ data, onDone, onMsg }) {
       onDone?.()
     } catch (e) { onMsg({ error: true, text: e.message }) } finally { setBusy(false) }
   }
+  const words = t('Merged with the recording from {time} ({title}), which carries on from {at}. Separate puts them back as two meetings, until {date}.', { time: timeOf(last.startedAt), title: last.title, at: clock(last.at), date: until })
+  const link = <button type="button" className="link-btn" disabled={busy} onClick={separate}>{busy ? t('Separating…') : t('Separate')}</button>
+  // Separate kept on a line with the words' last one, so it never starts a line by itself (where
+  // the language spaces its words; else the line breaks where it may).
+  const cut = words.lastIndexOf(' ')
+  const tail = cut > 0 && words.length - cut <= 13 ? words.slice(cut + 1) : ''
   return (
     <p className="mt-merged small muted" role="status">
-      <Icon name="branch" size={12} /> <span>{t('Merged with the recording from {time} ({title}), which carries on from {at}. Separate puts them back as two meetings, until {date}.', { time: timeOf(last.startedAt), title: last.title, at: clock(last.at), date: until })}</span>
-      <button type="button" className="link-btn" disabled={busy} onClick={separate}>{busy ? t('Separating…') : t('Separate')}</button>
+      <Icon name="branch" size={12} /> <span>{tail ? words.slice(0, cut + 1) : words}</span>
+      {tail ? <span className="mt-merged-end">{tail} {link}</span> : <>{' '}{link}</>}
     </p>
   )
 }

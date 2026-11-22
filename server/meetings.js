@@ -48,7 +48,8 @@ const readJSON = (f, d = null) => { try { return JSON.parse(fs.readFileSync(f, '
 const readText = (f) => { try { return fs.readFileSync(f, 'utf8') } catch { return '' } }
 function meta(id) {
   const m = readJSON(path.join(dirOf(id), 'meeting.json'))
-  if (!m) throw new Error('No such meeting')
+  // (code: for a page showing it, to say it's gone: deleted, or merged into another.)
+  if (!m) throw Object.assign(new Error('No such meeting'), { code: 'no_meeting' })
   return m
 }
 function saveMeta(m) {
@@ -776,13 +777,33 @@ function pcmToWav(id) {
     } catch { /* left as it is */ }
   }
 }
+// Notes or a cleanup being written when it closed were never finished, and nothing is writing them
+// now: they don't say they're being written for ever (with Summarize greyed out). The notes are
+// written again in a moment, as the summary would have been (none was there yet; one there already
+// stays as it was), and the cleanup says it was cut off, with Try again. A meeting stopped just
+// before it closed, whose last words were being transcribed, has its notes written too, when
+// summaries are written by themselves: it never got that far.
+const CUT_OFF = 'Bridge AI closed before it was done.'
 export function recover() {
+  const soon = () => new Date(Date.now() + 5_000).toISOString()
   for (const m of list()) {
+    const hasSum = () => fs.existsSync(path.join(DIR, m.id, 'summary.md'))
+    const said = () => !!m.parts || transcript(m.id).some((l) => l.text)
     if (m.status === 'recording' || m.status === 'paused') {
       const at = lastWritten(m)
       pcmToWav(m.id)
       saveMeta({ ...m, status: 'done', endedAt: at, interrupted: { at } })
-    } else if (m.status === 'transcribing') saveMeta({ ...m, status: 'done', endedAt: m.endedAt || m.startedAt })
+    } else if (m.status === 'transcribing') {
+      const write = !m.again && !m.summarizing && cfg.meetings?.autoSummary !== false && !hasSum() && said()
+      if (write) m.summaryRetryAt = soon()
+      saveMeta({ ...m, status: 'done', endedAt: m.endedAt || m.startedAt, ...(write ? { summaryRetryAt: m.summaryRetryAt } : {}) })
+    }
+    if (m.summarizing || m.summaryProgress) {
+      const write = !hasSum() && said()
+      if (write) m.summaryRetryAt = soon()
+      saveMeta({ ...meta(m.id), summarizing: false, summaryProgress: null, ...(write ? { summaryRetryAt: m.summaryRetryAt } : {}) })
+    }
+    if (m.cleaning) saveMeta({ ...meta(m.id), cleaning: false, cleanError: CUT_OFF })
     // Notes that are only a model's "You've hit your weekly limit" (saved as the notes before 3.9.3,
     // when a command line's limit message passed for its answer): set aside (summary-limit.md) and
     // written again, as a summary that couldn't be.
@@ -2292,15 +2313,16 @@ function marksFor(notes, captures = []) {
 let helpers = { reply: null, pickModel: null, pickFor: null, models: null, ownOf: null, ran: null, mailRelated: null, mailMessage: null }
 export const setHelpers = (h) => { helpers = { ...helpers, ...h } }
 
-// The model for a job on a meeting: the one asked for, the meeting's own pick, Settings › Voice &
-// Meetings' pick, else the one for that kind of job (Settings › Model Providers) by what it reads
-// (text): its own model, or with Auto the local model for a short one. { id, anywhere, auto, own,
-// passed, job }: anywhere, it may go to a model elsewhere when the one here can't run it (Auto put it
-// here; you didn't); auto: how pickFor chose; own: the job's own list, which a model in it falls back
-// along instead (passed: the ones in it passed over first, and why). Set to stay on this computer,
-// or a list none of which can run now: the error says why.
+// The model for a job on a meeting: the one asked for, the meeting's own pick for its notes (the
+// summary's Model), else the one for that kind of job (Settings › Models for Each Task) by what it
+// reads (text): its own model, or with Auto the local model for a short one. A meeting's pick is for
+// its notes only: live suggestions, the board and the cleanup go by their own rows. { id, anywhere,
+// auto, own, passed, job }: anywhere, it may go to a model elsewhere when the one here can't run it
+// (Auto put it here; you didn't); auto: how pickFor chose; own: the job's own list, which a model in
+// it falls back along instead (passed: the ones in it passed over first, and why). Set to stay on
+// this computer, or a list none of which can run now: the error says why.
 async function choose(m, model, job, text, o = {}) {
-  const set = model || m?.summaryModelPick || cfg.meetings?.model
+  const set = model || (job === 'notes' ? m?.summaryModelPick : null)
   const own = helpers.ownOf?.(job) || null
   if (set) return { id: set, anywhere: false, auto: null, own, passed: [], job }
   if (!helpers.pickFor) return { id: await helpers.pickModel(), anywhere: false, auto: null, own, passed: [], job }

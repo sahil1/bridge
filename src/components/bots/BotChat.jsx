@@ -3,7 +3,7 @@ import Icon from '../Icon.jsx'
 import { AssistHead } from '../AiAssist.jsx'
 import { Guide, Connect, Owner, DiscordSetup, TeamsSetup, NewBot, AnswererList, PLATFORMS, platName } from '../settings/Bots.jsx'
 import { BotReach } from './Connections.jsx'
-import { ConnectionCard } from './ConnectionCard.jsx'
+import { ConnectionCard, UseForAll } from './ConnectionCard.jsx'
 import { api } from '../../api.js'
 import { t } from '../../i18n/index.js'
 import { useEnter, EnterHint } from '../EnterHint.jsx'
@@ -295,7 +295,7 @@ function ConnectCard({ d, save, reload, again, platform }) {
       <div className="seg" role="tablist" aria-label={t('Where It Answers')}>
         {PLATFORMS.map(([k, label]) => <button key={k} type="button" role="tab" aria-selected={at === k} className={at === k ? 'on' : ''} onClick={() => setAt(k)}>{label}</button>)}
       </div>
-      <BotReach key={`reach-${at}`} d={d} platform={at} reload={reload} />
+      <BotReach key={`reach-${at}`} d={d} platform={at} reload={reload} offer={!via && <OwnForAll key={`own-${at}`} platform={at} reload={reload} />} />
       {via?.shared
         ? <SharedSteps key={via.id} id={via.id} d={d} platform={at} />
         : (
@@ -312,17 +312,34 @@ function ConnectCard({ d, save, reload, again, platform }) {
 }
 // The shared connection's own card (its app's steps, tokens and you there) until it's connected
 // with you there, made once for every bot on it; then this bot's own checklist, which ticks itself.
+// (With every connection beside it, so one never set up offers a bot's own app that's connected
+// instead, as on Connections, before the steps to make a second app.)
 function SharedSteps({ id, d, platform }) {
-  const [c, setC] = useState(null)
-  const load = () => api(`/connections/${id}`).then(setC, () => {})
+  const [all, setAll] = useState(null)
+  const load = () => api('/connections').then((x) => setAll(x.connections || []), () => {})
   useEffect(() => {
     load()
     const every = setInterval(() => { if (!document.hidden) load() }, 4000)
     return () => clearInterval(every)
   }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
+  const c = (all || []).find((x) => x.id === id) || null
   if (!c) return null
-  if (c.state !== 'connected' || !c.owner) return <ConnectionCard c={c} reload={load} open where="chat" />
+  if (c.state !== 'connected' || !c.owner) return <ConnectionCard c={c} reload={load} open where="chat" all={all} />
   return <Guide key={platform} d={d} platform={platform} where="chat" />
+}
+
+// No connection on a platform yet, where another bot's own app there is connected: that app for all
+// your bots, in one step (Use it for all your bots, as its card on Connections offers), before making
+// a second app for what the first does already.
+function OwnForAll({ platform, reload }) {
+  const [list, setList] = useState(null)
+  const [done, setDone] = useState(null)
+  const load = () => api('/connections').then((x) => setList(x.connections || []), () => {})
+  useEffect(() => { load() }, [platform]) // eslint-disable-line react-hooks/exhaustive-deps
+  if (done) return <p className="st-note ok" role="status" data-setting="connection-done"><Icon name="check" size={13} /><span>{done}</span></p>
+  const own = (list || []).find((c) => c.platform === platform && !c.shared && c.state === 'connected' && !c.paused)
+  if (!own) return null
+  return <UseForAll own={own} shared={null} reload={() => { load(); reload?.() }} onDone={(text) => setDone(text)} />
 }
 
 const EXAMPLES = () => [
@@ -333,7 +350,11 @@ const EXAMPLES = () => [
 
 export default function BotChat({ id = null, draft = false, phone = false, d = null, save, reload, again, onClose, onMade, onCreated, onDiscarded }) {
   const [s, setS] = useState(null)
+  // What was said, applied or made, turned down (Settings' own check refusing your home folder): said
+  // until the next thing you do. The chat's look every 4 s cleared it, so the reason was gone in a
+  // moment, or before it was seen. unread: that look failing, said until one works.
   const [error, setError] = useState(null)
+  const [unread, setUnread] = useState(null)
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(null) // 'ask' | 'edit' | 'create' | 'apply'
   const [form, setForm] = useState(false)
@@ -346,7 +367,7 @@ export default function BotChat({ id = null, draft = false, phone = false, d = n
   // the chat just said, off the screen until the next one.)
   const seq = useRef(0)
   const fresh = (r) => { seq.current += 1; setS(r) }
-  const load = () => { const n = seq.current; return api(path).then((r) => { if (n !== seq.current) return; setS((x) => (id ? r : { ...r, messages: x?.messages || [] })); setError(null) }, (e) => { if (n === seq.current) setError(e.message) }) }
+  const load = () => { const n = seq.current; return api(path).then((r) => { if (n !== seq.current) return; setS((x) => (id ? r : { ...r, messages: x?.messages || [] })); setUnread(null) }, (e) => { if (n === seq.current) setUnread(e.message) }) }
   useEffect(() => {
     load()
     if (!id) return undefined
@@ -453,12 +474,12 @@ export default function BotChat({ id = null, draft = false, phone = false, d = n
             {!id && (form || noModel) && <NewBot form start={start} onMade={(bid) => onMade?.(bid)} />}
           </li>
         )}
-        {draft && s?.proposal && <li className="bc-msg bc-card-row"><ProposalCard p={s.proposal} options={s.options} onEdit={edit} onCreate={create} onDiscard={discardDraft} busy={busy === 'create'} error={busy !== 'ask' ? error : null} /></li>}
+        {draft && s?.proposal && <li className="bc-msg bc-card-row"><ProposalCard p={s.proposal} options={s.options} onEdit={edit} onCreate={create} onDiscard={discardDraft} busy={busy === 'create'} error={busy !== 'ask' ? error || unread : null} /></li>}
         {showConnect && <li className="bc-msg bc-card-row"><ConnectCard d={d} save={save} reload={reload} again={again} platform={s?.platform} /></li>}
         {live && s?.change && <li className="bc-msg bc-card-row"><ChangeCard change={s.change} busy={busy === 'apply'} onApply={() => apply(true)} onDiscard={() => apply(false)} /></li>}
         <li ref={end} className="bc-end" aria-hidden="true" />
       </ol>
-      {error && !(draft && s?.proposal) && <p className="error-text small bc-error" role="alert">{error}</p>}
+      {(error || unread) && !(draft && s?.proposal) && <p className="error-text small bc-error" role="alert">{error || unread}</p>}
       <form className="bc-say" onSubmit={(e) => { e.preventDefault(); ask(text) }}>
         <textarea className="st-input" rows={phone ? 2 : 3} value={text} onChange={(e) => { setText(e.target.value); enter.box.onSelect(e) }} onKeyDown={enter.onKeyDown} {...enter.box}
           placeholder={live ? t('Say what to change') : draft ? t('Say what to change in it') : t('What should it do, and who is it for?')} aria-label={live || draft ? t('Say what to change') : t('What should it do, and who is it for?')} disabled={busy === 'ask'} />

@@ -106,7 +106,7 @@ import { mcpRoutes, bridgeMcp } from './mcp.js'
 import { make as makeMcpTools } from './mcptools.js'
 import { make as makeOutside } from './outside.js'
 import { makeFrontDesk, SPACE as BOT_RUNS } from './frontdesk.js'
-import { manifest as slackManifest, connectionManifest, SCOPES as SLACK_SCOPES, SHARED_SCOPES, SCOPE_FOR as SLACK_SCOPE_FOR, commandOf as slackCommand, shortcutOf as slackShortcut } from './slackbot.js'
+import { manifest as slackManifest, connectionManifest, SCOPES as SLACK_SCOPES, SHARED_SCOPES, SCOPE_FOR as SLACK_SCOPE_FOR, commandOf as slackCommand, commandsOf as slackCommands, shortcutOf as slackShortcut } from './slackbot.js'
 import { PORT as TEAMS_PORT } from './teamsbot.js'
 import { combine, platformOf, PLATFORMS, makeConnector as connectorFor } from './connector.js'
 import { makeBotSessions } from './botsessions.js'
@@ -784,11 +784,10 @@ app.post('/api/studio/ask', wrap(async (req) => {
   await studio.noteAsk(root, q.path, adapter(kind).label)
   return { ...out, name: adapter(kind).label }
 }))
-// AI Assist's Sign this (signing.js): a PDF explained by the model meeting notes use when you've
-// picked one, else AI Assist's (pickFor), then signed in a copy in _signed beside it. A scan is read
-// on a Mac (doctext.js).
+// AI Assist's Sign this (signing.js): a PDF explained by AI Assist's model (pickFor), then signed in
+// a copy in _signed beside it. A scan is read on a Mac (doctext.js).
 signing.setHelpers({
-  reply: replyFor('assist'), pickModel: (text) => (cfg.meetings?.model ? Promise.resolve(cfg.meetings.model) : pickModelFor('assist', { text })),
+  reply: replyFor('assist'), pickModel: (text) => pickModelFor('assist', { text }),
   describe: (id) => chatModels.describe(id), via: async (id) => (await chatModels.models().catch(() => [])).find((m) => m.id === id)?.via || null,
   contextOf: (id) => chatModels.contextOf(id), scanText: doctext.ocrBin() ? (file) => doctext.textOf(file, 200_000) : null,
 })
@@ -866,17 +865,16 @@ app.post('/api/studio/deck/comment', async (req, res) => {
 })
 // The change an agent asked in place wrote beside the file, taken once (studio.takeProposal).
 app.get('/api/studio/proposal', wrap(async (req) => { const q = sq(req); return studio.takeProposal(await rootOf(q.root), q.path) }))
-// Decks written by a model (the one meeting notes use when you've picked one, else AI Assist's): a
-// whole deck from what it's about or a document, a slide rewritten, a slide added. The page shows it
-// before it's taken.
-app.get('/api/studio/models', wrap(async () => ({ models: (await chatModels.models().catch(() => [])).map(({ id, label, provider, via }) => ({ id, label, provider, via })), pick: cfg.meetings?.model || await pickModelFor('assist').catch(() => null) })))
+// Decks written by a model (the one picked in Studio, else AI Assist's): a whole deck from what it's
+// about or a document, a slide rewritten, a slide added. The page shows it before it's taken.
+app.get('/api/studio/models', wrap(async () => ({ models: (await chatModels.models().catch(() => [])).map(({ id, label, provider, via }) => ({ id, label, provider, via })), pick: await pickModelFor('assist').catch(() => null) })))
 app.post('/api/studio/deck/ai', wrap(async (req) => {
   const b = req.body || {}
   const mode = ['deck', 'slide', 'add'].includes(b.mode) ? b.mode : 'deck'
   const source = await studio.deckSource(b.from?.root ? { root: await rootOf(String(b.from.root)), path: String(b.from.path || '') } : null, b.upload)
   if (mode === 'deck' && !String(b.prompt || '').trim() && !source) throw new Error('Say what the deck is about, or pick a document to make it from')
   const ask = studio.deckAsk({ mode, prompt: b.prompt, slides: Array.isArray(b.slides) ? b.slides.map(String) : [], at: b.at, source: source?.text, sourceName: source?.name, count: b.count })
-  const use = String(b.model || '') || cfg.meetings?.model || await pickModelFor('assist', { text: ask.prompt })
+  const use = String(b.model || '') || await pickModelFor('assist', { text: ask.prompt })
   if (!use) throw Object.assign(new Error(`No model to write with yet: sign in to an agent (Claude Code, Codex…) or add a key in ${placeEn('providers')}.`), { code: 'noModel' })
   const r = await replyFor('assist')(use, [{ role: 'user', text: ask.prompt }], { system: ask.system, feature: 'studio' })
   return { ...studio.deckAnswer(r?.text), model: r.model, by: await byName(r.model) }
@@ -3790,7 +3788,24 @@ const remoteTrialKept = (req, next) => { if (remoteTrialOf(next) !== remoteTrial
 // at this computer only, by either way of changing the settings (turned off from anywhere).
 const mcpKept = (req, next) => { if (next?.mcpServer?.on === true && settings.readUser().mcpServer?.on !== true) remoteHere(req) }
 app.get('/api/settings', wrap(() => settingsView()))
-app.patch('/api/settings', (req, res) => {
+// Meeting notes' model as Meetings & Voice had it (meetings.model: saved before 3.22.0, sent by an
+// app that still has it, or typed into the file): first in Meeting notes' row in Models for Each
+// Task, with the models it fell back on then, so notes that were written still are. It went on to
+// up to three of the others you have, in the order Automatic takes them (meetingModels), and from
+// one on this computer only to others on this computer (meetings.js replyAny, as it was). A row set
+// after that goes as its list says. The keys that changed.
+async function notesFallbacks(pick) {
+  const all = await meetingModels().catch(() => [])
+  return all.filter((id) => id !== pick && (!chatModels.isLocal(pick) || chatModels.isLocal(id))).slice(0, 3)
+}
+async function moveNotesModel() {
+  const pick = settings.notesPick(settings.readUser())
+  if (pick === undefined) return []
+  const falls = typeof pick === 'string' && settings.MODEL_ID.test(pick) ? await notesFallbacks(pick) : []
+  return settings.moveNotesModel(falls)
+}
+const plus = (a, b) => [...new Set([...a, ...b])]
+app.patch('/api/settings', async (req, res) => {
   try {
     if (req.body && typeof req.body === 'object' && !Array.isArray(req.body)) {
       const next = settings.merged(settings.readUser(), req.body)
@@ -3798,16 +3813,20 @@ app.patch('/api/settings', (req, res) => {
       remoteTrialKept(req, next)
       mcpKept(req, next)
     }
-    res.json(afterChange(settings.patch(req.body || {})))
+    const changed = settings.patch(req.body || {})
+    res.json(afterChange(plus(changed, await moveNotesModel())))
   } catch (e) { res.status(e.status >= 400 && e.status < 500 ? e.status : 502).json({ error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}) }) }
 })
 app.put('/api/settings/raw', async (req, res) => {
   try {
     const text = String(req.body?.text ?? '')
     try { const next = outOfBeta(JSON.parse(text)); channelKept(req, next); remoteTrialKept(req, next); mcpKept(req, next) } catch (e) { if (e.status) throw e }
-    res.json(afterChange(settings.replaceRaw(text)))
+    const changed = settings.replaceRaw(text)
+    res.json(afterChange(plus(changed, await moveNotesModel())))
   } catch (e) { res.status(e.status || 502).json({ error: e.message }) }
 })
+// As Bridge AI starts: one saved before 3.22.0, moved once (the models it fell back on known by then).
+moveNotesModel().then((changed) => { if (changed.length) afterChange(changed) }).catch(() => {})
 app.get('/api/settings/geocode', wrap((req) => settings.geocode(req.query.q)))
 app.get('/api/agents/catalog', wrap(async () => { clearInstalledCache(); return agentCatalog() }))
 
@@ -4199,7 +4218,7 @@ app.get('/api/chat/models', wrap(async (req) => {
   const models = await chatModels.models({ fresh: !!req.query.refresh })
   const automatic = await pickModelFor('notes').catch((e) => (e.code === 'not_ready' ? null : pickMeetingModel()))
   let short = null
-  if (modelJobs.setting(cfg, 'notes') === 'auto' && automatic && !chatModels.isLocal(automatic)) {
+  if (modelJobs.setting(cfg, 'notes') === 'auto' && !modelJobs.listOf(cfg, 'notes') && automatic && !chatModels.isLocal(automatic)) {
     const local = await localFor(await ranked()).catch(() => null)
     const limit = local && await localLimit(local).catch(() => null)
     if (local && limit) short = { id: local.id, label: local.label, minutes: Math.floor(limit.tokens / modelJobs.PER_MINUTE) }
@@ -4630,7 +4649,10 @@ async function botView(b, { brief = false } = {}) {
     signIn: kind === 'claude' || kind === 'codex' ? await signInKind(kind) : null,
     manifest: via.slack?.shared ? connectionManifest(conns.get(via.slack.id), conns.botsOn(conns.get(via.slack.id), botsStore.live()), cfg.name) : slackManifest(b, cfg.name), scopesWanted: via.slack?.shared ? SHARED_SCOPES : SLACK_SCOPES, you: me || null,
     updateApp: { missing, needs: missing.map((x) => ({ scope: x, for: String(SLACK_SCOPE_FOR[x] || '').replace('<command>', slackCommand(via.slack?.shared ? via.slack.name : b.name).slice(1)) })) },
-    command: via.slack?.shared ? `${slackCommand(via.slack.name)} ${b.name.toLowerCase().split(/\s+/)[0]}` : slackCommand(b.name), shortcut: slackShortcut(via.slack?.shared ? via.slack.name : b.name), ownerGuess,
+    command: via.slack?.shared ? `${slackCommand(via.slack.name)} ${b.name.toLowerCase().split(/\s+/)[0]}` : slackCommand(b.name),
+    // (Its own slash command on the shared app, where there's one for each bot: unique among them.)
+    ownCommand: via.slack?.shared && conns.get(via.slack.id)?.perBot ? slackCommands(conns.botsOn(conns.get(via.slack.id), botsStore.live()), [slackCommand(via.slack.name)]).get(b.id) || null : null,
+    shortcut: slackShortcut(via.slack?.shared ? via.slack.name : b.name), ownerGuess,
     scheduled: (routinesNow.routines || []).filter((r) => r.to === 'bot' && r.bot === b.id).map((r) => ({ id: r.id, name: r.name, command: r.command, channel: r.channel || null, schedule: r.schedule || null, says: r.says || null, next: r.next || [], state: r.state, note: r.note || null, auto: !!r.auto, paused: !!r.paused, runs: (r.runs || []).slice(0, 5) })),
     routinesOn: featureOn('routines'),
   }
@@ -5318,7 +5340,7 @@ async function connView(c) {
   return {
     ownerGuess,
     id: c.id, name: c.name, platform: c.platform, shared: c.shared, own: c.bot ? { id: c.bot, name: botsStore.get(c.bot)?.name || c.bot } : null,
-    bots: on.map((b) => ({ id: b.id, name: b.name, description: b.description || '', paused: b.paused, command: slack && c.perBot ? slackCommand(b.name) : null })),
+    bots: on.map((b) => ({ id: b.id, name: b.name, description: b.description || '', paused: b.paused, command: slack && c.perBot ? slackCommands(on, [slackCommand(c.name)]).get(b.id) : null })),
     owner, ownerFrom: owner && !c.owner ? 'bot' : null, defaults: c.defaults, perBot: c.perBot, createdAt: c.createdAt || null,
     // (Its Chief, while that bot's on it; a code to link you waiting to be sent, until when; its last
     // Test this connection, conncheck.js.)

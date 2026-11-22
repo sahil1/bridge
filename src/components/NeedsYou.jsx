@@ -373,7 +373,11 @@ export function OutsideItem({ it, onDone, setNote }) {
 // A run at its time limit is a card of its own (LimitItem); one stopped there for want of your
 // answer is a draft to write, with Continue as well, for a day.
 const sizeOf = (n) => (n == null ? '' : n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`)
-const whereOf = (it) => (it.place?.kind === 'dm' ? t('in a direct message') : it.place?.name ? t('in #{channel}', { channel: it.place.name }) : t('in a channel'))
+// (A Teams channel by its name alone, as Teams shows it: no # before it.)
+const whereOf = (it) => (it.place?.kind === 'dm' ? t('in a direct message') : it.place?.name ? (/^teams:/.test(String(it.place.id || it.conv || '')) ? t('in {place}', { place: it.place.name }) : t('in #{channel}', { channel: it.place.name })) : t('in a channel'))
+// Where it was asked, by the platform's own name: Discord's and Teams' places and conversations
+// carry their platform before them (server/connector.js), Slack's nothing.
+const platformOf = (it) => { const m = /^(discord|teams):/.exec(String(it.place?.id || it.conv || '')); return m ? (m[1] === 'teams' ? 'Microsoft Teams' : 'Discord') : 'Slack' }
 const timeOf = (iso) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 // A request to a bot that changes files, held before it started, is a card of its own (ScreenItem);
 // a change to files with a draft shows in it, with Approve and Send or Deny while it waits, and Undo
@@ -642,7 +646,7 @@ function DraftItem({ it, onDone, setNote }) {
       const out = await onDevice(null, `/bots/questions/${encodeURIComponent(it.id)}`, { send, text, ...(writes ? { write: { id: it.write.id, hash: it.write.hash } } : {}) })
       if (out.item?.state === 'draft') { setProblem(out.item.problem || null); return }
       onDone(it)
-      setNote({ text: writes ? (send ? t('Approved: the change is made, and the reply is on its way to {name}', { name: who }) : t('Denied: nothing was changed, and {name} is told', { name: who })) : !send ? t('Discarded: nothing sent') : out.item?.state === 'sent' ? t('Sent to {name} in Slack', { name: who }) : t('Sending to Slack: {why}', { why: out.item?.problem || t('in a moment') }) })
+      setNote({ text: writes ? (send ? t('Approved: the change is made, and the reply is on its way to {name}', { name: who }) : t('Denied: nothing was changed, and {name} is told', { name: who })) : !send ? t('Discarded: nothing sent') : out.item?.state === 'sent' ? t('Sent to {name} in {platform}', { name: who, platform: platformOf(it) }) : t('Sending to {platform}: {why}', { platform: platformOf(it), why: out.item?.problem || t('in a moment') }) })
     } catch (e) { setProblem(e.message) } finally { setBusy(false) }
   }
   const undo = async () => {
@@ -684,7 +688,7 @@ function DraftItem({ it, onDone, setNote }) {
       <WriteOf it={it} onUndo={undo} busy={busy} whole={whole} onMore={more} />
       {it.push?.state === 'waiting' && <PushOf it={it} onDone={onDone} setNote={setNote} />}
       {it.share?.state === 'waiting' && <ShareOf it={it} onDone={onDone} setNote={setNote} />}
-      {it.ownerAsked && <p className="muted small ny-from"><Icon name="chat" size={11} /> {t('Also in your Slack direct messages: answer it there or here.')}</p>}
+      {it.ownerAsked && <p className="muted small ny-from"><Icon name="chat" size={11} /> {t('Also in your {platform} direct messages: answer it there or here.', { platform: platformOf(it) })}</p>}
       <textarea className="ny-draft" value={text} onChange={(e) => setText(e.target.value)} rows={Math.min(8, Math.max(3, text.split('\n').length + 1))} placeholder={t('Write the reply…')} aria-label={t('Reply to {name}', { name: who })} disabled={busy || limit.busy} />
       {(problem || limit.problem) && <p className="ny-problem" role="alert"><Icon name="alert" size={12} />{problem || limit.problem}</p>}
       <div className="ny-acts">

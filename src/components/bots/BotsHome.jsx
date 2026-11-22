@@ -7,7 +7,7 @@ import SessionList from './SessionList.jsx'
 import { BotDot } from './RailBots.jsx'
 import { accessSaid } from './access.js'
 import { usePolled, stateOf } from './sessions.js'
-import { useBots, statusOf, STATUS, needsCount, openBot, refreshBots, chiefIdOf, BOTS_TABS } from './bots.js'
+import { useBots, statusOf, STATUS, needsCount, openBot, openBots, refreshBots, chiefIdOf, BOTS_TABS } from './bots.js'
 import { t } from '../../i18n/index.js'
 import './bots-page.css'
 import './bots-home.css'
@@ -179,6 +179,9 @@ function QuickCreate({ conns, first = false, onClose }) {
     } catch (err) { setError(err.message) }
     setBusy(false)
   }
+  // (Where it would answer, when that isn't working yet: said, with where to set it up.)
+  const via = shared.find((x) => x.id === conn) || (shared.length === 1 ? shared[0] : null)
+  const viaName = via ? (via.platform === 'teams' ? via.name : `@${via.name}`) : ''
   return (
     <form className="st-sec bh-quick" onSubmit={make} data-setting="bots-quick">
       <h4>{first ? t('Make Your First Bot') : t('New Bot')}</h4>
@@ -196,11 +199,12 @@ function QuickCreate({ conns, first = false, onClose }) {
       {shared.length > 1 && (
         <label className="sb-field"><span>{t('Where it answers')}</span>
           <select className="st-input" value={conn} onChange={(e) => setConn(e.target.value)} aria-label={t('Where it answers')}>
-            {shared.map((c) => <option key={c.id} value={c.id}>{`${c.platform === 'teams' ? c.name : `@${c.name}`} (${platName(c.platform)})`}</option>)}
+            {shared.map((c) => <option key={c.id} value={c.id}>{`${c.platform === 'teams' ? c.name : `@${c.name}`} (${platName(c.platform)})${c.state === 'connected' ? '' : ` · ${c.state === 'no-tokens' ? t('not set up') : t('not connected')}`}`}</option>)}
           </select>
         </label>
       )}
-      {shared.length === 1 && <p className="muted small">{t('It answers through {name} on {platform}.', { name: shared[0].platform === 'teams' ? shared[0].name : `@${shared[0].name}`, platform: platName(shared[0].platform) })}</p>}
+      {shared.length === 1 && <p className="muted small" data-setting="bots-quick-via">{t('It answers through {name} on {platform}.', { name: shared[0].platform === 'teams' ? shared[0].name : `@${shared[0].name}`, platform: platName(shared[0].platform) })}</p>}
+      {via && via.state !== 'connected' && <p className="small bh-quick-warn" data-setting="bots-quick-unset"><Icon name="info" size={12} /> <span>{via.state === 'no-tokens' ? t('{name} isn\'t set up yet, so it isn\'t reached until it is.', { name: viaName }) : t('{name} isn\'t connected now, so it isn\'t reached until it is.', { name: viaName })}</span> <button type="button" className="link-btn" onClick={() => openBots('connections')}>{t('Set it up in Connections')}</button></p>}
       {conns && !shared.length && <p className="muted small">{t('No connection yet: make one in Connections once it\'s made, for all your bots.')}</p>}
       {folder.trim() && <p className="muted small">{t('It reads and edits files there: yours at once, anyone else\'s once you OK them.')}</p>}
       {error && <p className="error-text small" role="alert">{error}</p>}

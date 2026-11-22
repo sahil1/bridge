@@ -2453,6 +2453,9 @@ button.ue-row:hover { background: var(--pane-2); }
 .st-chip { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; font-size: 11px; font-weight: 550; background: var(--pane-3); color: var(--ink-2); }
 .st-chip.good { background: color-mix(in srgb, var(--good) 14%, transparent); color: var(--good); }
 .st-chip.warn { background: color-mix(in srgb, var(--warning) 16%, transparent); color: var(--warning); }
+/* One that can be long (a device's name in it): onto more lines inside it, not past its edge. */
+.st-chip.wraps { height: auto; min-height: 20px; padding-block: 2px; border-radius: 10px; overflow-wrap: anywhere; }
+.st-chip.wraps .icon { flex: none; }
 .st-cmd { width: 100%; font: 11.5px var(--font-mono); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .st-agent-acts { display: flex; align-items: center; gap: 6px; flex: none; }
 .st-path { font: 11.5px var(--font-mono); color: var(--ink-2); background: var(--pane-2); border: 1px solid var(--line); border-radius: 7px; padding: 4px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
@@ -2482,6 +2485,8 @@ button.ue-row:hover { background: var(--pane-2); }
 .st-back:active { background: var(--accent-soft); }
 .st-bar .st-close { justify-self: end; width: 44px; height: 44px; border-radius: 10px; color: var(--ink-2); }
 .modal.settings.phone .st-scroll { flex: 1; min-height: 0; padding: 14px 16px calc(24px + env(safe-area-inset-bottom)); }
+/* Every field at 16px or more: iOS zooms into a smaller one as it's tapped, and the page stays zoomed. */
+.modal.settings.phone :is(input:not([type=checkbox], [type=radio], [type=range], [type=color], [type=file]), select, textarea) { font-size: 16px; }
 .st-list .m-more-text span { white-space: normal; overflow: visible; line-height: 1.35; }
 .st-list .m-more-row { min-height: 60px; padding-block: 10px; }
 .st-lede { margin: 0 0 12px; }
@@ -2682,6 +2687,9 @@ button.ue-row:hover { background: var(--pane-2); }
 .ph-devices { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .ph-devices li { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: 9px; border: 1px solid var(--line); flex-wrap: wrap; }
 .ph-devices li > span:first-of-type { font-weight: 550; }
+/* The icon stays beside the name, a long one wrapping beside it (not the icon alone on a line). */
+.ph-dev-name { display: inline-flex; align-items: center; gap: 9px; min-width: 0; overflow-wrap: anywhere; }
+.ph-dev-name .icon { flex: none; }
 .ph-devices li .ghost-btn { margin-left: auto; }
 .ab-version { font-weight: 650; font-size: 14px; }
 .ab-cmd { display: grid; gap: 6px; }
@@ -3574,6 +3582,9 @@ button.cb-main:focus-visible { outline: 2px solid var(--accent); outline-offset:
 .mc-head { padding: 6px 9px 4px; font: 600 10.5px var(--font); letter-spacing: .05em; text-transform: uppercase; color: var(--ink-3); }
 .mc-row { display: flex; align-items: center; gap: 2px; border-radius: 7px; }
 .mc-row:hover { background: var(--pane-3); }
+.mc-err { display: flex; align-items: flex-start; gap: 6px; margin: 2px 0; padding: 4px 9px 6px; color: var(--critical); line-height: 1.35; }
+.mc-err .icon { flex: none; margin-top: 2px; }
+.mch-detail { display: block; margin-top: 2px; overflow-wrap: anywhere; }
 .mc-item { flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px; padding: 6px 9px; text-align: left; color: var(--ink); }
 .mc-text { flex: 1; min-width: 0; display: grid; }
 .mc-text b { font: 600 12.5px var(--font); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

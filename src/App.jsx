@@ -12,7 +12,7 @@ import TabStrip from './components/TabStrip.jsx'
 import Dock from './components/Dock.jsx'
 import Console, { MateEmpty, showChat, showView } from './components/Console.jsx'
 import { Settings, Onboarding, HerdrView, Terminals, ShellTab, MeetingsHome, MeetingPage, StudioHome, StudioPage, UsageStats, BotPage, BotsHome, SessionView, preloadViews } from './lazy.jsx'
-import { useBots, needsCount, botPlace, BOT_VIEW, BOTS_VIEW, SESSION_VIEW, botView, botsView, sessionView } from './components/bots/bots.js'
+import { useBots, needsCount, firstTab, botPlace, BOT_VIEW, BOTS_VIEW, SESSION_VIEW, botView, botsView, sessionView } from './components/bots/bots.js'
 import { sessionTitle } from './components/bots/sessions.js'
 import Home from './components/Home.jsx'
 import { FirstRunAnswers } from './components/FirstRun.jsx'
@@ -54,6 +54,7 @@ import { RemoteHere, ScreenLive } from './components/remote/Here.jsx'
 import Dictation from './dictation/Dictation.jsx'
 import BackForward from './components/BackForward.jsx'
 import { start as navStart, stop as navStop, seen as navSeen, recheck as navRecheck, usePlaces, placeOf, placeLabel, showPlaceIn, replacedWith, renamedTab, slotOf } from './backForward.js'
+import { start as phoneStart, stop as phoneStop, seen as phoneSeen, backward as phoneBackward } from './phoneBack.js'
 import { WHERE_KEY, SHELF } from './components/files/fsapi.js'
 import { t, tn, tx } from './i18n/index.js'
 import { where } from './components/settings/search.js'
@@ -1164,7 +1165,7 @@ function App() {
         : id.startsWith(STUDIO) && StudioPage ? <section className="pane view-pane"><StudioPage {...studioOf(id)} onBack={() => openAgent('view:studio', { replace: id })} onOpen={(f, o) => openAgent(studioId(f), o?.replace ? { replace: id } : {})} /></section>
         : id.startsWith(BOTS_VIEW) ? <section className="pane view-pane">{bots.on ? <BotsHome tab={id.slice(BOTS_VIEW.length)} phone={!wide} onTab={(x) => openAgent(botsView(x), wide ? { replace: id } : {})} /> : conf && <TrialOff name={t('Bots')} />}</section>
         : id.startsWith(SESSION_VIEW) ? <section className="pane view-pane">{bots.on ? <SessionView key={id} sid={id.slice(SESSION_VIEW.length)} phone={!wide} fleet={fleet} /> : conf && <TrialOff name={t('Bots')} />}</section>
-        : id.startsWith(BOT_VIEW) ? <section className="pane view-pane">{bots.on ? <BotPage id={id.slice(BOT_VIEW.length)} phone={!wide} onOpen={(bid, o) => openAgent(botView(bid), o?.replace ? { replace: id } : {})} onTab={(x) => openAgent(botsView(x), wide ? { replace: id } : {})} onGone={() => (wide ? closeTab(id) : setMoreView(botsView('bots')))} /> : conf && <TrialOff name={t('Bots')} />}</section>
+        : id.startsWith(BOT_VIEW) ? <section className="pane view-pane">{bots.on ? <BotPage id={id.slice(BOT_VIEW.length)} phone={!wide} onOpen={(bid, o) => openAgent(botView(bid), o?.replace ? { replace: id } : {})} onTab={(x) => openAgent(botsView(x), wide ? { replace: id } : {})} onGone={() => { if (wide) closeTab(id); else { phoneBackward(); setMoreView(botsView('bots')) } }} /> : conf && <TrialOff name={t('Bots')} />}</section>
         : <section className="pane view-pane"><MeetingPage id={id.slice(13)} onBack={onBack || (() => openAgent('view:meetings', { replace: id }))} /></section>}
     </ErrorBoundary>
   )
@@ -1243,6 +1244,30 @@ function App() {
   const openTabs = W.tabs.join('\n')
   useEffect(() => { navRecheck() }, [openTabs])
 
+  // ---------- The phone's Back (src/phoneBack.js) ----------
+  // On a phone's layout (not its Cloud agents, which keep their own), what it shows is a place: its
+  // tab and, in it, the view More shows, the agent the Agents tab has open, the meeting Meetings has
+  // open, Home or Everything. Each is an entry in the browser's history, so the system's Back goes
+  // to the one before and leaves Bridge AI only from the first.
+  const phoneOn = !wide && !cloudOnly && navReady.current
+  const phonePlace = !phoneOn ? null : { tab: mtab, more: mtab === 'more' ? moreView || null : null, agent: mtab === 'agents' ? mobileAgent || null : null, meeting: mtab === 'meetings' ? mobileMeeting || null : null, home: mtab === 'home' ? homeView : null }
+  const phoneKey = phonePlace ? JSON.stringify(phonePlace) : ''
+  const phoneShow = useRef(null)
+  phoneShow.current = (pl) => {
+    if (!pl?.tab) return
+    setMtab(pl.tab)
+    if (pl.tab === 'more') setMoreView(pl.more || null)
+    if (pl.tab === 'agents') setMobileAgent(pl.agent || null)
+    if (pl.tab === 'meetings') setMobileMeeting(pl.meeting || null)
+    if (pl.tab === 'home') setHomeView(pl.home || 'home')
+  }
+  useEffect(() => {
+    if (!phoneOn) return undefined
+    phoneStart({ show: (pl) => phoneShow.current(pl) })
+    return () => phoneStop()
+  }, [phoneOn])
+  useEffect(() => { if (phoneOn) phoneSeen(phonePlace, phoneKey) }, [phoneKey, phoneOn]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // ---------- Phone ----------
   // The phone's Cloud agents: their list (or the first key), and one agent at a time.
   if (cloudOnly) {
@@ -1274,7 +1299,7 @@ function App() {
       { id: 'terminals', icon: 'terminal', label: t('Terminals'), hint: t("Every agent's terminal, live"), run: () => setMoreView('terminals') },
       { id: 'map', icon: 'grid', label: t('Agent Map'), hint: t("What's running on each of your computers"), run: () => setMoreView('view:map') },
       // Bots (a beta feature): its Connections, Bots and Sessions, as the computer's.
-      bots.on && { id: 'bots', icon: 'bot', label: t('Bots'), hint: t('Connections, bots and every conversation they\'re having'), count: needsCount(bots.list), run: () => setMoreView(botsView(needsCount(bots.list) ? 'sessions' : 'bots')) },
+      bots.on && { id: 'bots', icon: 'bot', label: t('Bots'), hint: t('Connections, bots and every conversation they\'re having'), count: needsCount(bots.list), run: () => setMoreView(botsView(firstTab(bots.list))) },
       { id: 'needs', icon: 'bell', label: t('Needs You'), hint: t("What's waiting on you, on every device"), count: waiting, run: () => setInbox({}) },
       { id: 'history', icon: 'clock', label: t('History'), hint: t('Every conversation, and closed agents'), run: () => setHistory(true) },
       { id: 'settings', icon: 'settings', label: t('Settings'), hint: t('Devices, voice, appearance and more'), run: () => setSettings('all') },
@@ -1292,14 +1317,14 @@ function App() {
           {mtab === 'mate' && (mateShown ? <Console key={mateShown.paneId} agent={mateShown} variant="mobile" queued={queuedFor(mateShown.paneId)} delivered={deliveredFor(mateShown.paneId)} agents={agents} onThread={(id) => setMateId(id)} /> : <MateEmpty onLaunch={mateLaunch.launch} {...mateLaunch} />)}
           {mtab === 'agents' && (mAgent
             ? mAgent.view
-              ? <div className="m-view">{!mAgent.paneId.startsWith('view:meeting:') && <button type="button" className="ghost-btn m-view-back" onClick={() => setMobileAgent(null)}><Icon name="back" size={14} /> {t('Agents')}</button>}{viewFor(mAgent.paneId, { onBack: () => openAgent('view:meetings') })}</div>
-              : <Console agent={mAgent} variant="mobile" onBack={() => setMobileAgent(null)} queued={queuedFor(mAgent.paneId)} delivered={deliveredFor(mAgent.paneId)} />
+              ? <div className="m-view">{!mAgent.paneId.startsWith('view:meeting:') && <button type="button" className="ghost-btn m-view-back" onClick={() => { phoneBackward(); setMobileAgent(null) }}><Icon name="back" size={14} /> {t('Agents')}</button>}{viewFor(mAgent.paneId, { onBack: () => openAgent('view:meetings') })}</div>
+              : <Console agent={mAgent} variant="mobile" onBack={() => { phoneBackward(); setMobileAgent(null) }} queued={queuedFor(mAgent.paneId)} delivered={deliveredFor(mAgent.paneId)} />
             : <><SessionSwitcher fleet={fleet} phone /><Board fleet={fleet} compact onOpen={openAgent}
               action={<span className="m-acts"><button className="btn small" onClick={openMap} aria-label={t('Agent Map')} title={t("What's running on each of your computers")}><Icon name="grid" size={12} /> {t('Map')}</button><button className="btn small" onClick={openNew} aria-label={t('Start something new')}><Icon name="plus" size={12} /> {t('New')}</button></span>} /></>)}
           {mtab === 'meetings' && (
             <div className="m-view m-meetings">
               {/* Meetings, with Dictations a tab of it (Meetings.jsx), or a meeting. */}
-              {viewFor(mobileMeeting || 'view:meetings', { onBack: () => setMobileMeeting(null) })}
+              {viewFor(mobileMeeting || 'view:meetings', { onBack: () => { phoneBackward(); setMobileMeeting(null) } })}
             </div>
           )}
           {mtab === 'more' && (moreView
@@ -1307,8 +1332,8 @@ function App() {
               <div className="m-view m-more-view">
                 {/* A file in Studio has its own way back, to Studio. */}
                 {!moreView.startsWith(STUDIO) && (moreView.startsWith(BOT_VIEW) || moreView.startsWith(SESSION_VIEW)
-                  ? <button type="button" className="ghost-btn m-view-back" onClick={() => setMoreView(botsView(moreView.startsWith(SESSION_VIEW) ? 'sessions' : 'bots'))}><Icon name="back" size={14} /> {t('Bots')}</button>
-                  : <button type="button" className="ghost-btn m-view-back" onClick={() => setMoreView(null)}><Icon name="back" size={14} /> {t('More')}</button>)}
+                  ? <button type="button" className="ghost-btn m-view-back" onClick={() => { phoneBackward(); setMoreView(botsView(moreView.startsWith(SESSION_VIEW) ? 'sessions' : 'bots')) }}><Icon name="back" size={14} /> {t('Bots')}</button>
+                  : <button type="button" className="ghost-btn m-view-back" onClick={() => { phoneBackward(); setMoreView(null) }}><Icon name="back" size={14} /> {t('More')}</button>)}
                 {moreView === 'terminals' ? <Terminals key={fleet?.session || ''} onChat={(id) => openAgent(id)} />
                   : moreView === 'bots' ? viewFor(botsView('bots'))
                   : moreView === 'today' ? <div className="m-today"><TodayTabs tab={todayTab} setTab={setTodayTab} compact /><div className={`m-today-body tab-${todayTab}`}><TodayBody phone onOpenAgent={openAgent} tab={todayTab} setTab={setTodayTab} stackClass="m-stack" /></div></div>

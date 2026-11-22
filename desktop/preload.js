@@ -11,7 +11,7 @@ const { contextBridge, ipcRenderer, webUtils, webFrame } = require('electron')
 // card), as on a phone. So does any page that isn't this computer's own at its own address (a page an
 // agent made, at /api/...), and the app checks each message too (senders.js guard).
 const machine = /^\/m\/([A-Za-z0-9_-]{1,20})\//.exec(location.pathname)?.[1] || null
-const own = !machine && location.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname) && !location.pathname.startsWith('/api/')
+const own = !machine && location.protocol === 'http:' && location.hostname === '127.0.0.1' && !location.pathname.startsWith('/api/')
 // What an update would lose in this window, asked by the app before it updates by itself while
 // you're away (main.js): the page answers (src/busy.js). No answer: null, which counts as busy.
 let busyAnswer = null

@@ -51,7 +51,7 @@ import fs from 'node:fs'
 import http from 'node:http'
 import crypto from 'node:crypto'
 import { writeFileAtomic } from './paths.js'
-import { failure, masked, sleep, split } from './connector.js'
+import { failure, masked, sleep, split, unreached, UNREACHED_FIX } from './connector.js'
 import { safeName } from './safename.js'
 import { appPackage, SHORT_MAX } from './teamsapp.js'
 
@@ -129,7 +129,7 @@ export function makeKeys() {
   async function load() {
     fetches++
     const get = async (u) => {
-      const r = await fetch(u, { signal: AbortSignal.timeout(15000) }).catch((e) => { throw failure(`Couldn't reach Microsoft for its signing keys: ${e.cause?.code || e.message}`, 'offline') })
+      const r = await fetch(u, { signal: AbortSignal.timeout(15000) }).catch((e) => { throw failure(`Couldn't reach Microsoft for its signing keys: ${unreached(e)}`, 'offline') })
       if (!r.ok) throw failure(`Microsoft's signing keys couldn't be read (${r.status})`, `http_${r.status}`)
       return r.json()
     }
@@ -222,7 +222,7 @@ export function makeTeams({ id = 'teams', file, say = () => {}, threads = () => 
     let r
     try {
       r = await fetch(SIGNIN(tenant), { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ grant_type: 'client_credentials', client_id: c.appId, client_secret: c.password, scope: SCOPE }), signal: AbortSignal.timeout(20000) })
-    } catch (e) { throw failure(`Couldn't reach Microsoft Entra ID: ${e.cause?.code || e.message}`, 'offline') }
+    } catch (e) { throw failure(`Couldn't reach Microsoft Entra ID: ${unreached(e)}`, 'offline') }
     const j = await r.json().catch(() => null)
     if (r.ok && j?.access_token) return { value: j.access_token, until: Date.now() + Math.max(60, Number(j.expires_in) || 3600) * 1000 - 5 * 60 * 1000 }
     const said = String(j?.error_description || j?.error || r.status)
@@ -253,7 +253,7 @@ export function makeTeams({ id = 'teams', file, say = () => {}, threads = () => 
       let r
       try {
         r = await fetch(url, { method, headers: { authorization: `Bearer ${t}`, ...(body ? { 'content-type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(20000) })
-      } catch (e) { throw failure(`Couldn't reach Teams: ${e.cause?.code || e.message}`, 'offline') }
+      } catch (e) { throw failure(`Couldn't reach Teams: ${unreached(e)}`, 'offline') }
       if (r.status === 401 && again) { again = false; tok = { value: null, until: 0 }; continue }
       if (r.status === 429) {
         const wait = Math.min(60, Math.max(1, Number(r.headers.get('retry-after')) || 1))
@@ -710,7 +710,7 @@ export function makeTeams({ id = 'teams', file, say = () => {}, threads = () => 
     checks.add(n)
     let r = null
     let why = null
-    try { r = await fetch(`${kept.publicUrl}/api/messages/check?n=${n}`, { signal: AbortSignal.timeout(15000), redirect: 'manual' }) } catch (e) { why = `Couldn't reach ${kept.publicUrl}: ${e.cause?.code || e.message}` } finally { checks.delete(n) }
+    try { r = await fetch(`${kept.publicUrl}/api/messages/check?n=${n}`, { signal: AbortSignal.timeout(15000), redirect: 'manual' }) } catch (e) { why = `Couldn't reach ${kept.publicUrl}: ${unreached(e)}` } finally { checks.delete(n) }
     if (r && r.status !== 204) why = r.status === 404 ? `${kept.publicUrl} answered, but not from this bot: point your tunnel at port ${server.address().port}` : `${kept.publicUrl} answered ${r.status}: is the tunnel running?`
     st.endpoint = { ok: !why, why, at: now() }
     say({ what: 'endpoint', ok: !why, why })
@@ -752,7 +752,7 @@ export function makeTeams({ id = 'teams', file, say = () => {}, threads = () => 
       tok = await signIn()
       out.push({ id: 'tokens', label: 'Tokens', state: 'ok', detail: 'Microsoft Entra ID gave the bot a token', fix: null })
     } catch (e) {
-      out.push({ id: 'tokens', label: 'Tokens', state: 'fail', detail: e.message, fix: 'Check the app ID, tenant ID and client secret\'s Value on the Azure Bot and its app registration' })
+      out.push({ id: 'tokens', label: 'Tokens', state: 'fail', detail: e.message, fix: e.code === 'offline' ? UNREACHED_FIX : 'Check the app ID, tenant ID and client secret\'s Value on the Azure Bot and its app registration' })
       out.push({ id: 'owner', label: 'You here', state: 'skip', detail: 'Needs working credentials first', fix: null })
       return out
     }

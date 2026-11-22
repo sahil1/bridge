@@ -8,7 +8,10 @@
 // there, so one from a frame in it (another computer's agent in a tab, a project's app in Preview)
 // comes from a page that got past its own. Each channel takes this computer's own page, and the few
 // a window showing another computer needs take that too (guard).
-const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]'])
+// Only 127.0.0.1, where the app's server listens and its windows load: localhost and [::1] are
+// other addresses, where another program (a project's server an agent runs) can listen at the same
+// port, so a page there is never the app's or another computer's.
+const LOOPBACK = new Set(['127.0.0.1'])
 
 // What a window showing another computer needs of the app: windows (an agent in one of its own, this
 // computer's main one, a device in one of its own), saying what an update would lose in it, and the

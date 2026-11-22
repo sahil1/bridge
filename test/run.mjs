@@ -9,9 +9,11 @@
 //   --lanes N     how many at once (default 3; each has its own server and port)
 //   --browser webkit|chromium|both          which engine the app's tests run in (default chromium)
 //   --no-retry    report a failure straight away instead of running it once more on its own
-//   --browser-only   only the tests that run in a browser (CI's WebKit machines: the macOS one runs
-//                    the rest on the same system)
-//   --shard I/N   the I-th of N shares of those tests, each about as long (CI splits WebKit's in two)
+//   --browser-only   only the tests that run in a browser (CI's WebKit machines, and Linux's in
+//                    Chromium)
+//   --no-browser     only the tests that run in no browser (CI's macOS machine for them)
+//   --shard I/N   the I-th of N shares of those tests, each about as long (CI splits them across
+//                 machines)
 // The app is built first when its source is newer than the build. A test that fails, then passes
 // on its own, is reported as flaky rather than failed. Logs and pictures go in test/.out.
 import { spawn, spawnSync, execFileSync } from 'node:child_process'
@@ -50,6 +52,7 @@ const SUITES = [
   { name: 'meeting-insights', build: 'dist', browser: true, covers: [/^server\/(meetinsights|meetings|meetwork|meetmemory|voices|calendar|index)\.js$/, /^src\/components\/meetings\/(insights|people|tools|Meetings)\.jsx$/, /^native\/bridgecal\.swift$/, /^src\/components\/settings\/About\.jsx$/, /^src\/components\/meetings\/meetings\.css$/, /^src\/(trials|App)\.jsx?$/] },
   { name: 'meetings-ui', build: 'dist', browser: true, covers: [/^src\/components\/meetings\//, /^src\/components\/(Rail|Icon|FileExtras|layout)\.jsx$/, /^src\/(api|App|appearance)\.jsx?$/, /^server\/(meetings|meetwork|calendar|calls|index)\.js$/] },
   { name: 'meetings-screen', build: 'dist', browser: true, covers: [/^src\/components\/meetings\//, /^src\/(api|App)\.jsx?$/, /^server\/(meetings|calls|index)\.js$/] },
+  { name: 'meetings-edges', build: 'dist', browser: true, covers: [/^src\/components\/meetings\/(recording|Meetings|merge)\.jsx$/, /^src\/components\/meetings\/meetings\.css$/, /^src\/api\.js$/, /^server\/meetings\.js$/] },
   { name: 'scroll-ui', build: 'dist', browser: true, covers: [/^src\/styles\.css$/, /^src\/scrolling\.js$/, /^src\/main\.jsx$/, /^src\/components\/meetings\/meetings\.css$/] },
   { name: 'rail-ui', build: 'dist', browser: true, covers: [/^src\/components\/(Rail|Palette|Tour|Console)\.jsx$/, /^src\/components\/meetings\/(RailMeetings|bulk)\.jsx$/, /^src\/App\.jsx$/, /^src\/styles\.css$/, /^server\/(meetings|threads)\.js$/] },
   { name: 'settings-ui', build: 'dist', browser: true, covers: [/^src\/enter\.js$/, /^src\/components\/EnterHint\.jsx$/, /^src\/components\/settings\//, /^src\/components\/(Settings|Appearance|Palette|Machines)\.jsx$/, /^src\/(dictation|voice)\/[\w.]+\.css$/, /^src\/styles\.css$/] },
@@ -115,6 +118,8 @@ const SUITES = [
   { name: 'usage-counts', build: 'dist', browser: true, covers: [/^server\/(system|boards)\.js$/, /^src\/components\/crashReport\.css$/, /^src\/activeTime\.js$/, /^src\/main\.jsx$/, /^server\/counts\.js$/, /^shared\/telemetry-schema\.json$/, /^src\/components\/settings\/(UsageCounts\.jsx|counts\.css|About\.jsx)$/, /^server\/(index|agents)\.js$/] },
   { name: 'phone-parity', build: 'dist', browser: true, covers: [/^src\/App\.jsx$/, /^src\/components\/(More|Palette|Settings|Rail|Home|NeedsHome|Dock)\.jsx$/, /^src\/styles\.css$/] },
   { name: 'phone-fresh', build: 'dist', browser: true, covers: [/^src\/(fresh|App|api)\.jsx?$/, /^src\/components\/TopNotes\.jsx$/, /^relay\/web\//, /^server\/index\.js$/, /^test\/stand-ins\/relay\.mjs$/] },
+  // The phone page's service worker not getting there: Bridge AI opens with one that's active, or the page says why, with Try again.
+  { name: 'phone-worker', build: 'dist', browser: true, covers: [/^relay\/web\/(shell|sw|index)\./, /^relay\/build\.js$/, /^test\/stand-ins\/relay\.mjs$/] },
   { name: 'phone-meetings', build: 'dist', browser: true, covers: [/^src\/components\/meetings\//, /^src\/(App|api)\.jsx?$/, /^src\/styles\.css$/, /^server\/(meetings|speech|index)\.js$/] },
   { name: 'phone-composer', build: 'dist', browser: true, covers: [/^src\/enter\.js$/, /^src\/components\/EnterHint\.jsx$/, /^src\/components\/(Composer|ModelChip|Console|Handoff|Rail)\.jsx$/, /^src\/styles\.css$/, /^test\/stand-ins\/claude\.cjs$/] },
   { name: 'mention-meetings', build: 'dist', browser: true, covers: [/^src\/components\/Composer\.jsx$/, /^src\/styles\.css$/, /^server\/(meetings|machines|index)\.js$/, /^shared\/mentions\.js$/, /^test\/stand-ins\/(relay|older-meetings)\.mjs$/, /^test\/stand-ins\/claude\.cjs$/] },
@@ -197,6 +202,9 @@ const SUITES = [
   // Overview and Settings (Basic and Advanced), a session's Thread and Live, against the server's
   // own sessions, checks and links (only what's hard to bring about stood in for in the page).
   { name: 'bots-ui', build: 'dist', browser: true, minutes: 12, covers: [/^src\/components\/bots\//, /^src\/components\/settings\/(Bots\.jsx|bots\.css)$/, /^src\/components\/(NeedsYou|Console|Rail)\.jsx$/, /^src\/(App|lazy)\.jsx$/, /^server\/(connections|connhub|conncheck|connector|slackbot|botsessions|sessionmcp|frontdesk|delegate|botwrite|bots|index)\.(js|mjs)$/, /^test\/stand-ins\/(slack\.mjs|helper-claude\.cjs)$/, /^test\/lib\/bots\.mjs$/] },
+  // One Slack app for all your bots, from every place a bot that isn't reached is looked at (the
+  // owner's case: a bot's own app beside specialists that aren't reached), on a computer and a phone.
+  { name: 'bots-one-app', build: 'dist', browser: true, covers: [/^src\/components\/bots\/(ConnectionCard|Connections|BotChat|bots)\.jsx?$/, /^src\/components\/settings\/Bots\.jsx$/, /^server\/(connections|connhub|bots|index)\.js$/, /^test\/stand-ins\/slack\.mjs$/, /^test\/lib\/bots\.mjs$/] },
   { name: 'bots-routing', build: 'dist', browser: true, minutes: 8, covers: [/^server\/(connections|connhub|bots|bottemplates|frontdesk|index)\.js$/, /^src\/components\/bots\//, /^src\/components\/settings\/(Bots\.jsx|bots\.css)$/, /^src\/App\.jsx$/, /^test\/stand-ins\/(slack|model)\.mjs$/, /^test\/stand-ins\/helper-claude\.cjs$/, /^test\/lib\/bots\.mjs$/] },
   // Files a bot makes: its run's outbox, sent with its answer (Slack's upload API, Discord's
   // attachments, Teams' reply saying it can't), what's refused, and its Activity's files with Open
@@ -288,8 +296,9 @@ else if (named.length) {
   }
 }
 if (flag('--browser-only')) pick = pick.filter((s) => s.browser)
+if (flag('--no-browser')) pick = pick.filter((s) => !s.browser)
 if (shard) pick = shareOf(pick, shard[0], shard[1])
-if (!pick.length && !flag('--list')) { console.log(`None of these tests is ${shard ? 'in this share' : 'in a browser'}.`); process.exit(0) }
+if (!pick.length && !flag('--list')) { console.log(`None of these tests is ${shard ? 'in this share' : flag('--no-browser') ? 'in no browser' : 'in a browser'}.`); process.exit(0) }
 if (flag('--list')) {
   console.log(JSON.stringify({ names: pick.map((s) => s.name), browser: pick.some((s) => s.browser) }))
   process.exit(0)

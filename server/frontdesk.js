@@ -653,7 +653,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       case 'context': q.context = { kind: e.kind, n: e.messages?.length || 0, pins: e.pins?.length || 0, problem: e.problem || null }; break
       case 'run.started':
         // (A run picked up after its time limit has the minutes you gave it; any other, its bot's.)
-        Object.assign(q, { state: 'answering', helper: e.helper, route: e.route || null, runAt: e.at, until: e.resumed ? e.until || null : null, ask: null, paused: null, resume: null, limitCarried: false, ...(e.sid ? { session: e.sid } : {}) })
+        Object.assign(q, { state: 'answering', helper: e.helper, route: e.route || null, runAt: e.at, until: e.resumed ? e.until || null : null, ask: null, paused: null, resume: null, limitCarried: false, closing: false, ...(e.sid ? { session: e.sid } : {}) })
         q.runs.push({ session: e.sid || null, turn: e.turn || null, typed: !!e.typed, outbox: e.outbox || null, helper: e.helper, agent: e.agent, model: e.model || null, from: e.from || null, folders: e.folders || [], with: e.with || [], at: e.at, instructions: e.instructions || null, change: e.change || null, mcp: e.mcp || null, answerer: e.answerer || null, try: e.try ?? null, noChange: e.noChange || null, earlier: e.earlier || null, write: e.write || null, full: e.full || null, handsTo: e.handsTo || null, attaches: e.attaches || null, attachFrom: e.attachFrom || [], notRead: e.notRead || [] })
         if (c) { c.answered = true; c.route = e.route || null }
         break
@@ -1104,7 +1104,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     // time limit: refused, and said. Only you let a run go on.
     const notYours = !why && !isOwner(bot, m.from) && /^\s*continue\b/i.test(String(m.text || '')) && DECIDE.test(String(m.text || ''))
       && [...st.questions.values()].some((x) => waitsAtLimit(x) && (x.conv === conv || (x.from?.id && x.from.id === m.from?.id)))
-    const busy = !command && !notYours && !m.steer && c && c.questions.map((x) => st.questions.get(x)).reverse().find((x) => x?.state === 'answering')
+    const busy = !command && !notYours && !m.steer && c && c.questions.map((x) => st.questions.get(x)).reverse().find((x) => x?.state === 'answering' && !x.closing)
     const qid = !why && busy ? busy.id : `${id}-q${st.next}`
     const e = record(id, 'received', { q: qid, ...fields, ...(qid === busy?.id ? { joined: true, ...(flagsOf(m.from) ? { flags: flagsOf(m.from) } : {}) } : {}), ...(m.from?.why ? { lookup: oneLine(m.from.why, 200) } : {}) })
     const q = st.questions.get(qid)
@@ -2001,6 +2001,10 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
       next(id)
       return answer(id, q, { pending, after: h }).catch((e) => toYou(id, q, `It couldn't be handed on: ${e.message}`))
     }
+    // (Nothing came meanwhile: what comes from now on is a question of its own, not this one's. Joined
+    // to this one while its change was made and its answer sent, it was never given to its agent, and
+    // was marked answered with it.)
+    q.closing = true
     const raw = String(h.said?.text || '').trim()
     // Couldn't answer (it never got going, its provider said no, it's at its usage limit, it ended
     // with nothing to read): the next in its list, at once.

@@ -210,6 +210,20 @@ try {
     delete j.paused; delete j.pausedWhy; delete j.pausedBy
     fs.writeFileSync(path.join(kit.data, 'connections', C, 'connection.json'), JSON.stringify(j))
   })
+  await part('Slack out of reach', async () => {
+    // (The network gone: the connection and the test say so in words, never the network library's
+    // code, and the test doesn't send you to copy a token that may be fine.)
+    await slack.away()
+    const v = await until(async () => { const c = await conn(C); return c.state !== 'connected' && /Couldn't reach Slack/.test(c.why || '') ? c : null }, 20000)
+    ok(!!v && /Couldn't reach Slack: (the connection was cut off|this computer seems to be offline|it didn't answer in time|the network didn't let it through)$/.test(v.why) && !/E[A-Z]{3,}|UND_ERR/.test(v.why), 'Slack out of reach: the connection says so in words, no network code', v && [v.state, v.why])
+    const r = await check(C)
+    ok(by(r).tokens?.state === 'fail' && /^Couldn't reach Slack: /.test(by(r).tokens.detail) && !/E[A-Z]{3,}|UND_ERR/.test(by(r).tokens.detail) && /internet connection/.test(by(r).tokens.fix || '') && !/Copy the|paste it/i.test(by(r).tokens.fix || ''), 'and Test this connection: not reached, check the internet, not copy the token again', by(r).tokens)
+    const bad = await kit.api(`/connections/${C}/tokens`, { appToken: 'xapp-test', botToken: 'xoxb-test' }).then(() => null, (e) => e)
+    ok(/^Couldn't reach Slack: .+\. Nothing was kept/.test(bad?.message || '') && !/E[A-Z]{3,}|UND_ERR|The bot token/.test(bad?.message || ''), 'tokens pasted meanwhile: not reached, nothing kept, not that the token is wrong', bad?.message)
+    await slack.back()
+    await kit.api(`/connections/${C}/connect`, {})
+    ok(!!(await until(async () => (await conn(C)).state === 'connected', 20000)), 'Slack back: connected again')
+  })
   await part('held to a read a minute', async () => {
     // (A distributed app outside the Marketplace: Slack holds its reads of a conversation back.)
     await slack.limit({ method: 'conversations.history', n: 1, wait: 25 })
@@ -217,6 +231,32 @@ try {
     const v = await until(async () => { const c = await conn(C); return c.limited ? c : null }, 20000)
     ok(v?.limited?.method === 'conversations.history' && v.limited.wait === 25 && v.catchingUp?.waiting === 25, 'reading back what was missed, Slack holding it back: said on the connection, and the read waits as long as Slack says', v && { limited: v.limited, catchingUp: v.catchingUp })
     ok((await routedOf(C)).some((e) => e.event === 'rate-limited' && /one read a minute/.test(e.why || '')), 'and in its record, plainly')
+  })
+
+  // ---------- A name at the start, in Japanese ----------
+  // (Its name taken off what's asked as it was written: a katakana name with voiced marks, which
+  // come apart when names are compared, takes off just the name, never the question's start.)
+  await part('a Japanese name at the start', async () => {
+    const JB = (await kit.api('/bots', { name: 'マーケティングボット', description: 'Answers marketing questions' })).id
+    const x = await kit.api(`/connections/${C}/try`, { text: 'マーケティングボット: 来週の予定は？', person: 'you' })
+    ok(x.rule === 'name' && x.bot?.id === JB && x.asked === '来週の予定は？', 'its name first: that bot, asked the whole question without its name', { rule: x.rule, bot: x.bot, asked: x.asked })
+    // A slash command for each bot, two of them with no Latin letters in their names: each its own,
+    // as Slack wants an app's commands to be, in its manifest, on its page, and each reaching its bot.
+    const JB2 = (await kit.api('/bots', { name: '採用ボット', description: 'Answers hiring questions' })).id
+    await kit.api(`/connections/${C}`, { perBot: true }, 'PATCH')
+    const cmds = Object.fromEntries((await conn(C)).bots.map((b) => [b.id, b.command]))
+    const n = (id) => id.replace(/\D/g, '')
+    ok(cmds[JB] === `/ask-bot-${n(JB)}` && cmds[JB2] === `/ask-bot-${n(JB2)}` && new Set(Object.values(cmds)).size === Object.keys(cmds).length, 'each bot\'s own command unique: /ask-bot and its number for a name with no Latin letters', cmds)
+    const listed = (await conn(C)).manifest.features.slash_commands.map((x) => x.command)
+    ok(listed.includes(cmds[JB]) && listed.includes(cmds[JB2]) && new Set(listed).size === listed.length && listed.every((x) => /^\/[a-z0-9_-]{1,31}$/.test(x)), 'its manifest: every command once, each one Slack takes', listed)
+    ok((await kit.api(`/bots/${JB2}`)).ownCommand === cmds[JB2], 'and its page says its own command', (await kit.api(`/bots/${JB2}`)).ownCommand)
+    const y = await kit.api(`/connections/${C}/try`, { text: `${cmds[JB2]} 面接はいつ？`, person: 'you' })
+    ok(y.rule === 'command' && y.bot?.id === JB2 && y.asked === '面接はいつ？', 'its command reaches it', { rule: y.rule, bot: y.bot, asked: y.asked })
+    await kit.api(`/connections/${C}`, { perBot: false }, 'PATCH')
+    await kit.api(`/bots/${JB2}`, undefined, 'DELETE')
+    await kit.api(`/bots/${JB}`, undefined, 'DELETE')
+    // (Connected again after the reads Slack held back, before what follows counts on it.)
+    await until(async () => (await conn(C)).state === 'connected', 30000)
   })
 
   // ---------- Discord: the basic checks ----------

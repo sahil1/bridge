@@ -20,7 +20,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import QRCode from 'qrcode'
-import { startKit, startRelay, checks, until, browser, page, shot, noServiceWorker, changeAnswer, TEST } from '../lib/harness.mjs'
+import { startKit, startRelay, checks, until, browser, page, shot, noServiceWorker, changeAnswer, freePort, TEST } from '../lib/harness.mjs'
 import { linkAs } from '../lib/linkclient.mjs'
 
 const { ok, skip, done } = checks('devices-ui')
@@ -353,12 +353,49 @@ try {
   await narrow.p.waitForSelector('.ph-pair', { timeout: 10000 })
   ok((await narrow.p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 1, 'Pair a device fits a phone')
   await shot(narrow.p, `${tag}devices-pair-phone`)
+  // A phone with a long name, in the list at a phone's width: its icon beside the name's first line,
+  // not on a line of its own above it.
+  const LONG = 'Alex’s iPhone 16 Pro Max (personal, with the cracked screen)'
+  const long = await linkAs(ra.url, { code: (await a.api('/relay/pair', {})).pairing.code, name: LONG, about: { name: LONG } })
+  await long.request?.('GET', '/api/version')
+  long.close?.()
+  const longRow = narrow.p.locator('.ph-devices li', { hasText: 'cracked screen' })
+  await longRow.waitFor({ timeout: 15000 }).catch(() => {})
+  const lay = await longRow.evaluate((li) => {
+    const r = (e) => e.getBoundingClientRect()
+    const icon = r(li.querySelector('svg'))
+    const words = document.createRange()
+    const text = [...li.querySelectorAll('span')].find((s) => /cracked screen/.test(s.textContent) && !s.querySelector('span'))
+    words.selectNodeContents(text)
+    const first = words.getClientRects()[0]
+    return { iconTop: Math.round(icon.top), iconBottom: Math.round(icon.bottom), iconRight: Math.round(icon.right), textTop: Math.round(first.top), textBottom: Math.round(first.bottom), textLeft: Math.round(first.left), lines: words.getClientRects().length, wider: document.documentElement.scrollWidth - innerWidth }
+  }).catch((e) => ({ error: e.message }))
+  ok(lay.iconRight <= lay.textLeft && lay.iconTop < lay.textBottom && lay.iconBottom > lay.textTop && lay.wider <= 1, 'a phone with a long name: its icon beside its name\'s first line, the name wrapping beside it, nothing wider than the screen', lay)
+  // ...and "<name> paired" above the list: its words inside its chip, on as many lines as they take.
+  const chip = await narrow.p.locator('[data-setting="relay"] .st-chip.good', { hasText: 'paired' }).evaluate((e) => ({ fits: e.scrollHeight <= e.clientHeight + 1 && e.scrollWidth <= e.clientWidth + 1, right: Math.round(e.getBoundingClientRect().right), w: innerWidth })).catch((e) => ({ error: e.message }))
+  ok(chip.fits && chip.right <= chip.w, '"…paired" with a long name: its words inside its chip, within the screen', chip)
+  await shot(narrow.p, `${tag}devices-long-name-phone`)
 
   // ---------- Scan QR code, in a phone's browser ----------
   // The camera in the page: a stand-in camera showing a QR code, read with jsQR (no BarcodeDetector,
   // as in Safari). On a computer there's no Scan QR code: Copy link is the way.
   const linkHere = s.p.locator('[data-setting="link-device"]')
   ok(await linkHere.locator('input').count() === 1 && !(await linkHere.locator('button', { hasText: 'Scan QR code' }).count()), 'on a computer, Link a device has no Scan QR code', await linkHere.innerText().catch(() => ''))
+  // A link whose relay can't be reached (nothing answers at its address): said in plain words, with
+  // what to check, and the system's own words (ECONNREFUSED) only small under it.
+  {
+    const nowhere = await freePort()
+    await linkHere.locator('input').fill(`http://127.0.0.1:${nowhere}/#pair=AAAAABBBBBCCCCCDDDDD`)
+    await linkHere.getByRole('button', { name: 'Link', exact: true }).click()
+    const err = linkHere.locator('.error-text')
+    await err.waitFor({ timeout: 50000 }).catch(() => {})
+    const said = await err.innerText().catch(() => '')
+    const main = await err.evaluate((e) => [...e.childNodes].filter((n) => !(n.nodeType === 1 && n.classList.contains('mch-detail'))).map((n) => n.textContent).join('')).catch(() => '')
+    ok(new RegExp(`^Can't reach 127\\.0\\.0\\.1:${nowhere}\\. Check the address, this computer's network, or that the relay is up\\.$`).test(main.trim()) && !/ECONNREFUSED|getaddrinfo|ENOTFOUND/.test(main), 'Link a device, its relay not reached: in plain words, with what to check', said)
+    ok(/ECONNREFUSED/.test(await linkHere.locator('.mch-detail').innerText().catch(() => '')), 'and the system\'s own words only small under it', said)
+    await linkHere.scrollIntoViewIfNeeded()
+    await shot(s.p, `${tag}devices-link-unreachable`)
+  }
   const deskLink = (await c.api('/relay/pair', {})).pairing.link
   const qr = async (text) => (await QRCode.toString(text, { type: 'svg', margin: 1 })).replace('<svg ', '<svg width="330" height="330" ')
   const cam = await page(b, a.url, { phone: true, mode: 'light', theme: 'sky', before: (cx) => cx.addInitScript(PHONE_CAMERA, IPHONE) })

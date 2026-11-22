@@ -178,6 +178,26 @@ try {
   await sleep(3000)
   ok(reportsOn(tE).length === 0, 'and, as whoever asked was told, nothing is reported to the Chief of Staff', reportsOn(tE).map((x) => x.text))
 
+  // ---------- Marked done in the Tasks panel, in another language ----------
+  // (What it came to is kept in English for the chief, and shown in yours, in the tray and on the board.)
+  await part('marked done, in German', async () => {
+    const it = (await kit.api('/chief/tasks', { title: 'Book the offsite room' })).item
+    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky', store: { 'cc-lang': 'de', 'cc-agent-views': { [chiefPane]: 'chat' } } })
+    await p.locator('.rail-nav-btn.rail-chief').click({ timeout: 15000 })
+    const row = p.locator('.ct-tray .ct-item', { hasText: 'Book the offsite room' })
+    await row.waitFor({ timeout: 10000 })
+    await row.locator('.ct-act').click()
+    ok(!!(await until(async () => (await task(it.id))?.status === 'done', 8000)) && (await task(it.id)).outcome === 'Marked done in the Tasks panel', 'marked done in the tray: kept in English, for the chief', await task(it.id))
+    await p.locator('.ct-tray .ct-done-link').click()
+    const shown = await until(async () => { const x = await p.locator('.ct-tray .ct-item', { hasText: 'Book the offsite room' }).locator('.ct-outcome').innerText().catch(() => ''); return x || null }, 8000)
+    ok(shown === 'Im Aufgabenbereich als erledigt markiert', 'and said in German in the tray', shown)
+    await p.locator('.ct-tray .ct-board-btn').click()
+    const card = p.locator('.cb-col.c-done .cb-card', { hasText: 'Book the offsite room' })
+    ok(!!(await until(async () => (await card.locator('.cb-outcome').innerText().catch(() => '')) === 'Im Aufgabenbereich als erledigt markiert', 8000)), 'and on the board', await card.innerText().catch(() => ''))
+    ok(errors.length === 0, 'no page errors', errors)
+    await ctx.close()
+  })
+
   // ---------- Helpers may edit in their own work folder ----------
   await kit.api('/settings', { chief: { helpers: { editOwnFolder: true } } }, 'PATCH')
   const outO = bridge('delegate', '--role', 'writer', '--title', 'Write the FAQ', '[work 1] [file faq.md] Write the FAQ.')
