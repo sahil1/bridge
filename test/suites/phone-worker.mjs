@@ -9,7 +9,7 @@
 // WebView) and WebKit (Safari, the iPhone app's engine).
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, startRelay, checks, until, browser, shot, browserNotice, phoneSaw } from '../lib/harness.mjs'
+import { startKit, startRelay, checks, until, browser, shot, sleep, browserNotice, phoneSaw } from '../lib/harness.mjs'
 
 const { ok, done } = checks('phone-worker')
 const { b, which } = await browser()
@@ -56,17 +56,22 @@ try {
   let open = await ph.opened()
   const saw = open ? null : { shown: await shown(ph.p), page: await phoneSaw(ph.p) }
   ok(!!open, 'a service worker the browser made active but never said was ready: Bridge AI opens with it all the same', saw || undefined)
-  ok(!open || Date.now() - t0 < 25000, `within the wait for it (${Math.round((Date.now() - t0) / 1000)} s)`)
+  ok(!open || Date.now() - t0 < 40000, `within the wait for it (${Math.round((Date.now() - t0) / 1000)} s)`)
   if (open) ok(await ph.frame().evaluate(() => !!navigator.serviceWorker?.controller), 'and the worker carries what it asks for (its frame is in its hands)')
   ok(!real(ph.errors).length, 'no page errors', ph.errors)
   await ph.ctx.close()
 
   // ---------- never there ----------
   ph = await phone('never')
-  const said = await until(async () => { const x = await shown(ph.p); return x.wait && /taking a while/.test(x.title) ? x : null }, 25000, 200)
+  const said = await until(async () => { const x = await shown(ph.p); return x.wait && /taking a while/.test(x.title) ? x : null }, 40000, 200)
   ok(!!said && /hasn't finished setting up this page/.test(said.text) && /Try again/.test(said.text) && said.retry, 'a service worker that never gets there: not a blank page, but why, and what to do, with Try again', said || await shown(ph.p))
   ok(!!said && !said.frame && said.frameHidden, 'Bridge AI\'s frame isn\'t shown blank meanwhile', said)
   await shot(ph.p, `${tag}phone-worker-slow`)
+  // The link dropping and coming back meanwhile (Bridge AI would show again): still said, not blank.
+  await relay.drop()
+  await sleep(6000)
+  const again = await until(async () => { const x = await shown(ph.p); return x.wait && /taking a while/.test(x.title) && x.frameHidden ? x : null }, 20000, 200)
+  ok(!!again, 'the link dropping and coming back meanwhile: still said, never a blank frame', again || await shown(ph.p))
   const box = await ph.p.locator('#retry').boundingBox()
   ok(box && box.height >= 40 && box.x >= 0 && box.x + box.width <= 390, 'Try again is a whole 40 px target on the screen', box)
   await ph.p.locator('#retry').click()

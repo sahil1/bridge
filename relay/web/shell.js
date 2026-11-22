@@ -282,10 +282,11 @@ let asking = false // a pairing link's "Pair with …?" is up: the link to the r
 let worker = null
 // One that isn't there WORKER_MS after Bridge AI should open (a browser can leave it installing for
 // good): one the browser has made active is used all the same; otherwise the page says so, with Try
-// again (which loads the page afresh), rather than staying blank, and Bridge AI still opens if it
-// comes meanwhile (slowWorker).
+// again (which loads the page afresh), rather than staying blank, whenever Bridge AI would show (the
+// link back after it dropped, too), and Bridge AI still opens if it comes meanwhile (slowWorker).
 const WORKER_MS = 10000
-let workerSlow = false // that's showing
+let workerSlow = false // it wasn't there by then, and still isn't: said whenever Bridge AI would show
+let slowShown = false // that's what the start screen says now
 let readyWaiters = []
 let appShown = false
 let shown = 0 // each time Bridge AI is opened in the frame
@@ -1308,7 +1309,7 @@ document.addEventListener('visibilitychange', () => {
 
 // ---------- the app ----------
 function showApp() {
-  if (workerSlow) return // said so, until it comes (load) or the page is loaded afresh
+  if (workerSlow && worker) return slowScreen() // said so, until it comes (load) or the page is loaded afresh
   show(null)
   clearTimeout(stuckTimer)
   const f = $('app')
@@ -1321,7 +1322,7 @@ function showApp() {
   const n = ++shown
   const load = () => {
     if (!appShown || n !== shown) return
-    if (workerSlow) { workerSlow = false; show(null); f.hidden = false; if (away) awayBanner() }
+    if (workerSlow) { workerSlow = false; if (slowShown) { show(null); f.hidden = false; if (away) awayBanner() } }
     f.src = src
   }
   if (worker) {
@@ -1357,12 +1358,16 @@ async function slowWorker(w, load) {
   const reg = await navigator.serviceWorker?.getRegistration('/').catch(() => null)
   if (worker !== w) return
   if (reg?.active) { worker = null; return load() }
-  waitScreen('Bridge AI is taking a while to open', 'This browser hasn\'t finished setting up this page. Try again loads it afresh; if Bridge AI still doesn\'t open, close this page and open it again.', true)
   workerSlow = true
+  if (!$('app').hidden) slowScreen() // (another start screen up: said once Bridge AI would show)
+}
+function slowScreen() {
+  waitScreen('Bridge AI is taking a while to open', 'This browser hasn\'t finished setting up this page. Try again loads it afresh; if Bridge AI still doesn\'t open, close this page and open it again.', true)
+  slowShown = true
 }
 
 function waitScreen(title, msg, retry) {
-  workerSlow = false
+  slowShown = false
   show('wait')
   $('wait-title').textContent = title
   $('wait-text').textContent = msg || ''
@@ -1375,7 +1380,7 @@ function waitScreen(title, msg, retry) {
   if (retry && paired?.hostKey && !adding) offline.hasCopy().then((has) => { $('saved-open').hidden = !has || $('wait').hidden }, () => {})
 }
 
-$('retry').onclick = () => { if (workerSlow) { location.reload(); return } if (!appShown) watchStart(); reconnect() }
+$('retry').onclick = () => { if (workerSlow && worker) { location.reload(); return } if (!appShown) watchStart(); reconnect() }
 $('skip').onclick = () => { for (const w of readyWaiters.splice(0)) w.ok(); showApp() }
 $('pair-form').onsubmit = async (e) => {
   e.preventDefault()
