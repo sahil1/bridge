@@ -233,6 +233,18 @@ try {
     ok((await routedOf(C)).some((e) => e.event === 'rate-limited' && /one read a minute/.test(e.why || '')), 'and in its record, plainly')
   })
 
+  // ---------- A name at the start, in Japanese ----------
+  // (Its name taken off what's asked as it was written: a katakana name with voiced marks, which
+  // come apart when names are compared, takes off just the name, never the question's start.)
+  await part('a Japanese name at the start', async () => {
+    const JB = (await kit.api('/bots', { name: 'マーケティングボット', description: 'Answers marketing questions' })).id
+    const x = await kit.api(`/connections/${C}/try`, { text: 'マーケティングボット: 来週の予定は？', person: 'you' })
+    ok(x.rule === 'name' && x.bot?.id === JB && x.asked === '来週の予定は？', 'its name first: that bot, asked the whole question without its name', { rule: x.rule, bot: x.bot, asked: x.asked })
+    await kit.api(`/bots/${JB}`, undefined, 'DELETE')
+    // (Connected again after the reads Slack held back, before what follows counts on it.)
+    await until(async () => (await conn(C)).state === 'connected', 30000)
+  })
+
   // ---------- Discord: the basic checks ----------
   await part('Discord', async () => {
     const D = (await kit.api('/connections', { platform: 'discord', name: 'tester_bot' })).id

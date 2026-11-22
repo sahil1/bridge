@@ -55,6 +55,10 @@ const TELL = new Set(['not-in-channel', 'another-copy'])
 const clip = (s, n) => { const t = String(s ?? '').trim(); return t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t }
 const low = (s) => String(s || '').toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '')
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+// How much of the text, as written, its first n characters of low() came from: low() changes
+// lengths (Japanese ガ is two once its mark is split off, a Korean syllable two or three), so what a
+// name at the start takes off is measured in the words as they were written, not in low()'s.
+const writtenLength = (t, n) => { let i = 0; while (i < t.length && low(t.slice(0, i)).length < n) i++; return i }
 // Words too common to name a bot by on their own.
 const PLAIN = new Set(['the', 'bot', 'and', 'for', 'ask', 'help', 'desk', 'team', 'our', 'your', 'my', 'bridge'])
 
@@ -71,13 +75,13 @@ export function namedAt(text, bots, { slash = false } = {}) {
     for (const key of new Set([low(b.name), commandOf(b.name).slice(1), commandOf(b.name).slice(1).replace(/[-_]+/g, ' ')])) {
       if (!key) continue
       const m = new RegExp(`^${esc(key)}(?=$|[\\s:,!?.—–-])[\\s:,—–-]*`, 'i').exec(low(t))
-      if (m) take(b.id, key.length, t.slice(m[0].length))
+      if (m) take(b.id, key.length, t.slice(writtenLength(t, m[0].length)))
     }
   }
   for (const [w, id] of words) {
     if (!id) continue
     const m = new RegExp(`^${esc(w)}(?:\\s*[:,—–]\\s*${slash ? '|\\s+' : ''})`, 'i').exec(low(t))
-    if (m) take(id, w.length, t.slice(m[0].length))
+    if (m) take(id, w.length, t.slice(writtenLength(t, m[0].length)))
   }
   return best ? { bot: best.bot, rest: best.rest.trim() } : null
 }
