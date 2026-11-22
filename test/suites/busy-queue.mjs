@@ -7,7 +7,10 @@
 //   in the chat (typed into a busy Claude Code, they were joined into one, or taken in where its
 //   chat didn't show them);
 //   the same on a desktop (1440 px, light and dark), with one taken back (never sent) and one
-//   changed before it went (the change is what goes);
+//   changed before it went (the change is what goes); Enter with the caret back in what's written
+//   (src/enter.js) a new line, in the message box while it works (not queued, the hint saying only
+//   ⌘⏎ interrupts and sends) and in the queued one being changed (the hint saying ⌘⏎ saves, which
+//   it does);
 //   two sent at once to an agent that's free: one goes in and the other waits its turn (the
 //   second found the first still in the input box and cleared it);
 //   and what a send says, by the computer's answer (Dictations' Send to an agent): "Queued for" a
@@ -67,10 +70,30 @@ try {
     ok(!!shown && same(shown.map((x) => x.text), msgs), `desktop ${look.mode}: the three show as queued, in order`, shown)
     await p.locator('.msg.queued', { hasText: 'Skip the old ones' }).locator('button', { hasText: 'Remove' }).click()
     ok(!!(await until(async () => same(await queueOf(ag.paneId), [msgs[0], msgs[2]]), 5000, 100)), `desktop ${look.mode}: one taken back`, await queueOf(ag.paneId))
+    // While it works, the caret back in what's written: Enter is a new line there (it isn't queued),
+    // and the hint says only ⌘⏎ interrupts and sends.
+    const box = p.locator('.composer textarea')
+    await box.fill('Look at the refunds too')
+    for (let i = 0; i < 4; i++) await box.press('ArrowLeft')
+    await box.press('Enter')
+    const busyHint = await until(async () => { const x = (await p.locator('.composer-stack .busy-hint').innerText().catch(() => '')).replace(/\s+/g, ' ').trim(); return /^Working( · \d+ queued)? · (⌘|Ctrl)⏎ interrupt and send$/.test(x) && x }, 4000, 100)
+    ok((await box.inputValue()) === 'Look at the refunds\n too' && (await bubbles(p)).length === 2 && !!busyHint, `desktop ${look.mode}: while it works, Enter with the caret back in the words is a new line, not queued, and the hint says ⌘⏎ interrupts and sends`, { box: await box.inputValue(), hint: await p.locator('.composer-stack .busy-hint').innerText().catch(() => '') })
+    await box.fill('')
+    // Changing a queued one, Enter as in the box: with the caret back in it a new line (the hint
+    // saying ⌘⏎ saves), and ⌘⏎ saves; Save does too.
     await p.locator('.msg.queued', { hasText: 'Then the totals' }).locator('button', { hasText: 'Edit' }).click()
-    await p.locator('.queued-edit').fill('Then the totals, both currencies')
+    const edit = p.locator('.queued-edit')
+    await edit.fill('Then the totals, both currencies')
     await shot(p, `${tag}busy-queued-desktop-${look.mode}-1440`)
-    await p.locator('.msg.queued.editing').locator('button', { hasText: 'Save' }).click()
+    for (let i = 0; i < 16; i++) await edit.press('ArrowLeft')
+    await edit.press('Enter')
+    const said = await until(async () => /^(⌘|Ctrl)⏎ to save$/.test((await p.locator('.msg.queued.editing .enter-hint').innerText().catch(() => '')).trim()), 4000, 100)
+    ok((await edit.inputValue()) === 'Then the totals,\n both currencies' && !!said && (await p.locator('.msg.queued.editing').count()) === 1, `desktop ${look.mode}: changing a queued one, Enter with the caret back in it is a new line, and the hint says ⌘⏎ saves`, { box: await edit.inputValue(), hint: await p.locator('.msg.queued.editing .msg-time').innerText().catch(() => '') })
+    await shot(p, `${tag}smart-enter-queued-edit-${look.mode}`, { clip: await p.locator('.msg.queued.editing').boundingBox().then((r) => ({ x: r.x - 16, y: r.y - 16, width: r.width + 32, height: r.height + 32 })) })
+    await edit.press('Backspace')
+    // ⌘⏎ saves in the light; Save in the dark.
+    if (look === LIGHT) await edit.press('ControlOrMeta+Enter')
+    else await p.locator('.msg.queued.editing').locator('button', { hasText: 'Save' }).click()
     const want = [msgs[0], 'Then the totals, both currencies']
     ok(!!(await until(async () => same(await queueOf(ag.paneId), want), 5000, 100)), `desktop ${look.mode}: and one changed before it goes`, await queueOf(ag.paneId))
     ok(!!(await until(async () => same((await bubbles(p)).map((x) => x.text), want), 5000, 100)), `desktop ${look.mode}: the chat shows the two left, the change in place`, await bubbles(p))

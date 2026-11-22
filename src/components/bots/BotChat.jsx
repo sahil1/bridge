@@ -6,6 +6,7 @@ import { BotReach } from './Connections.jsx'
 import { ConnectionCard, UseForAll } from './ConnectionCard.jsx'
 import { api } from '../../api.js'
 import { t } from '../../i18n/index.js'
+import { useEnter, EnterHint } from '../EnterHint.jsx'
 import { where } from '../settings/search.js'
 import './bots-page.css'
 
@@ -424,6 +425,8 @@ export default function BotChat({ id = null, draft = false, phone = false, d = n
   const said = msgs.some((m) => m.who === 'you')
   const created = msgs.some((m) => m.kind === 'created')
   const showConnect = live && d && (created || !msgs.length || d.state !== 'connected')
+  // Enter as Settings › You › Enter Key has it (src/enter.js); a phone's keyboard on the screen sends, as before.
+  const enter = useEnter(text, () => ask(text))
   return (
     <div className={`bc${phone ? ' phone' : ''}`} data-setting="bots-chat">
       <AssistHead what={!id ? t('New bot') : t('Setting up {bot}', { bot: name })} onClose={onClose} closeLabel={t('Close AI Assist')}>
@@ -474,8 +477,9 @@ export default function BotChat({ id = null, draft = false, phone = false, d = n
       </ol>
       {error && !(draft && s?.proposal) && <p className="error-text small bc-error" role="alert">{error}</p>}
       <form className="bc-say" onSubmit={(e) => { e.preventDefault(); ask(text) }}>
-        <textarea className="st-input" rows={phone ? 2 : 3} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); ask(text) } }}
+        <textarea className="st-input" rows={phone ? 2 : 3} value={text} onChange={(e) => { setText(e.target.value); enter.box.onSelect(e) }} onKeyDown={enter.onKeyDown} {...enter.box}
           placeholder={live ? t('Say what to change') : draft ? t('Say what to change in it') : t('What should it do, and who is it for?')} aria-label={live || draft ? t('Say what to change') : t('What should it do, and who is it for?')} disabled={busy === 'ask'} />
+        <EnterHint show={enter.mid} />
         <button type="submit" className="btn small primary" disabled={!text.trim() || !!busy} aria-label={t('Send')}><Icon name="send" size={13} /></button>
       </form>
     </div>

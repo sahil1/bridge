@@ -20,7 +20,8 @@
 //   the board opening Bridge AI's search; a dark theme. Diagram files in an agent's Files tab:
 //   .excalidraw drawn and saved back into the file, .mmd and .drawio (plain and compressed) drawn
 //   as shapes, saved beside or added to Studio's whiteboards; a Mermaid block in Markdown and in the
-//   agent's chat opening as a board. On a phone: the list and a board fit, with Excalidraw's phone
+//   agent's chat opening as a board. Whiteboards' box takes Enter as every message box does
+//   (src/enter.js): the caret back in the words a new line, the hint saying ⌘⏎ sends. On a phone: the list and a board fit, with Excalidraw's phone
 //   tools. Nothing the page loads comes from anywhere but this computer (Excalidraw's fonts
 //   included).
 import fs from 'node:fs'
@@ -258,7 +259,19 @@ try {
   await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-board', { detail: { list: true } })))
   await p.waitForSelector('.wb-ask textarea')
   await p.fill('.wb-ask textarea', 'Draw a flowchart of how a release gets shipped')
-  await p.locator('.wb-ask').getByRole('button', { name: 'Draw' }).click()
+  // Enter as in every message box (src/enter.js): with the caret back in the words a new line, nothing
+  // drawn, the hint beside Draw saying ⌘⏎ sends; ⌘⏎ draws.
+  const ask = p.locator('.wb-ask textarea')
+  for (let i = 0; i < 8; i++) await ask.press('ArrowLeft')
+  const boardsNow = () => { try { return fs.readdirSync(BOARDS).length } catch { return 0 } }
+  const boardsBefore = boardsNow()
+  await ask.press('Enter')
+  const hinted = await until(async () => /^(⌘|Ctrl)⏎ to send$/.test((await p.locator('.wb-ask .enter-hint').innerText().catch(() => '')).trim()), 4000, 100)
+  await sleep(800)
+  ok((await ask.inputValue()) === 'Draw a flowchart of how a release gets\n shipped' && boardsNow() === boardsBefore && !!hinted, 'Whiteboards\' box, the caret back in the words: Enter is a new line, nothing drawn, and the hint says ⌘⏎ sends', { box: await ask.inputValue(), hint: await p.locator('.wb-ask .enter-hint').innerText().catch(() => '') })
+  await shot(p, `${tag}smart-enter-whiteboard-light`, { clip: await p.locator('.wb-ask').boundingBox().then((r) => ({ x: r.x - 8, y: r.y - 8, width: r.width + 16, height: r.height + 16 })) })
+  await ask.press('Backspace')
+  await ask.press('ControlOrMeta+Enter')
   const board = 'Flowchart of how a release gets shipped'
   await p.waitForSelector('.wb-note', { timeout: 30000 }).catch(() => {})
   const first = await until(() => { const j = readBoard(board); return texts(j).includes('Start') && j }, 15000)

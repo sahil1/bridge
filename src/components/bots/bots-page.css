@@ -91,6 +91,9 @@
 .bc-say { flex: none; display: flex; align-items: flex-end; gap: 8px; padding: 10px 14px 12px; border-top: 1px solid var(--line); }
 .bc-say textarea { flex: 1; min-width: 0; width: auto; height: auto; min-height: 40px; max-height: 180px; padding: 9px 11px; resize: vertical; font: 13px/1.45 var(--font); }
 .bc-say .btn { flex: none; width: 40px; height: 40px; padding: 0; display: grid; place-items: center; }
+/* ⌘⏎ to send: in the box's corner, as .enter-at's (styles.css), so the box keeps its width. */
+.bc-say { position: relative; }
+.bc-say .enter-hint { position: absolute; right: 78px; bottom: 19px; padding: 0 3px; border-radius: 5px; background: var(--pane-2); pointer-events: none; }
 
 /* ---------- On a phone ---------- */
 .bp.phone .bp-cols.with-chat { grid-template-columns: minmax(0, 1fr); }
