@@ -82,7 +82,7 @@ const senders = require('../../desktop/senders.js')
   // the app's (above), nor anywhere its windows go; and a frame in a window never moves the window.
   ok(!pages.local(`http://localhost:${P}/`) && !pages.local(`http://[::1]:${P}/`) && !pages.local(`http://localhost:${DP}/m/desk1/`) && pages.local(`http://127.0.0.1:${P}/`), 'localhost and [::1] at the app\'s port are no place of the app\'s windows')
   const navs = main.split("on('will-navigate', ").slice(1).map((x) => x.split(/\r?\n/)[0])
-  ok(navs.length >= 4 && navs.every((h) => /^\((e|ev)\) => \1\.preventDefault\(\)\)$/.test(h) || /else if \(byFrame\((e|ev)\)\) \1\.preventDefault\(\) \}\)$/.test(h)) && /const byFrame = \(e\) => !!e\?\.initiator\?\.parent/.test(main), 'every window\'s navigation refuses what a frame in it asks (a project\'s app in Preview can\'t move the window), or refuses all', navs)
+  ok(navs.length >= 4 && navs.every((h) => /^\((e|ev)\) => \1\.preventDefault\(\)\)$/.test(h) || /else if \(byFrame\((e|ev)\)\) \1\.preventDefault\(\) \}\)$/.test(h)) && /const byFrame = \(e\) => \{ try \{ return !e\?\.initiator \|\| !!e\.initiator\.parent \} catch \{ return true \} \}/.test(main), 'every window\'s navigation refuses what a frame in it asks (a project\'s app in Preview can\'t move the window), or refuses all', navs)
   const pre = src('preload.js')
   ok(/location\.hostname === '127\.0\.0\.1'/.test(pre) && !/'localhost'/.test(pre), 'the preload gives this computer\'s own only to a page at 127.0.0.1')
   const handlers = main.split('setWindowOpenHandler(').slice(1).map((x) => x.split(/\r?\n/)[0]) // (Windows checks out CRLF)

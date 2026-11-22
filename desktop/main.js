@@ -147,8 +147,9 @@ const pages = senders.create(PORT, { ports: machinePorts })
 const isLocal = pages.local
 // A frame in a window (a project's app in Preview, another computer's page in a tab) never moves the
 // window: only the window's own page does (initiator: the frame that asked; a frame has a parent).
-// One it sends out of the app opens in its own app, as before.
-const byFrame = (e) => !!e?.initiator?.parent
+// One it sends out of the app opens in its own app, as before. No initiator (that frame gone since)
+// counts as a frame's.
+const byFrame = (e) => { try { return !e?.initiator || !!e.initiator.parent } catch { return true } }
 // Every message from a page is checked first: only this computer's own page, but for what a window
 // showing another computer needs too, and the Allow access tile's own (senders.js MACHINE, SELF).
 const ipc = pages.guard(ipcMain, { refused: (ch, e) => console.warn(`Refused ${ch} from ${e?.senderFrame?.url || 'a frame that has gone'}: not this computer's own page`) })
