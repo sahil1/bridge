@@ -481,6 +481,9 @@ export function MeetingsProvider({ children }) {
   const unwatch = () => share.current?.stop()
   const stop = async () => {
     if (!handle.current) return
+    // A screen still being picked is let go: its wait, ending later, would say on the next
+    // recording that nothing was picked.
+    if (tryNow.current) cancelPick()
     // The video's last pieces go before the meeting is stopped.
     const f = film.current
     share.current?.stop()

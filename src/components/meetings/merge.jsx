@@ -112,7 +112,7 @@ export function Merged({ data, onDone, onMsg }) {
   }
   return (
     <p className="mt-merged small muted" role="status">
-      <Icon name="branch" size={12} /> <span>{t('Merged with the recording from {time} ({title}), which carries on from {at}. Separate puts them back as two meetings, until {date}.', { time: timeOf(last.startedAt), title: last.title, at: clock(last.at), date: until })}</span>
+      <Icon name="branch" size={12} /> <span>{t('Merged with the recording from {time} ({title}), which carries on from {at}. Separate puts them back as two meetings, until {date}.', { time: timeOf(last.startedAt), title: last.title, at: clock(last.at), date: until })}</span>{' '}
       <button type="button" className="link-btn" disabled={busy} onClick={separate}>{busy ? t('Separating…') : t('Separate')}</button>
     </p>
   )

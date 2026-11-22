@@ -1301,7 +1301,7 @@ export function MeetingPage({ id, onBack }) {
         {!live && (data.status === 'recording' || data.status === 'paused') && <Elsewhere id={id} paused={data.status === 'paused'} onDone={refresh} onMsg={setMsg} />}
         {canResume && recent && phone && <div className="mt-resume-row">{resumeBtn}</div>}
         {/* Bridge AI closed while it recorded (server meetings.js recover): said here until it carries on. */}
-        {done && data.interrupted && <p className="mt-interrupted small" role="status"><Icon name="alert" size={12} /> <span>{t('Recording stopped when Bridge AI closed at {time}. What was recorded until then is kept.', { time: timeOf(data.interrupted.at) })}</span>{canResume && <button type="button" className="link-btn" onClick={resumeRec} disabled={busy === 'resume'}>{t('Resume recording')}</button>}</p>}
+        {done && data.interrupted && <p className="mt-interrupted small" role="status"><Icon name="alert" size={12} /> <span>{t('Recording stopped when Bridge AI closed at {time}. What was recorded until then is kept.', { time: timeOf(data.interrupted.at) })}</span>{canResume && ' '}{canResume && <button type="button" className="link-btn" onClick={resumeRec} disabled={busy === 'resume'}>{t('Resume recording')}</button>}</p>}
         {!combined && <MergeHint data={data} onMerged={merged} onMsg={setMsg} />}
         {!combined && <Merged data={data} onDone={refresh} onMsg={setMsg} />}
         {micErr && <MicFix stale={micErr.stale} onClose={() => setMicErr(null)} onAllowed={resumeRec} />}

@@ -89,6 +89,39 @@ try {
     await ctx.close()
   }
 
+  // ---------- Stop while a screen is being picked ----------
+  // Watch a screen, its picker never answering (macOS's, closed without a word), then Stop: the
+  // pick is let go, and the next recording doesn't say that no screen has been picked yet.
+  {
+    const { ctx, p, errors } = await page(b, kit.url, { store: { 'cc-rail-meetings': true }, before: async (c) => {
+      await tone(c)
+      await c.addInitScript(() => {
+        window.__bridgePickWait = 2500
+        const md = window.MediaDevices?.prototype
+        if (md) md.getDisplayMedia = () => new Promise(() => {})
+      })
+    } })
+    await p.waitForSelector('.rail-nav-row', { timeout: 15000 })
+    const startHere = async () => {
+      await p.locator('.rail-nav-btn', { hasText: 'Meetings' }).click()
+      await p.locator('.mt-view .pane-head button', { hasText: 'Start recording' }).click({ timeout: 10000 })
+      await p.waitForSelector('.mt-recbar', { timeout: 15000 }).catch(() => {})
+    }
+    await startHere()
+    await p.locator('.mt-recbar button', { hasText: 'Watch a screen' }).click()
+    ok(!!(await until(async () => (await p.locator('.mt-recbar .mt-picking-btn').count()) === 1, 5000)), 'Watch a screen: Picking a screen…')
+    await p.locator('.mt-recbar button', { hasText: 'Stop' }).click()
+    await sleep(3500) // (past the picker's wait)
+    await startHere()
+    await sleep(1500)
+    const bar = await p.locator('.mt-recbar').innerText().catch(() => '')
+    ok(/Recording/.test(bar) && !/picked|picker/i.test(bar) && (await p.locator('.mt-recbar .mt-picking-btn').count()) === 0, 'stopped while it was picked: the next recording says nothing about that screen', bar)
+    await p.locator('.mt-recbar button', { hasText: 'Stop' }).click()
+    await until(async () => !(await api('/meetings')).meetings.some((x) => x.status === 'recording'), 10000)
+    ok(withoutCutOff(errors).length === 0, 'stopped while picking: no page errors', errors)
+    await ctx.close()
+  }
+
   // ---------- Bridge AI closing while notes are being written ----------
   // Its summary was being written (the model slow to answer) when Bridge AI closed: opened again,
   // the meeting doesn't say it's being written for ever with Summarize greyed out; the notes are
@@ -194,6 +227,7 @@ try {
     const A = await recorded('Roadmap check with the whole design team', 'First half.')
     const B = await recorded('Roadmap check with the whole design team', 'Second half.')
     await api(`/meetings/${B}/merge`, { id: A })
+    await api(`/meetings/${A}/assist`, { on: true })
     const { ctx, p, errors } = await page(b, kit.url, { phone: true })
     await sleep(1500)
     await open(p, A)
@@ -203,10 +237,20 @@ try {
       const icon = el.querySelector('svg').getBoundingClientRect()
       const words = el.querySelector('span').getClientRects()[0]
       const link = el.querySelector('button').getBoundingClientRect()
-      return { icon: { top: icon.top, bottom: icon.bottom, right: icon.right }, words: { top: words.top, bottom: words.bottom, left: words.left }, link: { left: link.left }, left: el.getBoundingClientRect().left }
+      const rects = el.querySelector('span').getClientRects(), last = rects[rects.length - 1]
+      return { icon: { top: icon.top, bottom: icon.bottom, right: icon.right }, words: { top: words.top, bottom: words.bottom, left: words.left }, end: { right: last.right, mid: (last.top + last.bottom) / 2 }, link: { left: link.left, mid: (link.top + link.bottom) / 2 }, left: el.getBoundingClientRect().left }
     }).catch((e) => ({ error: e.message }))
     ok(!at.error && at.icon.top < at.words.bottom && at.icon.bottom > at.words.top && at.words.left >= at.icon.right, 'a phone: the merge\'s icon is beside the start of its words', at)
-    ok(!at.error && at.link.left > at.left + 40, 'and Separate follows the words, not on a line of its own', at)
+    ok(!at.error && at.link.left > at.left + 40 && (Math.abs(at.link.mid - at.end.mid) > 8 || at.link.left >= at.end.right + 2), 'and Separate follows the words, with a space, not on a line of its own', at)
+    // Its header with five views (Suggestions among them): AI Assist beside the name and ⋯, not on
+    // a row of its own under the views.
+    const hd = await p.evaluate(() => {
+      const h = document.querySelector('.mt-view > .pane-head')
+      const r = (e) => e?.getBoundingClientRect()
+      const seg = r(h.querySelector('.seg')), wand = r(h.querySelector('.mt-ai-btn')), more = r(h.querySelector('.win-btn[aria-label="More actions"]'))
+      return { views: h.querySelectorAll('.seg > button').length, seg: seg && { top: seg.top, bottom: seg.bottom }, wand: wand && { top: wand.top, bottom: wand.bottom, right: wand.right }, more: more && { top: more.top }, width: innerWidth }
+    })
+    ok(hd.views === 5 && !!hd.wand && hd.wand.bottom <= hd.seg.top + 1 && Math.abs(hd.wand.top - hd.more.top) < 6 && hd.wand.right <= hd.width, 'a phone, five views: AI Assist beside ⋯ on the name\'s row, not on a row of its own', hd)
     await shot(p, `${tag}edges-merged-phone`)
     ok(withoutCutOff(errors).length === 0, 'merged on a phone: no page errors', errors)
     await ctx.close()
