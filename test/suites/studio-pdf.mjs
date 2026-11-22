@@ -187,7 +187,8 @@ try {
   fs.writeFileSync(path.join(dir, 'locked.pdf'), Buffer.from(lk.replace(/\nxref\n/, '\n99 0 obj\n<< /Filter /Standard /V 1 /R 2 /O (aaaa) /U (bbbb) /P -4 >>\nendobj\nxref\n').replace(/trailer\n<</, 'trailer\n<< /Encrypt 99 0 R'), 'latin1'))
   const place = (await api('/places', { path: dir })).place
   const root = `place:${place.id}`
-  const F = (p) => ({ root, path: p })
+  // (With the PDF's SHA-256 as it is now, as the page sends what it showed: signing needs it.)
+  const F = (p) => ({ root, path: p, ...(fs.existsSync(path.join(dir, p)) ? { sha256: sha(path.join(dir, p)) } : {}) })
   const before = sha(path.join(dir, 'agreement.pdf'))
 
   // ---------- The server ----------

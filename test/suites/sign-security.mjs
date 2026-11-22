@@ -27,9 +27,11 @@ import fs from 'node:fs'
 import path from 'node:path'
 import zlib from 'node:zlib'
 import crypto from 'node:crypto'
-import { spawnSync } from 'node:child_process'
+import net from 'node:net'
+import http from 'node:http'
+import { spawn, spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { startKit, startRelay, checks, until, sleep, rawFetch, ROOT, IS_WIN, IS_MAC, appKeysFor, windowHeader } from '../lib/harness.mjs'
+import { startKit, startRelay, checks, until, sleep, rawFetch, freePort, ROOT, IS_WIN, IS_MAC, appKeysFor, windowHeader } from '../lib/harness.mjs'
 import { linkAs } from '../lib/linkclient.mjs'
 import { K, json, text } from '../../relay/web/link.js'
 
@@ -53,15 +55,17 @@ const everything = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e)
 // A kit with the stand-in helper (told what to do in bridgesign.json), the app's keys given at start
 // (as the app gives them on its pipe: appKeysFor; more: in place of some of them), and before: what's
 // in its data folder as it starts.
-async function signKit(name, { probe = null, before = null, relay = null, more = {} } = {}) {
+async function signKit(name, { probe = null, before = null, relay = null, more = {}, config = {}, listen = false } = {}) {
   let state = null, log = null, push = null, keys = null
   const kit = await startKit(name, {
-    env: ({ bin, data }) => {
+    config,
+    env: ({ bin, data, port }) => {
       if (relay) fs.writeFileSync(path.join(data, 'relay.json'), JSON.stringify(relay.relayFile))
       before?.(data)
       state = path.join(bin, 'bridgesign.json'); log = path.join(bin, 'bridgesign.log'); push = path.join(bin, 'push.jsonl')
       fs.writeFileSync(state, JSON.stringify({ auth: { ok: true, how: 'touchid' }, ...(probe ? { probe } : {}) }))
-      keys = appKeysFor(bin, { store: 'keychain', ...more })
+      // (listen: where the app talks to it, as the app hands it: 127.0.0.1 and its port.)
+      keys = appKeysFor(bin, { store: 'keychain', ...(listen ? { listen: { host: '127.0.0.1', port } } : {}), ...more })
       const env = { BRIDGE_COMPUTER_NAME: 'Studio Mac', BRIDGE_TEST_PUSH: push, BRIDGE_TEST_WINDOW_FILE: keys.file }
       if (!IS_WIN) {
         fs.writeFileSync(path.join(bin, 'bridgesign'), `#!/bin/sh\nexec "${process.execPath}" "${path.join(ROOT, 'test', 'stand-ins', 'bridgesign.cjs')}" "$@"\n`, { mode: 0o755 })
@@ -75,7 +79,8 @@ async function signKit(name, { probe = null, before = null, relay = null, more =
   const call = (headers) => async (method, p, body, extra = {}) => {
     let r
     const url = `${kit.url}/api${p}`
-    try { r = await rawFetch(url, { method, headers: { 'content-type': 'application/json', ...headers(method, url), ...extra }, body: body ? JSON.stringify(body) : undefined }) } catch (e) { return { status: 0, error: e.cause?.code || e.message, j: null, buf: Buffer.alloc(0) } }
+    const sent = body ? JSON.stringify(body) : undefined
+    try { r = await rawFetch(url, { method, headers: { 'content-type': 'application/json', ...headers(method, url, sent ?? null), ...extra }, body: sent }) } catch (e) { return { status: 0, error: e.cause?.code || e.message, j: null, buf: Buffer.alloc(0) } }
     const buf = Buffer.from(await r.arrayBuffer())
     let j = null
     try { j = JSON.parse(buf.toString('utf8')) } catch { /* a picture */ }
@@ -86,8 +91,8 @@ async function signKit(name, { probe = null, before = null, relay = null, more =
     // A program with the key alone (Bearer, nothing else), and the app's own window (a MAC of its
     // secret on each request, as the app adds it: winAs, another secret's).
     prog: call(() => ({ authorization: `Bearer ${kit.key}` })),
-    win: call((m, u) => ({ authorization: `Bearer ${kit.key}`, 'x-bridge-window': windowHeader(keys.window, m, u) })),
-    winAs: (secret) => call((m, u) => ({ authorization: `Bearer ${kit.key}`, 'x-bridge-window': windowHeader(secret, m, u) })),
+    win: call((m, u, b) => ({ authorization: `Bearer ${kit.key}`, 'x-bridge-window': windowHeader(keys.window, m, u, b) })),
+    winAs: (secret) => call((m, u, b) => ({ authorization: `Bearer ${kit.key}`, 'x-bridge-window': windowHeader(secret, m, u, b) })),
     helper: (o) => fs.writeFileSync(state, JSON.stringify({ auth: { ok: true, how: 'touchid' }, ...o })),
     started: () => { try { return fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) } catch { return [] } },
     pushes: () => { try { return fs.readFileSync(push, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) } catch { return [] } },
@@ -114,7 +119,7 @@ async function aPdf(s, name = 'x.pdf', line = null) {
   fs.mkdirSync(dir, { recursive: true })
   fs.writeFileSync(path.join(dir, name), await pdfSaying(line))
   const root = `place:${(await s.win('POST', '/places', { path: dir })).j.place.id}`
-  return { dir, root, q: `root=${encodeURIComponent(root)}&path=${encodeURIComponent(name)}`, body: { root, path: name } }
+  return { dir, root, q: `root=${encodeURIComponent(root)}&path=${encodeURIComponent(name)}`, body: { root, path: name }, shown: () => sha(fs.readFileSync(path.join(dir, name))) }
 }
 // Many requests at once over one phone's link (the relay carries them side by side).
 async function many(c, list) {
@@ -165,6 +170,7 @@ const A_ = await signKit('sign-security', {
 const { kit, prog, win } = A_
 const links = []
 let B_ = null
+let C_ = null
 try {
   await prog('POST', '/setup', { name: 'Tester' })
   const sd = path.join(kit.data, 'studio', 'signatures')
@@ -214,8 +220,8 @@ try {
   // The app's own checks (desktop/windowauth.js, as main.js runs them): the server proves it's the one
   // the app started, and has its window secret, which never goes over the wire.
   const appFetch = (u, o = {}) => rawFetch(u, { ...o, headers: { ...(o.headers || {}), authorization: `Bearer ${kit.key}` } })
-  const proven = await windowAuth.proves(appFetch, kit.url, A_.keys.launch)
-  const notThat = await windowAuth.proves(appFetch, kit.url, crypto.randomBytes(32).toString('base64url'))
+  const proven = await windowAuth.proves({ port: kit.port, launch: A_.keys.launch, headers: { authorization: `Bearer ${kit.key}` } })
+  const notThat = await windowAuth.proves({ port: kit.port, launch: crypto.randomBytes(32).toString('base64url'), headers: { authorization: `Bearer ${kit.key}` } })
   const has = await windowAuth.hello(appFetch, kit.url, A_.keys.window)
   const hasNot = await windowAuth.hello(appFetch, kit.url, crypto.randomBytes(32).toString('base64url'))
   const given = await prog('POST', '/window/hello', { secret: crypto.randomBytes(32).toString('base64url') })
@@ -308,17 +314,24 @@ try {
   fs.writeFileSync(path.join(pdf.dir, 'contract.pdf'), await pdfSaying('Fee: $1,200,000 a year'))
   const inSigned = () => (fs.existsSync(path.join(pdf.dir, '_signed')) ? fs.readdirSync(path.join(pdf.dir, '_signed')).filter((f) => f.startsWith('contract')).length : 0)
   const swapped = await win('POST', `/studio/sign?${cq}`, { grant: gc.grant, sha256: shownSha, marks: MARKS })
-  const swappedNoSha = await win('POST', `/studio/sign?${cq}`, { grant: (await win('POST', `/studio/sign/ask?${cq}`, {})).j.grant, marks: MARKS }).then(async (x) => (fs.writeFileSync(path.join(pdf.dir, 'contract.pdf'), await pdfSaying('Fee: $1,200 a year')), x))
+  const swappedNoSha = await win('POST', `/studio/sign?${cq}`, { grant: (await win('POST', `/studio/sign/ask?${cq}`, {})).j.grant, sha256: sha(fs.readFileSync(path.join(pdf.dir, 'contract.pdf'))), marks: MARKS }).then(async (x) => (fs.writeFileSync(path.join(pdf.dir, 'contract.pdf'), await pdfSaying('Fee: $1,200 a year')), x))
   ok(/^sign "contract\.pdf"$/.test(reason || '') && !!gc.grant && swapped.status === 409 && swapped.j?.code === 'changed' && inSigned() <= 1, 'confirmed for one document, then that file changed: nothing signed, it says the document changed', { reason, swapped: swapped.j, signed: inSigned() })
   const stale = await win('POST', `/studio/sign/ask?${cq}`, { sha256: shownSha.replace(/^./, (c) => (c === '0' ? '1' : '0')) })
   const g2 = (await win('POST', `/studio/sign/ask?${cq}`, {})).j
+  const beforeAppend = sha(fs.readFileSync(path.join(pdf.dir, 'contract.pdf')))
   fs.appendFileSync(path.join(pdf.dir, 'contract.pdf'), '\n% changed\n')
-  const afterAsk = await win('POST', `/studio/sign?${cq}`, { grant: g2.grant, marks: MARKS })
+  const afterAsk = await win('POST', `/studio/sign?${cq}`, { grant: g2.grant, sha256: beforeAppend, marks: MARKS })
+  // Nothing said of what was shown (a page from before, a program): nothing signed. A PDF opened in
+  // Studio comes with its SHA-256, for a page that reads a big one in parts to send.
+  const g3 = (await win('POST', `/studio/sign/ask?${cq}`, {})).j
+  const noShown = await win('POST', `/studio/sign?${cq}`, { grant: g3.grant, marks: MARKS })
+  const opened = (await win('GET', `/studio/open?${cq}`)).j
+  ok(noShown.status === 400 && noShown.j?.code === 'need-sha' && opened.sha256 === sha(fs.readFileSync(path.join(pdf.dir, 'contract.pdf'))), 'signing with nothing said of what was shown: refused; Studio gives the PDF\'s hash as it opens it, for a page that reads it in parts', { noShown: noShown.j, opened: opened.sha256 })
   ok(stale.status === 409 && stale.j?.code === 'changed' && afterAsk.status === 409 && afterAsk.j?.code === 'changed' && swappedNoSha.status === 200, 'shown one way and changed before you were asked: not asked; changed after (whatever the page sends): not signed', { stale: stale.j?.code, afterAsk: afterAsk.j?.code })
 
   // ---------- The record ----------
   for (const n of ['a.pdf', 'b.pdf']) fs.writeFileSync(path.join(pdf.dir, n), await pdfSaying(n))
-  const signAs = async (n) => { const qn = `root=${encodeURIComponent(pdf.root)}&path=${encodeURIComponent(n)}`; const gg = (await win('POST', `/studio/sign/ask?${qn}`, {})).j; return win('POST', `/studio/sign?${qn}`, { grant: gg.grant, marks: MARKS }) }
+  const signAs = async (n) => { const qn = `root=${encodeURIComponent(pdf.root)}&path=${encodeURIComponent(n)}`; const gg = (await win('POST', `/studio/sign/ask?${qn}`, {})).j; return win('POST', `/studio/sign?${qn}`, { grant: gg.grant, sha256: sha(fs.readFileSync(path.join(pdf.dir, n))), marks: MARKS }) }
   const sa = await signAs('a.pdf'), sb = await signAs('b.pdf')
   const idxOf = (n) => path.join(kit.data, 'studio', 'versions', crypto.createHash('sha1').update(fs.realpathSync(path.join(pdf.dir, n))).digest('hex').slice(0, 20), 'index.json')
   const ia = JSON.parse(fs.readFileSync(idxOf('a.pdf'), 'utf8')), ib = JSON.parse(fs.readFileSync(idxOf('b.pdf'), 'utf8'))
@@ -337,11 +350,11 @@ try {
   fs.copyFileSync(copy, path.join(pdf.dir, 'moved.pdf'))
   const edited = await PDFDocument.load(fs.readFileSync(copy), { updateMetadata: false })
   edited.addPage([612, 792])
-  fs.writeFileSync(path.join(pdf.dir, 'edited.pdf'), await edited.save({ useObjectStreams: false }))
+  fs.writeFileSync(path.join(pdf.dir, 'edited.pdf'), await edited.save({ useObjectStreams: true })) // (its mark packed away)
   for (const n of [sa.j.path, 'moved.pdf', 'edited.pdf']) await win('GET', `/studio/open?root=${encodeURIComponent(pdf.root)}&path=${encodeURIComponent(n)}`)
   const signedBytes = [copy, path.join(pdf.dir, 'edited.pdf')].map((f) => sha(fs.readFileSync(f)))
   const kept = everything(kit.data).filter((f) => signedBytes.includes(sha(fs.readFileSync(f))))
-  ok(!kept.length, 'a signed copy opened in its _signed folder, copied out of it, or changed (a page added): none kept in Bridge AI\'s data folder', kept.map((f) => path.relative(kit.data, f)))
+  ok(!kept.length && !fs.readFileSync(path.join(pdf.dir, 'edited.pdf')).includes('BridgeAISigned'), 'a signed copy opened in its _signed folder, copied out of it, or changed (a page added, its objects packed so its mark isn\'t in its bytes): none kept in Bridge AI\'s data folder', kept.map((f) => path.relative(kit.data, f)))
 
   // ---------- A copy of the list from before, put back ----------
   const state = await A_.heard()
@@ -364,7 +377,7 @@ try {
   const bare = (await win('GET', '/studio/sign/setup')).j
   const bareHello = await prog('POST', '/window/hello', { secret: real.window })
   const barePic = await win('GET', '/studio/signature/signature')
-  ok(bare.canSign === false && bareHello.status === 403 && barePic.status === 403 && !(await windowAuth.proves(appFetch, kit.url, real.launch)), 'started without the app\'s keys: the window can\'t sign, its secret isn\'t taken over the wire, and the app finds it isn\'t the server it started', { canSign: bare.canSign, hello: bareHello.status, pic: barePic.status })
+  ok(bare.canSign === false && bareHello.status === 403 && barePic.status === 403 && !(await windowAuth.proves({ port: kit.port, launch: real.launch, headers: { authorization: `Bearer ${kit.key}` } })), 'started without the app\'s keys: the window can\'t sign, its secret isn\'t taken over the wire, and the app finds it isn\'t the server it started', { canSign: bare.canSign, hello: bareHello.status, pic: barePic.status })
   // (b) Another window secret on the pipe, no key: that window gets no signature.
   const EVIL = crypto.randomBytes(32).toString('base64url')
   await kit.restart(() => A_.keys.write({ window: EVIL, launch: crypto.randomBytes(32).toString('base64url') }))
@@ -385,11 +398,75 @@ try {
   const noGrant = await win('POST', `/studio/sign?${pdf.q}`, { marks: [{ kind: 'date', page: 1, x: 10, y: 10, w: 100, h: 20, text: 'today' }] })
   ok(after3.ask?.on === true && after3.setAside?.n >= 0 && !!after3.setAside && noGrant.status === 403 && noGrant.j?.code === 'ask', 'the sealed list changed on disk: set aside, and signing still asks first (not open)', { ask: after3.ask, setAside: after3.setAside, sign: noGrant.status })
 
+  // ---------- A list sealed with a key file put beside yours ----------
+  // (A program with your files only: a key file of its own, and a list sealed with it naming your
+  // pictures, with Ask Before Signing off and a high version, the mark beside it gone.)
+  const appState = { v: 5, ask: true }
+  const KF = crypto.randomBytes(32)
+  const sealAs = (k, name, buf) => { const iv = crypto.randomBytes(12); const c = crypto.createCipheriv('aes-256-gcm', k, iv); c.setAAD(Buffer.from(name)); const b = Buffer.concat([c.update(buf), c.final()]); return Buffer.concat([Buffer.from('BSIG1'), iv, c.getAuthTag(), b]) }
+  const ids = fs.readdirSync(sd).filter((f) => /^[a-z0-9]{8,32}\.bin$/.test(f)).map((f) => f.slice(0, -4))
+  const notYours = { list: ids.map((id) => ({ id, kind: 'signature', name: 'Not yours', at: new Date().toISOString(), width: 300, height: 90 })), defaults: { signature: ids[0] || null }, v: 1_000_000_000, ask: { on: false, way: 'device', pin: null, fails: 0, lockUntil: 0, locks: 0, nextTry: 0 } }
+  await kit.restart(() => {
+    fs.writeFileSync(path.join(sd, 'store.bin'), sealAs(KF, 'store', Buffer.from(JSON.stringify(notYours))))
+    fs.writeFileSync(path.join(sd, 'key'), KF.toString('base64'))
+    fs.rmSync(path.join(sd, 'ask-before-signing'), { force: true })
+    A_.keys.write({ ...real, state: appState })
+  })
+  const injected = (await win('GET', '/studio/sign/setup')).j
+  const injSign = await win('POST', `/studio/sign?${pdf.q}`, { sha256: pdf.shown(), marks: [{ kind: 'date', page: 1, x: 10, y: 10, w: 100, h: 20, text: 'today' }] })
+  ok(injected.sealed?.by === 'app' && !fs.existsSync(path.join(sd, 'key')) && !injected.list?.some((x) => x.name === 'Not yours') && !!injected.setAside && injSign.status === 403 && injSign.j?.code === 'ask', 'a list sealed with a key file another program put beside yours: never sealed again with the app\'s key, set aside, and signing asks first', { sealed: injected.sealed, list: injected.list?.map((x) => x.name), setAside: injected.setAside, sign: injSign.j?.code })
+  // The app last heard Ask Before Signing was on; the list says off, at whatever version: asks first.
+  const offList = { list: [], defaults: {}, v: 1_000_000_000, ask: { on: false, way: 'device', pin: null, fails: 0, lockUntil: 0, locks: 0, nextTry: 0 } }
+  await kit.restart(() => {
+    fs.writeFileSync(path.join(sd, 'store.bin'), sealAs(Buffer.from(A_.keys.key, 'base64'), 'store', Buffer.from(JSON.stringify(offList))))
+    fs.rmSync(path.join(sd, 'ask-before-signing'), { force: true })
+  })
+  const offSetup = (await win('GET', '/studio/sign/setup')).j
+  const offSign = await win('POST', `/studio/sign?${pdf.q}`, { sha256: pdf.shown(), marks: [{ kind: 'date', page: 1, x: 10, y: 10, w: 100, h: 20, text: 'today' }] })
+  ok(!!offSetup.older && offSign.status === 403 && offSign.j?.code === 'ask', 'the app last heard Ask Before Signing was on, and the list says off at a higher version: signing asks first until you confirm', { older: offSetup.older, sign: offSign.j?.code })
+
+  // ---------- The app's server and SIGUSR1 ----------
+  // The app starts its server with flags that keep SIGUSR1 from opening Node's inspector
+  // (desktop/serverflags.js, main.js); without them the signal opens it and the process's memory can
+  // be read from there.
+  const { SERVER_NODE_FLAGS } = require(path.join(ROOT, 'desktop', 'serverflags.js'))
+  const idle = path.join(kit.dir, 'idle.cjs')
+  fs.writeFileSync(idle, 'globalThis.SECRET = "in memory"; setInterval(() => {}, 1000)\n')
+  const opens = (port) => new Promise((resolve) => { const c = net.connect(port, '127.0.0.1'); c.once('connect', () => { c.destroy(); resolve(true) }); c.once('error', () => resolve(false)) })
+  const usr1 = async (flags) => {
+    const port = await freePort()
+    const c = spawn(process.execPath, [`--inspect-port=${port}`, ...flags, idle], { stdio: 'ignore' })
+    await sleep(500)
+    c.kill('SIGUSR1')
+    await sleep(1500)
+    const r = { inspector: await opens(port), alive: c.exitCode == null && c.signalCode == null }
+    c.kill()
+    return r
+  }
+  if (IS_WIN) skip('SIGUSR1 opens no inspector on the app\'s server', 'no signals on Windows')
+  else {
+    const bare = await usr1([]), flagged = await usr1(SERVER_NODE_FLAGS)
+    const mainSrc = fs.readFileSync(path.join(ROOT, 'desktop', 'main.js'), 'utf8')
+    ok(bare.inspector && !flagged.inspector && flagged.alive && /require\('\.\/serverflags\.js'\)\.SERVER_NODE_FLAGS, path\.join\(ROOT, 'server', 'index\.js'\)/.test(mainSrc), 'the app\'s server: SIGUSR1 opens no inspector (without its flags, it does), and it carries on', { bare, flagged })
+  }
+
   // ---------- Where the PIN is this computer's way ----------
   B_ = await signKit('sign-security-pin', { probe: { trackpad: false, touchID: false, auth: false }, more: { key: null, store: null } })
   await B_.prog('POST', '/setup', { name: 'Tester' })
   const bSealed = (await B_.win('GET', '/studio/sign/setup')).j.sealed
   ok(bSealed?.by === 'file', 'with no key from the app: a key file, and Settings says so', bSealed)
+  // An app with no keychain makes a new window secret each time it starts: with a key file, it's
+  // taken, so signing still works in its window.
+  const NEW = crypto.randomBytes(32).toString('base64url')
+  await B_.kit.restart(() => B_.keys.write({ window: NEW, launch: crypto.randomBytes(32).toString('base64url'), testHeader: true }))
+  const bAfter = (await B_.winAs(NEW)('GET', '/studio/sign/setup')).j
+  // ...and a start where the app couldn't read its own keys: nothing opened, no key made, and said.
+  const keyFiles = () => fs.readdirSync(path.join(B_.kit.data, 'studio', 'signatures')).filter((f) => /^key/.test(f))
+  const filesBefore = keyFiles()
+  await B_.kit.restart(() => B_.keys.write({ window: NEW, launch: crypto.randomBytes(32).toString('base64url'), unreadable: true }))
+  const bUnread = (await B_.winAs(NEW)('GET', '/studio/sign/setup')).j
+  ok(bAfter.canSign === true && bUnread.keysUnreadable === true && JSON.stringify(keyFiles()) === JSON.stringify(filesBefore), 'with a key file: the app\'s new window secret taken; a start where the app couldn\'t read its keys: none used, none made, and it says so', { canSign: bAfter.canSign, unreadable: bUnread.keysUnreadable, keyFiles: keyFiles() })
+  await B_.kit.restart(() => B_.keys.write({ window: B_.keys.window, launch: crypto.randomBytes(32).toString('base64url'), testHeader: true }))
   const pdfB = await aPdf(B_)
   const on = await B_.win('POST', '/studio/sign/ask/setting', { on: true, pin: '4821' })
   // (In waves of 100 at once, under the queue of new connections a computer keeps; the right one in
@@ -400,6 +477,65 @@ try {
   const t3 = tally(bRes)
   const progB = await Promise.all(bGuesses.slice(0, 20).map((pin) => B_.prog('POST', `/studio/sign/ask?${pdfB.q}`, { pin })))
   ok(on.status === 200 && on.j.way === 'pin' && !t3.GRANT && (t3['pin-wrong'] || 0) <= 5 && (t3['pin-wait'] || 0) + (t3['pin-locked'] || 0) >= 395 && progB.every((x) => x.status === 403), '400 PINs at once where the PIN is the way: no grant; from the key alone, not even tried', { tally: t3, prog: tally(progB) })
+
+  // ---------- Where the app talks to its server ----------
+  // config.json says another address (::1), the app's pipe says 127.0.0.1 and its port: it listens
+  // there and nowhere else.
+  C_ = await signKit('sign-security-port', { config: { host: '::1' }, listen: true, more: { testHeader: false } })
+  const ck = C_.kit
+  const reach6 = await new Promise((resolve) => { const c = net.connect(ck.port, '::1'); c.once('connect', () => { c.destroy(); resolve(true) }); c.once('error', () => resolve(false)) })
+  ok(!reach6 && (await C_.prog('GET', '/version')).status === 200, 'started by the app: it listens where the app talks to it (127.0.0.1 and its port), not where config.json says', { onV6: reach6 })
+  await C_.prog('POST', '/setup', { name: 'Tester' })
+  const cmine = png(260, 80)
+  await C_.win('POST', '/studio/signatures', { kind: 'signature', name: 'Mine', png: dataUrl(cmine), default: true })
+  // Another program on another port, passing everything on to it: the app's check of the server
+  // fails through it, and a window's request sent to it is refused.
+  const Q = await freePort()
+  const passed = { proofs: 0, pictures: 0 }
+  const fwd = http.createServer((req, res) => {
+    const chunks = []
+    req.on('data', (c) => chunks.push(c))
+    req.on('end', () => {
+      if (req.url.startsWith('/api/window/proof')) passed.proofs++
+      const up = http.request({ host: '127.0.0.1', port: ck.port, method: req.method, path: req.url, headers: req.headers }, (r) => {
+        const back = []
+        r.on('data', (c) => back.push(c))
+        r.on('end', () => { const b = Buffer.concat(back); if (/image\/png/.test(r.headers['content-type'] || '')) passed.pictures++; res.writeHead(r.statusCode, r.headers); res.end(b) })
+      })
+      up.on('error', () => { res.writeHead(502); res.end() })
+      up.end(Buffer.concat(chunks))
+    })
+  }).listen(Q, '127.0.0.1')
+  await new Promise((r) => fwd.once('listening', r))
+  const auth = { authorization: `Bearer ${ck.key}` }
+  const direct = await windowAuth.proves({ port: ck.port, launch: C_.keys.launch, headers: auth })
+  const through = await windowAuth.proves({ port: Q, launch: C_.keys.launch, headers: auth })
+  const viaQ = `http://127.0.0.1:${Q}/api/studio/signature/signature`
+  const picThrough = await rawFetch(viaQ, { headers: { ...auth, 'x-bridge-window': windowHeader(C_.keys.window, 'GET', viaQ) } })
+  fwd.close()
+  ok(direct && !through && passed.proofs === 1 && picThrough.status === 403 && passed.pictures === 0, 'through another program passing it on: the app\'s check of the server fails, and a window\'s request sent there gets no picture', { direct, through, picture: picThrough.status })
+  // The body is in the window's MAC: one changed on the way is refused.
+  const addUrl = `${ck.url}/api/studio/signatures`
+  const meant = JSON.stringify({ kind: 'signature', name: 'Drawn again', png: dataUrl(png(250, 80)), default: true })
+  const swappedBody = JSON.stringify({ kind: 'signature', name: 'Drawn again', png: dataUrl(png(120, 40)), default: true })
+  const changedOnWay = await rawFetch(addUrl, { method: 'POST', headers: { ...auth, 'content-type': 'application/json', 'x-bridge-window': windowHeader(C_.keys.window, 'POST', addUrl, meant) }, body: swappedBody })
+  const asMeant = await rawFetch(addUrl, { method: 'POST', headers: { ...auth, 'content-type': 'application/json', 'x-bridge-window': windowHeader(C_.keys.window, 'POST', addUrl, meant) }, body: meant })
+  ok(changedOnWay.status === 403 && asMeant.status === 200, 'a window\'s request with its body changed on the way: refused; as sent: kept', { changed: changedOnWay.status, asSent: asMeant.status })
+
+  // ---------- The app's keys file it can't open ----------
+  // (safeStorage stood in for: once working, once refused, as a denied Keychain prompt is.)
+  const kdir = path.join(kit.dir, 'app-keys-test')
+  fs.mkdirSync(kdir, { recursive: true })
+  const works = { isEncryptionAvailable: () => true, encryptString: (t) => Buffer.from(`ENC:${t}`), decryptString: (b) => { const t = b.toString(); if (!t.startsWith('ENC:')) throw new Error('not ours'); return t.slice(4) } }
+  const refuses = { ...works, decryptString: () => { throw new Error('Keychain access denied') } }
+  const kf = path.join(kdir, 'signing-keys')
+  const firstKeys = JSON.parse(windowAuth.keysAt(kf, works).forStart())
+  const denied = windowAuth.keysAt(kf, refuses)
+  const deniedStart = JSON.parse(denied.forStart())
+  const asideNow = fs.existsSync(`${kf}.unreadable`) && !fs.existsSync(kf)
+  const again = windowAuth.keysAt(kf, works)
+  const againStart = JSON.parse(again.forStart())
+  ok(denied.unreadable && deniedStart.unreadable && deniedStart.key === null && asideNow && againStart.key === firstKeys.key && againStart.window === firstKeys.window && !again.unreadable, 'the app\'s keys it can\'t open this time: moved aside, never written over, that run without a key (and said); the next run opens them again', { denied: { unreadable: deniedStart.unreadable, key: deniedStart.key }, asideNow, sameKeyAfter: againStart.key === firstKeys.key })
 
   // ---------- The helper itself, built for release (a Mac) ----------
   if (!IS_MAC) skip('native/bridgesign answers only Bridge AI', 'macOS only')
@@ -427,7 +563,7 @@ try {
   console.log(kit.log().slice(-1500))
 } finally {
   for (const c of links) c.close?.()
-  kit.stop(); B_?.kit.stop(); relay.stop()
+  kit.stop(); B_?.kit.stop(); C_?.kit.stop(); relay.stop()
 }
 process.exit(done().fail ? 1 : 0)
 
@@ -442,6 +578,8 @@ function parentCheck(nb, dir) {
   fs.rmSync(d, { recursive: true, force: true }); fs.mkdirSync(d)
   const run = (cmd, args, o = {}) => { const r = spawnSync(cmd, args, { cwd: d, encoding: 'utf8', ...o }); if (r.status !== 0) throw new Error(`${cmd} ${args.join(' ')}: ${r.stderr || r.stdout}`); return r.stdout }
   const kc = path.join(d, 'test.keychain-db')
+  // (The keychain list as it is, put back as it was after, whatever happens in between.)
+  const listed = spawnSync('/usr/bin/security', ['list-keychains', '-d', 'user'], { encoding: 'utf8' }).stdout.split('\n').map((l) => l.trim().replace(/^"|"$/g, '')).filter(Boolean)
   try {
     fs.writeFileSync(path.join(d, 'ext.cnf'), '[req]\ndistinguished_name = dn\nprompt = no\n[dn]\nCN = Bridge AI Test\n[ext]\nbasicConstraints = critical,CA:false\nkeyUsage = critical,digitalSignature\nextendedKeyUsage = critical,codeSigning\n')
     const hashes = {}
@@ -468,5 +606,6 @@ function parentCheck(nb, dir) {
     return { skip: `couldn't make throwaway certificates here: ${e.message.slice(0, 200)}` }
   } finally {
     spawnSync('/usr/bin/security', ['delete-keychain', kc])
+    if (listed.length) spawnSync('/usr/bin/security', ['list-keychains', '-d', 'user', '-s', ...listed])
   }
 }
