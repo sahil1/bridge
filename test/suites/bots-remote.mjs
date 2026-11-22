@@ -512,12 +512,34 @@ try {
   })
 
   await part('the Android app', async () => {
-    const { ctx, f, errors } = await phonePage({ android: true })
+    const { ctx, phone, f, errors } = await phonePage({ android: true })
     if (!f) { await ctx.close(); return }
     await openBot(f, { name: 'Harbor Desk' })
     const exp = f.locator('.bp [data-setting="slack-export"]')
     await exp.waitFor({ timeout: 10000 })
     ok(/The Android app can't save files yet\./.test(await exp.innerText()) && !(await exp.locator('button, a').count()), 'the Android app: Export says it can\'t save files there yet, instead of a button that does nothing', await exp.innerText())
+    // Its Back goes back in the page (the app's WebView, as phone-apps checks): Bridge AI in the
+    // relay's frame keeps each view a step, so More, Bots and a bot come back in turn.
+    const shown = (sel) => f.evaluate((s) => [...document.querySelectorAll(s)].some((e) => e.getClientRects().length > 0), sel)
+    await f.locator('.tabbar button', { hasText: 'More' }).click() // (More again: its list)
+    await sleep(500)
+    await f.locator('.tabbar button', { hasText: 'Agents' }).click()
+    await sleep(500)
+    await f.locator('.tabbar button', { hasText: 'More' }).click()
+    await f.locator('.m-more-row[data-id="bots"]').waitFor({ timeout: 8000 }); await sleep(500)
+    await f.locator('.m-more-row[data-id="bots"]').click()
+    await f.locator('.bh .bo-card', { hasText: 'Harbor Desk' }).first().waitFor({ timeout: 10000 }); await sleep(500)
+    await f.locator('.bh .bo-card', { hasText: 'Harbor Desk' }).first().click()
+    await f.locator('.bp').first().waitFor({ timeout: 10000 }); await sleep(500)
+    // (The WebView going back through the whole page's history, the relay's frame's steps in it: as
+    // the page's own Back is, history.back() at its top.)
+    const back = () => phone.evaluate(() => history.back())
+    await back()
+    ok(!!(await until(async () => (await shown('.bh[data-tab]')) && !(await shown('.bp')), 8000)), 'the Android app\'s Back, through the relay: from a bot back to Bots')
+    await back()
+    ok(!!(await until(() => shown('.m-more-row'), 8000)), 'and again: More')
+    await back()
+    ok(!!(await until(async () => /Agents/.test(await f.locator('.tabbar button[aria-current="true"]').innerText().catch(() => '')), 8000)), 'and again: the Agents tab')
     ok(errors.length === 0, 'no page errors in the Android app', errors)
     await ctx.close()
   })
