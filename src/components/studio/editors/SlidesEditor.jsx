@@ -1146,19 +1146,40 @@ function Slides({ doc, file, onDirty, onStats, handle, readOnly = false, onOpen 
       P.slideView(doc, slidesRef.current[curRef.current])
       for (const p of need) far.set(p, await doc.parts.bytes(p))
       doc.urlOf = (part) => { if (!P.showable(part)) return null; if (!data.has(part)) { const b = doc.bin.get(part) || far.get(part) || media.current.get(part)?.bytes; data.set(part, b ? `data:${P.mimeOf(part)};base64,${base64(b)}` : null) } return data.get(part) }
-      const html = slideHtml(P.slideView(doc, slidesRef.current[curRef.current]), { number: curRef.current + 1, font, words })
+      const html = slideHtml(P.slideView(doc, slidesRef.current[curRef.current]), { number: curRef.current + 1, font, words }).replace(/ loading="lazy"/g, '')
       doc.urlOf = was
       const scale = 2
       // An SVG's own HTML has to be XML: the browser writes it so.
       const box = document.createElement('div')
       box.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml')
       box.innerHTML = `<style>${SLIDE_CSS}</style>${html}`
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W * scale}" height="${H * scale}"><foreignObject width="${W}" height="${H}" transform="scale(${scale})">${new XMLSerializer().serializeToString(box)}</foreignObject></svg>`
+      // Drawn at the slide's size and made twice as big on the canvas (an SVG is drawn anew at the size
+      // it's drawn at): WebKit (Safari, the iPhone app) ignores a transform on a foreignObject, and
+      // drew the slide at its own size in the picture's top left corner, the rest of it empty.
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><foreignObject width="${W}" height="${H}">${new XMLSerializer().serializeToString(box)}</foreignObject></svg>`
       const img = new Image()
       await new Promise((ok, no) => { img.onload = ok; img.onerror = () => no(new Error(t('the browser couldn\'t draw it'))); img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`; setTimeout(() => no(new Error(t('the browser took too long to draw it'))), 10_000) })
+      await img.decode?.().catch(() => {})
       const c = document.createElement('canvas')
       c.width = W * scale; c.height = H * scale
-      c.getContext('2d').drawImage(img, 0, 0)
+      // WebKit draws the pictures in it only once it's decoded them, which a draw starts (the first
+      // time, a slide without its photos): drawn again and again, a little longer apart each time,
+      // until it comes out the same twice (three times at least; three seconds at most).
+      const g = c.getContext('2d')
+      const small = document.createElement('canvas')
+      small.width = 64; small.height = 36
+      const sg = small.getContext('2d', { willReadFrequently: true })
+      const look = () => { sg.clearRect(0, 0, 64, 36); sg.drawImage(c, 0, 0, 64, 36); return sg.getImageData(0, 0, 64, 36).data.join(',') }
+      let drawn = null
+      const stopAt = Date.now() + 3000
+      for (let n = 0; ; n++) {
+        g.clearRect(0, 0, c.width, c.height)
+        g.drawImage(img, 0, 0, W * scale, H * scale)
+        const now = look()
+        if ((n >= 2 && now === drawn) || Date.now() > stopAt) break
+        drawn = now
+        await new Promise((r) => setTimeout(r, 120 * (n + 1)))
+      }
       const blob = await new Promise((ok, no) => { try { c.toBlob((b) => (b ? ok(b) : no(new Error(t('the browser couldn\'t draw it')))), 'image/png') } catch (e) { no(e) } })
       const a = document.createElement('a')
       a.href = URL.createObjectURL(blob)

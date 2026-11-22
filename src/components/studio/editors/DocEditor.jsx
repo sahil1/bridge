@@ -736,6 +736,10 @@ function WordDoc({ file, model, onDirty, onStats, handle, readOnly, onOpen }) {
   const print = () => {
     const dom = editor.view.dom.cloneNode(true)
     for (const x of dom.querySelectorAll('.sd-pb, .sd-pb-top, .sd-pb-end, tr.sd-pb-row, [data-resize-handle], .ProseMirror-separator')) x.remove()
+    // Every picture loaded before it's printed, not only those near the top: the print's frame is a
+    // pixel wide, and WebKit (Safari, the iPhone app) loads a lazy one only once it's scrolled to,
+    // so the rest printed blank. (The frame's load waits for pictures that aren't lazy.)
+    for (const img of dom.querySelectorAll('img[loading]')) img.removeAttribute('loading')
     dom.removeAttribute('contenteditable')
     const hfText = (json) => {
       const p = json?.content?.find((b) => b.type === 'paragraph' && (b.content || []).length)

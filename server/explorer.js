@@ -406,8 +406,10 @@ export async function size(dir, rel, { signal } = {}) {
 // first), up to SEARCH_MAX found, SEARCH_DIRS folders or SEARCH_MS (partial then), stopped as soon
 // as you change it or leave. Hidden ones only when they're shown; never into node_modules or .git,
 // nor into what a walk leaves alone (skipFor).
+// Names are compared composed (NFC): a Mac's own apps often write a name decomposed (é as e and its
+// accent, Japanese ガ as カ and its mark), and "café" or "データ" typed found nothing.
 export async function search(root, dir, rel, q, { hidden = false, signal } = {}) {
-  const needle = String(q || '').trim().toLowerCase()
+  const needle = String(q || '').trim().normalize('NFC').toLowerCase()
   if (!needle) return { results: [], partial: false, folders: 0, skipped: [] }
   const { real, rel: r } = await within(`real\n${dir}\n${rel}`, () => safePath(dir, rel)).catch((e) => { throw said(e) })
   const realRoot = (await safePath(dir, '')).realRoot
@@ -429,7 +431,7 @@ export async function search(root, dir, rel, q, { hidden = false, signal } = {})
       for (const e of ents) {
         if (!hidden && hiddenIn(d, e.name)) continue
         const full = path.join(d, e.name)
-        if (e.name.toLowerCase().includes(needle) && found.length < SEARCH_MAX) found.push({ e, full, d })
+        if (e.name.normalize('NFC').toLowerCase().includes(needle) && found.length < SEARCH_MAX) found.push({ e, full, d })
         if (e.isDirectory() && !NOISE.has(e.name) && !isPackage(e.name)) {
           const why = skip(full)
           if (why) skipped.add(why); else next.push(full)

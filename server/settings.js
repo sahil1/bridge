@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
-import { ROOT, dataFile, ensureDir, DATA, IS_MAC, writeFileAtomic } from './paths.js'
+import { ROOT, dataFile, ensureDir, DATA, IS_MAC, writeFileAtomic, outOfBeta } from './paths.js'
 import { gitReady } from './gitready.js'
 
 export const FILE = dataFile('config.json')
@@ -24,7 +24,9 @@ function writeUser(obj) {
 // Which top-level keys differ, so the app can say what needs a restart.
 const changedKeys = (a, b) => [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]))
 
-// Your settings with a patch merged in. Objects merge one level deep; null removes a key.
+// Your settings with a patch merged in. Objects merge one level deep; null removes a key. A Beta
+// Features switch for a feature out of beta, sent the old way, is saved as that feature's setting
+// (paths.js outOfBeta).
 export function merged(before, p) {
   const next = { ...before }
   for (const [k, v] of Object.entries(p)) {
@@ -32,7 +34,7 @@ export function merged(before, p) {
     else if (v && typeof v === 'object' && !Array.isArray(v) && next[k] && typeof next[k] === 'object' && !Array.isArray(next[k])) next[k] = { ...next[k], ...v }
     else next[k] = v
   }
-  return next
+  return outOfBeta(next)
 }
 // ...saved.
 export function patch(p) {
@@ -48,9 +50,21 @@ export function replaceRaw(text) {
   let obj
   try { obj = JSON.parse(text) } catch (e) { throw Object.assign(new Error(`Not valid JSON: ${e.message}`), { status: 400 }) }
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) throw Object.assign(new Error('The file must hold a JSON object ({ ... })'), { status: 400 })
+  obj = outOfBeta(obj)
   const before = readUser()
   writeUser(obj)
   return changedKeys(before, obj)
+}
+
+// As the server starts: a settings file from before 3.22.0 with Beta Features switches for the
+// features out of beta, saved with those switches as their settings, once. Nothing is written when
+// there are none, or when the file can't be read.
+export function settle() {
+  const before = readUser()
+  const next = outOfBeta(before)
+  if (next === before) return []
+  writeUser(next)
+  return changedKeys(before, next)
 }
 
 // ---------- Location ----------

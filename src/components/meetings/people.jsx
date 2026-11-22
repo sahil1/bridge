@@ -7,7 +7,7 @@ import { CalendarSetup } from '../Agenda.jsx'
 import { Fold } from './tools.jsx'
 import { Avatar, Tile, colorOf, day, hours, num, when } from './insights.jsx'
 
-// People, the Meetings section's third tab (a beta feature, meeting-insights): everyone you've met,
+// People, the Meetings section's third tab (Meeting Insights, meetings.insights): everyone you've met,
 // from invites and the names on transcripts, for hundreds of them. A picker that finds anyone as you
 // type (the people you met last and most first), a map of who you meet most and who of them meet
 // each other, everyone by when you last met, and a person's own page: your meetings together over

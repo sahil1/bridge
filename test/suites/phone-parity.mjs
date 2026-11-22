@@ -22,13 +22,14 @@
 // is there: Your Features, with the sections down the left.
 //
 // A path is what's tapped, from the tab bar: a tab (Chief, Agents, Meetings, Today, More), then the
-// buttons in it by name. A beta feature's paths (trial: its id) are followed with it on; with Home
-// on, Home is the first tab and Today is in More, which is checked then too. One marked mac (Mail,
+// buttons in it by name. A beta feature's paths (trial: its id) are followed with it on, and Home's
+// (trial: 'home', on unless it's turned off) with it on: then Home is the first tab and Today is in
+// More, which is checked then too. The rest are followed with Home turned off. One marked mac (Mail,
 // its ⌘K actions and Settings › Mail & Calendar) is only there, and followed, on a Mac. "Search › x" types x in the top bar's search, which must offer it (for
 // actions rather than places); "Settings › x" is the top bar's Settings, then its section x.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, checks, until, browser, page, shot, phoneFaults, ROOT, IS_MAC } from '../lib/harness.mjs'
+import { startKit, checks, until, browser, page, shot, phoneFaults, withoutCutOff, ROOT, IS_MAC } from '../lib/harness.mjs'
 
 const { ok, done } = checks('phone-parity')
 
@@ -161,7 +162,9 @@ for (const [what, ids] of [['view', views], ['⌘K action', actions], ['Settings
   ok(!missing(ids).length, `every desktop ${what} has a way in on a phone, or says why not (add it to PATHS here)`, missing(ids))
 }
 
-const kit = await startKit('phone-parity', { config: { trials: { 'meeting-insights': true, routines: true } } }) // the beta features on: their ways in are checked too
+// Meeting Insights on (as it is by itself after 5 meetings) and Scheduled Routines on, as it starts:
+// their ways in are checked too. Home turned off until its own part below.
+const kit = await startKit('phone-parity', { config: { meetings: { insights: true }, home: { on: false } } })
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 try {
@@ -376,10 +379,10 @@ try {
     await ph.ctx.close()
   }
 
-  // ---------- Home, a beta feature, on ----------
+  // ---------- Home on, as it is unless turned off ----------
   // Home is the first tab and where the phone opens, and Today is in More: each of Home's paths, and
   // Today's from More.
-  await kit.api('/settings', { trials: { home: true } }, 'PATCH')
+  await kit.api('/settings', { home: { on: true } }, 'PATCH')
   {
     const HOME_TABS = ['Home', 'Chief', 'Agents', 'Meetings', 'More']
     const ph = await page(b, kit.url, { phone: true })
@@ -410,6 +413,16 @@ try {
     await ph.p.waitForSelector('.m-more-row')
     const names = (await ph.p.locator('.m-more-row .m-more-text > b').allInnerTexts()).map((x) => x.trim())
     ok(names[0] === 'Today' && names[1] === 'Usage', 'Home on: More has Today, then Usage, a row of its own', names)
+    // Left at Meetings, Bridge AI restarted, and the phone app opened again: where it was left, not
+    // Home (Home is where it starts only on its very first open, as above).
+    await follow(ph.p, 'Meetings', HOME_TABS)
+    await kit.restart()
+    await ph.p.goto(kit.url)
+    await ph.p.waitForSelector('.tabbar button', { timeout: 20000 })
+    await until(async () => (await tabNames()).join('|') === HOME_TABS.join('|'), 10000)
+    await ph.p.waitForTimeout(2000)
+    const back = await ph.p.locator('.tabbar button[aria-current="true"]').innerText().catch(() => '')
+    ok(/Meetings/.test(back) && !(await ph.p.locator('.hm').isVisible()), 'Home on: left at Meetings, restarted and opened again: Meetings, not Home', back)
     // The desktop's Edit in Home's header: on a phone, a long press on a section's name (as on an
     // iPhone's home screen), besides Search's Edit Home above. It fits the phone.
     // (Opened again, it's at the tab it last showed: Home's tapped.)
@@ -429,10 +442,12 @@ try {
     ok(edit && !Object.keys(f).length && !(await ph.p.locator('.hm-edit-btn').count()), 'Home on: a long press on a section\'s name is the phone\'s Edit Home, and it fits', { edit, f })
     await shot(ph.p, `${tag}phone-edit-home`)
     await ph.p.locator('.hm-done').click({ force: true })
-    ok(!ph.errors.filter((e) => !/\/api\/\S+ due to access control checks|^TypeError: Importing a module script failed\.$/.test(e)).length, 'Home on: no page errors', ph.errors)
+    // (Bridge AI restarting cuts off the app's own files the page was fetching ahead, which WebKit
+    // reports as errors: withoutCutOff.)
+    ok(!withoutCutOff(ph.errors).filter((e) => !/^TypeError: Importing a module script failed\.$/.test(e)).length, 'Home on: no page errors', ph.errors)
     await ph.ctx.close()
   }
-  await kit.api('/settings', { trials: { home: false } }, 'PATCH')
+  await kit.api('/settings', { home: { on: false } }, 'PATCH')
 
   // ---------- Share Links, a beta feature, on a phone ----------
   // As on a computer: off, Settings › Devices & Access › Share Links has its switch at the top, then

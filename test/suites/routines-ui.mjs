@@ -1,8 +1,10 @@
-// Routines in the app, and Scheduled Routines (a beta feature), in the browser named by
-// BRIDGE_TEST_BROWSER, with a stand-in Claude Code. Off: Today's Routines as before (Repeats, Run,
-// I did this), a scheduled routine saying it doesn't run by itself while the beta feature is off,
-// and no Commands in History, Routine in a chat or New routine in ⌘K. Turned on in Settings ›
-// About & Updates › Beta Features: each scheduled routine says when it runs and when next, and what
+// Routines in the app, and Scheduled Routines (out of Beta Features, on unless you turn it off), in
+// the browser named by BRIDGE_TEST_BROWSER, with a stand-in Claude Code. Off (its Beta Features
+// switch turned off before 3.22.0, so still off): Today's Routines as before (Repeats, Run, I did
+// this), a scheduled routine saying it doesn't run by itself while Scheduled Routines is off and
+// where to turn it on, and no Commands in History, Routine in a chat or New routine in ⌘K. Turned
+// on at its own switch, Settings › Agents & Models › Agents › Scheduled Routines (no Beta mark, and
+// not in Beta Features): each scheduled routine says when it runs and when next, and what
 // became of its last run (one whose folder is gone says it didn't run, and why), its runs listed
 // with what its agent said last, a late run and a missed one; routines suggested from what was
 // asked on four weekdays (and the Chief of Staff on three Mondays), with where it runs. Add a
@@ -36,6 +38,7 @@ const morning = { every: 'day', at: hhmm(hoursAgo(3)) }
 const release = { every: 'week', days: [now.getDay()], at: hhmm(hoursAgo(2)) }
 const since = daysAgo(10, 0, 0).toISOString()
 const kit = await startKit('routines-ui', {
+  config: { trials: { routines: false } },
   env: ({ data, home }) => {
     fs.mkdirSync(path.join(home, 'code', 'shop'), { recursive: true })
     fs.writeFileSync(path.join(data, 'routines.json'), JSON.stringify({ routines: [
@@ -105,7 +108,7 @@ try {
     await open(p, 'repeat')
     const card = p.locator('#card-repeat')
     await card.locator('.r-row', { hasText: 'Weekly dependency check' }).waitFor({ timeout: 15000 })
-    ok(/Doesn't run by itself while Scheduled Routines is off/.test(await text(card.locator('.r-row', { hasText: 'Morning check' }))), 'off: a scheduled routine says it doesn\'t run by itself while the beta feature is off', await text(card.locator('.r-row', { hasText: 'Morning check' })))
+    ok(/Doesn't run by itself while Scheduled Routines is off \(Settings › Agents & Models › Agents › Scheduled Routines\)/.test(await text(card.locator('.r-row', { hasText: 'Morning check' }))), 'off: a scheduled routine says it doesn\'t run by itself while Scheduled Routines is off, and where to turn it on', await text(card.locator('.r-row', { hasText: 'Morning check' })))
     ok(!(await card.locator('.r-sug, .r-when, .r-where').count()), 'off: no schedules, suggestions or where it runs')
     await card.locator('.add-line').click()
     ok(await card.locator('.r-form select').count() === 1 && !(await card.locator('.r-sched').count()) && /Repeats/i.test(await text(card.locator('.r-form'))), 'off: Add a routine is as before, with Repeats', await text(card.locator('.r-form')))
@@ -124,8 +127,15 @@ try {
 
     // ---------- Turned on ----------
     await settingsAt(p, 'about')
-    await p.locator('.st-check', { hasText: 'Scheduled Routines' }).locator('input').check()
-    ok(!!(await until(async () => (await kit.api('/config')).trials?.routines === true, 5000)), 'Beta Features › Scheduled Routines turns it on')
+    const betaList = p.locator('.modal.settings [data-setting="beta"]')
+    await betaList.waitFor({ timeout: 10000 })
+    ok(!/Scheduled Routines/.test(await betaList.innerText()), 'Beta Features doesn\'t list it', await betaList.innerText())
+    await settingsAt(p, 'scheduled-routines')
+    const sw = p.locator('.modal.settings [data-setting="scheduled-routines"]')
+    await sw.waitFor({ timeout: 10000 })
+    ok(!(await sw.locator('.st-chip.beta').count()) && !(await sw.locator('input').isChecked()) && /Routines that run by themselves at the time you set/.test(await sw.innerText()), 'its own switch, in Settings › Agents & Models › Agents: off, with no Beta mark', await sw.innerText())
+    await sw.locator('input').check()
+    ok(!!(await until(async () => (await kit.api('/config')).features?.routines === true && (await kit.api('/settings')).user.routines?.on === true, 5000)), 'Settings › Agents & Models › Agents › Scheduled Routines turns it on')
     await closeSettings(p)
     await open(p, 'repeat')
     const when = card.locator('.r-row', { hasText: 'Morning check' }).locator('.r-when')

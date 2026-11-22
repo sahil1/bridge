@@ -72,6 +72,7 @@ try {
   ws.addRow(['Item', 'Cost']); ws.addRow(['Hosting', 120]); ws.addRow(['Design', 900]); ws.getCell('B4').value = { formula: 'SUM(B2:B3)', result: 1020 }; ws.getCell('A1').font = { bold: true }
   await wb.xlsx.writeFile(path.join(dir, 'budget.xlsx'))
   fs.writeFileSync(path.join(dir, 'notes.md'), '# Notes\n\nFirst draft.\n')
+  const LONG_NAME = 'Quarterly Business Review – Final Presentation Notes for the Board of Directors v5.md'
   fs.writeFileSync(path.join(dir, 'pitch.md'), '---\nmarp: true\n---\n\n# Pitch\n\n## Q4\n\n---\n\n# Why now\n\n- Customers asked\n- It is ready\n\n<!-- Say the numbers -->\n')
   fs.writeFileSync(path.join(dir, 'dash.html'), '<!doctype html><title>Dash</title><h1 id="h">Dashboard</h1>')
   fs.writeFileSync(path.join(dir, 'data.csv'), 'a,b\n1,"x, y"\n')
@@ -257,12 +258,36 @@ try {
   await p.locator('.sd-versions li').nth(1).locator('button', { hasText: 'Compare' }).click()
   ok(!!(await until(async () => (await p.locator('.sd-diff .add').count()) > 0 && /Edited here/.test(await p.locator('.sd-diff .add').allInnerTexts().then((x) => x.join(' ')).catch(() => '')), 8000)), "Compare: what's new since that version, marked", { text: await p.locator('.sd-compare').innerText().catch(() => ''), errors: w.errors })
   await shot(p, `${tag}studio-compare`)
-  await p.locator('.sd-compare button[aria-label="Close"]').click()
+  // Esc closes it, focus in it from the start (it stayed open, focus on Compare behind it).
+  ok(await p.evaluate(() => !!document.activeElement?.closest('.sd-compare')), 'Compare takes the keyboard\'s focus')
+  await p.keyboard.press('Escape')
+  ok(!!(await until(async () => !(await p.locator('.sd-compare').count()), 3000)), 'Esc closes Compare')
+  if (await p.locator('.sd-compare').count()) await p.locator('.sd-compare button[aria-label="Close"]').click()
+  // Each version's who and when whole beside, or above, its Compare, Open and Restore (they were
+  // cut to "Changed outsid…", the size on a line of its own).
+  const rowsCut = await p.locator('.sd-versions li').evaluateAll((els) => els.map((li) => [...li.querySelectorAll('.sd-v-who b, .sd-v-who small')].filter((x) => x.scrollWidth > x.clientWidth + 1 || x.getBoundingClientRect().height > parseFloat(getComputedStyle(x).lineHeight) * 1.5).map((x) => x.textContent)).flat())
+  ok(!rowsCut.length, 'Versions: each one\'s who and when whole, each on one line', rowsCut)
+  await p.locator('.sd-panel button[aria-label="Close"]').click()
   await shot(p, `${tag}studio-doc`)
   // A change from outside while it's open, with nothing unsaved: shown within seconds.
   await sleep(50)
   fs.writeFileSync(path.join(dir, 'notes.md'), '# Notes\n\nChanged by another app.\n')
   ok(!!(await until(async () => /Changed by another app/.test(await pm.innerText().catch(() => '')) && /changed it/.test(await p.locator('.sd-bar').innerText().catch(() => '')), 15000)), 'a change from outside while open is shown, and said')
+  // Saved by you in another window: said as yours, not another app's.
+  {
+    const w2 = await page(b, kit.url, { width: 1200, height: 800, before: noServiceWorker })
+    await w2.p.locator('.app').first().waitFor({ timeout: 20000 }).catch(() => {})
+    const second = await until(async () => { if (!(await w2.p.locator('.sd-file').count())) await w2.p.evaluate((detail) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail })), F('notes.md')); return /Changed by another app/.test(await w2.p.locator('.sd-page .ProseMirror').innerText().catch(() => '')) }, 40000, 1000)
+    if (!second) console.log('the second window, as far as it got:', (await w2.p.locator('body').innerText().catch(() => '')).slice(0, 400))
+    await w2.p.locator('.sd-page .ProseMirror').click()
+    await w2.p.keyboard.press(process.platform === 'darwin' ? 'Meta+End' : 'Control+End')
+    await w2.p.keyboard.type(' From my other window.')
+    await w2.p.keyboard.press(`${MOD}+s`)
+    await until(() => fs.readFileSync(path.join(dir, 'notes.md'), 'utf8').includes('From my other window'), 8000)
+    const yours = await until(async () => { const shown = await pm.innerText().catch(() => ''); const x = await p.locator('.sd-bar').allInnerTexts().catch(() => []); return /From my other window/.test(shown) ? x.find((y) => /changed it/.test(y)) || null : null }, 15000, 300)
+    ok(/^You changed it in another window: this is its new version\./.test(yours || ''), 'saved in another window of yours: "You changed it in another window", not another app', yours)
+    await w2.ctx.close()
+  }
   // Ask an agent, from the page.
   await p.locator('.pane-head button', { hasText: 'Ask an agent' }).click()
   await p.locator('.sd-ask textarea').fill('add a summary at the top')
@@ -545,12 +570,34 @@ try {
   await code.fill('<!doctype html><title>Dash</title><h1 id="h">Revenue</h1>')
   ok(!!(await until(async () => /Revenue/.test(await p.locator('.sd-page-view').getAttribute('srcdoc').catch(() => '')), 5000)), 'a page is drawn as you type it')
   ok(!!(await until(async () => { const x = await p.locator('.sd-status').innerText(); return /HTML page/.test(x) && /Unsaved changes/.test(x) }, 5000)) && !(await bare(p)).length, 'its status line: an HTML page, with unsaved changes; no bare controls', { status: await p.locator('.sd-status').innerText(), bare: await bare(p) })
+  // Left with them unsaved (another file opened here): saved as it goes, as a document is (a page,
+  // a sheet or a deck, which don't save themselves, lost them without a word).
+  const dashWas = fs.readFileSync(path.join(dir, 'dash.html'), 'utf8')
   // A PDF: drawn in the page by pdf.js, in every browser (studio-pdf.mjs has the rest). Nothing to
   // save, and it says so.
   await open('report.pdf')
+  const leftSaved = await until(() => /<h1 id="h">Revenue<\/h1>/.test(fs.readFileSync(path.join(dir, 'dash.html'), 'utf8')), 10000, 200)
+  ok(!!leftSaved && /Dashboard/.test(dashWas), 'a page left with unsaved changes (another file opened): what was typed is saved, not lost', fs.readFileSync(path.join(dir, 'dash.html'), 'utf8').slice(0, 120))
   const pdf = await until(async () => (await p.locator('.sd-pdf .pdfViewer .page canvas').count()) > 0, 15000)
   ok(!!pdf && !!(await until(async () => /Read-only/.test(await p.locator('.sd-status').innerText()), 5000)) && (await p.locator('.pane-head button', { hasText: 'Save' }).count()) === 0 && !(await bare(p)).length, 'a PDF: drawn in the page; read only, no Save', { pdf, status: await p.locator('.sd-status').innerText().catch(() => ''), bare: await bare(p) })
   await shot(p, `${tag}studio-pdf`)
+  // A page with unsaved changes, changed meanwhile by another app: the bar's two ways, and no Save
+  // in the header (it was turned down, and the bar then said "Something else"); ⌘S keeps who.
+  await open('dash.html')
+  await p.locator('.sd-code').waitFor({ timeout: 15000 })
+  await p.locator('.sd-code').fill('<!doctype html><title>Dash</title><h1 id="h">Mine</h1>')
+  await sleep(300)
+  fs.writeFileSync(path.join(dir, 'dash.html'), '<!doctype html><title>Dash</title><h1 id="h">Theirs</h1>')
+  const bar = p.locator('.sd-conflict')
+  ok(await bar.waitFor({ timeout: 20000 }).then(() => true, () => false) && /^Another app changed this file/.test(await bar.innerText()), 'a page changed by another app while yours is unsaved: said in a bar', await bar.innerText().catch(() => ''))
+  const head = await p.locator('.sd-file .pane-head').evaluate((h) => ({ save: !!h.querySelector('.sd-save-btn'), state: h.querySelector('.sd-save-state')?.innerText.trim() }))
+  ok(!head.save && head.state === 'Changed elsewhere', 'meanwhile no Save in the header (only the bar\'s Show theirs and Save mine over it), and it says Changed elsewhere', head)
+  await p.locator('.sd-code').click()
+  await p.keyboard.press(`${MOD}+s`)
+  await sleep(1200)
+  ok(/^Another app changed this file/.test(await bar.innerText().catch(() => '')) && /Theirs/.test(fs.readFileSync(path.join(dir, 'dash.html'), 'utf8')), '⌘S then: theirs not saved over, the bar still saying who changed it', await bar.innerText().catch(() => ''))
+  await bar.locator('button', { hasText: 'Save mine over it' }).click()
+  ok(!!(await until(() => /Mine/.test(fs.readFileSync(path.join(dir, 'dash.html'), 'utf8')), 8000)), 'Save mine over it: yours saved')
 
   // ---------- Focus ----------
   // Each kind of file given the whole window: the app's sidebar, top bar and tabs and Studio's
@@ -693,6 +740,16 @@ try {
     f = await phoneFaults(ph.p, '.sd-file')
     ok(!Object.keys(f).length && await ph.p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), `phone ${width}: a document fits, its toolbar wrapping rather than scrolling sideways, each button a whole 40 px target`, f)
     await shot(ph.p, `${tag}studio-phone-${width}`)
+    // A file with a long name: its Back still a whole 40 px target (squeezed to 16 px by the name).
+    if (width === 375) {
+      fs.writeFileSync(path.join(dir, LONG_NAME), '# For the board\n')
+      await ph.p.evaluate((detail) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail })), F(LONG_NAME))
+      await until(async () => (await ph.p.locator('.sd-file .pane-head h2 .mid-name').getAttribute('title').catch(() => '')) === LONG_NAME, 15000)
+      const backW = await ph.p.locator('.sd-file .pane-head .win-btn.back').evaluate((x) => x.getBoundingClientRect().width).catch(() => 0)
+      ok(backW >= 40, `phone ${width}: a long file name leaves Back its whole 40 px`, backW)
+      await ph.p.evaluate((detail) => window.dispatchEvent(new CustomEvent('bridge-open-studio', { detail })), F('notes.md'))
+      await until(async () => /Notes/.test(await ph.p.locator('.sd-page .ProseMirror').innerText().catch(() => '')), 15000)
+    }
     // Focus on a phone: the app's top bar and tabs out of sight too, each control still a whole target.
     await ph.p.locator('.sd-status .sd-focus-narrow').click()
     const phoneWhole = await until(() => wholeWindow(ph.p), 3000, 100)

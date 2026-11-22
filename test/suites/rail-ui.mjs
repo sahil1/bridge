@@ -118,10 +118,10 @@ try {
   const old = made[150] // about six months ago
   const oldTitle = listed.find((m) => m.id === old.id).title
 
-  // Every Beta Feature on, as the owner has it (Home in the sidebar too), and a space with an agent in
+  // Every Beta Feature on, as the owner has it (and Home in the sidebar, as for everyone), and a space with an agent in
   // it under Spaces.
   const trials = [...fs.readFileSync(path.join(ROOT, 'src', 'trials.js'), 'utf8').matchAll(/\{ id: '([a-z-]+)'/g)].map((m) => m[1])
-  await kit.api('/settings', { trials: Object.fromEntries(trials.map((x) => [x, true])) }, 'PATCH')
+  await kit.api('/settings', { trials: Object.fromEntries(trials.map((x) => [x, true])), home: { on: true } }, 'PATCH')
   const work = path.join(kit.home, 'code', 'bit')
   fs.mkdirSync(work, { recursive: true })
   await kit.api('/agents/launch', { kind: 'claude', cwd: work, label: 'Payments', newSpace: 'BIT', prompt: 'idle' })

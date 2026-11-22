@@ -1,4 +1,4 @@
-// History › Commands (Scheduled Routines, a beta feature): what you asked in Bridge AI's boxes, kept on
+// History › Commands (with Scheduled Routines on): what you asked in Bridge AI's boxes, kept on
 // this computer (server/cmdhistory.js): messages to an agent or the Chief of Staff, new agents' first
 // messages, tasks and answers. Searched, a day at a time, each made a routine or deleted; with a
 // routine suggested on top when you ask the same thing on a schedule.

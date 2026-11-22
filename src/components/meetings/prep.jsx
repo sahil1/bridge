@@ -98,7 +98,7 @@ function Suggestions({ p, prep, compact, onSettings }) {
   )
 }
 
-// insights: whether Meeting Insights (a beta feature) knew who's been in your meetings. Without it,
+// insights: whether Meeting Insights knew who's been in your meetings. Without it,
 // who's invited is all that's said: nobody met before, nobody new. Compact, "7 invited" opens the
 // event's guests under it, with their replies (e: the event).
 function People({ people, compact, e }) {

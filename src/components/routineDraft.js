@@ -1,4 +1,4 @@
-// Make a routine of something you asked (Scheduled Routines, a beta feature): the New Routine
+// Make a routine of something you asked (with Scheduled Routines on): the New Routine
 // dialog, filled in from it (App.jsx shows it). From a message in an agent's chat or the Chief of
 // Staff's, History › Commands and a suggestion. Small, so the chat needn't load Routines to offer it.
 import { toText } from '../../shared/schedule.js'
