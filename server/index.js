@@ -1,5 +1,8 @@
-// First: what the desktop app handed this server on its pipe, read and the pipe closed before
-// anything else here starts a program that could inherit it (appkeys.js).
+// First: in the built app, nothing loaded from outside its own copy (lockdown.js; the app also
+// starts the server with it, before this file). Then what the desktop app handed this server on its
+// pipe, read and the pipe closed before anything else here starts a program that could inherit it
+// (appkeys.js).
+import './lockdown.js'
 import { appKeys } from './appkeys.js'
 import express from 'express'
 import fs from 'node:fs'

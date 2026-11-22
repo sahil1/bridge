@@ -13,6 +13,8 @@
 //           listens there and nowhere else, whatever config.json says (index.js)
 //   unreadable  the app couldn't read its own keys this time (its keychain item denied or damaged):
 //           no key, so your signatures stay sealed for this run, and it's said (signstore.js)
+//   code    the Mac app's own code-signing requirement (desktop/codesig.js): the signing helper
+//           (signhelper.js) must be signed to it before anything it says is taken
 // A server started any other way (npm start, the CLI, Docker) has none of them: its windows can't
 // sign, and it keeps a key file of its own (signstore.js).
 // In the tests only (BRIDGE_FIX_DRYRUN), the same comes from a file of the test's own
@@ -54,6 +56,7 @@ function read() {
     // (Tried again and still not opening: Start Over can be offered, signing.js.)
     startOver: j?.unreadable === true && j?.startOver === true,
     testHeader: fromTest && j?.testHeader === true,
+    code: typeof j?.code === 'string' && j.code.length < 300 && /^(certificate leaf = H"[0-9a-f]{40}"|anchor apple generic and certificate leaf\[subject\.OU\] = "[A-Z0-9]{10}")$/.test(j.code) ? j.code : null,
   }
   return got
 }

@@ -8,8 +8,9 @@
 // it (no window over the screen, no Touch ID).
 import fs from 'node:fs'
 import path from 'node:path'
-import { spawn } from 'node:child_process'
+import { spawn, execFile } from 'node:child_process'
 import { ROOT, IS_MAC } from './paths.js'
+import { appKeys } from './appkeys.js'
 
 const TESTS = !!process.env.BRIDGE_FIX_DRYRUN
 export const signBin = () => {
@@ -17,11 +18,24 @@ export const signBin = () => {
   const f = (TESTS && process.env.BRIDGE_SIGNHELPER) || path.join(ROOT, 'native', 'bin', 'bridgesign')
   return (IS_MAC || (TESTS && process.env.BRIDGE_SIGNHELPER)) && fs.existsSync(f) ? f : null
 }
+// Started by the Mac app: the helper must be signed as the app is (its requirement, on the app's pipe:
+// appkeys.js code) before anything it says is taken, checked each time it's run, as it could be
+// swapped for another program (one that says Touch ID said yes). Not signed so: no helper.
+const holds = (bin, req) => new Promise((resolve) => execFile('/usr/bin/codesign', ['--verify', '--strict', '-R', `=${req}`, bin], { timeout: 20000 }, (err) => resolve(!err)))
+async function trusted() {
+  const bin = signBin()
+  if (!bin) return null
+  const req = appKeys().code
+  if (!req || TESTS) return bin
+  if (await holds(bin, req)) return bin
+  console.error(`signing: ${bin} isn't signed as Bridge AI is, so it isn't used`)
+  return null
+}
 const lastJson = (out) => { for (const line of String(out || '').trim().split('\n').reverse()) { try { return JSON.parse(line) } catch { /* the one before */ } } return null }
 // The helper run with what it's told on stdin (first line, JSON), its last line back.
-export function runHelper(args, said = null, ms = 15000) {
-  const bin = signBin()
-  if (!bin) return Promise.resolve(null)
+export async function runHelper(args, said = null, ms = 15000) {
+  const bin = await trusted()
+  if (!bin) return null
   return new Promise((resolve) => {
     const child = spawn(bin, args, { stdio: ['pipe', 'pipe', 'ignore'] })
     let out = ''
@@ -95,34 +109,42 @@ export function deviceAuth(reason) {
 // One at a time; its hint is written here (signing.js), never taken from the request.
 let current = null
 export function trackpad({ hint, seconds = 120, onLine, onEnd }) {
-  const bin = signBin()
-  if (!bin) { onEnd({ cancel: 'none' }); return { stop: () => {} } }
+  if (!signBin()) { onEnd({ cancel: 'none' }); return { stop: () => {} } }
   current?.stop()
-  const child = spawn(bin, ['trackpad'], { stdio: ['pipe', 'pipe', 'ignore'] })
-  let buf = ''
+  let child = null
+  let stopped = false
   let ended = false
   const end = (line) => { if (ended) return; ended = true; if (current === me) current = null; onEnd(line) }
-  child.stdout.on('data', (d) => {
-    buf += d
-    for (let i = buf.indexOf('\n'); i >= 0; i = buf.indexOf('\n')) {
-      const line = buf.slice(0, i).trim()
-      buf = buf.slice(i + 1)
-      let j
-      try { j = JSON.parse(line) } catch { continue }
-      if (j.done || j.cancel) end(j)
-      else onLine(j)
-    }
-  })
-  child.on('exit', () => end({ cancel: 'stop' }))
-  child.on('error', () => end({ cancel: 'none' }))
-  child.stdin.on('error', () => {})
-  child.stdin.write(`${JSON.stringify({ hint: hint ? String(hint).slice(0, 160) : null, seconds })}\n`)
   const me = {
     stop: () => {
+      stopped = true
+      if (!child) { end({ cancel: 'stop' }); return }
       try { child.stdin.write('stop\n') } catch { /* gone */ }
       setTimeout(() => { try { child.kill() } catch { /* gone */ } }, 1500).unref()
     },
   }
   current = me
+  // (The helper as signed as the app is first: trusted.)
+  trusted().then((bin) => {
+    if (stopped || ended) { end({ cancel: 'stop' }); return }
+    if (!bin) { end({ cancel: 'none' }); return }
+    child = spawn(bin, ['trackpad'], { stdio: ['pipe', 'pipe', 'ignore'] })
+    let buf = ''
+    child.stdout.on('data', (d) => {
+      buf += d
+      for (let i = buf.indexOf('\n'); i >= 0; i = buf.indexOf('\n')) {
+        const line = buf.slice(0, i).trim()
+        buf = buf.slice(i + 1)
+        let j
+        try { j = JSON.parse(line) } catch { continue }
+        if (j.done || j.cancel) end(j)
+        else onLine(j)
+      }
+    })
+    child.on('exit', () => end({ cancel: 'stop' }))
+    child.on('error', () => end({ cancel: 'none' }))
+    child.stdin.on('error', () => {})
+    child.stdin.write(`${JSON.stringify({ hint: hint ? String(hint).slice(0, 160) : null, seconds })}\n`)
+  }, () => end({ cancel: 'none' }))
   return me
 }

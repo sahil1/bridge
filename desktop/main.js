@@ -25,10 +25,11 @@ const crashes = require('./crashes.js')
 const apiToken = require('./apitoken.js')
 const { floatWindow, zoomOf, floatResizer, fitWhileResizing } = require('./floatfit.js')
 
-// Where Bridge AI's code is: inside the app when built, the repo next to this folder from source.
-// BRIDGE_ROOT overrides both (a built app running your clone, say).
-const BUNDLED = app.isPackaged && !process.env.BRIDGE_ROOT
-const ROOT = process.env.BRIDGE_ROOT || (app.isPackaged ? path.join(process.resourcesPath, 'app-root') : path.resolve(__dirname, '..'))
+// Where Bridge AI's code is: inside the app when built, the repo next to this folder from source
+// (BRIDGE_ROOT: another clone, from source only). A built app is always its own copy: nothing in the
+// environment changes that (startgate.js refuses BRIDGE_ settings but a few).
+const BUNDLED = app.isPackaged
+const ROOT = app.isPackaged ? path.join(process.resourcesPath, 'app-root') : (process.env.BRIDGE_ROOT || path.resolve(__dirname, '..'))
 const DATA = process.env.BRIDGE_HOME || path.join(os.homedir(), '.bridge-ai')
 const CONFIG = (() => {
   const read = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')) } catch { return {} } }
@@ -36,8 +37,17 @@ const CONFIG = (() => {
 })()
 // Dev mode (npm run desktop:dev): the window shows the hot-reloading UI on the next port, so your
 // edits appear without restarting or rebuilding the app.
-const DEV = process.env.BRIDGE_DEV === '1'
+const DEV = !app.isPackaged && process.env.BRIDGE_DEV === '1'
 const PID = path.join(DATA, 'cache', 'server.pid')
+const serverFlags = require('./serverflags.js')
+// The smoke test's own Mac build (startgate.js, by its bundle id): its server gets its BRIDGE_ settings.
+const SMOKE_BUILD = app.isPackaged && require('./startgate.js').smokeBuild(require('./startgate.js').bundleId())
+// The app's own code-signing requirement (codesig.js), once: what each program in its copy is held
+// to, and what the server holds its signing helper to (on the pipe, with the keys).
+const codesig = require('./codesig.js')
+let codeReqIs
+const codeReq = () => (codeReqIs === undefined ? (codeReqIs = BUNDLED && IS_MAC_APP ? codesig.requirementOf(path.resolve(process.resourcesPath, '..', '..')) : null) : codeReqIs)
+const IS_MAC_APP = process.platform === 'darwin'
 const PORT = (Number(process.env.BRIDGE_PORT) || CONFIG.port || 7420) + (DEV ? 1 : 0)
 const URL_BASE = `http://127.0.0.1:${PORT}`
 // The server's own port (in dev the window shows the next one, whose hot-reloading UI passes its
@@ -80,7 +90,10 @@ async function checkRoot() {
   if (!BUNDLED) return true
   let list = null
   try { list = fs.readFileSync(path.join(__dirname, 'app-root.list'), 'utf8') } catch { /* said below */ }
-  const r = list ? await rootList.verify(ROOT, list).catch((e) => ({ ok: false, error: e.message })) : { ok: false, missing: ['app-root.list'] }
+  // (Each program in it held to the app's own signature, where it has one: codesig.js.)
+  const req = codeReq()
+  const programs = req ? (rels) => codesig.failing(rels.map((r) => path.join(ROOT, r)), req).then((bad) => bad.map((f) => path.relative(ROOT, f).split(path.sep).join('/'))) : null
+  const r = list ? await rootList.verify(ROOT, list, { programs }).catch((e) => ({ ok: false, error: e.message })) : { ok: false, missing: ['app-root.list'] }
   rootOk = r.ok
   rootAt = Date.now()
   rootWhy = r.ok ? null : r
@@ -92,6 +105,8 @@ async function checkRoot() {
   }
   return r.ok
 }
+// Code from the app's copy (app-root, outside its archive): only once the copy is as built.
+const rootImport = (rel) => (rootOk ? import(require('node:url').pathToFileURL(path.join(ROOT, rel)).href) : Promise.reject(new Error('Bridge AI\'s own files aren\'t as built')))
 const CHANGED = () => {
   const what = [...(rootWhy?.changed || []), ...(rootWhy?.added || []), ...(rootWhy?.missing || [])]
   return `Bridge AI's own files have changed since it was built${what.length ? ` (${what.slice(0, 2).map((f) => `<code>${f.replace(/[<>&]/g, '')}</code>`).join(', ')}${what.length > 2 ? `, and ${what.length - 2} more` : ''})` : ''}, so it won't start its server or open your keys.<br>Install Bridge AI again, then open it.`
@@ -211,7 +226,7 @@ async function serverUp() {
 // From source the server needs your shell's PATH to find node, so look it up while the app is
 // still launching. The built app runs on its own Node and starts right away; the server looks up
 // your PATH itself, in the background, for the agents.
-const PATH_READY = app.isPackaged && !process.env.BRIDGE_ROOT ? null : loginPath()
+const PATH_READY = app.isPackaged ? null : loginPath()
 
 // On a Mac the server runs on the app's Helper, and so does everything it runs as Node (the
 // terminal host, the `node` it gives agents). A Node process that names itself (process.title)
@@ -232,18 +247,19 @@ async function startServer() {
     if (win && !win.isDestroyed()) win.loadURL(splash(CHANGED())).catch(() => {})
     return false
   }
-  const env = { ...process.env, PATH: PATH_READY ? await PATH_READY : process.env.PATH }
+  // (Built app: only what the server and what it starts need of the environment: serverflags.js.)
+  const env = BUNDLED ? serverFlags.serverEnv(process.env, { smoke: SMOKE_BUILD }) : { ...process.env, PATH: PATH_READY ? await PATH_READY : process.env.PATH }
   // Built app: run the bundled server on Electron's Node. It keeps running when the window
   // closes, like `npm start`, so agents carry on; quit it from the Bridge AI menu.
   // (With SIGUSR1 kept from opening Node's inspector: serverflags.js.)
   const [cmd, args] = BUNDLED
-    ? [NODE_BIN, [...require('./serverflags.js').SERVER_NODE_FLAGS, path.join(ROOT, 'server', 'index.js')]]
+    ? [NODE_BIN, serverFlags.serverArgs(ROOT)]
     : [process.platform === 'win32' ? 'node.exe' : 'node', ['scripts/start.js', ...(DEV ? ['dev'] : [])]]
   if (BUNDLED) env.ELECTRON_RUN_AS_NODE = '1'
   // The app's keys (above), on the server's fd 3, with a secret for this start only. From source (npm
   // run desktop:dev) the server runs under npm and node --watch, which don't pass a pipe on: there it
   // takes the first window secret the app gives (BRIDGE_WINDOW_TOFU), once, and then only that.
-  const given = BUNDLED ? appKeys().forStart() : null
+  const given = BUNDLED ? appKeys().forStart({ code: codeReq() }) : null
   delete env.BRIDGE_WINDOW_FD
   delete env.BRIDGE_WINDOW_TOFU
   if (BUNDLED) env.BRIDGE_WINDOW_FD = '3'
@@ -737,9 +753,9 @@ const perms = permissions.create({
 })
 let canPaste = false // pasting where you're typing can work here (dictation.js says, each time the key is set)
 let loneKey = false // a lone key (Fn, the right ⌥) is the dictation key, so Input Monitoring is asked about
-const listenAsk = (cmd) => new Promise((resolve) => execFile(process.env.BRIDGE_KEYS || path.join(ROOT, 'native', 'bin', 'bridgekeys'), [cmd], { timeout: 10000 }, (err, out) => {
+const listenAsk = (cmd) => new Promise((resolve) => (!rootOk ? resolve(null) : execFile(process.env.BRIDGE_KEYS || path.join(ROOT, 'native', 'bin', 'bridgekeys'), [cmd], { timeout: 10000 }, (err, out) => {
   try { resolve(!!JSON.parse(String(out).trim().split('\n').pop()).allowed) } catch { resolve(false) }
-}))
+})))
 ipc.handle('bridge:perm', async (e, { op, kind } = {}) => {
   if (!fromApp(e)) return null
   if (op === 'kinds') return perms.kinds()
@@ -1039,7 +1055,7 @@ async function checkForUpdates() {
   if (u.error) return say({ type: 'warning', message: 'Couldn\'t check for an update', detail: u.error })
   if (u.disabled) {
     // (Where Settings says it, from the one table: shared/places.js.)
-    const at = await import(require('node:url').pathToFileURL(path.join(ROOT, 'shared', 'places.js')).href).then((m) => m.placeEn('about'), () => 'Settings › About & Updates')
+    const at = await rootImport(path.join('shared', 'places.js')).then((m) => m.placeEn('about'), () => 'Settings › About & Updates')
     return say({ message: 'Checking for updates is turned off', detail: `Turn on Check for new versions in ${at}.` })
   }
   // This app can be behind the server it shows: one run from your clone (npm start) is as new as the
@@ -1124,7 +1140,7 @@ async function updateWhileAway() {
   if (updating) return
   updating = true
   try {
-    rules ||= await import(require('node:url').pathToFileURL(path.join(ROOT, 'shared', 'autoupdate.js')).href)
+    rules ||= await rootImport(path.join('shared', 'autoupdate.js'))
     if (!(await local('/updates/auto'))?.release) return
     // Said, and when both say it's the time, said again right before.
     const ready = async () => !!(await local('/updates/auto', { why: await whileAway() }))?.ready
@@ -1195,7 +1211,8 @@ let floatKeep = null // what was on the card when you asked for it back from the
 // with whether Bridge AI is looking at the screen itself (/api/calls capturing) as it is now.
 const { make: watchSharing, place: placeOf } = require('./floatshare.js')
 const floatShare = watchSharing({
-  bin: process.env.BRIDGE_CALLWATCH || (fs.existsSync(path.join(ROOT, 'native', 'bin', 'callwatch')) ? path.join(ROOT, 'native', 'bin', 'callwatch') : null),
+  // (Asked each time it starts, so it's run only once the app's copy is as built: checkRoot.)
+  bin: () => (!rootOk ? null : process.env.BRIDGE_CALLWATCH || (fs.existsSync(path.join(ROOT, 'native', 'bin', 'callwatch')) ? path.join(ROOT, 'native', 'bin', 'callwatch') : null)),
   mac: IS_MAC,
   onChange: () => { if (float && !float.isDestroyed()) float.setContentProtection(floatShare.hidden()); floatLook?.() },
 })
@@ -1504,7 +1521,7 @@ app.whenReady().then(async () => {
   windowsSendSecret()
   createWindow()
   // Remote Screen and Preview's windows: the capture page, the badge, a project's app drawn off screen.
-  try { remoteShared = await import(require('node:url').pathToFileURL(path.join(ROOT, 'shared', 'remote.js')).href) } catch (e) { console.error('remote:', e.message) }
+  try { remoteShared = await rootImport(path.join('shared', 'remote.js')) } catch (e) { console.error('remote:', e.message) }
   // Reopened from a device (Screen Recording takes effect once the app reopens): the app only, as
   // macOS's own Quit & Reopen does; the server goes on, and so does the device's session there.
   // Allow Screen Recording from a device: its page of System Settings here, with the tile.
@@ -1529,8 +1546,11 @@ app.whenReady().then(async () => {
   const onStatus = (v) => { canPaste = !!v?.paste?.can; loneKey = !!v?.lone && /^(Fn|RightAlt)$/.test(v.key || ''); reportPerms() }
   // Its messages from pages are checked as the rest are (ipc).
   const parts = { app, BrowserWindow, globalShortcut, screen, ipcMain: ipc, clipboard: electron.clipboard, systemPreferences, shell, nativeImage }
-  dictation.start({ electron: parts, ROOT, DATA, URL_BASE, preload: path.join(__dirname, 'preload.js'), isOurs: ours, askAccess: showTile, trusted: fromApp, pageOf: pages.of, sentFrom: pages.from, perms, onStatus })
-    .catch((e) => console.error('dictation:', e.message))
+  // (Its helper is the copy's: only once the copy is as built, checkRoot.)
+  if (rootOk) {
+    dictation.start({ electron: parts, ROOT, DATA, URL_BASE, preload: path.join(__dirname, 'preload.js'), isOurs: ours, askAccess: showTile, trusted: fromApp, pageOf: pages.of, sentFrom: pages.from, perms, onStatus })
+      .catch((e) => console.error('dictation:', e.message))
+  }
   // What the app is allowed: told once a minute (the server forgets it after three), and whenever you
   // come back to one of its windows (System Settings is where it changes).
   setInterval(reportPerms, 60000)

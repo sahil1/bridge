@@ -141,6 +141,20 @@ if (fs.existsSync(prebuilds)) for (const d of fs.readdirSync(prebuilds)) {
   if (fs.existsSync(h)) fs.chmodSync(h, 0o755)
 }
 
+// What electron-builder leaves out as it copies (its excludedNames: .gitkeep, .npmignore, …, and ._
+// files) left out here too, so the list below is what the app has, every file of it.
+{
+  const names = new Set(require('app-builder-lib/out/fileMatcher').excludedNames.split(','))
+  const drop = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name)
+      if (names.has(e.name) || e.name.startsWith('._')) fs.rmSync(p, { recursive: true, force: true })
+      else if (e.isDirectory()) drop(p)
+    }
+  }
+  drop(OUT)
+}
+
 // Every file of the copy, with its SHA-256 (rootlist.js), into the app's own archive: the app checks
 // its copy against it before it starts the server or opens its keys.
 require('./rootlist.js').make(OUT).then((text) => {

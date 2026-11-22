@@ -63,11 +63,12 @@ function keysAt(file, safeStorage, { listen = null } = {}) {
       return true
     },
     // For a server about to start: a new secret for this start, kept (so a later run of the app can
-    // check the same server), and what goes on its fd 3, with where the app talks to it (listen).
-    forStart() {
+    // check the same server), and what goes on its fd 3, with where the app talks to it (listen) and
+    // the app's own code-signing requirement (code: codesig.js), which its signing helper is held to.
+    forStart({ code = null } = {}) {
       k.launch = rand()
       save()
-      return JSON.stringify({ window: k.window, key: k.key, launch: k.launch, state: k.state, store: can && !unreadable ? store : null, listen, unreadable, startOver: unreadable && retried && can })
+      return JSON.stringify({ window: k.window, key: k.key, launch: k.launch, state: k.state, store: can && !unreadable ? store : null, listen, unreadable, startOver: unreadable && retried && can, code })
     },
     // What the server says of the signatures' list ({ v, ask }), kept for its next start.
     heard(st) {

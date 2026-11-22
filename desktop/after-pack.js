@@ -23,13 +23,21 @@ function otherChips(dir, arch) {
   }
 }
 
+// The copy packed is the one listed (rootlist.js: app-root.list, which the app checks it against
+// every time it starts a server): anything else and the build stops here, before it's signed.
+async function asListed(root, arch) {
+  const r = await require('./rootlist.js').verify(root, fs.readFileSync(path.join(__dirname, 'app-root.list'), 'utf8'), { arch })
+  if (!r.ok) throw new Error(`The app's copy of Bridge AI isn't the one app-root.list lists (run desktop/stage.js again): ${JSON.stringify({ changed: r.changed.slice(0, 5), added: r.added.slice(0, 5), missing: r.missing.slice(0, 5) })}`)
+}
+
 exports.default = async (ctx) => {
-  if (ctx.electronPlatformName !== 'darwin') return
   const name = ctx.packager.appInfo.productFilename
   const arch = require('electron-builder').Arch[ctx.arch]
+  if (ctx.electronPlatformName !== 'darwin') return asListed(path.join(ctx.appOutDir, 'resources', 'app-root'), arch)
   otherChips(path.join(ctx.appOutDir, `${name}.app`, 'Contents', 'Resources', 'app-root', 'node_modules'), arch)
   for (const other of ['arm64', 'x64'].filter((a) => a !== arch)) fs.rmSync(path.join(ctx.appOutDir, `${name}.app`, 'Contents', 'Resources', 'app-root', 'native', 'llama', `darwin-${other}`), { recursive: true, force: true })
   const plist = path.join(ctx.appOutDir, `${name}.app`, 'Contents', 'Frameworks', `${name} Helper.app`, 'Contents', 'Info.plist')
   const reasons = Object.entries(ctx.packager.config.mac?.extendInfo || {}).filter(([k]) => /UsageDescription$/.test(k))
   for (const [k, v] of reasons) execFileSync('plutil', ['-replace', k, '-string', String(v), plist])
+  await asListed(path.join(ctx.appOutDir, `${name}.app`, 'Contents', 'Resources', 'app-root'), arch)
 }

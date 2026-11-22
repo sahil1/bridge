@@ -4,9 +4,11 @@
 // main.js checks app-root against it before it starts the server or opens its keys, and starts
 // neither if anything was changed, added or taken away.
 // Programs (Mach-O and Windows executables and libraries) are listed but not hashed: signing the app
-// changes their bytes after the list is made, so they're left to their code signature. What the
-// packaging leaves out by design may be missing: the other Mac chip's packages and llama-server
-// (after-pack.js), and dot files. Finder's .DS_Store files are ignored.
+// changes their bytes after the list is made, so each is held to the app's own signature instead
+// (codesig.js). Only what the packaging leaves out by design may be missing: the other Mac chip's
+// packages and llama-server (after-pack.js). stage.js leaves out what electron-builder doesn't copy
+// (its excludedNames), and after-pack.js checks the packed copy against the list before signing.
+// Finder's .DS_Store files are ignored.
 const crypto = require('node:crypto')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -82,8 +84,10 @@ async function make(root) {
   await each(files, 16, async (f) => { lines.push(`${await hashOf(f)}\t${chip(f.rel)}\t${f.rel}`) })
   return `${lines.sort((a, b) => (a.split('\t')[2] < b.split('\t')[2] ? -1 : 1)).join('\n')}\n`
 }
-// Checks root against the list (main.js): { ok, changed, added, missing, ms }.
-async function verify(root, text, { arch = process.arch } = {}) {
+// Checks root against the list (main.js): { ok, changed, added, missing, ms }. programs(paths): the
+// ones of the listed programs that don't hold to the app's own signature (codesig.js); none given (an
+// app signed ad hoc), they're only checked to be programs.
+async function verify(root, text, { arch = process.arch, programs = null } = {}) {
   const t = Date.now()
   const want = new Map()
   for (const line of String(text).split('\n')) {
@@ -92,6 +96,7 @@ async function verify(root, text, { arch = process.arch } = {}) {
   }
   const changed = []
   const added = []
+  const bins = []
   const present = new Set()
   const files = walk(root).filter((f) => !ignored(f.rel))
   await each(files, 16, async (f) => {
@@ -100,8 +105,11 @@ async function verify(root, text, { arch = process.arch } = {}) {
     if (!w) { added.push(f.rel); return }
     const h = await hashOf(f).catch(() => null)
     if (h !== w.hash) changed.push(f.rel)
+    else if (h === 'bin') bins.push(f.rel)
   })
-  const missing = [...want.entries()].filter(([rel, w]) => !present.has(rel) && !path.posix.basename(rel).startsWith('.') && (w.chip === '-' || w.chip === arch)).map(([rel]) => rel)
+  if (programs && bins.length) changed.push(...(await programs(bins.sort())))
+  // (Anything listed and not here is missing, dot files too, but the other chip's: after-pack.js.)
+  const missing = [...want.entries()].filter(([rel, w]) => !present.has(rel) && (w.chip === '-' || w.chip === arch)).map(([rel]) => rel)
   return { ok: want.size > 0 && !changed.length && !added.length && !missing.length, changed: changed.sort(), added: added.sort(), missing: missing.sort(), files: files.length, ms: Date.now() - t }
 }
 
