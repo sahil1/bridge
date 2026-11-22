@@ -9,7 +9,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { checks, ROOT } from '../lib/harness.mjs'
-import { runnerChange, pick, cssRules, statements, styleChange, indexChange } from '../lib/scope.mjs'
+import { runnerChange, pick as pickFor, cssRules, statements, styleChange, indexChange } from '../lib/scope.mjs'
 
 const { ok, done } = checks('test-scope')
 const list = (...a) => JSON.parse(execFileSync(process.execPath, [path.join(ROOT, 'test', 'run.mjs'), '--list', ...a], { cwd: ROOT, encoding: 'utf8' }))
@@ -52,7 +52,7 @@ const literal = (name) => { const at = runner.indexOf(`const ${name} = [`); retu
 const SUITES = literal('SUITES')
 const core = literal('EVERYTHING')
 const app = literal('THE_APP')
-const picked = (changed, texts = {}, suites = SUITES) => pick({ suites, changed, core, app, runner: [], root: ROOT, texts }).map((s) => s.name)
+const picked = (changed, texts = {}, suites = SUITES) => pickFor({ suites, changed, core, app, runner: [], root: ROOT, texts }).map((s) => s.name)
 const lineAt = (f, start) => {
   const text = fs.readFileSync(path.join(ROOT, f), 'utf8')
   const n = text.replace(/\r\n/g, '\n').split('\n').findIndex((l) => l.startsWith(start)) + 1
