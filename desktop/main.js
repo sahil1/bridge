@@ -1498,6 +1498,9 @@ app.whenReady().then(async () => {
   // The app's page has no service worker (src/pwa.js: that's for a phone or a browser): any one an
   // older version left in the app's windows goes, so nothing answers for the server but the server.
   await session.defaultSession.clearStorageData({ storages: ['serviceworkers'] }).catch(() => {})
+  // The app's own copy checked before any window opens (checkRoot): its keys and a server only after.
+  // (Checked later, once the window is loading, a service worker in it never started.)
+  await checkRoot()
   windowsSendSecret()
   createWindow()
   // Remote Screen and Preview's windows: the capture page, the badge, a project's app drawn off screen.

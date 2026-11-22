@@ -136,6 +136,7 @@ const windowAuth = require(path.join(ROOT, 'desktop', 'windowauth.js'))
     first: firstRequire === 'startgate' && /require\('\.\/startgate\.js'\)\.check\(\{\n\s+app,/.test(mainJs),
     keys: /const appKeys = \(\) => \{\n\s+if \(!rootOk\) throw/.test(mainJs) && /let rootOk = !BUNDLED/.test(mainJs),
     server: /async function startServer\(\) \{\n\s+if \(BUNDLED && \(!rootOk \|\| Date\.now\(\) - rootAt > 10000\) && !\(await checkRoot\(\)\)\) \{/.test(mainJs),
+    atStart: /await checkRoot\(\)\n\s+windowsSendSecret\(\)\n\s+createWindow\(\)/.test(mainJs),
     connect: /async function connect\(\) \{\n[^]*?if \(BUNDLED && !rootOk && !\(await checkRoot\(\)\)\) return win\.loadURL\(splash\(CHANGED\(\)\)\)\n[^]*?replaceStale/.test(mainJs),
     fuses: pkg.build.electronFuses.enableEmbeddedAsarIntegrityValidation === true && pkg.build.electronFuses.onlyLoadAppFromAsar === true,
     packed: ['startgate.js', 'rootlist.js', 'app-root.list'].every((f) => pkg.build.files.includes(f)) && /require\('\.\/rootlist\.js'\)\.make\(OUT\)/.test(stage),
