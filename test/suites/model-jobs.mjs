@@ -106,10 +106,12 @@ try {
   ok(m.summaryModel === 'ollama:gemma3:4b' && ollama.sent().length > 0 && anth.asked === 0, 'Meeting notes on a model of its own: written by it (Ollama, on this computer), not the cloud model Automatic would use', { model: m.summaryModel, error: m.summaryError })
   ok((await jobOf('notes')).last?.model === 'ollama:gemma3:4b', 'its last run says so')
   // Meeting notes' model has one place, its row here. One picked as Meetings & Voice had it
-  // (meetings.model: before 3.22.0, or an app that still sends it) goes first in that row.
+  // (meetings.model: before 3.22.0, or an app that still sends it) goes first in that row, with the
+  // models it fell back on then after it (up to three of the others, in Automatic's order: here
+  // Anthropic's, then Ollama's), then what the row had.
   await kit.api('/settings', { meetings: { model: 'openai:gpt-5' } }, 'PATCH')
   let user = (await kit.api('/settings')).user
-  ok(JSON.stringify(user.jobModels?.notes) === '["openai:gpt-5","ollama:gemma3:4b"]' && !('model' in (user.meetings || {})), 'a notes model picked as Meetings & Voice had it goes first in Meeting notes\' row, and nowhere else', { notes: user.jobModels?.notes, meetings: user.meetings })
+  ok(JSON.stringify(user.jobModels?.notes) === '["openai:gpt-5","anthropic:claude-opus-5-5","ollama:gemma3:4b"]' && !('model' in (user.meetings || {})), 'a notes model picked as Meetings & Voice had it goes first in Meeting notes\' row, the models it fell back on after it, and nowhere else', { notes: user.jobModels?.notes, meetings: user.meetings })
   let n = openaiAsked()
   m = await notes('Meetings & Voice picks')
   ok(m.summaryModel === 'openai:gpt-5' && openaiAsked() > n, 'and writes the notes', m.summaryModel)
@@ -130,15 +132,21 @@ try {
   await kit.api('/settings', { trials: { 'meeting-board': false } }, 'PATCH')
   await own('notes', ['ollama:gemma3:4b'])
   // Saved before 3.22.0 (Meetings & Voice's own pick in the file): moved into Meeting notes' row as
-  // Bridge AI starts, the other rows as they were.
+  // Bridge AI starts, with what it fell back on then; the other rows as they were.
   await own('diagrams', ['openai:gpt-5'])
   await kit.restart(() => {
     const f = path.join(kit.data, 'config.json')
     const c = JSON.parse(fs.readFileSync(f, 'utf8'))
     fs.writeFileSync(f, JSON.stringify({ ...c, meetings: { ...c.meetings, model: 'anthropic:claude-opus-5-5' } }))
   })
-  user = (await kit.api('/settings')).user
-  ok(JSON.stringify(user.jobModels?.notes) === '["anthropic:claude-opus-5-5","ollama:gemma3:4b"]' && JSON.stringify(user.jobModels?.diagrams) === '["openai:gpt-5"]' && !user.jobModels?.live && !('model' in (user.meetings || {})), 'one saved before: in Meeting notes\' row once Bridge AI starts, the other rows as they were', { jobModels: user.jobModels, meetings: user.meetings })
+  user = await until(async () => { const u = (await kit.api('/settings')).user; return !('model' in (u.meetings || {})) && u }, 10000)
+  ok(JSON.stringify(user?.jobModels?.notes) === '["anthropic:claude-opus-5-5","openai:gpt-5","ollama:gemma3:4b"]' && JSON.stringify(user.jobModels?.diagrams) === '["openai:gpt-5"]' && !user.jobModels?.live, 'one saved before: in Meeting notes\' row once Bridge AI starts, with the models it fell back on, the other rows as they were', user && { jobModels: user.jobModels, meetings: user.meetings })
+  // It falls back as it did: over its limit, the next one writes the notes, and the row says which.
+  anth.busy = true
+  m = await notes('Its pick over its limit')
+  const moved = (await jobOf('notes')).last
+  ok(m.summaryModel === 'openai:gpt-5' && !m.summaryError && moved?.model === 'openai:gpt-5' && moved.passed?.[0]?.id === 'anthropic:claude-opus-5-5' && /over your limit/.test(moved.passed[0].why), 'the pick moved there over its limit: the next one writes the notes, and the row\'s last run says which, and why', { model: m.summaryModel, error: m.summaryError, moved })
+  anth.busy = false
   await own('diagrams', null)
   await own('notes', ['ollama:gemma3:4b'])
   m = await notes('The meeting picks', 'anthropic:claude-opus-5-5')

@@ -158,8 +158,6 @@ ensureDir(DATA)
 // computer (the folder, so nothing in it can be reached).
 try { fs.chmodSync(DATA, 0o700) } catch { /* Windows, or a folder that isn't yours */ }
 ensureDir(CACHE)
-// Meeting notes' model, picked in Meetings & Voice before 3.22.0: moved to Models for Each Task.
-try { settings.moveNotesModel() } catch { /* the file as it is */ }
 const cfg = loadConfig()
 labs.configure(cfg) // more models (Qwen, DeepSeek, Kimi, GLM): hidden unless cfg.moreModels
 llm.configure(cfg) // the local model you picked in Settings › Model Providers (llmModel), if any
@@ -3723,23 +3721,44 @@ const afterChange = (changed) => {
 const remoteTrialOf = (s) => JSON.stringify((s?.trials && typeof s.trials === 'object' && !Array.isArray(s.trials) ? s.trials['remote-screen'] : null) ?? null)
 const remoteTrialKept = (req, next) => { if (remoteTrialOf(next) !== remoteTrialOf(settings.readUser())) remoteHere(req) }
 app.get('/api/settings', wrap(() => settingsView()))
-app.patch('/api/settings', (req, res) => {
+// Meeting notes' model as Meetings & Voice had it (meetings.model: saved before 3.22.0, sent by an
+// app that still has it, or typed into the file): first in Meeting notes' row in Models for Each
+// Task, with the models it fell back on then, so notes that were written still are. It went on to
+// up to three of the others you have, in the order Automatic takes them (meetingModels), and from
+// one on this computer only to others on this computer (meetings.js replyAny, as it was). A row set
+// after that goes as its list says. The keys that changed.
+async function notesFallbacks(pick) {
+  const all = await meetingModels().catch(() => [])
+  return all.filter((id) => id !== pick && (!chatModels.isLocal(pick) || chatModels.isLocal(id))).slice(0, 3)
+}
+async function moveNotesModel() {
+  const pick = settings.notesPick(settings.readUser())
+  if (pick === undefined) return []
+  const falls = typeof pick === 'string' && settings.MODEL_ID.test(pick) ? await notesFallbacks(pick) : []
+  return settings.moveNotesModel(falls)
+}
+const plus = (a, b) => [...new Set([...a, ...b])]
+app.patch('/api/settings', async (req, res) => {
   try {
     if (req.body && typeof req.body === 'object' && !Array.isArray(req.body)) {
       const next = settings.merged(settings.readUser(), req.body)
       channelKept(req, next)
       remoteTrialKept(req, next)
     }
-    res.json(afterChange(settings.patch(req.body || {})))
+    const changed = settings.patch(req.body || {})
+    res.json(afterChange(plus(changed, await moveNotesModel())))
   } catch (e) { res.status(e.status >= 400 && e.status < 500 ? e.status : 502).json({ error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}) }) }
 })
 app.put('/api/settings/raw', async (req, res) => {
   try {
     const text = String(req.body?.text ?? '')
     try { const next = JSON.parse(text); channelKept(req, next); remoteTrialKept(req, next) } catch (e) { if (e.status) throw e }
-    res.json(afterChange(settings.replaceRaw(text)))
+    const changed = settings.replaceRaw(text)
+    res.json(afterChange(plus(changed, await moveNotesModel())))
   } catch (e) { res.status(e.status || 502).json({ error: e.message }) }
 })
+// As Bridge AI starts: one saved before 3.22.0, moved once (the models it fell back on known by then).
+moveNotesModel().then((changed) => { if (changed.length) afterChange(changed) }).catch(() => {})
 app.get('/api/settings/geocode', wrap((req) => settings.geocode(req.query.q)))
 app.get('/api/agents/catalog', wrap(async () => { clearInstalledCache(); return agentCatalog() }))
 
