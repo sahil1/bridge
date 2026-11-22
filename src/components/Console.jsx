@@ -15,6 +15,7 @@ import Lightbox from './Lightbox.jsx'
 import { addAccount } from './AddAccount.jsx'
 import { leftOf, nameOf } from './AccountMenu.jsx'
 import CloudConsole from './CloudConsole.jsx'
+import { useEnter, EnterHint } from './EnterHint.jsx'
 import { PaneHeader } from './layout.jsx'
 import { tildePath, Menu } from './Rail.jsx'
 import { ownTitle } from '../agentTitle.js'
@@ -348,12 +349,15 @@ function QueuedMsg({ q, agent, actions }) {
     if (await actions.edit(q.id, text)) setDraft(null)
     setBusy(false)
   }
+  // Enter as in the message box (src/enter.js), saving the change: from the end of it, or ⌘Enter. A
+  // phone's keyboard on the screen makes a new line, as before, and Save saves.
+  const enter = useEnter(draft, () => { if (!busy) save() }, { onScreen: 'newline' })
   return (
     <div ref={ref} className={`msg user queued ${editing ? 'editing' : ''}`}>
       <div className="msg-text">
         {editing
-          ? <textarea className="queued-edit" value={draft} autoFocus rows={Math.min(8, Math.max(2, draft.split('\n').length))} onChange={(e) => setDraft(e.target.value)} aria-label={t('Change this message')}
-            onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); stop() } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); save() } }} />
+          ? <textarea className="queued-edit" value={draft} autoFocus rows={Math.min(8, Math.max(2, draft.split('\n').length))} onChange={(e) => { setDraft(e.target.value); enter.box.onSelect(e) }} aria-label={t('Change this message')}
+            {...enter.box} onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); stop() } else enter.onKeyDown(e) }} />
           : <UserText text={q.text} paneId={agent.paneId} />}
       </div>
       <div className="msg-time">
@@ -361,7 +365,8 @@ function QueuedMsg({ q, agent, actions }) {
         {/* failed: typed in, but the agent didn't take it (server/queue.js); it waits for you. */}
         {q.failed ? <span className="queued-failed" role="alert">{q.failed}</span> : q.sending ? t('Sending…') : q.waiting ? t('Waiting for the connection to your computer…') : agent.chief ? t('Queued, sends when Chief of Staff is free') : t('Queued, sends when the agent is free')}
         {editing
-          ? <><button className="link" disabled={busy} onClick={save}>{t('Save')}</button><button className="link" disabled={busy} onClick={stop}>{t('Cancel')}</button></>
+          // The hint before Save, so going from the box to Save moves neither button.
+          ? <><EnterHint show={enter.mid} save /><button className="link" disabled={busy} onClick={save}>{t('Save')}</button><button className="link" disabled={busy} onClick={stop}>{t('Cancel')}</button></>
           : ready && <>{q.failed && <button className="link" onClick={() => actions.edit(q.id, q.text)}>{t('Send again')}</button>}<button className="link" onClick={start}>{t('Edit')}</button><button className="link" onClick={() => actions.remove(q.id)}>{t('Remove')}</button></>}
       </div>
     </div>

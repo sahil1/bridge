@@ -21,6 +21,7 @@ export const SETTINGS = [
     ['location', tx('Location'), 'city weather morning brief place where'],
     ['layout', tx('Layout'), 'simple everything panels today board'],
     ['home', tx('Home'), 'home where bridge ai opens needs you start page open where you were'],
+    ['enter-key', tx('Enter Key'), 'enter return key send new line line break message box smart command ctrl shift typing'],
     ['color-mode', tx('Color Mode'), 'dark light system mode appearance'],
     ['theme', tx('Theme'), 'theme colors accent frame appearance'],
     ['text-size', tx('Text Size'), 'text size zoom bigger smaller'],

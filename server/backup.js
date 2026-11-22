@@ -91,7 +91,7 @@ const TAG = 16
 // early-access code, the assistant's folder, Bridge AI's MCP server and whether outside apps may send
 // to its agents through it (mcpServer: each computer's own say), sign-ins, and what's only kept for
 // its own start.
-const SETTINGS = ['name', 'location', 'defaultAgent', 'chief', 'mail', 'market', 'mortgage', 'news', 'quota', 'simple', 'moreModels', 'keepAgents', 'trials', 'home', 'routines', 'alertSounds', 'notify', 'voice', 'studio', 'consult', 'resumeWork', 'filesAssist', 'modelJobs', 'jobModels', 'llmModel', 'dictation', 'meetings', 'calendar', 'commands', 'crashReports', 'counts']
+const SETTINGS = ['name', 'location', 'defaultAgent', 'chief', 'mail', 'market', 'mortgage', 'news', 'quota', 'simple', 'moreModels', 'keepAgents', 'trials', 'home', 'routines', 'alertSounds', 'enterKey', 'notify', 'voice', 'studio', 'consult', 'resumeWork', 'filesAssist', 'modelJobs', 'jobModels', 'llmModel', 'dictation', 'meetings', 'calendar', 'commands', 'crashReports', 'counts']
 // (Meetings' folder and the Chief of Staff's are folders of this computer's. And a beta feature that
 // lets another device see or use this screen is turned on only by someone at this computer:
 // remote-screen stays as it is; so does the MCP server's switch in a backup from before 3.22.0, when

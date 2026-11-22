@@ -21,6 +21,8 @@
 //   Claude Code settings in a bot's folder (reads anywhere, a command run as it starts): its run
 //   loads only your own and Bridge AI's, so neither holds; an agent of your own there loads them as
 //   before; a Claude Code too old for that starts no run, saying why. Settings › Bots opens Bots.
+//   AI Assist's chat takes Enter as every message box does (src/enter.js): the caret back in the
+//   words a new line, the hint saying ⌘⏎ sends, which it does.
 //   The pages in light and dark, on a computer and a phone (More › Bots).
 import fs from 'node:fs'
 import path from 'node:path'
@@ -144,9 +146,20 @@ try {
     await p.locator('.bc-proposal form.sb-add input[aria-label="Add a folder by its path"]').fill('~/docs')
     await p.locator('.bc-proposal form.sb-add:has(input[aria-label="Add a folder by its path"]) button[type="submit"]').click()
     ok(await until(async () => { const x = (await assist(id)).proposal; return x.limits.day === 20 && fwds(x.folders).includes('~/docs') }, 8000), 'changed in place: its limit, a folder by its path', (await assist(id)).proposal)
-    // In words: a folder that isn't there, and Create turns it down.
-    await p.locator('.bc-say textarea').fill('read ~/missing too')
-    await p.locator('.bc-say button[type="submit"]').click()
+    // In words: a folder that isn't there, and Create turns it down. Enter as in every message box
+    // (src/enter.js): with the caret back in the words a new line, nothing asked, the hint in the
+    // box's corner saying ⌘⏎ sends; ⌘⏎ sends.
+    const sayBox = p.locator('.bc-say textarea')
+    await sayBox.fill('read ~/missing too')
+    for (let i = 0; i < 4; i++) await sayBox.press('ArrowLeft')
+    const askedBefore = model.asked(/Known folders/).length
+    await sayBox.press('Enter')
+    const cornered = await until(async () => /^(⌘|Ctrl)⏎ to send$/.test((await p.locator('.bc-say .enter-hint').innerText().catch(() => '')).trim()), 4000, 100)
+    await sleep(800)
+    ok((await sayBox.inputValue()) === 'read ~/missing\n too' && model.asked(/Known folders/).length === askedBefore && !!cornered, 'AI Assist\'s chat, the caret back in the words: Enter is a new line, nothing asked, the hint says ⌘⏎ sends', { box: await sayBox.inputValue(), hint: await p.locator('.bc-say .enter-hint').innerText().catch(() => '') })
+    await shot(p, `${tag}smart-enter-bot-chat-light`, { clip: await p.locator('.bc-say').boundingBox().then((r) => ({ x: r.x - 8, y: r.y - 8, width: r.width + 16, height: r.height + 16 })) })
+    await sayBox.press('Backspace')
+    await sayBox.press('ControlOrMeta+Enter')
     ok(await until(async () => fwds((await assist(id)).proposal.folders).includes('~/missing'), 15000), 'more words, the proposal again: a folder named', (await assist(id)).proposal.folders)
     await p.locator('.bc-proposal .bc-create .btn.primary').click()
     ok(await until(async () => /Folder not found: ~\/missing/.test(await p.locator('.bc-proposal').innerText()), 8000), 'Create turned down by Settings\' own check, saying why', await p.locator('.bc-proposal').innerText().catch(() => ''))

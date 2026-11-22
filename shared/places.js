@@ -60,6 +60,7 @@ export const SETTINGS = {
   'scheduled-routines': ['agents', 'Scheduled Routines'],
   'meeting-insights': ['meetings', 'Meeting Insights'],
   tidy: ['dictation', 'Tidy what I say'],
+  'enter-key': ['you', 'Enter Key'],
 }
 
 // Places outside Settings a message names, as names from the top: Bots' tabs (the sidebar's Bots,

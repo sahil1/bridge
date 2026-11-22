@@ -3685,6 +3685,7 @@ app.get('/api/config', (req, res) => res.json({
   // Settings › Meetings & Voice › Dictation, Tidy What I Say as it is here (its default where unset).
   dictation: { ...(cfg.dictation || {}), tidy: featureOn('dictation-cleanup') },
   alertSounds: cfg.alertSounds !== false, // the speaker in the top bar
+  enterKey: ['always', 'mod'].includes(cfg.enterKey) ? cfg.enterKey : 'smart', // Settings › You › Enter Key (src/enter.js)
   meetingKey: MEETING_KEYS.includes(cfg.meetings?.mentionKey) ? cfg.meetings.mentionKey : '@', // Settings › Voice & Meetings
   trials: Object.fromEntries(TRIALS.map((id) => [id, trialOn(id)])), // Settings › About & Updates › Beta Features
   features: Object.fromEntries(Object.keys(FEATURES).map((id) => [id, featureOn(id)])), // the ones out of beta, each in its own place
@@ -3737,8 +3738,9 @@ llm.fits().then((v) => { tidyFits = v; if (v && cfg.dictation?.tidy === undefine
 const SHOWN_BY = ['trials', 'home', 'routines', 'meetings', 'dictation', 'mcpServer']
 const afterChange = (changed) => {
   applyConfig()
-  // One of those on or off: every open window shows or hides it at once.
-  if (changed.some((k) => SHOWN_BY.includes(k))) configChanged()
+  // One of those on or off, or the Enter Key changed: every open window (a phone's too) shows or
+  // hides it, or takes Enter the new way, at once (the live feed), not at its next look at /config.
+  if (changed.some((k) => SHOWN_BY.includes(k)) || changed.includes('enterKey')) configChanged()
   if (changed.includes('trials')) remote.trialChanged()
   syncCalls()
   rt.setKeep?.(cfg.keepAgents !== false) // applies right away

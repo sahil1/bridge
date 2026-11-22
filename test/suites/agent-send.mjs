@@ -9,6 +9,11 @@
 // not taken when it went: held saying why, not typed in again, until Send again sends it. In the
 // browser named by BRIDGE_TEST_BROWSER: a message from the message box that Codex didn't take says
 // so under the box, and what you wrote is back in it; and the held one says why, with Send again.
+// And Enter in the message box (src/enter.js): Smart sends from the end, makes a new line with the
+// caret back in the words (the hint saying ⌘⏎ sends, which it does) or words selected, takes spaces
+// after the caret as the end, and leaves an input method's Enter alone; ⌘Enter Sends and Always
+// Sends, set elsewhere, taken by the open window at once; a message brought back with ↑ goes again
+// with Enter, though ↑ leaves the caret at its start; the hint light and dark.
 import fs from 'node:fs'
 import path from 'node:path'
 import { startKit, checks, until, sleep, browser, page, shot, TEST } from '../lib/harness.mjs'
@@ -130,8 +135,100 @@ try {
   await bubble.locator('button', { hasText: 'Send again' }).click()
   ok(!!(await until(() => got(cx.sessionId).at(-1) === held, 30000, 300)), 'Send again: it goes, once', got(cx.sessionId))
   ok(!!(await until(async () => !(await queueOf(cx.paneId)).length, 10000, 200)) && got(cx.sessionId).filter((x) => x === held).length === 1, 'nothing left held', { got: got(cx.sessionId).slice(-3), queue: await queueOf(cx.paneId) })
+
+  // ---------- Enter in the message box (src/enter.js) ----------
+  // Smart, the default: the caret at the end sends; back in the words, Enter is a new line there, the
+  // hint says ⌘⏎ sends, and it does; spaces after the caret don't count; words selected: a new line in
+  // their place; an input method's Enter does nothing. Then ⌘Enter Sends and Always Sends, set
+  // elsewhere (Settings, another device) and taken at once by the open window.
+  await idle(cx.paneId)
+  const hint = () => p.locator('.composer-stack .comp-hint').innerText().catch(() => '')
+  const last = () => got(cx.sessionId).at(-1)
+  const left = async (n) => { for (let i = 0; i < n; i++) await boxEl.press('ArrowLeft') }
+  const nothingSent = async (was) => { await sleep(1200); return last() === was }
+  await boxEl.fill('Check the March totals')
+  ok(/⏎ send · ⇧⏎ new line/.test(await hint()), 'Smart, the caret at the end: the hint says ⏎ sends, ⇧⏎ is a new line', await hint())
+  await left(13)
+  await boxEl.press('Enter')
+  ok((await boxEl.inputValue()) === 'Check the\n March totals' && await nothingSent(held), 'Smart, the caret back in the words: Enter is a new line there, and nothing is sent', { box: await boxEl.inputValue(), last: last() })
+  ok(!!(await until(async () => /^(⌘|Ctrl)⏎ to send$/.test((await hint()).trim()), 4000, 100)), 'and the hint says ⌘⏎ sends, nothing else', await hint())
+  await shot(p, `${tag}smart-enter-composer-light`, { clip: await p.locator('.composer-stack').boundingBox().then((r) => ({ x: r.x - 16, y: r.y - 16, width: r.width + 32, height: r.height + 32 })) })
+  await boxEl.press('ControlOrMeta+Enter')
+  ok(!!(await until(() => last() === 'Check the\n March totals', 15000, 200)), '⌘Enter sends it there, new line and all', got(cx.sessionId).slice(-2))
+  ok(!!(await until(async () => (await boxEl.inputValue()) === '' && /⏎ send · ⇧⏎ new line/.test(await hint()), 4000, 100)), 'the box empty again, and its hint as it was', await hint())
+  await idle(cx.paneId)
+  await boxEl.fill('Check the April totals   ')
+  await left(2)
+  await boxEl.press('Enter')
+  ok(!!(await until(() => last() === 'Check the April totals', 15000, 200)), 'Smart: the caret before nothing but spaces is the end, so Enter sends', got(cx.sessionId).slice(-2))
+  await idle(cx.paneId)
+  await boxEl.fill('Check the May totals')
+  await boxEl.evaluate((el) => el.setSelectionRange(10, 13))
+  await boxEl.press('Enter')
+  ok((await boxEl.inputValue()) === 'Check the \n totals' && await nothingSent('Check the April totals'), 'Smart, words selected: Enter is a new line in their place, nothing sent', await boxEl.inputValue())
+  // An input method putting a word together: its Enter (isComposing, or Safari's keyCode 229) is its own.
+  await boxEl.fill('合計を確認')
+  await boxEl.evaluate((el) => {
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true, cancelable: true }))
+    const e = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    Object.defineProperty(e, 'keyCode', { get: () => 229 })
+    el.dispatchEvent(e)
+  })
+  ok((await boxEl.inputValue()) === '合計を確認' && await nothingSent('Check the April totals'), 'an input method\'s Enter, the caret at the end: nothing is sent', { box: await boxEl.inputValue(), last: last() })
+  // ⌘Enter Sends, set from elsewhere: the open window takes it at once (the live feed's config).
+  await kit.api('/settings', { enterKey: 'mod' }, 'PATCH')
+  await boxEl.fill('Check the June totals')
+  ok(!!(await until(async () => /^(⌘|Ctrl)⏎ send · ⏎ new line$/.test((await hint()).trim()), 8000, 100)), '⌘Enter Sends, set elsewhere: the open window says so at once', await hint())
+  await boxEl.press('Enter')
+  ok((await boxEl.inputValue()) === 'Check the June totals\n' && await nothingSent('Check the April totals'), '⌘Enter Sends: Enter at the end is a new line', await boxEl.inputValue())
+  await boxEl.press('ControlOrMeta+Enter')
+  ok(!!(await until(() => last() === 'Check the June totals', 15000, 200)), 'and ⌘Enter sends', got(cx.sessionId).slice(-2))
+  await idle(cx.paneId)
+  await kit.api('/settings', { enterKey: 'always' }, 'PATCH')
+  await boxEl.fill('Check the July totals')
+  await left(7)
+  ok(!!(await until(async () => /^⏎ send · ⇧⏎ new line$/.test((await hint()).trim()), 8000, 100)), 'Always Sends: the hint says ⏎ sends, the caret back in the words too', await hint())
+  await boxEl.press('Enter')
+  ok(!!(await until(() => last() === 'Check the July totals', 15000, 200)), 'and Enter sends from there', got(cx.sessionId).slice(-2))
+  await kit.api('/settings', { enterKey: null }, 'PATCH')
+  await idle(cx.paneId)
+  // Smart again (taken out of the settings): ↑ in the empty box brings back a message, the caret at
+  // its start; unchanged, Enter sends it again from there, as before.
+  await boxEl.fill('Check the totals')
+  await left(3)
+  ok(!!(await until(async () => /^(⌘|Ctrl)⏎ to send$/.test((await hint()).trim()), 8000, 100)), 'Smart again, as soon as it\'s set', await hint())
+  await boxEl.fill('')
+  await boxEl.press('ArrowUp')
+  const back = await until(async () => { const v = await boxEl.inputValue(); return v && v }, 4000, 100)
+  // At its start, where ↑ puts it (once the box has the message: WebKit can draw it after the frame
+  // ↑ moved the caret in, which leaves it at the end).
+  await sleep(300)
+  await boxEl.evaluate((el) => el.setSelectionRange(0, 0))
+  ok(!!back && /⏎ send · ⇧⏎ new line/.test(await hint()), '↑ brings back a message, and with the caret at its start the hint says Enter sends it', { back, hint: await hint() })
+  const sentSoFar = got(cx.sessionId).length
+  await boxEl.press('Enter')
+  ok(!!(await until(() => got(cx.sessionId).length === sentSoFar + 1 && last() === back.trim(), 15000, 200)), 'and Enter sends it again', { back, last: got(cx.sessionId).slice(-2) })
+  await idle(cx.paneId)
   ok(errors.length === 0, 'no page errors', errors)
   await ctx.close()
+
+  // The hint in the dark.
+  {
+    const dk = await page(b, kit.url, { mode: 'dark', theme: 'midnight', width: 1440, height: 900 })
+    await dk.p.waitForSelector('.rail-nav-btn', { timeout: 20000 })
+    await dk.p.evaluate((id) => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: id } })), cx.paneId)
+    const box = dk.p.locator(`textarea[data-composer="${cx.paneId}"]`)
+    await box.waitFor({ timeout: 20000 })
+    await box.fill('Check the March totals')
+    for (let i = 0; i < 13; i++) await box.press('ArrowLeft')
+    await box.press('Enter')
+    const said = await until(async () => { const x = (await dk.p.locator('.composer-stack .comp-hint').innerText().catch(() => '')).trim(); return /^(⌘|Ctrl)⏎ to send$/.test(x) && x }, 8000, 100)
+    ok(!!said, 'dark: the caret back in the words, the hint says ⌘⏎ sends', await dk.p.locator('.composer-stack .comp-hint').innerText().catch(() => ''))
+    await shot(dk.p, `${tag}smart-enter-composer-dark`, { clip: await dk.p.locator('.composer-stack').boundingBox().then((r) => ({ x: r.x - 16, y: r.y - 16, width: r.width + 32, height: r.height + 32 })) })
+    await box.fill('')
+    ok(dk.errors.length === 0, 'dark: no page errors', dk.errors)
+    await dk.ctx.close()
+  }
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)
   console.log(kit.log().slice(-1500))

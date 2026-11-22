@@ -446,7 +446,7 @@ function Line({ l, id, me, onSaved, onError, onWho, onPlay, playing = false, now
       {edit != null ? (
         <span className="mt-text mt-line-edit">
           <textarea value={edit} onChange={(e) => setEdit(e.target.value)} autoFocus rows={Math.min(6, Math.ceil(edit.length / 70) + 1)} aria-label={t('Line text')}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); put(edit) } if (e.key === 'Escape') setEdit(null) }} />
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) { e.preventDefault(); put(edit) } if (e.key === 'Escape') setEdit(null) }} />
           <span className="mt-line-edit-acts"><button type="button" className="btn small primary" onClick={() => put(edit)}>{t('Save')}</button><button type="button" className="ghost-btn" onClick={() => setEdit(null)}>{t('Cancel')}</button></span>
         </span>
       ) : (
