@@ -711,6 +711,30 @@ app.get('/api/studio/version', async (req, res) => {
   } catch (e) { res.status(e.status || 404).json({ error: e.message }) }
 })
 app.post('/api/studio/restore', wrap(async (req) => { const q = sq(req); return studio.restore(await rootOf(q.root), q.path, String(req.body?.id || '')) }))
+// A file moved or deleted while it was open (studio.js): where it went, if it was moved (id: its
+// fileId from open); a copy of what the page has, saved in a folder (dir) under a name; the file
+// whole for a download; and a recovery draft kept until one of those is done. parts=1: the page
+// opened it in parts, so the parts it never had come from its versions.
+app.get('/api/studio/moved', wrap(async (req) => { const q = sq(req); return studio.movedTo(await rootOf(q.root), q.path, String(req.query.id || '')) }))
+const studioRaw = express.raw({ type: () => true, limit: studio.SAVE_MAX })
+app.put('/api/studio/copy', studioRaw, wrap(async (req) => { const q = sq(req); const to = String(req.query.to || q.root); return { ...await studio.saveCopy(await rootOf(q.root), q.path, await rootOf(to), String(req.query.dir || ''), String(req.query.name || ''), req.body, { inParts: req.query.parts === '1' }), root: to } }))
+app.put('/api/studio/whole', studioRaw, async (req, res) => {
+  try {
+    const q = sq(req)
+    const bytes = await studio.wholeFile(await rootOf(q.root), q.path, req.body, req.query.parts === '1')
+    res.set({ 'Content-Type': 'application/octet-stream', 'Content-Length': String(bytes.length), 'Cache-Control': 'no-store' })
+    res.end(bytes)
+  } catch (e) { res.status(502).json({ error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}) }) }
+})
+app.put('/api/studio/draft', studioRaw, wrap(async (req) => { const q = sq(req); return studio.keepDraft(await rootOf(q.root), q.root, q.path, req.body, { kind: String(req.query.kind || '') || null, inParts: req.query.parts === '1' }) }))
+app.get('/api/studio/draft', wrap((req) => { const q = sq(req); return studio.draftOf(q.root, q.path) }))
+app.get('/api/studio/draft/file', (req, res) => {
+  const q = sq(req)
+  const file = studio.draftFile(q.root, q.path)
+  res.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Type': 'application/octet-stream' })
+  res.sendFile(file, { dotfiles: 'allow' }, (e) => { if (e && !res.headersSent) res.status(404).json({ error: 'No draft' }) })
+})
+app.delete('/api/studio/draft', wrap((req) => { const q = sq(req); return studio.dropDraft(q.root, q.path) }))
 app.post('/api/studio/new', wrap(async (req) => {
   const q = sq(req)
   return studio.create(await rootOf(q.root), String(req.body?.dir || ''), String(req.body?.name || ''), req.body?.data ? Buffer.from(String(req.body.data), 'base64') : Buffer.from(String(req.body?.text || '')))

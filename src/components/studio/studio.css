@@ -74,6 +74,10 @@
 .sd-note-bar .win-btn { flex: none; width: 24px; height: 24px; }
 .sd-conflict { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12.5px; background: color-mix(in srgb, var(--warning) 12%, var(--pane)); }
 .sd-conflict > span { flex: 1 1 280px; line-height: 1.45; }
+/* Moved or deleted while open: where to save a copy, beside its buttons. */
+.sd-gone-where { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.sd-gone-where select { max-width: 280px; height: 28px; padding: 0 8px; border: 1px solid var(--line-2, var(--line)); border-radius: 8px; background: var(--pane); color: var(--ink); font: 12.5px var(--font); min-width: 0; }
+.sd-gone-err { flex: 1 1 100%; }
 .sd-body { position: relative; grid-row: 5; display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; }
 .sd-body.with-panel { grid-template-columns: minmax(0, 1fr) 280px; }
 .sd-editor { position: relative; min-width: 0; min-height: 0; overflow: auto; }
@@ -376,6 +380,8 @@
 .app.narrow .sd-status-btn.vers { display: none; } /* the header's clock is there */
 .app.narrow .sd-empty .btn.small { height: 40px; padding: 0 14px; }
 .app.narrow .sd-conflict .btn.small, .app.narrow .sd-conflict .ghost-btn { min-height: 40px; }
+.app.narrow .sd-gone-where { flex: 1 1 100%; }
+.app.narrow .sd-gone-where select { flex: 1; max-width: none; height: 40px; font-size: 16px; }
 .app.narrow .sd-versions li { padding: 4px 6px; }
 .app.narrow .sd-v-acts { gap: 4px; }
 .app.narrow .sd-v-acts .link-btn { min-height: 40px; min-width: 40px; display: inline-flex; align-items: center; justify-content: center; }
