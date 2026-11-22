@@ -3661,6 +3661,7 @@ app.get('/api/config', (req, res) => res.json({
   // Settings › Voice & Meetings › Dictation; Tidy what I say only while its trial is on.
   dictation: trialOn('dictation-cleanup') || !cfg.dictation?.tidy ? cfg.dictation || {} : { ...cfg.dictation, tidy: false },
   alertSounds: cfg.alertSounds !== false, // the speaker in the top bar
+  enterKey: ['always', 'mod'].includes(cfg.enterKey) ? cfg.enterKey : 'smart', // Settings › You › Enter Key (src/enter.js)
   meetingKey: MEETING_KEYS.includes(cfg.meetings?.mentionKey) ? cfg.meetings.mentionKey : '@', // Settings › Voice & Meetings
   trials: Object.fromEntries(TRIALS.map((id) => [id, trialOn(id)])), // Settings › About & Updates › Beta Features
   // The effort each agent starts with (Settings › Agents), for a task's effort chip to say.
@@ -3705,9 +3706,10 @@ const settingsView = () => ({
 const atStart = Object.fromEntries(settings.RESTART_KEYS.map((k) => [k, JSON.stringify(settings.readUser()[k])]))
 const afterChange = (changed) => {
   applyConfig()
-  // Beta Features on or off: every open window shows or hides them at once (the live feed), not at
-  // its next look at /config, which can be minutes away.
-  if (changed.includes('trials')) for (const c of clients) c.write('event: config\ndata: {}\n\n')
+  // Beta Features on or off, or the Enter Key changed: every open window (a phone's too) shows or
+  // hides them, or takes Enter the new way, at once (the live feed), not at its next look at /config,
+  // which can be minutes away.
+  if (changed.includes('trials') || changed.includes('enterKey')) for (const c of clients) c.write('event: config\ndata: {}\n\n')
   if (changed.includes('trials')) remote.trialChanged()
   syncCalls()
   rt.setKeep?.(cfg.keepAgents !== false) // applies right away

@@ -7,6 +7,7 @@ import { openSettings } from './SignIn.jsx'
 import { EffortChip, launchEffort } from './Recommended.jsx'
 import { t, tn, tx } from '../i18n/index.js'
 import { where } from './settings/search.js'
+import { useEnter, EnterAt } from './EnterHint.jsx'
 import './home.css'
 
 // Home: "What should we build in <project>?" and one message box, like starting a thread in T3
@@ -104,6 +105,8 @@ export default function Home({ fleet, onLaunched, onMore, autoFocus = true }) {
     } catch (x) { setErr(x.message) } finally { setBusy(false) }
   }
 
+  // Enter as Settings › You › Enter Key has it (src/enter.js); a phone's keyboard on the screen sends, as before.
+  const enter = useEnter(text, go)
   const name = project?.name?.split('/').pop()
   const addKey = <button type="button" className="link-btn" onClick={() => openSettings('providers')}>{t('add an API key')}</button>
   return (
@@ -132,8 +135,10 @@ export default function Home({ fleet, onLaunched, onMore, autoFocus = true }) {
             : pj && !projects.length && <p className="muted small home-sub">{pickFolder ? tn('{choose}, or just start a chat below.', { choose: <button type="button" className="link-btn" onClick={async () => { const d = await pickFolder().catch(() => null); if (d) addProject(d) }}>{t('Choose a folder')}</button> }) : t('Start an agent in a folder from More options, or just start a chat below.')}</p>}
 
         <form className="home-box" onSubmit={go}>
-          <textarea ref={box} rows={3} value={text} onChange={(e) => setText(e.target.value)} placeholder={project ? t('Ask for a change, a fix, a plan, anything') : t('Ask anything')}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) go(e) }} aria-label={t('Your message')} />
+          <EnterAt show={enter.mid}>
+            <textarea ref={box} rows={3} value={text} onChange={(e) => { setText(e.target.value); enter.box.onSelect(e) }} placeholder={project ? t('Ask for a change, a fix, a plan, anything') : t('Ask anything')}
+              onKeyDown={enter.onKeyDown} {...enter.box} aria-label={t('Your message')} />
+          </EnterAt>
           <div className="home-chips">
             <span className="home-chip-wrap">
               <button type="button" className="home-chip" onClick={() => setOpen(open === 'agent' ? null : 'agent')} aria-haspopup="menu" aria-expanded={open === 'agent'}>
