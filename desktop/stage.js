@@ -44,7 +44,7 @@ for (const f of fs.readdirSync(path.join(OUT, 'dist', 'assets'))) if (f.endsWith
 
 // The call-sound helper for meeting notes (native/calltap.swift), built here on a Mac with Xcode's
 // tools; without it, meetings record the mic only.
-if (process.platform === 'darwin') spawnSync(process.execPath, [path.join(REPO, 'scripts', 'calltap.js'), path.join(OUT, 'native', 'bin')], { stdio: 'inherit' })
+if (process.platform === 'darwin') spawnSync(process.execPath, [path.join(REPO, 'scripts', 'calltap.js'), path.join(OUT, 'native', 'bin'), '--release'], { stdio: 'inherit' })
 
 // The local model's runtime (server/llm.js): llama.cpp's llama-server, the pinned build for each chip
 // this app is made for (both on a Mac; x64 and Arm on Windows; x64 on Linux), fetched now and checked

@@ -307,11 +307,15 @@ export async function planOf(x, { kind = 'file', from = null } = {}) {
 // but from a file routines, MCP servers and settings only when true. kind: 'file' or 'move'. why: what a
 // connection brought here says while it's paused; pausedBy, what paused it. req: the request it's
 // applied by (a bot's folders are checked as Settings checks them, from where it's asked).
-export async function apply(x, { parts = {}, why = 'Paused', pausedBy = 'restore', kind = 'file', req = null } = {}) {
+// signaturesIn(): throws when your signatures may not be added from where it's applied (signing.js).
+export async function apply(x, { parts = {}, why = 'Paused', pausedBy = 'restore', kind = 'file', req = null, signaturesIn = null } = {}) {
   const on = (k) => (kind === 'file' && ['routines', 'mcp', 'settings', 'signatures'].includes(k) ? parts[k] === true : parts[k] !== false)
   const out = { bots: [], connections: [], routines: [], chief: [], mcp: [], settings: [], signatures: 0, problems: [] }
   if (on('signatures') && x.signatures.length) {
-    try { out.signatures = await signatures.importAll(x.signatures) } catch (e) { out.problems.push(`Your signatures couldn't be added: ${e.message}`) }
+    try {
+      await signaturesIn?.()
+      out.signatures = await signatures.importAll(x.signatures)
+    } catch (e) { out.problems.push(`Your signatures couldn't be added: ${e.message}`) }
   }
   // (Settings first: Bots, a beta feature, is on here once its setting is. Then MCP servers, so a
   // bot that uses one finds it.)
@@ -626,6 +630,8 @@ export function routes(app, x) {
     try {
       hereOnly(req, 'Back up to a file')
       checkPass(req.body?.passphrase)
+      // (Your signatures only from your own window, once it's asked that it's you: signing.js.)
+      if (req.body?.signatures === true) x.signaturesOk(req)
       const file = await seal(await collect({ withSignatures: req.body?.signatures === true }), req.body.passphrase)
       const name = `${clean(file.from, 60).replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '') || 'Bridge-AI'}-${file.madeAt.slice(0, 10)}.bridge-backup`
       res.setHeader('content-type', 'application/json; charset=utf-8')
@@ -654,7 +660,7 @@ export function routes(app, x) {
     letGo(p.id)
     const move = p.kind === 'move'
     const why = move ? `Moved from ${p.from}: waiting for ${p.from} to stop its bots` : p.x.via
-    const r = await apply(p.x, { parts: req.body?.parts || {}, why, pausedBy: move ? `in:${p.move}` : 'restore', kind: p.kind, req })
+    const r = await apply(p.x, { parts: req.body?.parts || {}, why, pausedBy: move ? `in:${p.move}` : 'restore', kind: p.kind, req, signaturesIn: () => x.signaturesIn(req) })
     const got = { from: p.from, at: new Date().toISOString(), bots: r.bots.map((b) => b.id), connections: r.connections.filter((c) => !c.wasPaused).map((c) => c.id), routines: r.routines.filter((y) => y.paused).map((y) => y.id) }
     state.last = { kind: p.kind, ...got, ...(move ? { machine: p.machine, move: p.move, handoff: 'asking' } : {}) }
     if (move) state.received = [{ move: p.move, machine: p.machine, ...got }, ...state.received.filter((y) => y.move !== p.move)].slice(0, 20)
@@ -679,7 +685,7 @@ export function routes(app, x) {
     return { ...start({ connections: ids }), paused: pausedNow() }
   }))
   // To another of your computers.
-  app.post('/api/backup/move', wrap(async (req) => { mine(req); return moveTo(String(req.body?.to || ''), { withSignatures: req.body?.signatures === true }) }))
+  app.post('/api/backup/move', wrap(async (req) => { mine(req); if (req.body?.signatures === true) x.signaturesOk(req); return moveTo(String(req.body?.to || ''), { withSignatures: req.body?.signatures === true }) }))
   app.post('/api/backup/moves/:id/undo', wrap(async (req) => { mine(req); return undo(req.params.id) }))
   // Another of your computers: a move for this one, called off there, applied there, turned down
   // there, or taken back there.

@@ -3,6 +3,7 @@ import Icon from '../../Icon.jsx'
 import { api, BASE } from '../../../api.js'
 import { t, tx, locale } from '../../../i18n/index.js'
 import SignPad from './SignPad.jsx'
+import { grantFor } from './grant.jsx'
 // (Their look is pdf.css's: here too when no PDF has been opened yet, as in Settings › Studio.)
 import './pdf.css'
 
@@ -29,13 +30,15 @@ export function useSignSetup(on = true) {
   const refresh = useCallback(() => api('/studio/sign/setup').then((d) => { setData(d); setErr(null); return d }, (e) => { setErr(e.message); return null }), [])
   useEffect(() => { if (on && !data) refresh() }, [on, data, refresh])
   const merge = (d) => { setData((x) => ({ ...x, ...d })); return d }
+  // With Ask Before Signing on, each change to them is asked for first (grant.jsx): Touch ID, or the PIN.
+  const grant = async () => grantFor('change')
   // A new one (kind, png, name, makeDefault): its id.
   // (replace: one of yours, drawn again.)
-  const add = async (kind, png, { name, makeDefault = false, replace = null } = {}) => { const d = merge(await api('/studio/signatures', { method: 'POST', body: { kind, png, name: name || undefined, default: makeDefault, replace } })); return d.id }
+  const add = async (kind, png, { name, makeDefault = false, replace = null } = {}) => { const g = await grant(); const d = merge(await api('/studio/signatures', { method: 'POST', body: { kind, png, name: name || undefined, default: makeDefault, replace, grant: g } })); return d.id }
   // Drawn again: the default of that kind replaced.
-  const keep = async (which, png) => merge(await api(`/studio/signature/${which}`, { method: 'PUT', body: { png } }))
-  const change = async (id, o) => merge(await api(`/studio/signatures/${id}`, { method: 'PATCH', body: o }))
-  const remove = async (id) => merge(await api(`/studio/signatures/${id}`, { method: 'DELETE' }))
+  const keep = async (which, png) => { const g = await grant(); return merge(await api(`/studio/signature/${which}`, { method: 'PUT', body: { png, grant: g } })) }
+  const change = async (id, o) => { const g = await grant(); return merge(await api(`/studio/signatures/${id}`, { method: 'PATCH', body: { ...o, grant: g } })) }
+  const remove = async (id) => { const g = await grant(); return merge(await api(`/studio/signatures/${id}`, { method: 'DELETE', body: { grant: g } })) }
   return { data, err, refresh, add, keep, change, remove }
 }
 export const sigsOf = (setup, kind) => (setup.data?.list || []).filter((x) => x.kind === kind)
@@ -122,7 +125,11 @@ function KindList({ kind, setup }) {
     </div>
   )
 }
+// Where signing can't be done (a browser tab, a computer of yours showing this one, Tailscale):
+// said plainly, with where it can.
+export const NotHere = () => <p className="sd-warn small sd-not-here" role="note"><Icon name="lock" size={11} /> {t('Signing is done in the Bridge AI app on this computer, or in the app on your phone. From here your signatures aren\'t shown and nothing can be signed.')}</p>
 export function SignatureList({ setup }) {
+  if (setup.data && !setup.data.canSign) return <NotHere />
   if (setup.err && !setup.data) return <p className="error-text small" role="alert">{setup.err} <button type="button" className="link-btn" onClick={setup.refresh}>{t('Try again')}</button></p>
   if (!setup.data) return <div className="sd-sigcards waiting" aria-busy="true"><span className="sd-sigcard waiting"><span className="sd-sigcard-pic" /></span></div>
   return (

@@ -9,20 +9,32 @@
 //   Each request is for one signature or one set of initials, from one pad: it ends after 2 minutes,
 //   or when either side cancels, or once it's answered. Its id and nonce are random and only sent
 //   to the phones it's for; an answer for one that has ended, or a second answer, is refused.
+//   Only the pad that asked follows it, cancels it and gets the ink: with a key given to it alone
+//   (pad), not only by being the same kind of asker; a new request never ends another pad's. Both
+//   screens show the same short code, so you can see the phone is answering the pad in front of
+//   you. Asks are limited (a few a minute, a few waiting at once), so a phone isn't flooded with
+//   notifications.
 // What comes back is strokes (points as a share of the phone's pad), never a picture: the pad here
 // draws them in its own ink, and nothing is kept until you keep it there.
 import crypto from 'node:crypto'
+import { limiter } from './signhelper.js'
 
 // (BRIDGE_SIGN_PHONE_MS: shorter, for the tests that see one run out.)
 const MS = Math.max(3000, Number(process.env.BRIDGE_SIGN_PHONE_MS) || 2 * 60_000)
 const KEEP_ENDED = 10 * 60_000 // ended ones are remembered a while, to say so
 const MAX_POINTS = 20000
+const MAX_WAITING = 3 // waiting at once from one asker
+const MAX_ALL = 20 // kept at all (waiting and ended)
+const asks = limiter(10, 60_000) // a minute
+const pushes = limiter(4, 60_000) // notifications sent, a minute (more asks show on the phone's feed only)
+const code = () => String(crypto.randomInt(0, 10000)).padStart(4, '0')
 const reqs = new Map() // id -> { id, nonce, what, doc, asker, askerName, targets, until, state, strokes, by, at, waiters }
 const err = (message, status, code) => Object.assign(new Error(message), { status, code })
 let helpers = { phones: () => [], admits: () => false, tell: () => {}, notify: async () => {}, computer: () => 'your computer' }
 export const setHelpers = (h) => { helpers = { ...helpers, ...h } }
 
-const shownTo = (r) => ({ id: r.id, nonce: r.nonce, what: r.what, doc: r.doc, from: r.askerName, computer: helpers.computer(), until: r.until, state: r.state })
+const shownTo = (r) => ({ id: r.id, nonce: r.nonce, what: r.what, doc: r.doc, from: r.askerName, computer: helpers.computer(), until: r.until, state: r.state, code: r.code })
+const same = (a, b) => { const x = Buffer.from(String(a || '')), y = Buffer.from(String(b || '')); return x.length === y.length && x.length > 0 && crypto.timingSafeEqual(x, y) }
 const sweep = () => {
   for (const r of reqs.values()) {
     if (r.state === 'waiting' && r.until <= Date.now()) end(r, 'expired')
@@ -48,17 +60,18 @@ export const phones = () => helpers.phones().filter((p) => helpers.admits(p.id) 
 export async function ask({ asker, askerName, what = 'signature', doc = '', to = null }) {
   sweep()
   if (!['signature', 'initials'].includes(what)) throw err('Only a signature or initials', 400)
-  const can = phones().filter((p) => !to || p.id === to)
+  const can = phones().filter((p) => (!to || p.id === to) && p.id !== asker.replace(/^d:/, ''))
   if (!can.length) throw err('No phone of yours can be asked now. Open Bridge AI on your phone (paired with this computer, and let in under Which Devices May Connect), then try again.', 409, 'no-phone')
-  // One at a time from a pad: asking again ends the one before.
-  for (const r of reqs.values()) if (r.asker === asker && r.state === 'waiting') end(r, 'cancelled', { by: 'computer' })
-  const r = { id: crypto.randomBytes(18).toString('base64url'), nonce: crypto.randomBytes(18).toString('base64url'), what, doc: String(doc || '').slice(0, 120), asker, askerName: String(askerName || '').slice(0, 60), targets: can.map((p) => p.id), until: Date.now() + MS, state: 'waiting', strokes: null, by: null, at: Date.now(), waiters: [] }
+  if ([...reqs.values()].filter((x) => x.asker === asker && x.state === 'waiting').length >= MAX_WAITING) throw err('Your phone is being asked already. Cancel that first, or wait for it.', 429, 'busy')
+  if (!asks()) throw err('Your phone was asked too often just now. Wait a minute and try again.', 429, 'too-often')
+  if (reqs.size >= MAX_ALL) { const old = [...reqs.values()].find((x) => x.state !== 'waiting'); if (old) reqs.delete(old.id); else throw err('Too many requests waiting', 429, 'busy') }
+  const r = { id: crypto.randomBytes(18).toString('base64url'), nonce: crypto.randomBytes(18).toString('base64url'), pad: crypto.randomBytes(24).toString('base64url'), code: code(), what, doc: String(doc || '').slice(0, 120), asker, askerName: String(askerName || '').slice(0, 60), targets: can.map((p) => p.id), until: Date.now() + MS, state: 'waiting', strokes: null, by: null, at: Date.now(), waiters: [] }
   r.timer = setTimeout(() => end(r, 'expired'), MS)
   r.timer.unref?.()
   reqs.set(r.id, r)
   helpers.tell(r.targets)
-  await helpers.notify(r, shownTo(r)).catch(() => {})
-  return { id: r.id, until: r.until, to: can.map((p) => ({ id: p.id, name: p.name })) }
+  if (pushes()) await helpers.notify(r, shownTo(r)).catch(() => {})
+  return { id: r.id, pad: r.pad, code: r.code, until: r.until, to: can.map((p) => ({ id: p.id, name: p.name })) }
 }
 
 // For the phone: the ones waiting for it (its live feed), and one by id (a notification tapped).
@@ -83,20 +96,20 @@ export function answer(id, device, { nonce, ink } = {}) {
   end(r, 'answered', { strokes: cleanInk(ink), by: device })
   return { ok: true }
 }
-// Cancelled on the phone, or by the pad that asked.
-export function cancel(id, { device = null, asker = null } = {}) {
+// Cancelled on the phone, or by the pad that asked (its key).
+export function cancel(id, { device = null, asker = null, pad = null } = {}) {
   sweep()
   const r = reqs.get(String(id || ''))
-  if (!r || (device ? !r.targets.includes(device) : r.asker !== asker)) throw err('There\'s no such request to sign', 404, 'gone')
+  if (!r || (device ? !r.targets.includes(device) : r.asker !== asker || !same(r.pad, pad))) throw err('There\'s no such request to sign', 404, 'gone')
   end(r, 'cancelled', { by: device ? 'phone' : 'computer' })
   return { ok: true }
 }
 
-// For the pad that asked: how it stands, waiting up to wait ms for it to change.
-export async function state(id, asker, wait = 0) {
+// For the pad that asked (its key): how it stands, waiting up to wait ms for it to change.
+export async function state(id, asker, pad, wait = 0) {
   sweep()
   const r = reqs.get(String(id || ''))
-  if (!r || r.asker !== asker) throw err('There\'s no such request to sign', 404, 'gone')
+  if (!r || r.asker !== asker || !same(r.pad, pad)) throw err('There\'s no such request to sign', 404, 'gone')
   if (r.state === 'waiting' && wait > 0) await new Promise((resolve) => { const t = setTimeout(resolve, Math.min(wait, 25000)); r.waiters.push(() => { clearTimeout(t); resolve() }) })
   const out = { id: r.id, state: r.state, until: r.until, by: r.by ? helpers.phones().find((p) => p.id === r.by)?.name || null : null, cancelledBy: r.state === 'cancelled' ? r.by : null }
   // The ink goes to the pad once, and is forgotten here.

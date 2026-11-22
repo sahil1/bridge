@@ -47,6 +47,42 @@ const fetch = (u, o = {}) => globalThis.fetch(u, ownServer(u) ? { ...o, headers:
 async function letInWindows() {
   try { await apiToken.letIn(session.defaultSession, { port: SERVER_PORT, token: apiKey() }) } catch (e) { console.warn(`Couldn't give the windows Bridge AI's key: ${e.message}`) }
 }
+// The app's own windows, told apart from any other program with the key (server/windowkey.js): a
+// secret made here, kept in the Keychain (safeStorage: macOS asks any other program before it can
+// read it), handed to the server this app starts on a pipe of its own (never the environment, a
+// file in the open or a link it hands out), and added to its windows' requests to the server's
+// /api outside their pages (X-Bridge-Window), so no page script ever has it. A server found
+// running is given it again (POST /api/window/hello), which takes it only if it's the one the app
+// started a server with before. Studio's signing works only from these windows (and your phone).
+const WINDOW_SECRET = path.join(DATA, 'cache', 'window-secret')
+let windowSecret = null
+function savedWindowSecret() {
+  try { return electron.safeStorage.isEncryptionAvailable() ? electron.safeStorage.decryptString(fs.readFileSync(WINDOW_SECRET)) : null } catch { return null }
+}
+function newWindowSecret() {
+  const s = require('node:crypto').randomBytes(32).toString('base64url')
+  try {
+    if (electron.safeStorage.isEncryptionAvailable()) {
+      fs.mkdirSync(path.dirname(WINDOW_SECRET), { recursive: true })
+      fs.writeFileSync(WINDOW_SECRET, electron.safeStorage.encryptString(s), { mode: 0o600 })
+    }
+  } catch { /* this run only: a server found running later isn't given it again */ }
+  return s
+}
+async function helloWindow() {
+  windowSecret ||= savedWindowSecret()
+  if (!windowSecret) return
+  await fetch(`http://127.0.0.1:${SERVER_PORT}/api/window/hello`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ secret: windowSecret }) }).catch(() => {})
+}
+function windowsSendSecret() {
+  const urls = [...new Set([PORT, SERVER_PORT])].map((p) => `http://127.0.0.1:${p}/api/*`)
+  session.defaultSession.webRequest.onBeforeSendHeaders({ urls }, (d, cb) => {
+    const h = d.requestHeaders
+    delete h['X-Bridge-Window']
+    if (windowSecret && ownServer(d.url)) h['X-Bridge-Window'] = windowSecret
+    cb({ requestHeaders: h })
+  })
+}
 const SHORTCUT = CONFIG.desktop?.shortcut || 'Alt+CommandOrControl+A'
 const IS_MAC = process.platform === 'darwin'
 
@@ -110,9 +146,17 @@ async function startServer() {
     ? [NODE_BIN, [path.join(ROOT, 'server', 'index.js')]]
     : [process.platform === 'win32' ? 'node.exe' : 'node', ['scripts/start.js', ...(DEV ? ['dev'] : [])]]
   if (BUNDLED) env.ELECTRON_RUN_AS_NODE = '1'
+  // The windows' secret (above): a new one for each server this app starts, on the server's fd 3.
+  // From source (npm run desktop:dev) the server runs under npm and node --watch, which don't pass
+  // a pipe on: there it takes the first the app gives (BRIDGE_WINDOW_TOFU), once, and then only that.
+  windowSecret = (!BUNDLED && savedWindowSecret()) || newWindowSecret()
+  delete env.BRIDGE_WINDOW_FD
+  if (BUNDLED) env.BRIDGE_WINDOW_FD = '3'
+  else env.BRIDGE_WINDOW_TOFU = '1'
   // What it prints goes in logs/server.log, for a crash report's last lines.
   const log = crashes.serverLog(DATA)
-  const child = require('node:child_process').spawn(cmd, args, { cwd: ROOT, env, detached: true, stdio: ['ignore', log, log], windowsHide: true })
+  const child = require('node:child_process').spawn(cmd, args, { cwd: ROOT, env, detached: true, stdio: ['ignore', log, log, ...(BUNDLED ? ['pipe'] : [])], windowsHide: true })
+  if (BUNDLED) { try { child.stdio[3].on('error', () => {}); child.stdio[3].end(windowSecret) } catch { /* it reads none, and the windows can't sign */ } }
   if (typeof log === 'number') try { fs.closeSync(log) } catch { /* the server has its own copy */ }
   // Same pid file as `npm start`, so `npm run stop` and "Quit and Stop Agents" both find it.
   if (BUNDLED) try { fs.mkdirSync(path.dirname(PID), { recursive: true }); fs.writeFileSync(PID, String(child.pid)) } catch { /* not fatal */ }
@@ -708,6 +752,8 @@ async function watchFleet() {
       // x-bridge-desktop: this is the app's own feed, which also hears "allow it here" (onFixAsk).
       const res = await fetch(`${URL_BASE}/api/events`, { headers: { Accept: 'text/event-stream', 'x-bridge-desktop': app.getVersion() } })
       reportPerms()
+      // (A server found running, or one that restarted: its windows' secret given again.)
+      helloWindow()
       if (!res.ok || !res.body) throw new Error(String(res.status))
       const dec = new TextDecoder()
       let buf = ''
@@ -1228,6 +1274,7 @@ app.whenReady().then(async () => {
   buildMenu()
   globalShortcut.register(SHORTCUT, toggleWindow)
   await letInWindows()
+  windowsSendSecret()
   createWindow()
   // Remote Screen and Preview's windows: the capture page, the badge, a project's app drawn off screen.
   try { remoteShared = await import(require('node:url').pathToFileURL(path.join(ROOT, 'shared', 'remote.js')).href) } catch (e) { console.error('remote:', e.message) }

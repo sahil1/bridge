@@ -3,21 +3,26 @@
 //   On this computer   a Mac: Touch ID, or its password (LocalAuthentication, through
 //                      native/bridgesign). Windows: Windows Hello where it's set up. Elsewhere, or
 //                      where neither can be asked: your signing PIN.
-//   From your phone    your signing PIN (what a device says it did can't be checked here, a PIN
-//   or another device  can). Only a device the relay proves it's running the request for
-//                      (relayproof.js), never one a request only names, nor through Tailscale.
+//   From your phone    your signing PIN (what a phone says it did can't be checked here, a PIN
+//                      can). Only a phone paired here, kept and let in, that the relay proves it's
+//                      running the request for (relayproof.js); never another computer, a device
+//                      not kept yet, one a request only names, nor Tailscale.
+// Only your own windows (windowkey.js) and those phones ask at all (signing.js), never a program that
+// only has the key.
 // What's asked is asked here, by the server, never taken from the page: the page gets a grant, a
 // random token for that one document, for 2 minutes, used once, by the device that asked; signing
 // (signing.js) refuses without it while this is on. The setting and the PIN's hash are in the
-// sealed list beside the signatures (signstore.js), not in config.json, so turning it off or
-// changing the PIN is asked for the same way first. A PIN wrong 5 times locks it for 5 minutes,
-// longer each time after.
+// sealed list beside the signatures (signstore.js), not in config.json, with a mark beside it that
+// keeps signing closed if the list can't be read; turning it off or setting a PIN is asked for the
+// same way first. The way this computer asked when it was turned on is kept with it and never
+// lowered. PIN tries go one at a time, each counted before it's checked, slower after each wrong
+// one; 5 wrong lock it for 5 minutes, longer each time after.
 import crypto from 'node:crypto'
 import { execFile } from 'node:child_process'
 import path from 'node:path'
 import { IS_WIN } from './paths.js'
 import * as store from './signstore.js'
-import { signBin, probe, deviceAuth } from './signhelper.js'
+import { signBin, probe, deviceAuth, limiter } from './signhelper.js'
 import { placeEn } from '../shared/places.js'
 
 const GRANT_MS = 2 * 60_000
@@ -51,21 +56,40 @@ const helloAvailable = () => {
 }
 
 // ---------- Who's asking, and how they're asked ----------
-// here: this computer itself (no relay, not another computer's page, not Tailscale). Another device
-// by its relay id (and the device a computer said it asks for).
-export const who = ({ here, device, forId }) => (here ? 'here' : device ? `d:${device}${forId ? `/${forId}` : ''}` : 'other')
-// The way this one is asked: 'device' (Touch ID or the password), 'hello', or 'pin'.
-export async function wayFor(here) {
-  if (here && (await probe()).auth) return 'device'
-  if (here && await helloAvailable()) return 'hello'
+// here: one of the app's own windows on this computer (windowkey.js), never a program that only has
+// the key. Else a phone of yours, paired here, kept and let in, the relay proving it (signing.js
+// decides who may ask at all). who: whose a grant is.
+export const who = ({ here, device }) => (here ? 'here' : device ? `d:${device}` : 'other')
+// How this computer can ask now: 'device' (Touch ID or the Mac's password), 'hello', or 'pin';
+// null when the helper didn't answer (asked again next time).
+async function wayHere() {
+  const p = await probe()
+  if (p.failed) return null
+  if (p.auth) return 'device'
+  if (await helloAvailable()) return 'hello'
   return 'pin'
+}
+// The way this one is asked. Here: the way this computer had when Ask Before Signing was turned on,
+// kept with it (a.way), and never less: with Touch ID or the password kept, a PIN is never taken
+// here, and the helper not answering is "try again", not "there's nothing to ask with". A phone:
+// the PIN.
+async function wayFor(here, a) {
+  if (!here) return 'pin'
+  const now = await wayHere()
+  if (!now) throw err('Touch ID couldn\'t be asked just now. Try again.', 503, 'try-again')
+  if (a?.way === 'device' && now !== 'device') throw err('This Mac can\'t ask for Touch ID or its password just now (it was set to). Try again.', 503, 'try-again')
+  if (a?.way === 'hello' && now === 'pin') return 'hello' // (Windows Hello asked, and a PIN where it can't be just then: ask())
+  return now
 }
 // For Settings and the pad: whether it's on, whether there's a PIN, how this one would be asked,
 // and what this computer can ask at all.
 export async function status(here) {
-  const a = await store.askOf()
+  const a = await store.askOf().catch(() => null)
   const p = await probe()
-  return { on: !!a.on, pin: !!a.pin, way: await wayFor(here), touchID: p.touchID, deviceAuth: p.auth, hello: await helloAvailable(), locked: a.lockUntil > Date.now() ? a.lockUntil : null }
+  const on = !!a?.on || store.askMarked()
+  let way = null
+  try { way = await wayFor(here, a) } catch { way = null }
+  return { on, pin: !!a?.pin, way, recorded: a?.way || null, touchID: p.touchID, deviceAuth: p.auth, hello: await helloAvailable(), locked: a?.lockUntil > Date.now() ? a.lockUntil : null, closed: !a }
 }
 
 // ---------- The PIN ----------
@@ -76,86 +100,129 @@ async function hashPin(pin) {
   const salt = crypto.randomBytes(16).toString('base64')
   return { salt, hash: (await scrypt(pin, salt)).toString('base64') }
 }
+const when = (t) => new Date(t).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+// Checked one at a time, in the list's own turn: the try counted (and kept) before it's checked, so
+// tries at once are tries one after another. A wrong one waits a little longer each time before
+// the next (1, 2, 4, 8 s), and 5 wrong lock it for 5 minutes, twice as long each time after.
 async function checkPin(pin) {
-  const a = await store.askOf()
-  if (!a.pin) throw err(`There's no signing PIN yet. Set one in ${placeEn('ask-before-signing')}, on the computer.`, 409, 'no-pin')
-  if (a.lockUntil > Date.now()) throw err(`The signing PIN was wrong ${TRIES} times, so it's locked until ${new Date(a.lockUntil).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}.`, 429, 'pin-locked', { until: a.lockUntil })
-  const good = okPin(pin) && crypto.timingSafeEqual(await scrypt(pin, a.pin.salt), Buffer.from(a.pin.hash, 'base64'))
-  if (good) { if (a.fails) await store.setAsk(() => ({ fails: 0 })); return true }
-  const next = await store.setAsk((x) => {
-    const fails = (x.fails || 0) + 1
-    if (fails < TRIES) return { fails }
-    const locks = (x.locks || 0) + 1
-    return { fails: 0, locks, lockUntil: Date.now() + 5 * 60_000 * 2 ** Math.min(6, locks - 1) }
+  return store.withAsk(async (a, save) => {
+    if (!a.pin) throw err(`There's no signing PIN yet. Set one in ${placeEn('ask-before-signing')}, on the computer.`, 409, 'no-pin')
+    const now = Date.now()
+    if (a.lockUntil > now) throw err(`The signing PIN was wrong ${TRIES} times, so it's locked until ${when(a.lockUntil)}.`, 429, 'pin-locked', { until: a.lockUntil })
+    if (a.nextTry > now) throw err('Wait a moment before trying the PIN again.', 429, 'pin-wait', { until: a.nextTry })
+    const fails = (a.fails || 0) + 1
+    const lock = fails >= TRIES
+    const locks = (a.locks || 0) + (lock ? 1 : 0)
+    // (Counted as wrong first; put right below when it isn't.)
+    await save({ fails: lock ? 0 : fails, locks, lockUntil: lock ? now + 5 * 60_000 * 2 ** Math.min(6, locks - 1) : a.lockUntil, nextTry: now + 1000 * 2 ** Math.min(4, fails - 1) })
+    const good = okPin(pin) && crypto.timingSafeEqual(await scrypt(pin, a.pin.salt), Buffer.from(a.pin.hash, 'base64'))
+    if (good) { await save({ fails: 0, nextTry: 0, lockUntil: 0 }); return true }
+    if (lock) throw err(`That PIN isn't right, and it was wrong ${TRIES} times, so it's locked until ${when(a.lockUntil)}.`, 429, 'pin-locked', { until: a.lockUntil })
+    throw err(`That PIN isn't right (${TRIES - fails} ${TRIES - fails === 1 ? 'try' : 'tries'} left).`, 401, 'pin-wrong', { left: TRIES - fails })
   })
-  if (next.lockUntil > Date.now()) throw err(`That PIN isn't right, and it was wrong ${TRIES} times, so it's locked until ${new Date(next.lockUntil).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}.`, 429, 'pin-locked', { until: next.lockUntil })
-  throw err(`That PIN isn't right (${TRIES - next.fails} ${TRIES - next.fails === 1 ? 'try' : 'tries'} left).`, 401, 'pin-wrong', { left: TRIES - next.fails })
 }
 
 // ---------- Grants ----------
 const grants = new Map() // token -> { purpose, doc, who, how, until }
+const MAX_GRANTS = 50
 const sweep = () => { for (const [k, g] of grants) if (g.until < Date.now()) grants.delete(k) }
-// Asked as this one is asked (pin: what they typed, when that's the way, or they chose it), then a
-// grant for purpose ('sign' and the document, or 'settings'). how says which it was, for the record.
-export async function ask({ here, device, forId, purpose = 'sign', doc = null, reason = 'sign a document', pin = null }) {
-  if (!['sign', 'settings'].includes(purpose)) throw err('Not something to ask for', 400)
-  const a = await store.askOf()
-  if (purpose === 'sign' && !a.on) return { needed: false }
-  const way = await wayFor(here)
-  // The PIN only where it's the way: on a Mac with Touch ID or its password, those are asked here,
-  // never a PIN in their place (a program on this computer could guess one). Windows Hello, or the
-  // PIN when Hello can't be used just then.
+// Touch ID (or Windows Hello) asked at most so often: a prompt is the person's, not a program's to repeat.
+const prompts = limiter(8, 60_000)
+// What a grant is for: 'sign' (one document), 'settings' (Ask Before Signing itself, the PIN),
+// 'change' (your saved signatures, while it's on) and 'export' (them, into a backup or a move).
+const PURPOSES = ['sign', 'settings', 'change', 'export']
+// Whether it's on: as the sealed list says, or (it can't be read) as the mark beside it says, or the
+// list was set aside (it may have been): closed until you confirm.
+export async function needed() {
+  const a = await store.askOf().catch(() => null)
+  if (a?.on || store.askMarked()) return true
+  if (!a) return true
+  return !!(await store.setAsideNote().catch(() => null))
+}
+// Asked as this one is asked (pin: what they typed, where that's the way), then a grant for
+// purpose. how says which it was, for the record. reason: what Touch ID says it's for, written by
+// signing.js from the document itself. Export asks even with Ask Before Signing off.
+export async function ask({ here, device, purpose = 'sign', doc = null, reason = 'sign a document', pin = null }) {
+  if (!PURPOSES.includes(purpose)) throw err('Not something to ask for', 400)
+  const a = await store.askOf().catch(() => null)
+  const on = await needed()
+  if ((purpose === 'sign' || purpose === 'change') && !on) return { needed: false }
+  const way = await wayFor(here, a)
+  // The PIN only where it's the way: with Touch ID or the Mac's password, they are asked, never a
+  // PIN in their place. Windows Hello, or the PIN when Hello can't be used just then.
   if (pin != null && way === 'device') throw err('This Mac asks for Touch ID or its password, not the PIN.', 400, 'use-device')
   let how
   if (way === 'pin' || pin != null) {
-    if (pin == null) throw err(a.pin ? 'Type your signing PIN' : `There's no signing PIN yet. Set one in ${placeEn('ask-before-signing')}, on the computer.`, a.pin ? 428 : 409, a.pin ? 'pin' : 'no-pin')
-    await checkPin(pin)
-    how = 'pin'
-  } else if (way === 'device') {
-    const r = await deviceAuth(reason)
-    if (!r.ok) throw err(r.code === 'cancel' ? 'Not signed: Touch ID or the password was cancelled' : `Not signed: ${r.error}`, 401, r.code === 'cancel' ? 'cancelled' : 'refused')
-    how = r.how
+    // Exporting where only a PIN could be asked and there's none: your own window is enough.
+    if (pin == null && purpose === 'export' && here && !a?.pin) how = 'window'
+    else {
+      if (pin == null) throw err(a?.pin ? 'Type your signing PIN' : `There's no signing PIN yet. Set one in ${placeEn('ask-before-signing')}, on the computer.`, a?.pin ? 428 : 409, a?.pin ? 'pin' : 'no-pin')
+      await checkPin(pin)
+      how = 'pin'
+    }
   } else {
-    const said = await hello(reason)
-    if (said !== 'result Verified') throw err(/Canceled/.test(said) ? 'Not signed: Windows Hello was cancelled' : `Not signed: Windows Hello said ${said.replace(/^result /, '') || 'nothing'}`, 401, /Canceled/.test(said) ? 'cancelled' : 'refused')
-    how = 'hello'
+    if (!prompts()) throw err('Asked too often just now. Wait a minute and try again.', 429, 'too-often')
+    if (way === 'device') {
+      const r = await deviceAuth(reason)
+      if (!r.ok) throw err(r.code === 'cancel' ? 'Not done: Touch ID or the password was cancelled' : `Not done: ${r.error}`, 401, r.code === 'cancel' ? 'cancelled' : 'refused')
+      how = r.how
+    } else {
+      const said = await hello(reason)
+      if (said !== 'result Verified') throw err(/Canceled/.test(said) ? 'Not done: Windows Hello was cancelled' : `Not done: Windows Hello said ${said.replace(/^result /, '') || 'nothing'}`, 401, /Canceled/.test(said) ? 'cancelled' : 'refused')
+      how = 'hello'
+    }
   }
   sweep()
+  if (grants.size >= MAX_GRANTS) grants.delete(grants.keys().next().value)
   const token = crypto.randomBytes(32).toString('base64url')
-  grants.set(token, { purpose, doc, who: who({ here, device, forId }), how, until: Date.now() + GRANT_MS })
+  grants.set(token, { purpose, doc, who: who({ here, device }), how, until: Date.now() + GRANT_MS })
   return { needed: true, grant: token, how, until: Date.now() + GRANT_MS }
 }
-// The grant a signing (or a change to the setting) came with: for that, by that one, in time; used
-// up either way. null when it isn't.
-export function use(token, { purpose, doc = null, here, device, forId }) {
+// The grant a signing (or a change) came with: for that, by that one, in time; used up either way.
+// null when it isn't.
+export function use(token, { purpose, doc = null, here, device }) {
   sweep()
   const g = typeof token === 'string' ? grants.get(token) : null
   if (!g) return null
   grants.delete(token)
-  if (g.purpose !== purpose || g.who !== who({ here, device, forId }) || g.until < Date.now()) return null
+  if (g.purpose !== purpose || g.who !== who({ here, device }) || g.until < Date.now()) return null
   if (purpose === 'sign' && (g.doc?.root !== doc?.root || g.doc?.path !== doc?.path)) return null
   return g
 }
-// Whether signing needs one now.
-export const needed = async () => !!(await store.askOf()).on
 
 // ---------- The setting ----------
-// Turned on: from anywhere you are (it only asks more). With no way to ask on this computer but the
-// PIN, a PIN to turn it on with. Off, a new PIN, or none: once it's on, only with a grant for
-// 'settings', asked first as signing would be.
-export async function set({ on, pin, removePin = false, grant, here, device, forId }) {
-  const a = await store.askOf()
-  const asked = a.on ? use(grant, { purpose: 'settings', here, device, forId }) : null
-  if (a.on && !asked) throw err('Confirm it\'s you first: Ask Before Signing is on, so changing it is asked for too.', 403, 'ask')
+// Turned on: from your window or phone (it only asks more), with the way this computer asks then
+// kept (and a PIN to turn it on with where that's the only way). Off, or a PIN set, changed or taken
+// away: asked first, whether it's on or not (a PIN planted while it's off would be one more way in
+// later): with Touch ID or the password where the computer has them (in your window there), else
+// the current PIN, or, with none yet, your own window.
+export async function set({ on, pin, removePin = false, grant, here, device }) {
+  const a = await store.askOf().catch(() => null)
+  if (!a) throw err('Your signatures can\'t be opened just now, so neither can this. Try again once they open.', 503, 'closed')
+  const touchesPin = pin != null || removePin
+  const asks = (await needed()) || touchesPin
+  const wayNow = here ? await wayHere() : 'pin'
+  if (here && !wayNow) throw err('Touch ID couldn\'t be asked just now. Try again.', 503, 'try-again')
+  // Setting a PIN where the computer has Touch ID or its password: only at the computer, with them.
+  if (touchesPin && !here && (a.way === 'device' || a.way === 'hello')) throw err('Set or change the signing PIN on the computer, where Touch ID or its password is asked.', 403, 'here')
+  const asked = grant ? use(grant, { purpose: 'settings', here, device }) : null
+  const firstPinHere = here && wayNow === 'pin' && !a.pin && pin != null && removePin === false && !a.on
+  if (asks && !asked && !firstPinHere) throw err('Confirm it\'s you first: changing this is asked for too.', 403, 'ask')
+  if (asked && asked.how === 'pin' && here && (wayNow === 'device' || wayNow === 'hello')) throw err('This computer asks for Touch ID or its password for this, not the PIN.', 403, 'ask')
   const change = {}
   if (pin != null) change.pin = await hashPin(pin)
   if (removePin) change.pin = null
-  if (typeof on === 'boolean') change.on = on
+  if (typeof on === 'boolean') {
+    change.on = on
+    if (on) change.way = here ? wayNow : a.way || 'pin'
+  }
   const pinAfter = 'pin' in change ? change.pin : a.pin
   const onAfter = 'on' in change ? change.on : a.on
-  if (onAfter && !pinAfter && (await wayFor(true)) === 'pin') throw err('This computer can only ask for a signing PIN: set one to turn this on.', 400, 'need-pin')
-  if ('pin' in change) Object.assign(change, { fails: 0, lockUntil: 0, locks: 0 })
+  const wayAfter = change.way || a.way
+  if (onAfter && !pinAfter && wayAfter === 'pin') throw err('This computer can only ask for a signing PIN: set one to turn this on.', 400, 'need-pin')
+  if ('pin' in change) Object.assign(change, { fails: 0, lockUntil: 0, locks: 0, nextTry: 0 })
   await store.setAsk(() => change)
+  if (asked) await store.clearSetAside().catch(() => {})
   return status(here)
 }
 export const helperHere = () => !!signBin()

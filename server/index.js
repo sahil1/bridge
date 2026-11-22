@@ -96,6 +96,8 @@ import * as perf from './perf.js'
 import * as studio from './studio.js'
 import * as signing from './signing.js'
 import * as signPhone from './signphone.js'
+import * as signStore from './signstore.js'
+import * as windowkey from './windowkey.js'
 import { provenDevice } from './relayproof.js'
 import * as doctext from './doctext.js'
 import * as studioFound from './studiofound.js'
@@ -288,7 +290,10 @@ const jsonBoard = express.json({ limit: '45mb' })
 // the 1 MB here, which had turned a phone's photo away already.
 const jsonStudio = express.json({ limit: '30mb' })
 const jsonDeckAi = express.json({ limit: '40mb' })
+// Studio's signatures: a drawing (1.5 MB at most, as base64) and no more (signstore.js).
+const jsonSig = express.json({ limit: '2200kb' })
 const jsonFor = (req) => (req.method === 'PUT' && /^\/api\/agents\/[^/]+\/file$/.test(req.path) ? jsonFile
+  : /^\/api\/studio\/signatures?(\/|$)/.test(req.path) ? jsonSig
   // An outside app's new file or suggestion, through MCP (mcptools.js takes up to 2 MB of text).
   : /^\/(mcp|api\/mcp-server\/call)$/.test(req.path) ? jsonFile
   : /^\/api\/boards(\/|$)/.test(req.path) ? jsonBoard
@@ -748,19 +753,26 @@ signing.setHelpers({
   describe: (id) => chatModels.describe(id), via: async (id) => (await chatModels.models().catch(() => [])).find((m) => m.id === id)?.via || null,
   contextOf: (id) => chatModels.contextOf(id), scanText: doctext.ocrBin() ? (file) => doctext.textOf(file, 200_000) : null,
 })
-// Who's signing, for Ask Before Signing's grant and the record: this computer itself, or a device
-// the relay proves it ran the request for (relayproof.js: not just a header a program here could
-// send), and the one a computer of yours says it asks for; a picture of a signature only to your
-// own windows (a page's cookie, or a device through the relay), never to a program holding the key
-// alone. said: a device was named, proven or not.
-function signDevice(req) {
+// Who may sign (signing.js): one of the app's own windows on this computer (windowkey.js: a secret
+// the app gives its server and adds to its windows' requests, which a program that only has the key
+// can't make), or one of your phones: paired here, kept, let in (Which Devices May Connect), the
+// relay proving it ran the request for it (relayproof.js). Never another computer, a device not kept
+// yet, Tailscale, a browser tab or a program with the key alone.
+windowkey.fromStart()
+const signWindow = (req) => windowkey.fromWindow(req, atThisComputer(req))
+function signPhoneOf(req) {
   const id = provenDevice(req)
-  return { device: id, said: !!req.headers['x-bridge-relay'], forId: id && relay.isMachine(id) && req.headers['x-bridge-for-id'] ? String(req.headers['x-bridge-for-id']).slice(0, 80) : null }
+  const d = id ? relay.deviceOf(id) : null
+  return d && d.kind !== 'computer' && !d.fresh && remote.admits(id) ? id : null
 }
-signing.routes(app, {
-  wrap, rootOf, sq, here: (req) => atThisComputer(req), device: signDevice, nameOf: (req) => whoAsks(req),
-  page: (req) => auth.byCookie(req) || !!provenDevice(req), record: (x) => studio.noteSigned(x),
+signing.routes(app, { wrap, rootOf, sq, window: signWindow, phone: signPhoneOf, nameOf: (req) => whoAsks(req), record: (x) => studio.noteSigned(x) })
+// The app giving its window secret again (a server it found running, or this one restarted): only
+// at this computer, and only the one the app started a server with (windowkey.js).
+app.post('/api/window/hello', async (req, res) => {
+  try { if (!atThisComputer(req)) throw Object.assign(new Error('Only the app on this computer'), { status: 403 }); res.json(await windowkey.hello(String(req.body?.secret || ''))) } catch (e) { res.status(e.status || 502).json({ error: e.message, ...(e.code ? { code: e.code } : {}) }) }
 })
+// A signature kept open before 3.22, sealed at start (signstore.js), not only once Studio's signing opens.
+setTimeout(() => { signStore.atStart().catch((e) => console.error(`signing: an old signature couldn't be sealed yet: ${e.message}`)) }, 3000).unref()
 // Sign on Phone (signphone.js): your phones paired here, kept and let in, told on their own feed
 // (event: sign) and by a notification to them alone, which opens the pad there (?sign=<id>).
 signPhone.setHelpers({
@@ -5525,6 +5537,9 @@ backup.routes(app, {
   kept: (req) => !req.headers['x-bridge-relay'] || relay.isKept(req.headers['x-bridge-relay']), deviceOf: (req) => relay.deviceOf(req.headers['x-bridge-relay'])?.name || null,
   machineOf: (req) => (viaMachine(req) ? machines.ofDevice(relay.deviceOf(req.headers['x-bridge-relay'])) : null),
   notify: (o) => notify.send(o).catch(() => {}),
+  // Your signatures into a backup or a move: from your window or a phone, with a grant for it (signing.js).
+  signaturesOk: (req) => signing.exportAllowed(req, req.body?.grant, { window: signWindow, phone: signPhoneOf }),
+  signaturesIn: (req) => signing.importAllowed(req, req.body?.grant, { window: signWindow, phone: signPhoneOf }),
 })
 // The files a bot's runs made and sent back, newest first (its Activity lists them, with Open and
 // Send to…).

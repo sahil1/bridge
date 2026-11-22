@@ -16,12 +16,15 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { DATA, IS_MAC, IS_WIN, writeFileAtomic } from './paths.js'
-import { signBin } from './signhelper.js'
+import { signBin, runHelper } from './signhelper.js'
 
 export const DIR = path.join(DATA, 'studio', 'signatures')
 const STORE = path.join(DIR, 'store.bin')
 const KEYFILE = path.join(DIR, 'key')
 const DPAPI = path.join(DIR, 'key.dpapi')
+// Ask Before Signing was turned on: said outside the sealed list too, so a list that can't be
+// opened (changed, or its key gone) leaves signing closed until you confirm, not open.
+const ASK_MARK = path.join(DIR, 'ask-before-signing')
 export const KINDS = ['signature', 'initials']
 export const MAX_PNG = 1.5 * 1024 * 1024
 const MAX_EACH = 20 // of each kind
@@ -35,10 +38,12 @@ export const sealedWith = () => where
 const run = (bin, args, o = {}) => new Promise((resolve, reject) => {
   execFile(bin, args, { timeout: 30000, maxBuffer: 1024 * 1024, windowsHide: true, ...o }, (e, out, errOut) => (e ? reject(Object.assign(e, { out: String(out || ''), errOut: String(errOut || '') })) : resolve(String(out || ''))))
 })
-const lastJson = (out) => { try { return JSON.parse(String(out).trim().split('\n').pop()) } catch { return null } }
 
-async function keychainKey(bin) {
-  const out = lastJson(await run(bin, ['key']).catch((e) => e.out))
+// null when the helper won't give it to this server (a build of the app signed ad hoc: it answers
+// only Bridge AI signed with its own certificate), which then keeps a key file, as elsewhere.
+async function keychainKey() {
+  const out = await runHelper(['key'], null, 30000)
+  if (out?.error === 'parent') return null
   const k = out?.key ? Buffer.from(out.key, 'base64') : null
   if (k?.length === 32) return k
   throw err(`This Mac's Keychain didn't give the key your signatures are kept with${out?.error ? `: ${out.error}` : ''}. Unlock the Keychain (it opens with your Mac's password) and try again.`, 503, 'keychain')
@@ -46,6 +51,7 @@ async function keychainKey(bin) {
 // Windows: a key sealed to your account by DPAPI (as Electron's safeStorage does there).
 const PS = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
 async function dpapi(how, b64) {
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(String(b64)) || !['Protect', 'Unprotect'].includes(how)) throw err('Not a key', 500)
   const script = `Add-Type -AssemblyName System.Security; $b = [Convert]::FromBase64String('${b64}'); [Convert]::ToBase64String([Security.Cryptography.ProtectedData]::${how}($b, $null, 'CurrentUser'))`
   const out = await run(PS, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')])
   return Buffer.from(out.trim(), 'base64')
@@ -86,9 +92,10 @@ async function rekey(old, k) {
 async function loadKey() {
   await fsp.mkdir(DIR, { recursive: true, mode: 0o700 })
   await fsp.chmod(DIR, 0o700).catch(() => {})
-  const bin = IS_MAC || process.env.BRIDGE_SIGNHELPER ? signBin() : null
+  const bin = signBin()
   let k = null
-  if (bin) { k = await keychainKey(bin); where = 'keychain' } else if (IS_WIN && !process.env.BRIDGE_FIX_DRYRUN) {
+  if (bin) { k = await keychainKey(); if (k) where = 'keychain' }
+  if (!k && !bin && IS_WIN && !process.env.BRIDGE_FIX_DRYRUN) {
     try { k = await dpapiKey(); where = 'dpapi' } catch (e) { if (fs.existsSync(DPAPI)) throw e }
   }
   if (k) {
@@ -165,20 +172,23 @@ async function writeStore(s) {
   cache = s
 }
 
-// Before 3.22, the two were PNGs in this folder, in the open: sealed the first time they're read,
-// and the open ones overwritten and taken away.
+// Before 3.22, the two were PNGs in this folder, in the open: sealed the first time they're read (and
+// at start: atStart), and the open ones overwritten and taken away, with or without their index.json
+// (one half written or gone too).
 async function migrate(s) {
   const idx = path.join(DIR, 'index.json')
-  let old
-  try { old = JSON.parse(await fsp.readFile(idx, 'utf8')) } catch { return }
-  for (const kind of KINDS) {
+  const plain = KINDS.filter((k) => fs.existsSync(path.join(DIR, `${k}.png`)))
+  if (!plain.length && !fs.existsSync(idx)) return
+  let old = null
+  try { old = JSON.parse(await fsp.readFile(idx, 'utf8')) } catch { /* none, or not readable: the files are enough */ }
+  for (const kind of plain) {
     const f = path.join(DIR, `${kind}.png`)
     let buf
     try { buf = await fsp.readFile(f) } catch { continue }
     if (!isPng(buf)) continue
     const id = newId()
     await fsp.writeFile(fileOf(id), await seal(id, buf), { mode: 0o600 })
-    s.list.push({ id, kind, name: kind === 'initials' ? 'Initials' : 'Signature', at: old?.[kind]?.at || new Date().toISOString(), width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) })
+    s.list.push({ id, kind, name: kind === 'initials' ? 'Initials' : 'Signature', at: typeof old?.[kind]?.at === 'string' ? old[kind].at.slice(0, 40) : new Date().toISOString(), width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) })
     s.defaults[kind] ||= id
   }
   await writeStore(s)
@@ -282,15 +292,61 @@ export async function importAll(items) {
 }
 // ---------- Ask Before Signing (signauth.js) ----------
 // Kept in the same sealed list, not in config.json: nothing that can only write files or call the
-// settings API can turn it off or change its PIN; only signauth.js does, after asking.
-// { on, pin: { salt, hash } | null, fails, lockUntil, locks }
-export const askOf = () => one(async () => ({ on: false, pin: null, fails: 0, lockUntil: 0, locks: 0, ...((await readStore()).ask || {}) }))
+// settings API can turn it off or change its PIN; only signauth.js does, after asking. The mark
+// outside it (ASK_MARK) only ever closes: a list that can't be opened, with the mark there, asks.
+// { on, way: how this computer was asked when it was turned on ('device' | 'hello' | 'pin'),
+//   pin: { salt, hash } | null, fails, lockUntil, locks, nextTry }
+const ASK0 = { on: false, way: null, pin: null, fails: 0, lockUntil: 0, locks: 0, nextTry: 0 }
+export const askOf = () => one(async () => ({ ...ASK0, ...((await readStore()).ask || {}) }))
 export const setAsk = (fn) => one(async () => {
   const s = await readStore()
-  s.ask = { on: false, pin: null, fails: 0, lockUntil: 0, locks: 0, ...(s.ask || {}), ...fn({ on: false, pin: null, fails: 0, lockUntil: 0, locks: 0, ...(s.ask || {}) }) }
+  s.ask = { ...ASK0, ...(s.ask || {}), ...fn({ ...ASK0, ...(s.ask || {}) }) }
   await writeStore(s)
+  if (s.ask.on) writeFileAtomic(ASK_MARK, 'on\n', { mode: 0o600 })
+  else if (!s.setAside) await fsp.rm(ASK_MARK, { force: true })
   return s.ask
 })
+// The mark: whether signing was set to ask, whatever the list says (a list set aside counts as
+// "it may have been").
+export const askMarked = () => fs.existsSync(ASK_MARK)
+// Run fn(ask) in the list's own turn (one PIN check at a time, its try counted before it's checked).
+export const withAsk = (fn) => one(async () => {
+  const s = await readStore()
+  const a = { ...ASK0, ...(s.ask || {}) }
+  const save = async (change) => { s.ask = { ...a, ...change }; await writeStore(s); Object.assign(a, change) }
+  return fn(a, save)
+})
+
+// ---------- The app's window secret (windowkey.js) ----------
+// Its hash, sealed here, so only the one the app started the server with is taken again.
+// Once you've confirmed (signauth.js set): a list set aside isn't a reason to keep signing closed.
+export const clearSetAside = () => one(async () => {
+  const s = await readStore()
+  if (!s.setAside) return
+  delete s.setAside
+  await writeStore(s)
+  if (!s.ask?.on) await fsp.rm(ASK_MARK, { force: true })
+})
+export const setWindowHash = (h) => one(async () => { const s = await readStore(); if (s.window?.hash === h) return; s.window = { hash: String(h), at: new Date().toISOString() }; await writeStore(s) })
+export const windowHash = () => one(async () => (await readStore()).window?.hash || null)
+
+// ---------- The record of a signing (studio.js) ----------
+// Each one's MAC, with a key of its own made from the list's (HKDF), so a record changed in the
+// versions' index.json shows as changed.
+async function recordKey() { return Buffer.from(crypto.hkdfSync('sha256', await key(), Buffer.alloc(0), Buffer.from('bridge-ai signing record'), 32)) }
+const canon = (o) => JSON.stringify(Object.keys(o).sort().reduce((a, k) => { a[k] = o[k]; return a }, {}))
+export async function macOf(rec) { const { mac: _m, id: _i, verified: _v, ...rest } = rec; return crypto.createHmac('sha256', await recordKey()).update(canon(rest)).digest('base64url') }
+export async function macOk(rec) {
+  if (typeof rec?.mac !== 'string') return false
+  const want = Buffer.from(await macOf(rec)), got = Buffer.from(rec.mac)
+  return want.length === got.length && crypto.timingSafeEqual(want, got)
+}
+
+// At start: one kept open before 3.22 sealed now, not only when Studio's signing first opens.
+export async function atStart() {
+  if (!KINDS.some((k) => fs.existsSync(path.join(DIR, `${k}.png`))) && !fs.existsSync(path.join(DIR, 'index.json'))) return
+  await list()
+}
 
 // For the tests and a reset: the key forgotten in memory (read again next time).
 export const forgetKey = () => { keyP = null; cache = null }

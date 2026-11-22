@@ -4,6 +4,7 @@ import { api, apiUrl } from '../../api.js'
 import { download } from '../../download.js'
 import { t } from '../../i18n/index.js'
 import { where } from './search.js'
+import { grantFor } from '../studio/pdf/grant.jsx'
 import { Advanced, More } from './Advanced.jsx'
 import './backup.css'
 
@@ -167,7 +168,9 @@ export default function BackUp() {
 
   const backUp = () => run('file', async () => {
     if (pass.a !== pass.b) throw new Error(t('The two passphrases aren\'t the same'))
-    const r = await fetch(apiUrl('/backup/file'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ passphrase: pass.a, signatures: sigs }) })
+    // (Your signatures go only once it's asked that it's you: Touch ID, or your PIN.)
+    const grant = sigs ? await grantFor('export') : null
+    const r = await fetch(apiUrl('/backup/file'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ passphrase: pass.a, signatures: sigs, grant }) })
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`)
     const name = /filename="([^"]+)"/.exec(r.headers.get('content-disposition') || '')?.[1] || 'Bridge-AI.bridge-backup'
     download(await r.arrayBuffer(), name, 'application/json')
@@ -183,14 +186,18 @@ export default function BackUp() {
   })
   const seeMove = (m) => run(`see-${m.id}`, async () => { const r = await api(`/backup/pending/${m.id}`); setApplied(null); setOpened({ ...r, from: r.from }) })
   const apply = (parts) => run('apply', async () => {
-    const r = await api('/backup/apply', { method: 'POST', body: { id: opened.id, parts } })
+    // (Your signatures added here are a change to them: asked first while Ask Before Signing is on.
+    // Not asked, or not from here: the rest is restored, and it says why they weren't.)
+    const sigs = opened.plan?.signatures?.length && (opened.kind === 'file' ? parts.signatures === true : parts.signatures !== false)
+    const grant = sigs ? await grantFor('change').catch(() => null) : null
+    const r = await api('/backup/apply', { method: 'POST', body: { id: opened.id, parts, grant } })
     setApplied({ ...r, from: opened.from })
     setOpened(null)
   })
   const cancel = () => run('cancel', async () => { if (opened.kind === 'move') await api('/backup/discard', { method: 'POST', body: { id: opened.id } }); setOpened(null) })
   const start = (ids) => run('start', async () => { await api('/backup/start', { method: 'POST', body: ids ? { connections: ids } : {} }); setApplied(null) })
   const again = () => run('handoff', async () => { const r = await api('/backup/handoff', { method: 'POST', body: {} }); setApplied((a) => (a ? { ...a, ...r } : a)) })
-  const move = () => run('move', () => api('/backup/move', { method: 'POST', body: { to, signatures: sigs } }))
+  const move = () => run('move', async () => api('/backup/move', { method: 'POST', body: { to, signatures: sigs, grant: sigs ? await grantFor('export') : null } }))
   const withSigs = <label className="st-check bk-sigs" data-setting="backup-signatures"><input type="checkbox" checked={sigs} onChange={(e) => setSigs(e.target.checked)} /> <span><b>{t('With your signatures')}</b> <span className="muted small">{t('Your saved signatures and initials too ({place}). Off, they stay only here.', { place: where('signatures') })}</span></span></label>
   const undo = (id) => run(`undo-${id}`, () => api(`/backup/moves/${id}/undo`, { method: 'POST', body: {} }))
   const linked = s.linked || []

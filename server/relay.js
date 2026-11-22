@@ -822,7 +822,7 @@ class Conn {
         let res
         if (this.view) res = await shares.answer(this.view, { m, u, h: Array.isArray(h) ? h.filter((x) => Array.isArray(x) && x.length === 2) : [], body: s.body ? Buffer.concat(s.body) : null, content: c === 1 })
         else {
-          const headers = Object.fromEntries((h || []).filter(([k]) => !DROP.has(k.toLowerCase()) && !/^(sec-|x-bridge-relay$|x-bridge-relay-proof$|authorization$)/i.test(k) && (computer || !FOR.test(k))))
+          const headers = Object.fromEntries((h || []).filter(([k]) => !DROP.has(k.toLowerCase()) && !/^(sec-|x-bridge-relay$|x-bridge-relay-proof$|x-bridge-window$|authorization$)/i.test(k) && (computer || !FOR.test(k))))
           headers['x-bridge-relay'] = this.device.id
           // (And that it's the relay saying so: relayproof.js.)
           headers[PROOF] = proofOf(this.device.id)

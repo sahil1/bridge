@@ -10,12 +10,13 @@
 // the copy (pdf-lib) and asks the model.
 import fsp from 'node:fs/promises'
 import path from 'node:path'
+import crypto from 'node:crypto'
 import { PDFDocument, StandardFonts, PDFSignature, PDFTextField, PDFName, PDFRef, degrees, rgb } from 'pdf-lib'
 import { safePath } from './files.js'
 import * as store from './signstore.js'
 import * as auth from './signauth.js'
 import * as phone from './signphone.js'
-import { probe, trackpad } from './signhelper.js'
+import { probe, trackpad, limiter } from './signhelper.js'
 import { shownSize, fitImage, dateSize, dateSpot, toUser, KINDS } from '../shared/signmarks.js'
 import { placeEn } from '../shared/places.js'
 
@@ -263,62 +264,91 @@ export async function explain(root, rel, { pages: given, total, model, lang } = 
 }
 
 // ---------- Routes ----------
-// Under Studio's own (/api/studio). From index.js: here(req) (this computer itself), device(req)
-// (the paired device a request came through, and the one a computer says it asks for), nameOf(req)
-// (that device's name, or this computer's), page(req) (one of your own windows: a page's cookie, or
-// a device through the relay; not a program holding the key), and record(…) (the document's
-// versions, studio.js).
+// Under Studio's own (/api/studio). Who may do anything with your signatures (see them, add or
+// change them, sign, ask for Touch ID, start the trackpad or Sign on Phone): one of the app's own
+// windows on this computer (window(req): windowkey.js, which a program that only has the key can't
+// be), or one of your phones (phone(req): paired here, kept, let in, the relay proving it; never
+// another computer, nor a device not kept yet). Not a browser tab, not Tailscale, not a program
+// with the key: they're told signing is done in the app or on your phone. From index.js: those two,
+// nameOf(req) (the device's name, or this computer's), record(…) (the document's versions,
+// studio.js), and checked(…) for the PDF being asked about.
 const answer = (fn) => async (req, res) => {
   try { res.json(await fn(req, res)) } catch (e) { res.status(e.status && e.status >= 400 && e.status < 600 ? e.status : 502).json({ error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}), ...(e.data && typeof e.data === 'object' ? e.data : {}) }) }
 }
 const SIG_ID = /^[a-z0-9]{8,32}$/
-export function routes(app, { wrap, rootOf, sq, here, device, nameOf, page, record }) {
-  // Who may sign, or ask for Ask Before Signing's grant: this computer itself, or one of your devices
-  // the relay proves (not a request that only says it's one, nor one through Tailscale, which can't
-  // be told from a program here).
+export const NOT_YOURS = 'Signing is done in the Bridge AI app on this computer, or in the app on your phone: not from here.'
+// The trackpad's hint, as the helper shows it (macOS's card), in the page's language: written here,
+// never taken from the request.
+const HINTS = {
+  en: 'Draw on the trackpad with one finger; press any key when done. Esc starts again.',
+  de: 'Zeichne mit einem Finger auf dem Trackpad; drück eine beliebige Taste, wenn du fertig bist. Esc fängt neu an.',
+  es: 'Dibuja en el trackpad con un dedo; pulsa cualquier tecla al terminar. Esc empieza de nuevo.',
+  fr: 'Dessinez sur le trackpad avec un doigt ; appuyez sur une touche quand vous avez fini. Échap recommence.',
+  hi: 'ट्रैकपैड पर एक उँगली से बनाएँ; हो जाने पर कोई भी की दबाएँ। Esc दबाने पर फिर से शुरू होता है।',
+  ja: 'トラックパッド上を 1 本の指で描き、終わったら任意のキーを押します。Esc でやり直します。',
+  'pt-BR': 'Desenhe no trackpad com um dedo; pressione qualquer tecla quando terminar. Esc recomeça.',
+  'zh-CN': '用一根手指在触控板上画，画完按任意键。按 Esc 重新开始。',
+}
+const trackpads = limiter(6, 60_000)
+export function routes(app, { wrap, rootOf, sq, window: fromWindow, phone: phoneOf, nameOf, record }) {
+  // Who's asking: { here: the app's window, device: a phone of yours }, or refused.
   const asker = (req) => {
-    const h = here(req)
-    const { device: d, forId } = device(req)
-    if (!h && !d) throw Object.assign(new Error('Sign in Bridge AI on the computer, or on one of your devices paired with it.'), { status: 403, code: 'not-here' })
-    return { here: h, device: d, forId }
+    const here = fromWindow(req)
+    const device = here ? null : phoneOf(req)
+    if (!here && !device) throw Object.assign(new Error(NOT_YOURS), { status: 403, code: 'not-yours' })
+    return { here, device }
   }
   const me = (req) => auth.who(asker(req))
-  // (Signing with Ask Before Signing off: anyone who reaches this server as you, as before.)
-  const signer = (req) => { try { return asker(req) } catch { return { here: false, device: null, forId: null } } }
+  // While Ask Before Signing is on: a change to your saved signatures with a grant for it.
+  const changing = async (req) => {
+    const a = asker(req)
+    if (!(await auth.needed())) return a
+    if (!auth.use(req.body?.grant, { purpose: 'change', ...a })) throw Object.assign(new Error('Confirm it\'s you first: Ask Before Signing is on, so changing your signatures is asked for too.'), { status: 403, code: 'ask' })
+    return a
+  }
+  // The PDF a signing is about: in its root, a PDF that's there. Its name, for what Touch ID says.
+  const realPdf = async (q) => {
+    const { real } = await safePath(await rootOf(q.root), q.path)
+    const st = await fsp.stat(real).catch(() => null)
+    if (!st?.isFile() || path.extname(real).toLowerCase() !== '.pdf') throw Object.assign(new Error('Only a PDF can be signed here'), { status: 400 })
+    return real
+  }
   app.get('/api/studio/sign/setup', wrap(async (req) => {
-    const h = here(req)
+    const here = fromWindow(req)
+    const device = here ? null : phoneOf(req)
     let sigs
     try { sigs = { ...(await mine()), setAside: await store.setAsideNote() } } catch (e) { sigs = { list: [], signature: null, initials: null, sealError: e.message } }
-    const p = h ? await probe() : { trackpad: false }
-    const me = device(req).device
+    const p = here ? await probe() : { trackpad: false }
     return {
       ...sigs, sealed: store.sealedWith(), model: await modelInfo(String(req.query.model || '') || null), readsScans: !!helpers.scanText,
-      ask: await auth.status(h), trackpad: !!p.trackpad,
+      // Who this is to signing: 'window', 'phone', or null (it can't sign from here: said, and why).
+      who: here ? 'window' : device ? 'phone' : null, canSign: !!(here || device),
+      ask: await auth.status(here), trackpad: here && !!p.trackpad,
       // Your phones the pad can ask (Sign on Phone): not the one asking.
-      phones: phone.phones().filter((x) => x.id !== me).map(({ id, name }) => ({ id, name })),
+      phones: here || device ? phone.phones().filter((x) => x.id !== device).map(({ id, name }) => ({ id, name })) : [],
     }
   }))
-  // A picture, to your own windows only: never to a program on this computer holding the key alone
-  // (the CLI, `bridge-ai mcp`, a script), which has no use for one.
+  // A picture: to your own windows and phones only.
   app.get('/api/studio/signature/:id', async (req, res) => {
     try {
-      if (!page(req)) throw Object.assign(new Error('Your signatures are shown only in Bridge AI\'s own windows'), { status: 403 })
+      asker(req)
       const id = String(req.params.id)
       const x = MARKS.includes(id) ? await store.pick(id, null) : SIG_ID.test(id) ? { id } : null
       if (!x) throw Object.assign(new Error('Not drawn yet'), { status: 404 })
       const png = await store.image(x.id)
       res.set({ 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; sandbox", 'Content-Type': 'image/png', 'Content-Length': String(png.length) })
       res.end(png)
-    } catch (e) { res.status(e.status === 403 ? 403 : 404).json({ error: e.status === 403 ? e.message : 'Not drawn yet' }) }
+    } catch (e) { res.status(e.status === 403 ? 403 : 404).json({ error: e.status === 403 ? e.message : 'Not drawn yet', ...(e.status === 403 ? { code: e.code } : {}) }) }
   })
   // Add one (kind, name, png; default: the one to use from now on), rename one or make it the
-  // default, take one away.
-  // (replace: one of yours drawn again, which keeps its name and whether it's the default.)
-  app.post('/api/studio/signatures', answer(async (req) => { const r = await store.add({ kind: String(req.body?.kind || ''), name: req.body?.name, png: req.body?.png, makeDefault: req.body?.default === true, replace: SIG_ID.test(String(req.body?.replace || '')) ? String(req.body.replace) : null }); return { id: r.id, ...(await mine()) } }))
-  app.patch('/api/studio/signatures/:id', answer(async (req) => { await store.change(String(req.params.id), { name: req.body?.name, makeDefault: req.body?.default === true }); return mine() }))
-  app.delete('/api/studio/signatures/:id', answer(async (req) => { await store.remove(String(req.params.id)); return mine() }))
+  // default, take one away. (replace: one of yours drawn again, which keeps its name and whether
+  // it's the default.)
+  app.post('/api/studio/signatures', answer(async (req) => { await changing(req); const r = await store.add({ kind: String(req.body?.kind || ''), name: req.body?.name, png: req.body?.png, makeDefault: req.body?.default === true, replace: SIG_ID.test(String(req.body?.replace || '')) ? String(req.body.replace) : null }); return { id: r.id, ...(await mine()) } }))
+  app.patch('/api/studio/signatures/:id', answer(async (req) => { await changing(req); await store.change(String(req.params.id), { name: req.body?.name, makeDefault: req.body?.default === true }); return mine() }))
+  app.delete('/api/studio/signatures/:id', answer(async (req) => { await changing(req); await store.remove(String(req.params.id)); return mine() }))
   // Drawn again: the default of that kind replaced (or the first one, when there's none).
   app.put('/api/studio/signature/:which', answer(async (req) => {
+    await changing(req)
     const kind = String(req.params.which)
     if (!MARKS.includes(kind)) throw Object.assign(new Error('Only a signature or initials'), { status: 400 })
     const was = await store.pick(kind, null)
@@ -326,40 +356,47 @@ export function routes(app, { wrap, rootOf, sq, here, device, nameOf, page, reco
     return mine()
   }))
   app.delete('/api/studio/signature/:which', answer(async (req) => {
+    await changing(req)
     const was = MARKS.includes(String(req.params.which)) ? await store.pick(String(req.params.which), null) : null
     if (was) await store.remove(was.id)
     return mine()
   }))
 
   // ---------- Ask Before Signing ----------
-  app.get('/api/studio/sign/ask', answer((req) => auth.status(here(req))))
-  // Asked now (Touch ID on this Mac, or the PIN): a grant for this document's signing, or for a
-  // change to the setting.
+  // (canSign: whether it can be changed from where it's asked: the app's window or your phone.)
+  app.get('/api/studio/sign/ask', answer(async (req) => ({ ...(await auth.status(fromWindow(req))), canSign: !!(fromWindow(req) || phoneOf(req)) })))
+  // Asked now (Touch ID on this Mac, or the PIN): a grant for one document's signing ('sign'), for
+  // the setting ('settings'), for changing your signatures ('change') or for taking them into a
+  // backup or a move ('export'). What Touch ID says is written here, from the document itself.
   app.post('/api/studio/sign/ask', answer(async (req) => {
-    const purpose = req.body?.purpose === 'settings' ? 'settings' : 'sign'
+    const a = asker(req)
+    const purpose = ['settings', 'change', 'export'].includes(req.body?.purpose) ? req.body.purpose : 'sign'
     const q = purpose === 'sign' ? sq(req) : null
-    if (q) await rootOf(q.root)
-    const name = q ? path.basename(String(q.path || '')) : null
-    return auth.ask({ ...asker(req), purpose, doc: q ? { root: String(q.root), path: String(q.path) } : null, reason: name ? `sign ${name.slice(0, 80)}` : 'change Ask Before Signing', pin: req.body?.pin != null ? String(req.body.pin) : null })
+    const real = q ? await realPdf(q) : null
+    const reason = real ? `sign "${path.basename(real).slice(0, 80)}"` : purpose === 'export' ? 'put your signatures in a backup' : purpose === 'change' ? 'change your saved signatures' : 'change Ask Before Signing'
+    return auth.ask({ ...a, purpose, doc: q ? { root: String(q.root), path: String(q.path) } : null, reason, pin: req.body?.pin != null ? String(req.body.pin) : null })
   }))
   app.post('/api/studio/sign/ask/setting', answer((req) => auth.set({ ...asker(req), on: typeof req.body?.on === 'boolean' ? req.body.on : undefined, pin: req.body?.pin != null ? String(req.body.pin) : null, removePin: req.body?.removePin === true, grant: req.body?.grant })))
 
   app.get('/api/studio/sign/check', wrap(async (req) => { const q = sq(req); return inspect(await rootOf(q.root), q.path) }))
   app.post('/api/studio/sign/explain', wrap(async (req) => { const q = sq(req); return explain(await rootOf(q.root), q.path, { pages: req.body?.pages, total: req.body?.total, model: req.body?.model ? String(req.body.model) : null, lang: req.body?.lang }) }))
-  // The signed copy: with Ask Before Signing on, only with the grant asked for this document by this
-  // device (used up here, whatever happens next). Then it's in the document's versions.
+  // The signed copy: from your window or phone only, Ask Before Signing on or off; with it on (or
+  // its list unreadable), only with the grant asked for this document by this one (used up here,
+  // whatever happens next). Then it's in both files' versions, with which way it was signed, how
+  // it was asked, the copy's hash and a MAC over it all.
   app.post('/api/studio/sign', answer(async (req) => {
+    const a = asker(req)
     const q = sq(req)
     const root = await rootOf(q.root)
     let how = null
     if (await auth.needed()) {
-      const g = auth.use(req.body?.grant, { purpose: 'sign', doc: { root: String(q.root), path: String(q.path) }, ...signer(req) })
+      const g = auth.use(req.body?.grant, { purpose: 'sign', doc: { root: String(q.root), path: String(q.path) }, ...a })
       if (!g) throw Object.assign(new Error('Confirm it\'s you first: Ask Before Signing is on.'), { status: 403, code: 'ask' })
       how = g.how
     }
     const r = await sign(root, q.path, req.body?.marks)
-    const on = nameOf(req)
-    const rec = { on, how, places: r.places, at: new Date().toISOString(), copy: r.path, from: String(q.path) }
+    const rec = { on: nameOf(req), via: a.here ? 'window' : 'phone', how, places: r.places, at: new Date().toISOString(), copy: r.path, from: String(q.path), sha256: crypto.createHash('sha256').update(await fsp.readFile(r.real)).digest('hex') }
+    rec.mac = await store.macOf(rec).catch(() => null)
     await record({ original: r.from, copy: r.real, rec }).catch((e) => console.error(`signing: signed, but its versions couldn't say so: ${e.message}`))
     const { real: _r, from: _f, ...out } = r
     return { root: q.root, ...out, record: rec }
@@ -367,16 +404,18 @@ export function routes(app, { wrap, rootOf, sq, here, device, nameOf, page, reco
 
   // ---------- The trackpad (this Mac's own window only) ----------
   // A stream of the finger's place while you sign on the trackpad (native/bridgesign trackpad),
-  // as server-sent events: ready, then d, m, u, and done or cancel. Closing it stops it.
+  // as server-sent events: ready, then d, m, u, and done or cancel. Closing it stops it. Its hint
+  // is this server's, in the page's language (lang).
   app.get('/api/studio/sign/trackpad', async (req, res) => {
-    if (!here(req)) return res.status(403).json({ error: 'The trackpad is this computer\'s: sign on it in Bridge AI on this computer', code: 'here' })
+    if (!fromWindow(req)) return res.status(403).json({ error: 'The trackpad is this Mac\'s: sign on it in the Bridge AI app here', code: 'not-yours' })
     if (!(await probe()).trackpad) return res.status(409).json({ error: 'This Mac has no trackpad to sign on', code: 'no-trackpad' })
+    if (!trackpads()) return res.status(429).json({ error: 'Started too often just now. Wait a minute and try again.', code: 'too-often' })
     res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' })
     res.flushHeaders()
     // (Ended, it isn't started again by the browser reconnecting on its own.)
     res.write('retry: 3600000\n\n')
     const t = trackpad({
-      hint: String(req.query.hint || '').slice(0, 160) || null,
+      hint: HINTS[String(req.query.lang || '')] || HINTS.en,
       onLine: (j) => res.write(`data: ${JSON.stringify(j)}\n\n`),
       onEnd: (j) => { res.write(`event: end\ndata: ${JSON.stringify(j)}\n\n`); res.end() },
     })
@@ -384,18 +423,34 @@ export function routes(app, { wrap, rootOf, sq, here, device, nameOf, page, reco
   })
 
   // ---------- Sign on Phone (signphone.js) ----------
+  // The pad that asks gets its own key for it (pad), and only that follows, cancels it and gets the ink.
   app.post('/api/studio/sign/phone', answer((req) => phone.ask({ asker: me(req), askerName: nameOf(req), what: req.body?.what === 'initials' ? 'initials' : 'signature', doc: String(req.body?.doc || ''), to: req.body?.to ? String(req.body.to) : null })))
-  // The pad that asked: how it stands (wait=1: until it changes, or 25 s), and cancelled from there.
-  app.get('/api/studio/sign/phone/:id/state', answer((req) => phone.state(req.params.id, me(req), req.query.wait === '1' ? 25000 : 0)))
+  app.get('/api/studio/sign/phone/:id/state', answer((req) => phone.state(req.params.id, me(req), String(req.query.pad || ''), req.query.wait === '1' ? 25000 : 0)))
   // The phone: what's waiting for it, one of them, its answer, or cancelled there.
-  const phoneOf = (req) => { const d = device(req); return d.forId ? null : d.device }
   app.get('/api/studio/sign/phone', answer((req) => ({ list: phone.waitingFor(phoneOf(req)) })))
   app.get('/api/studio/sign/phone/:id', answer((req) => phone.one(req.params.id, phoneOf(req))))
   app.post('/api/studio/sign/phone/:id/answer', answer((req) => phone.answer(req.params.id, phoneOf(req), { nonce: req.body?.nonce, ink: req.body?.ink })))
   app.post('/api/studio/sign/phone/:id/cancel', answer((req) => {
     const d = phoneOf(req)
-    // The phone it went to, or the pad that asked.
+    // The phone it went to, or the pad that asked (with its key).
     try { if (d) return phone.cancel(req.params.id, { device: d }) } catch (e) { if (e.code !== 'gone') throw e }
-    return phone.cancel(req.params.id, { asker: me(req) })
+    return phone.cancel(req.params.id, { asker: me(req), pad: String(req.body?.pad || '') })
   }))
+}
+// Taking your signatures into a backup or a move (backup.js): from your window or a phone, with a
+// grant for it ('export'), asked as Ask Before Signing asks (Touch ID or the password where this
+// Mac has them), whether that's on or not.
+// Signatures added from a backup or a move: only from your own window or phone, and while Ask
+// Before Signing is on, once it's asked (a 'change' grant), as any other change to them.
+export async function importAllowed(req, grant, { window: fromWindow, phone: phoneOf }) {
+  const here = fromWindow(req)
+  const device = here ? null : phoneOf(req)
+  if (!here && !device) throw Object.assign(new Error(NOT_YOURS), { status: 403, code: 'not-yours' })
+  if ((await auth.needed()) && !auth.use(grant, { purpose: 'change', here, device })) throw Object.assign(new Error('Confirm it\'s you first: Ask Before Signing is on, so changing your signatures is asked for too.'), { status: 403, code: 'ask' })
+}
+export function exportAllowed(req, grant, { window: fromWindow, phone: phoneOf }) {
+  const here = fromWindow(req)
+  const device = here ? null : phoneOf(req)
+  if (!here && !device) throw Object.assign(new Error(NOT_YOURS), { status: 403, code: 'not-yours' })
+  if (!auth.use(grant, { purpose: 'export', here, device })) throw Object.assign(new Error('Confirm it\'s you first: putting your signatures in a backup or a move is asked for.'), { status: 403, code: 'ask' })
 }

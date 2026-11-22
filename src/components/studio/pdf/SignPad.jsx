@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Icon from '../../Icon.jsx'
 import { api, BASE, onThisComputer } from '../../../api.js'
-import { t, tx } from '../../../i18n/index.js'
+import { t, tx, currentLang } from '../../../i18n/index.js'
 import { stroke, drawStroke, strokesToPng, unpackStrokes } from './ink.js'
 import './pdf.css'
 
@@ -111,7 +111,8 @@ export default function SignPad({ what = 'signature', busy = false, onSave, onCa
     stopPad()
     before.current = strokes.length
     setPad('starting')
-    const es = new EventSource(`${BASE}/api/studio/sign/trackpad?hint=${encodeURIComponent(t('Draw on the trackpad with one finger; press any key when done. Esc starts again.'))}`)
+    // (What macOS's card says is the server's own, in this page's language.)
+    const es = new EventSource(`${BASE}/api/studio/sign/trackpad?lang=${encodeURIComponent(currentLang())}`)
     source.current = es
     const place = ([x, y, p], ms) => ({ x: x * size.current.w, y: y * size.current.h, t: ms, p: p > 0 ? p : null })
     es.onmessage = (e) => {
@@ -134,7 +135,7 @@ export default function SignPad({ what = 'signature', busy = false, onSave, onCa
   // ---------- Phone: Sign on Phone ----------
   const [to, setTo] = useState(null)
   const phone = phones.find((p) => p.id === to) || phones[0] || null
-  const [asked, setAsked] = useState(null) // { id, until, name } | { ended, name } | { error }
+  const [asked, setAsked] = useState(null) // { id, until, name, code } | { ended, name } | { error }
   const [now, setNow] = useState(Date.now())
   const askId = useRef(null)
   useEffect(() => {
@@ -142,16 +143,19 @@ export default function SignPad({ what = 'signature', busy = false, onSave, onCa
     const tick = setInterval(() => setNow(Date.now()), 500)
     return () => clearInterval(tick)
   }, [asked?.id])
-  useEffect(() => () => { if (askId.current) api(`/studio/sign/phone/${askId.current}/cancel`, { method: 'POST' }).catch(() => {}) }, [])
+  // The request is this pad's: its key (pad) follows it, cancels it and gets the ink; no one else's.
+  const padKey = useRef(null)
+  useEffect(() => () => { if (askId.current) api(`/studio/sign/phone/${askId.current}/cancel`, { method: 'POST', body: { pad: padKey.current } }).catch(() => {}) }, [])
   const askPhone = async () => {
     if (!phone) return
     setAsked(null)
     try {
       const r = await api('/studio/sign/phone', { method: 'POST', body: { what, doc, to: phone.id } })
       askId.current = r.id
-      setAsked({ id: r.id, until: r.until, name: phone.name })
+      padKey.current = r.pad
+      setAsked({ id: r.id, until: r.until, name: phone.name, code: r.code })
       for (;;) {
-        const s = await api(`/studio/sign/phone/${r.id}/state?wait=1`)
+        const s = await api(`/studio/sign/phone/${r.id}/state?wait=1&pad=${encodeURIComponent(r.pad)}`)
         if (askId.current !== r.id) return
         if (s.state === 'waiting') continue
         askId.current = null
@@ -168,7 +172,7 @@ export default function SignPad({ what = 'signature', busy = false, onSave, onCa
     const id = askId.current
     askId.current = null
     setAsked(null)
-    if (id) api(`/studio/sign/phone/${id}/cancel`, { method: 'POST' }).catch(() => {})
+    if (id) api(`/studio/sign/phone/${id}/cancel`, { method: 'POST', body: { pad: padKey.current } }).catch(() => {})
   }
 
   const pick = (m) => {
@@ -193,7 +197,7 @@ export default function SignPad({ what = 'signature', busy = false, onSave, onCa
               : pad?.ended === 'none' ? t('The trackpad couldn\'t be used just now.')
               : t('Use the trackpad as the pad: one finger draws, lifting it ends a stroke, any key finishes. The pointer stays still while you sign.')
     : mode === 'phone'
-      ? waiting ? t('Waiting for {phone}: draw on it and press Use. {left} left.', { phone: asked.name, left: mmss(asked.until - now) })
+      ? waiting ? t('Waiting for {phone}: check it shows {code}, then draw on it and press Use. {left} left.', { phone: asked.name, code: asked.code, left: mmss(asked.until - now) })
         : asked?.ended === 'answered' ? t('From {phone}. Keep it, or Clear to ask again.', { phone: asked.name })
           : asked?.ended === 'expired' ? t('{phone} didn\'t answer in 2 minutes. Ask again when it\'s at hand.', { phone: asked.name })
             : asked?.ended === 'cancelled' ? (asked.by === 'phone' ? t('Cancelled on {phone}.', { phone: asked.name }) : t('Cancelled.'))

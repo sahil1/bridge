@@ -6,7 +6,7 @@ import { q as fileQuery } from '../files.js'
 import { SIZES } from '../../../../shared/signmarks.js'
 import { findPlaces } from './find.js'
 import { pageData, pagesText } from './read.js'
-import { SignatureChooser, sigsOf } from './Signatures.jsx'
+import { SignatureChooser, sigsOf, NotHere } from './Signatures.jsx'
 import { HOW, signedLine, placesLine } from './signed.js'
 import { KIND } from './Marks.jsx'
 import { AssistHead } from '../../AiAssist.jsx'
@@ -64,6 +64,7 @@ export default function SignAssist({ file, pdf, setup, marks, setMarks, picked, 
     <aside className="sd-sign" aria-label={t('AI Assist')}>
       <AssistHead className="sd-panel-head sd-sign-head" what={t('Sign this')} onClose={onClose} />
       <div className="sd-sign-body" ref={body}>
+        {setup.data && !setup.data.canSign && <NotHere />}
         <ol className="sd-steps">
           {STEPS.map(([id, title], i) => {
             const on = step === id

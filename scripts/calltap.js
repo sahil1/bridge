@@ -12,7 +12,10 @@
 // a PDF as pictures and links only, the dictation key from other apps is tapped, not held, and
 // Studio's signing has no Trackpad or Touch ID (its PIN instead) and keeps its key in a file. bridgespeech needs the macOS 26 SDK (Xcode 26) to build; with an
 // older one it's left out and meetings use whisper.cpp or a service.
-//   node scripts/calltap.js [out-dir] [--only name]
+//   node scripts/calltap.js [out-dir] [--only name] [--release]
+// --release (desktop/stage.js, for the app): bridgesign gives its key and asks for Touch ID only for
+// a program signed with its own certificate (Bridge AI). Without it (a build of your own from a
+// clone), it's built with BRIDGESIGN_ANY_PARENT, so the server run from the clone can use it.
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -22,11 +25,12 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const only = process.argv.includes('--only') ? process.argv[process.argv.indexOf('--only') + 1] : null
 const out = path.resolve(process.argv.slice(2).find((a, i, all) => !a.startsWith('--') && all[i - 1] !== '--only') || path.join(ROOT, 'native', 'bin'))
 const strict = process.argv.includes('--strict')
+const release = process.argv.includes('--release')
 if (process.platform !== 'darwin') { console.log('calltap: macOS only, skipped'); process.exit(0) }
 fs.mkdirSync(out, { recursive: true })
 let failed = false
 // [name, oldest macOS it runs on, extra swiftc flags, optional (its build failing isn't a failure)]
-const TOOLS = [['calltap', '14.2'], ['callwatch', '14.0'], ['bridgeocr', '14.0'], ['bridgespeech', '14.0', ['-parse-as-library'], true], ['bridgecal', '14.0'], ['bridgekeys', '14.0'], ['bridgesign', '14.0', ['-Xlinker', '-sectcreate', '-Xlinker', '__TEXT', '-Xlinker', '__info_plist', '-Xlinker', path.join(ROOT, 'native', 'bridgesign.plist')]]]
+const TOOLS = [['calltap', '14.2'], ['callwatch', '14.0'], ['bridgeocr', '14.0'], ['bridgespeech', '14.0', ['-parse-as-library'], true], ['bridgecal', '14.0'], ['bridgekeys', '14.0'], ['bridgesign', '14.0', ['-Xlinker', '-sectcreate', '-Xlinker', '__TEXT', '-Xlinker', '__info_plist', '-Xlinker', path.join(ROOT, 'native', 'bridgesign.plist'), ...(release ? [] : ['-D', 'BRIDGESIGN_ANY_PARENT'])]]]
 for (const [name, macos, flags = [], optional = false] of TOOLS.filter(([n]) => !only || n === only)) {
   const src = path.join(ROOT, 'native', `${name}.swift`)
   const parts = []

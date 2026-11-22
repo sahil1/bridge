@@ -124,6 +124,7 @@ function Pad({ req, onDone }) {
         <span className="ps-title">
           <b>{req.what === 'initials' ? t('Your initials for {computer}', { computer: req.computer }) : t('Your signature for {computer}', { computer: req.computer })}</b>
           <small className="muted">{req.doc ? t('For {doc} · {left} left', { doc: req.doc, left: mmss(left) }) : t('{left} left', { left: mmss(left) })}</small>
+          {req.code && <small className="ps-code">{t('Code {code}: the same as on the computer', { code: req.code })}</small>}
         </span>
       </div>
       <div className="ps-box">

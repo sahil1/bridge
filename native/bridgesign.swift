@@ -9,7 +9,10 @@
 //                                             touchID: Touch ID is set up and can be used now (the lid
 //                                             open, a finger enrolled); auth: this Mac can ask for its
 //                                             password (or Touch ID) at all.
-//   bridgesign trackpad [--seconds n]         draws on the trackpad. A window over the screen takes
+//   bridgesign trackpad                       draws on the trackpad. Its first line on stdin says
+//                                             how: {"hint":"…","seconds":120} (on stdin, not in its
+//                                             arguments, which any program can list).
+//                                             Then: A window over the screen takes
 //                                             the trackpad's touches (indirect touches, NSTouch) while
 //                                             the pointer stays still and hidden, and each finger's
 //                                             place is printed as it moves, as a share of the
@@ -24,12 +27,19 @@
 //                                             didn't let its window in front (then it exits)
 //                                             Only one finger draws; a second one on the trackpad is
 //                                             left out until the first lifts. A click does nothing.
-//   bridgesign auth --reason <text>           Touch ID, or this Mac's password, for <text> ("sign
-//                                             contract.pdf"). Touch ID first where it's set up, with
+//   bridgesign auth                           Touch ID, or this Mac's password, for the reason on its
+//                                             first line on stdin ({"reason":"sign contract.pdf"}).
+//                                             Touch ID first where it's set up, with
 //                                             "Use Password…" to type the password instead; the
 //                                             password where it isn't. One line, then exits:
 //     {"ok":true,"how":"touchid"|"password"}  or {"ok":false,"code":"cancel"|"failed"|"none","error":"…"}
 //                                             none: this Mac has no password or Touch ID to ask for.
+//
+// key and auth answer only the program that started them, when it's signed with the same
+// certificate as this helper (Bridge AI itself, the server on its Helper): another program running
+// this helper gets {"error":"parent"} (key) or {"ok":false,"code":"parent"} (auth), and probe says
+// auth false to it. A build of your own from a clone (scripts/calltap.js without --release) is
+// built with BRIDGESIGN_ANY_PARENT, which leaves that check out; release builds never are.
 //
 // It exits when the process that started it goes. Built for Apple silicon and Intel, as the other
 // helpers are (desktop/stage.js):
@@ -41,6 +51,7 @@ import AppKit
 import IOKit
 import LocalAuthentication
 import Security
+import CryptoKit
 
 let args = CommandLine.arguments
 func option(_ name: String) -> String? {
@@ -80,11 +91,41 @@ func hasTrackpad() -> Bool {
   if first != 0 { IOObjectRelease(first); return true }
   return false
 }
+// ---------- who started it ----------
+// The process that started this one, signed with this helper's own certificate (its leaf, the same
+// for a Developer ID or Bridge AI's own certificate): checked by its code signature, not its name.
+func parentTrusted() -> Bool {
+  #if BRIDGESIGN_ANY_PARENT
+  return true
+  #else
+  var me: SecCode?
+  guard SecCodeCopySelf([], &me) == errSecSuccess, let me = me else { return false }
+  var meStatic: SecStaticCode?
+  guard SecCodeCopyStaticCode(me, [], &meStatic) == errSecSuccess, let ms = meStatic else { return false }
+  var info: CFDictionary?
+  guard SecCodeCopySigningInformation(ms, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess,
+        let d = info as? [String: Any], let certs = d[kSecCodeInfoCertificates as String] as? [SecCertificate], let leaf = certs.first else { return false }
+  let hex = Insecure.SHA1.hash(data: SecCertificateCopyData(leaf) as Data).map { String(format: "%02x", $0) }.joined()
+  var req: SecRequirement?
+  guard SecRequirementCreateWithString("certificate leaf = H\"\(hex)\"" as CFString, [], &req) == errSecSuccess, let req = req else { return false }
+  var parent: SecCode?
+  let attrs = [kSecGuestAttributePid: NSNumber(value: getppid())] as CFDictionary
+  guard SecCodeCopyGuestWithAttributes(nil, attrs, [], &parent) == errSecSuccess, let p = parent else { return false }
+  return SecCodeCheckValidity(p, [], req) == errSecSuccess
+  #endif
+}
+// The first line on stdin, as JSON (what a caller says without putting it in the arguments).
+func firstLine() -> [String: Any] {
+  guard let line = readLine(), let data = line.data(using: .utf8), let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
+  return j
+}
+
 func probe() {
   let ctx = LAContext()
   var err: NSError?
-  let touch = ctx.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &err) && ctx.biometryType == .touchID
-  let auth = LAContext().canEvaluatePolicy(.deviceOwnerAuthentication, error: nil)
+  let trusted = parentTrusted()
+  let touch = trusted && ctx.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &err) && ctx.biometryType == .touchID
+  let auth = trusted && LAContext().canEvaluatePolicy(.deviceOwnerAuthentication, error: nil)
   say("{\"trackpad\":\(hasTrackpad()),\"touchID\":\(touch),\"auth\":\(auth)}")
   exit(0)
 }
@@ -126,6 +167,7 @@ func auth(_ reason: String) {
 
 // ---------- key ----------
 func keychainKey() {
+  if !parentTrusted() { say("{\"error\":\"parent\",\"status\":0}"); exit(1) }
   let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "dev.bridge-ai.signatures", kSecAttrAccount as String: "key"]
   var q = base
   q[kSecReturnData as String] = true
@@ -218,7 +260,7 @@ final class Pad: NSView {
   override func flagsChanged(with event: NSEvent) {}
 }
 
-func trackpad(seconds: Double) {
+func trackpad(seconds: Double, hint: String?) {
   let app = NSApplication.shared
   app.setActivationPolicy(.accessory)
   // Over the whole screen the pointer is on (where the pad is), almost clear: the app's pad shows
@@ -252,7 +294,7 @@ func trackpad(seconds: Double) {
   card.state = .active
   card.wantsLayer = true
   card.layer?.cornerRadius = 12
-  let label = NSTextField(labelWithString: option("--hint") ?? "Draw on the trackpad with one finger. Press any key when done; Esc cancels.")
+  let label = NSTextField(labelWithString: hint ?? "Draw on the trackpad with one finger. Press any key when done; Esc cancels.")
   label.font = NSFont.systemFont(ofSize: 13, weight: .medium)
   label.textColor = .labelColor
   label.alignment = .center
@@ -307,13 +349,17 @@ case "probe":
 case "key":
   keychainKey()
 case "auth":
+  if !parentTrusted() { say("{\"ok\":false,\"code\":\"parent\",\"error\":\"Only Bridge AI can ask with this helper\"}"); exit(1) }
+  let said = firstLine()
   NSApplication.shared.setActivationPolicy(.accessory)
-  auth(option("--reason") ?? "sign a document")
+  auth(String((said["reason"] as? String ?? "sign a document").prefix(140)))
   watchParent()
   NSApplication.shared.run()
 case "trackpad":
-  trackpad(seconds: max(5, min(600, Double(option("--seconds") ?? "") ?? 120)))
+  let said = firstLine()
+  let secs = (said["seconds"] as? NSNumber)?.doubleValue ?? 120
+  trackpad(seconds: max(5, min(600, secs)), hint: (said["hint"] as? String).map { String($0.prefix(160)) })
 default:
-  FileHandle.standardError.write("usage: bridgesign probe | bridgesign key | bridgesign trackpad [--seconds n] [--hint text] | bridgesign auth --reason <text>\n".data(using: .utf8)!)
+  FileHandle.standardError.write("usage: bridgesign probe | bridgesign key | bridgesign trackpad | bridgesign auth (the trackpad's and auth's details on stdin)\n".data(using: .utf8)!)
   exit(2)
 }

@@ -40,20 +40,25 @@ function AskBeforeSigning() {
       : e.code === 'cancelled' ? t('Cancelled: nothing changed.')
         : e.code === 'need-pin' ? t('This computer can only ask for a signing PIN: set one to turn this on.')
           : e.message)
-  // Once it's on, each change is asked for first (Touch ID here, or the PIN).
-  const grant = async (pin) => (st.on ? (await api('/studio/sign/ask', { method: 'POST', body: { purpose: 'settings', ...(pin != null ? { pin } : {}) } })).grant : null)
+  // Each change the server says needs asking (turning it off, any PIN: server/signauth.js) is asked
+  // for first, then tried again: Touch ID here, or the current PIN where that's the way.
+  const setting = (body) => api('/studio/sign/ask/setting', { method: 'POST', body })
   const run = async (what, body, pin) => {
     setBusy(what); setErr(null)
     try {
-      const g = await grant(pin)
-      setSt(await api('/studio/sign/ask/setting', { method: 'POST', body: { ...body, grant: g } }))
+      try { setSt(await setting(body)) } catch (e) {
+        if (e.code !== 'ask') throw e
+        if (way === 'pin' && pin == null && st.pin) { setConfirming(what); return }
+        const g = (await api('/studio/sign/ask', { method: 'POST', body: { purpose: 'settings', ...(pin != null ? { pin } : {}) } })).grant
+        setSt(await setting({ ...body, grant: g }))
+      }
       setPinFor(null); setPins({ a: '', b: '' }); setCurrent(''); setConfirming(null)
     } catch (e) { setErr(sayErr(e)) } finally { setBusy(null) }
   }
-  // A change that waits for the current PIN, when that's how this device is asked.
+  // A change that waits for the current PIN, when that's how this device is asked and one's set.
   const ask = (what, body) => {
-    if (st.on && way === 'pin' && current.length < 4) { setConfirming(what); setErr(null); return }
-    run(what, body, st.on && way === 'pin' ? current : null)
+    if (way === 'pin' && st.pin && current.length < 4) { setConfirming(what); setErr(null); return }
+    run(what, body, way === 'pin' && st.pin ? current : null)
   }
   const flip = (on) => {
     if (on && !st.pin && way === 'pin') { setPinFor('on'); return }
@@ -62,25 +67,26 @@ function AskBeforeSigning() {
   const newPin = () => {
     if (pins.a !== pins.b) { setErr(t('The two PINs aren\'t the same')); return }
     const body = { pin: pins.a, ...(pinFor === 'on' ? { on: true } : {}) }
-    if (st.on) ask('set', body)
-    else run('set', body)
+    ask('set', body)
   }
   const hereHow = st?.deviceAuth ? (st.touchID ? t('On this Mac: Touch ID, or its password.') : t('On this Mac: its password.')) : st?.hello ? t('On this computer: Windows Hello.') : t('On this computer: your signing PIN.')
   const pending = confirming === 'off' ? { on: false } : confirming === 'remove' ? { removePin: true } : confirming === 'set' ? { pin: pins.a } : null
+  // (From a browser tab: shown as it is, changed only in the app or on your phone, as Your Signatures says.)
+  const mine = st?.canSign !== false
   return (
     <section className="st-sec" data-setting="ask-before-signing">
       <h4>{t('Ask Before Signing')}</h4>
       {st && (
         <>
           <label className="st-check">
-            <input type="checkbox" checked={!!st.on} disabled={!!busy} onChange={(e) => flip(e.target.checked)} />
+            <input type="checkbox" checked={!!st.on} disabled={!!busy || !mine} onChange={(e) => flip(e.target.checked)} />
             <span><b>{t('Ask that it\'s you before a document is signed')}</b> <span className="muted small">{t('Once per document, however many places it signs.')} {way === 'pin' && !st.deviceAuth && !st.hello ? t('Here and from your phone: your signing PIN.') : `${hereHow} ${t('From your phone or another device: your signing PIN.')}`}</span></span>
           </label>
           <More>{t('Off, Sign this makes a signed copy when you press Sign. On, Bridge AI asks first, itself: Touch ID or the Mac\'s password through macOS, Windows Hello through Windows, or the signing PIN, checked on the computer (its hash is kept sealed with your signatures, and it locks for a while after 5 wrong tries). Only then is the copy made, so nothing can sign for you by calling Bridge AI directly. Turning it off or changing the PIN is asked for the same way.')}</More>
           <div className="st-row sd-pin-row">
             <span className="muted small">{st.pin ? t('Signing PIN: set') : t('Signing PIN: none yet')}</span>
-            {!pinFor && <button type="button" className="ghost-btn" onClick={() => { setPinFor('set'); setErr(null) }} disabled={!!busy}>{st.pin ? t('Change PIN') : t('Set a PIN')}</button>}
-            {st.pin && !pinFor && <button type="button" className="ghost-btn" onClick={() => ask('remove', { removePin: true })} disabled={!!busy}>{t('Remove PIN')}</button>}
+            {mine && !pinFor && <button type="button" className="ghost-btn" onClick={() => { setPinFor('set'); setErr(null) }} disabled={!!busy}>{st.pin ? t('Change PIN') : t('Set a PIN')}</button>}
+            {mine && st.pin && !pinFor && <button type="button" className="ghost-btn" onClick={() => ask('remove', { removePin: true })} disabled={!!busy}>{t('Remove PIN')}</button>}
           </div>
           {pinFor && (
             <div className="st-row sd-pin-new">
