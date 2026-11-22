@@ -44,6 +44,7 @@
       "apitoken.js",
       "windowauth.js",
       "serverflags.js",
+      "servergate.js",
       "package.json",
       "!node_modules/uiohook-napi/{libuiohook,src,binding.gyp}{,/**}"
     ],

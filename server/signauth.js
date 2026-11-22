@@ -132,7 +132,9 @@ const sweep = () => { for (const [k, g] of grants) if (g.until < Date.now()) gra
 const prompts = limiter(8, 60_000)
 // What a grant is for: 'sign' (one document), 'settings' (Ask Before Signing itself, the PIN),
 // 'change' (your saved signatures, while it's on) and 'export' (them, into a backup or a move).
-const PURPOSES = ['sign', 'settings', 'change', 'export']
+// 'start-over': new keys for your signatures when the app's own can't be opened any more (signing.js),
+// only at this computer and only with Touch ID, the Mac's password or Windows Hello.
+const PURPOSES = ['sign', 'settings', 'change', 'export', 'start-over']
 // Whether it's on: as the sealed list says, or (it can't be read) as the mark beside it says, or the
 // list was set aside, or is older than the app last heard (a copy put back): closed until you confirm.
 export async function needed() {
@@ -152,6 +154,7 @@ export async function ask({ here, device, purpose = 'sign', doc = null, sha256 =
   const on = await needed()
   if ((purpose === 'sign' || purpose === 'change') && !on) return { needed: false }
   const way = await wayFor(here, a)
+  if (purpose === 'start-over' && (!here || way === 'pin')) throw err('Start Over needs Touch ID, the Mac\'s password or Windows Hello, on this computer.', 409, 'no-device')
   // The PIN only where it's the way: with Touch ID or the Mac's password, they are asked, never a
   // PIN in their place. Windows Hello, or the PIN when Hello can't be used just then.
   if (pin != null && way === 'device') throw err('This Mac asks for Touch ID or its password, not the PIN.', 400, 'use-device')

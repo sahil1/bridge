@@ -460,9 +460,9 @@ export async function open(root, rel, { rootId = null, label = null } = {}) {
     path: r, name: path.basename(real), kind, ext, size: st.size, mtime: st.mtimeMs, versions: await shownChecked(await versionsOf(real), real), signings: await signingsOf(real), fileId: big ? `${big.dev}:${big.ino}` : null,
     inParts: inParts(ext, st.size) && (ext === '.pdf' || !!partsOf), ...(partsOf ? { left: partsOf.left, model: partsOf.model } : {}),
     saves: st.size <= SAVE_MAX, keep: keepFor(st.size), limits: { open: OPEN_MAX, save: SAVE_MAX, whole: WHOLE_MAX },
-    // A PDF one could sign (80 MB at most): its SHA-256 as it's opened, which signing then has to find
+    // A PDF one could sign (signStore.MAX_PDF): its SHA-256 as it's opened, which signing then has to find
     // (signing.js); the page sends it for one it reads in parts and can't hash itself.
-    ...(ext === '.pdf' && st.size <= 80 * MB ? { sha256: await fullHash(real) } : {}),
+    ...(ext === '.pdf' && st.size <= signStore.MAX_PDF ? { sha256: await fullHash(real) } : {}),
   }
 }
 

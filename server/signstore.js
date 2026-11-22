@@ -27,6 +27,8 @@ const KEYFILE = path.join(DIR, 'key')
 const ASK_MARK = path.join(DIR, 'ask-before-signing')
 export const KINDS = ['signature', 'initials']
 export const MAX_PNG = 1.5 * 1024 * 1024
+// The biggest PDF that can be signed (signing.js), and hashed as Studio opens it (studio.js).
+export const MAX_PDF = 80 * 1024 * 1024
 const MAX_EACH = 20 // of each kind
 const MAGIC = Buffer.from('BSIG1')
 const err = (message, status = 400, code) => Object.assign(new Error(message), { status, ...(code ? { code } : {}) })
@@ -175,8 +177,10 @@ async function putBack(now) {
 }
 // Said until a new one is drawn: the list's set-aside note.
 export const setAsideNote = () => one(async () => (await readStore()).setAside || null)
-// Whether the app couldn't read its own keys this time (said in Settings › Studio).
+// Whether the app couldn't read its own keys this time (said in Settings › Studio), and whether, tried
+// again and still not opening, Start Over can be offered (signing.js).
 export const keysUnreadable = () => appKeys().unreadable
+export const startOverOffered = () => appKeys().startOver
 // A list older than the app last heard (above): { at, was, is, ask }, until you confirm it's you.
 export const olderNote = () => one(async () => (await readStore()).older || null)
 async function writeStore(s) {

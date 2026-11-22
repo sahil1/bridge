@@ -21,7 +21,7 @@ import { shownSize, fitImage, dateSize, dateSpot, toUser, KINDS } from '../share
 import { placeEn } from '../shared/places.js'
 
 const MARKS = ['signature', 'initials'] // the two you draw
-const MAX_PDF = 80 * 1024 * 1024
+const MAX_PDF = store.MAX_PDF
 const MAX_MARKS = 200
 
 // ---------- Your signatures and initials ----------
@@ -40,9 +40,11 @@ async function pdfAt(root, rel) {
   const { real, realRoot } = await safePath(root, rel)
   const st = await fsp.stat(real)
   if (!st.isFile() || path.extname(real).toLowerCase() !== '.pdf') throw new Error('Only a PDF can be signed here')
-  if (st.size > MAX_PDF) throw new Error('Too big to sign here (80 MB at most)')
+  if (st.size > MAX_PDF) throw tooBig(st.size)
   return { real, realRoot, bytes: await fsp.readFile(real) }
 }
+// Over the limit: said with its size, the reason it can't be signed.
+const tooBig = (size) => Object.assign(new Error(`This PDF is ${Math.round(size / 1024 / 1024)} MB, and Studio signs PDFs up to ${MAX_PDF / 1024 / 1024} MB.`), { status: 413, code: 'too-big' })
 const LOCKED = 'This PDF is locked against changes (it\'s encrypted), so a signed copy can\'t be made from it. Ask whoever sent it for one that isn\'t locked, or print it and sign it on paper.'
 async function load(bytes, o = {}) {
   try { return await PDFDocument.load(bytes, { updateMetadata: false, ...o }) } catch (e) {
@@ -300,7 +302,7 @@ const HINTS = {
   'zh-CN': '用一根手指在触控板上画，画完按任意键。按 Esc 重新开始。',
 }
 const trackpads = limiter(6, 60_000)
-export function routes(app, { wrap, rootOf, sq, window: fromWindow, phone: phoneOf, nameOf, record }) {
+export function routes(app, { wrap, rootOf, sq, window: fromWindow, phone: phoneOf, nameOf, record, tellApp = () => {} }) {
   // Who's asking: { here: the app's window, device: a phone of yours }, or refused.
   const asker = (req) => {
     const here = fromWindow(req)
@@ -327,7 +329,7 @@ export function routes(app, { wrap, rootOf, sq, window: fromWindow, phone: phone
     const here = fromWindow(req)
     const device = here ? null : phoneOf(req)
     let sigs
-    try { sigs = { ...(await mine()), setAside: await store.setAsideNote(), older: await store.olderNote(), windowChanged: await store.windowChangedNote() } } catch (e) { sigs = { list: [], signature: null, initials: null, sealError: e.message, ...(e.code === 'keys-unreadable' ? { keysUnreadable: true } : {}) } }
+    try { sigs = { ...(await mine()), setAside: await store.setAsideNote(), older: await store.olderNote(), windowChanged: await store.windowChangedNote() } } catch (e) { sigs = { list: [], signature: null, initials: null, sealError: e.message, ...(e.code === 'keys-unreadable' ? { keysUnreadable: true, canStartOver: here && store.startOverOffered() } : {}) } }
     const p = here ? await probe() : { trackpad: false }
     return {
       ...sigs, sealed: store.sealedWith(), model: await modelInfo(String(req.query.model || '') || null), readsScans: !!helpers.scanText,
@@ -380,7 +382,7 @@ export function routes(app, { wrap, rootOf, sq, window: fromWindow, phone: phone
   // backup or a move ('export'). What Touch ID says is written here, from the document itself.
   app.post('/api/studio/sign/ask', answer(async (req) => {
     const a = asker(req)
-    const purpose = ['settings', 'change', 'export'].includes(req.body?.purpose) ? req.body.purpose : 'sign'
+    const purpose = ['settings', 'change', 'export', 'start-over'].includes(req.body?.purpose) ? req.body.purpose : 'sign'
     const q = purpose === 'sign' ? sq(req) : null
     const real = q ? await realPdf(q) : null
     // The document as it is now, and as the page showed it (its sha256, when it had it whole): the
@@ -388,7 +390,7 @@ export function routes(app, { wrap, rootOf, sq, window: fromWindow, phone: phone
     const now = real ? sha256(await fsp.readFile(real)) : null
     const shown = /^[0-9a-f]{64}$/.test(String(req.body?.sha256 || '')) ? req.body.sha256 : null
     if (now && shown && shown !== now) throw Object.assign(new Error('The document changed since it was shown here: look at it again, then sign.'), { status: 409, code: 'changed' })
-    const reason = real ? `sign "${path.basename(real).slice(0, 80)}"` : purpose === 'export' ? 'put your signatures in a backup' : purpose === 'change' ? 'change your saved signatures' : 'change Ask Before Signing'
+    const reason = real ? `sign "${path.basename(real).slice(0, 80)}"` : purpose === 'export' ? 'put your signatures in a backup' : purpose === 'start-over' ? 'start over with a new key for your signatures' : purpose === 'change' ? 'change your saved signatures' : 'change Ask Before Signing'
     return auth.ask({ ...a, purpose, doc: q ? { root: String(q.root), path: String(q.path) } : null, sha256: now, reason, pin: req.body?.pin != null ? String(req.body.pin) : null })
   }))
   app.post('/api/studio/sign/ask/setting', answer((req) => auth.set({ ...asker(req), on: typeof req.body?.on === 'boolean' ? req.body.on : undefined, pin: req.body?.pin != null ? String(req.body.pin) : null, removePin: req.body?.removePin === true, grant: req.body?.grant })))
@@ -416,7 +418,9 @@ export function routes(app, { wrap, rootOf, sq, window: fromWindow, phone: phone
     }
     // What was shown, always (the page's own hash of the bytes it has, or for one it read in parts,
     // the one Studio took as it opened it: studio.js open): no document is signed as it is now
-    // without it having been seen so.
+    // without it having been seen so. (Too big to sign: said so, its size the reason.)
+    const st0 = await fsp.stat((await safePath(root, q.path)).real).catch(() => null)
+    if (st0 && st0.size > MAX_PDF) throw tooBig(st0.size)
     if (!/^[0-9a-f]{64}$/.test(String(req.body?.sha256 || ''))) throw Object.assign(new Error('Open the PDF again to sign it: what it showed you wasn\'t sent.'), { status: 400, code: 'need-sha' })
     const id = `s${Date.now().toString(36)}${crypto.randomBytes(3).toString('hex')}`
     const r = await sign(root, q.path, req.body?.marks, { want, id })
@@ -425,6 +429,19 @@ export function routes(app, { wrap, rootOf, sq, window: fromWindow, phone: phone
     await record({ original: r.from, copy: r.real, rec }).catch((e) => console.error(`signing: signed, but its versions couldn't say so: ${e.message}`))
     const { real: _r, from: _f, ...out } = r
     return { root: q.root, ...out, record: rec }
+  }))
+
+  // ---------- Start Over (the app's keys that can't be opened any more) ----------
+  // From the app's window here, once you've confirmed with Touch ID, the Mac's password or Windows
+  // Hello: the app is told (its own feed) to keep the keys that won't open and make new ones, then it
+  // starts this server again with them (desktop/windowauth.js startOver, main.js).
+  app.post('/api/studio/sign/start-over', answer(async (req) => {
+    const a = asker(req)
+    if (!a.here) throw Object.assign(new Error('Start Over is done in the Bridge AI app on this computer.'), { status: 403, code: 'not-here' })
+    if (!store.startOverOffered()) throw Object.assign(new Error('There\'s nothing to start over.'), { status: 409, code: 'nothing' })
+    if (!auth.use(req.body?.grant, { purpose: 'start-over', ...a })) throw Object.assign(new Error('Confirm it\'s you first.'), { status: 403, code: 'ask' })
+    tellApp('sign-start-over', { at: new Date().toISOString() })
+    return { ok: true }
   }))
 
   // ---------- The trackpad (this Mac's own window only) ----------

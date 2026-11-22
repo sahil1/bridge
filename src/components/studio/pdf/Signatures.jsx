@@ -138,13 +138,38 @@ function KindList({ kind, setup }) {
 // Where signing can't be done (a browser tab, a computer of yours showing this one, Tailscale):
 // said plainly, with where it can.
 export const NotHere = () => <p className="sd-warn small sd-not-here" role="note"><Icon name="lock" size={11} /> {t('Signing is done in the Bridge AI app on this computer, or in the app on your phone. From here your signatures aren\'t shown and nothing can be signed.')}</p>
+// The app's keys still not opening after being tried again: start over with new ones, once it's
+// asked that it's you (Touch ID, the Mac's password or Windows Hello). The old keys are kept, and the
+// signatures sealed with them are set aside, so they can't be opened here.
+function StartOver({ setup }) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+  const [done, setDone] = useState(false)
+  const go = async () => {
+    setBusy(true); setErr(null)
+    try {
+      const g = await api('/studio/sign/ask', { method: 'POST', body: { purpose: 'start-over' } })
+      await api('/studio/sign/start-over', { method: 'POST', body: { grant: g.grant } })
+      setDone(true)
+      setTimeout(() => setup.refresh(), 8000)
+    } catch (e) { setErr(e.message) } finally { setBusy(false) }
+  }
+  if (done) return <p className="muted small" role="status">{t('Starting again with a new key: Bridge AI opens again in a moment.')}</p>
+  return (
+    <div className="sd-start-over">
+      <p className="muted small">{t('Start over to sign again: a new key is made, and the signatures sealed with the old one are set aside, where they can\'t be opened. The old key\'s file is kept.')}</p>
+      <button type="button" className="btn small" onClick={go} disabled={busy}><Icon name="fingerprint" size={12} /> {t('Start Over')}</button>
+      {err && <p className="error-text small" role="alert">{err}</p>}
+    </div>
+  )
+}
 export function SignatureList({ setup }) {
   if (setup.data && !setup.data.canSign) return <NotHere />
   if (setup.err && !setup.data) return <p className="error-text small" role="alert">{setup.err} <button type="button" className="link-btn" onClick={setup.refresh}>{t('Try again')}</button></p>
   if (!setup.data) return <div className="sd-sigcards waiting" aria-busy="true"><span className="sd-sigcard waiting"><span className="sd-sigcard-pic" /></span></div>
   return (
     <div className="sd-siglist">
-      {setup.data.keysUnreadable ? <p className="error-text small" role="alert">{t('Bridge AI couldn\'t read its keychain item this time, so your signatures can\'t be opened. Quit and reopen Bridge AI to try again, and allow it if macOS asks.')}</p>
+      {setup.data.keysUnreadable ? <><p className="error-text small" role="alert">{t('Bridge AI couldn\'t read its keychain item this time, so your signatures can\'t be opened. Quit and reopen Bridge AI to try again, and allow it if macOS asks.')}</p>{setup.data.canStartOver && <StartOver setup={setup} />}</>
         : setup.data.sealError && <p className="error-text small" role="alert">{t('Your saved signatures can\'t be opened: {error}', { error: setup.data.sealError })}</p>}
       <KeyWarning sealed={setup.data.sealed} />
       {setup.data.older && <p className="sd-warn small" role="status"><Icon name="alert" size={11} /> {t('Your signatures\' list is older than the app last saw, as if a copy from before was put back. Signing asks that it\'s you each time until you confirm it once.')}</p>}

@@ -799,7 +799,10 @@ function signPhoneOf(req) {
   const d = id ? relay.deviceOf(id) : null
   return d && d.kind !== 'computer' && !d.fresh && remote.admits(id) ? id : null
 }
-signing.routes(app, { wrap, rootOf, sq, window: signWindow, phone: signPhoneOf, nameOf: (req) => whoAsks(req), record: (x) => studio.noteSigned(x) })
+// (The app's own feeds, for what signing tells the app: Start Over, signing.js.)
+const appFeeds = new Set()
+const tellApp = (event, data) => { for (const res of appFeeds) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`) }
+signing.routes(app, { wrap, rootOf, sq, window: signWindow, phone: signPhoneOf, nameOf: (req) => whoAsks(req), record: (x) => studio.noteSigned(x), tellApp })
 // The app checking this server before it sends anything (windowkey.js): that it's the one the app
 // started (proof, to the app's nonce), and that it has the app's window secret (hello: a nonce, then
 // the app's MAC of it; from source, with none yet, the secret itself once). Only at this computer.
@@ -1816,8 +1819,9 @@ app.get('/api/events', (req, res) => {
   // ...and your signatures' list's version and whether Ask Before Signing is on, which the app keeps
   // where a copy of the list put back can't reach (signstore.js, appkeys.js).
   const offSign = appFeed ? signStore.onChange((st) => res.write(`event: sign-state\ndata: ${JSON.stringify(st)}\n\n`)) : null
+  if (appFeed) appFeeds.add(res)
   if (appFeed) signStore.olderNote().then((o) => (o ? null : signStore.state())).then((st) => { if (st && !res.writableEnded) res.write(`event: sign-state\ndata: ${JSON.stringify(st)}\n\n`) }, () => {})
-  req.on('close', () => { clients.delete(res); off?.(); offRemote?.(); offSign?.() })
+  req.on('close', () => { clients.delete(res); appFeeds.delete(res); off?.(); offRemote?.(); offSign?.() })
 })
 // A switch to another herdr session: a fleet read before it is dropped, not shown or announced.
 let fleetGen = 0
@@ -3772,6 +3776,8 @@ function applyConfig() {
   const fresh = loadConfig()
   for (const k of Object.keys(cfg)) if (!(k in fresh)) delete cfg[k]
   Object.assign(cfg, fresh)
+  // (Started by the app: still where the app talks to it, whatever config.json says now.)
+  if (appKeys().listen) Object.assign(cfg, appKeys().listen)
   TZ = cfg.location?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone
   routines.scheduling(trialOn('routines'))
   weather = makeWeather(cfg)

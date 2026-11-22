@@ -60,33 +60,58 @@ const windowAuth = require('./windowauth.js')
 let keys = null
 // (The server listens where the app talks to it, 127.0.0.1:<its port>, and nowhere else: listen.)
 const appKeys = () => (keys ||= windowAuth.keysAt(path.join(app.getPath('userData'), 'signing-keys'), electron.safeStorage, { listen: { host: '127.0.0.1', port: SERVER_PORT } }))
-let serverProven = false
 // Checked now: the server the app started, over the connection the app itself makes to it (built
-// app), or, from source (no pipe: npm and node --watch don't pass it on), one that has the app's
-// window secret (given once, the first time).
+// app: servergate.js holds everything back until it has, and checks again before each page loads),
+// or, from source (no pipe: npm and node --watch don't pass it on), one that has the app's window
+// secret (given once, the first time).
+const gate = require('./servergate.js').create({
+  bundled: BUNDLED,
+  isServer: (u) => ownServer(u),
+  prove: () => windowAuth.proves({ port: SERVER_PORT, launch: appKeys().launch, headers: { authorization: `Bearer ${apiKey()}` } }),
+})
+let devProven = false
+const serverProven = () => (BUNDLED ? gate.proven : devProven)
 async function proveServer() {
-  serverProven = BUNDLED
-    ? await windowAuth.proves({ port: SERVER_PORT, launch: appKeys().launch, headers: { authorization: `Bearer ${apiKey()}` } })
-    : await windowAuth.hello(fetch, `http://127.0.0.1:${SERVER_PORT}`, appKeys().window, { tofu: true })
-  return serverProven
+  if (BUNDLED) return gate.check()
+  devProven = await windowAuth.hello(fetch, `http://127.0.0.1:${SERVER_PORT}`, appKeys().window, { tofu: true })
+  return devProven
 }
-// Each window request's MAC is over its body too: its SHA-256 from what Electron will send
-// (onBeforeRequest), then the header added (onBeforeSendHeaders), by the request's id. One whose body
-// the app can't read (a file, a blob) goes without, and isn't taken as the window's.
+// The server checked lost (its feed went): nothing goes to its address until it proves itself again.
+function serverGone() { gate.set(false); devProven = false }
+// Every request the windows make to the server's address (servergate.js): held back while it isn't
+// proven (a page waits for it to prove itself again). And each window request's MAC is over its body
+// too: its SHA-256 from what Electron will send, then the header added (onBeforeSendHeaders), by the
+// request's id. One whose body the app can't read (a file, a blob) goes without, and isn't taken as
+// the window's.
 const bodies = new Map() // request id -> its body's SHA-256
 function windowsSendSecret() {
+  const all = [...new Set([PORT, SERVER_PORT])].map((p) => `http://127.0.0.1:${p}/*`)
   const urls = [...new Set([PORT, SERVER_PORT])].map((p) => `http://127.0.0.1:${p}/api/*`)
-  session.defaultSession.webRequest.onBeforeRequest({ urls }, (d, cb) => {
-    if (bodies.size > 500) bodies.clear()
-    bodies.set(d.id, windowAuth.bodyHash(d.uploadData))
-    cb({ cancel: false })
+  session.defaultSession.webRequest.onBeforeRequest({ urls: all }, (d, cb) => {
+    gate.request(d).then((r) => {
+      if (!r.cancel && /^\/api\//.test(new URL(d.url).pathname)) {
+        if (bodies.size > 500) bodies.clear()
+        bodies.set(d.id, windowAuth.bodyHash(d.uploadData))
+      }
+      cb(r)
+    }, () => cb({ cancel: BUNDLED }))
+  })
+  // A page held back (ERR_BLOCKED_BY_CLIENT): the main window says why; any other window closes.
+  app.on('web-contents-created', (_e, wc) => {
+    wc.on('did-fail-load', (_ev, code, _desc, url, isMain) => {
+      if (!isMain || !gate.blocked(code, url)) return
+      const w = BrowserWindow.fromWebContents(wc)
+      if (!w || w.isDestroyed()) return
+      if (w === win) w.loadURL(splash(NOT_OURS)).catch(() => {})
+      else w.destroy()
+    })
   })
   session.defaultSession.webRequest.onBeforeSendHeaders({ urls }, (d, cb) => {
     const h = d.requestHeaders
     for (const k of Object.keys(h)) if (k.toLowerCase() === 'x-bridge-window') delete h[k]
     const body = bodies.has(d.id) ? bodies.get(d.id) : ''
     bodies.delete(d.id)
-    const mac = serverProven && ownServer(d.url) && body != null ? windowAuth.windowHeader(appKeys().window, d.method, d.url, { at: `127.0.0.1:${SERVER_PORT}`, body }) : null
+    const mac = serverProven() && ownServer(d.url) && body != null ? windowAuth.windowHeader(appKeys().window, d.method, d.url, { at: `127.0.0.1:${SERVER_PORT}`, body }) : null
     if (mac) h['X-Bridge-Window'] = mac
     cb({ requestHeaders: h })
   })
@@ -197,7 +222,7 @@ const machinePorts = () => {
   } catch { /* none linked yet */ }
   return ports.map
 }
-const pages = senders.create(PORT, { ports: machinePorts })
+const pages = senders.create(PORT, { ports: machinePorts, proven: () => gate.proven })
 const isLocal = pages.local
 // Every message from a page is checked first: only this computer's own page, but for what a window
 // showing another computer needs too, and the Allow access tile's own (senders.js MACHINE, SELF).
@@ -700,7 +725,7 @@ async function connect() {
   if (await serverUp()) await replaceStale().catch(() => {})
   if (await serverUp() && !(await proveServer()) && BUNDLED) await replaceUnproven().catch(() => {})
   // (A server this app can't prove it started, on the address it uses: its page isn't shown here.)
-  if (await serverUp()) return BUNDLED && !serverProven ? win.loadURL(splash(NOT_OURS)) : win.loadURL(URL_BASE)
+  if (await serverUp()) return BUNDLED && !serverProven() ? win.loadURL(splash(NOT_OURS)) : win.loadURL(URL_BASE)
   win.loadURL(splash('Starting Bridge AI…'))
   // Dev mode needs both ports; a normal server already on the API port would block it.
   if (DEV && !startedServer) {
@@ -712,7 +737,7 @@ async function connect() {
   // server can take longer the first time).
   for (let i = 0; i < 600; i++) {
     await new Promise((r) => setTimeout(r, 100))
-    if (await serverUp()) { await proveServer(); return BUNDLED && !serverProven ? win.loadURL(splash(NOT_OURS)) : win.loadURL(URL_BASE) }
+    if (await serverUp()) { await proveServer(); return BUNDLED && !serverProven() ? win.loadURL(splash(NOT_OURS)) : win.loadURL(URL_BASE) }
   }
   win.loadURL(splash(BUNDLED
     ? `Couldn't start Bridge AI on port ${PORT}.<br>Another program may be using it: set <code>"port"</code> in ~/.bridge-ai/config.json and reopen.`
@@ -797,14 +822,18 @@ async function watchFleet() {
           const fleet = /^event: fleet$/m.test(block)
           const rem = /^event: remote$/m.test(block)
           const sign = /^event: sign-state$/m.test(block)
-          if (!fleet && !rem && !sign && !/^event: fix-ask$/m.test(block)) continue
+          const over = /^event: sign-start-over$/m.test(block)
+          if (!fleet && !rem && !sign && !over && !/^event: fix-ask$/m.test(block)) continue
           const data = block.split('\n').filter((l) => l.startsWith('data: ')).map((l) => l.slice(6)).join('\n')
-          try { if (fleet) onFleet(JSON.parse(data)); else if (rem) remote?.onEvent(JSON.parse(data)); else if (sign) { if (serverProven && BUNDLED) appKeys().heard(JSON.parse(data)) } else onFixAsk(JSON.parse(data)) } catch { /* partial or bad frame */ }
+          // (Only from the server the app proved it started: servergate.js.)
+          if (!gate.feed()) continue
+          if (over) { if (BUNDLED && appKeys().startOver()) startOverServer().catch(() => {}); continue }
+          try { if (fleet) onFleet(JSON.parse(data)); else if (rem) remote?.onEvent(JSON.parse(data)); else if (sign) { if (BUNDLED) appKeys().heard(JSON.parse(data)) } else onFixAsk(JSON.parse(data)) } catch { /* partial or bad frame */ }
         }
       }
     } catch { /* server down or restarting; retry */ }
     // (Checked again before the windows send it anything, once the feed is back.)
-    serverProven = false
+    serverGone()
     // The feed gone: nobody is known to be viewing this screen until it says so again (it does as it
     // connects), so the display may sleep, and the badge goes.
     remote?.onEvent({ t: 'sessions', list: [], asks: [] })
@@ -812,6 +841,18 @@ async function watchFleet() {
   }
 }
 
+// Start Over (server/signing.js, after Touch ID or the Mac's password): the app has kept its keys that
+// wouldn't open and made new ones (windowauth.js startOver); the server is started again with them,
+// checked, and the window shows it again.
+async function startOverServer() {
+  stopServer()
+  for (let i = 0; i < 50 && await serverUp(); i++) await new Promise((r) => setTimeout(r, 100))
+  stoppingServer = false
+  await startServer()
+  for (let i = 0; i < 300 && !(await serverUp()); i++) await new Promise((r) => setTimeout(r, 100))
+  await proveServer()
+  if (win && !win.isDestroyed()) win.loadURL(serverProven() ? URL_BASE : splash(NOT_OURS)).catch(() => {})
+}
 // Quitting leaves the server (and your agents) running. This stops the server; agents keep
 // running in the terminal host unless Keep agents running is off (Settings › General).
 function stopServer() {
@@ -1028,6 +1069,7 @@ function floatAt(w, h) {
 }
 function showFloat() {
   if (float && !float.isDestroyed()) { if (!float.isVisible()) float.showInactive(); return }
+  if (!gate.proven) return // (a server the app can't prove it started: servergate.js)
   const W = 324, H = 150
   const at = floatAt(W, H)
   float = new BrowserWindow(floatWindow({ width: W, height: H, x: at.x, y: at.y, title: `${APP_NAME} card`, preload: path.join(__dirname, 'preload.js') }))
@@ -1171,6 +1213,8 @@ ipc.on('bridge:float-move', (e, x, y) => {
 // an ask to allow something, an agent's notification) brings this computer's back first, rather
 // than telling the other's.
 async function mainReady() {
+  // (Its page only from the server the app proved it started: servergate.js.)
+  if (BUNDLED && !(await proveServer())) return null
   if (!win || win.isDestroyed()) {
     await createWindow()
     await new Promise((r) => setTimeout(r, 1500)) // the page sets itself up
@@ -1183,6 +1227,7 @@ async function mainReady() {
 // gesture: as if you'd clicked in the main window (watching a screen asks for one).
 const tellMain = async (js, show, gesture = false) => {
   const w = await mainReady()
+  if (!w) return null
   if (show) { if (w.isMinimized()) w.restore(); w.show(); w.focus() }
   return w.webContents.executeJavaScript(js, gesture).catch(() => {})
 }

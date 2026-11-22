@@ -73,7 +73,9 @@ function fresh(nonce, ms) {
 export function fromWindow(req, here) {
   if (req._fromWindow !== undefined) return req._fromWindow
   let ok = false
-  const m = /^1\.(\d{12,16})\.([A-Za-z0-9_-]{16,64})\.([A-Za-z0-9_-]{43})$/.exec(String(req.headers[HEADER] || ''))
+  // (A body the server didn't hash as it came, one that isn't JSON, can't be the one the MAC is over.)
+  const hasBody = Number(req.headers['content-length'] || 0) > 0 || !!req.headers['transfer-encoding']
+  const m = hasBody && req.bodySha256 == null ? null : /^1\.(\d{12,16})\.([A-Za-z0-9_-]{16,64})\.([A-Za-z0-9_-]{43})$/.exec(String(req.headers[HEADER] || ''))
   if (current && here && m && Math.abs(Date.now() - Number(m[1])) <= SKEW && same(macFor(current, req.method, hereOf(req.socket), req.originalUrl || req.url, m[1], m[2], req.bodySha256 || ''), m[3])) ok = fresh(m[2], Number(m[1]))
   // (A test's browser page, in the tests only: appkeys.js testHeader.)
   else if (current && here && appKeys().testHeader && same(String(req.headers[HEADER] || ''), `test.${current}`)) ok = true

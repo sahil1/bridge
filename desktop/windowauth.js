@@ -18,7 +18,10 @@ const same = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(Strin
 // A file there that can't be opened (its keychain item denied this time, or damaged) is never
 // written over: it's moved aside (<file>.unreadable) and tried again at the next start, and until it
 // opens this run has no signatures' key (unreadable: said in Settings › Studio), never a new one,
-// which would leave every saved signature sealed with a key nobody has.
+// which would leave every saved signature sealed with a key nobody has. Tried again and still not
+// opening (retried), Settings › Studio offers Start Over, behind Touch ID, the Mac's password or
+// Windows Hello (server/signing.js): startOver() keeps the file that won't open (<file>.unreadable-
+// <time>) and makes new keys; the signatures sealed with the old ones are then set aside, and said.
 function keysAt(file, safeStorage, { listen = null } = {}) {
   const can = (() => { try { return !!safeStorage?.isEncryptionAvailable() } catch { return false } })()
   const store = process.platform === 'darwin' ? 'keychain' : process.platform === 'win32' ? 'dpapi' : (() => { try { return safeStorage.getSelectedStorageBackend?.() === 'basic_text' ? 'basic' : 'secret-service' } catch { return 'basic' } })()
@@ -27,11 +30,12 @@ function keysAt(file, safeStorage, { listen = null } = {}) {
   let k = null
   // (Kept before, and no keychain to open it with this time: as unreadable, never replaced.)
   let unreadable = !can && fs.existsSync(file)
+  let retried = false
   if (can && fs.existsSync(file)) {
     try { k = open(file) } catch { unreadable = true }
-    if (unreadable) { try { if (!fs.existsSync(aside)) fs.renameSync(file, aside) } catch { /* left where it is */ } }
+    if (unreadable) { try { if (!fs.existsSync(aside)) fs.renameSync(file, aside); else retried = true } catch { /* left where it is */ } }
   } else if (can && fs.existsSync(aside)) {
-    try { k = open(aside); fs.renameSync(aside, file) } catch { unreadable = true; k = null }
+    try { k = open(aside); fs.renameSync(aside, file) } catch { unreadable = true; retried = true; k = null }
   }
   if (k && typeof k.window !== 'string') { k = null; unreadable = true }
   if (unreadable) k = { window: rand(), key: null, launch: null, state: null }
@@ -44,14 +48,26 @@ function keysAt(file, safeStorage, { listen = null } = {}) {
   return {
     get window() { return k.window },
     get launch() { return k.launch },
-    kept: can && !unreadable,
-    unreadable,
+    get kept() { return can && !unreadable },
+    get unreadable() { return unreadable },
+    // Start Over (only once the keys that won't open were tried again): they're kept beside, under a
+    // name of their own, and new ones made and kept. true when it did.
+    startOver() {
+      if (!unreadable || !retried || !can) return false
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+      for (const f of [aside, file]) { try { if (fs.existsSync(f)) fs.renameSync(f, `${file}.unreadable-${stamp}${f === file ? '-b' : ''}`) } catch { return false } }
+      k = { window: rand(), key: crypto.randomBytes(32).toString('base64'), launch: null, state: null }
+      unreadable = false
+      retried = false
+      save()
+      return true
+    },
     // For a server about to start: a new secret for this start, kept (so a later run of the app can
     // check the same server), and what goes on its fd 3, with where the app talks to it (listen).
     forStart() {
       k.launch = rand()
       save()
-      return JSON.stringify({ window: k.window, key: k.key, launch: k.launch, state: k.state, store: can && !unreadable ? store : null, listen, unreadable })
+      return JSON.stringify({ window: k.window, key: k.key, launch: k.launch, state: k.state, store: can && !unreadable ? store : null, listen, unreadable, startOver: unreadable && retried && can })
     },
     // What the server says of the signatures' list ({ v, ask }), kept for its next start.
     heard(st) {

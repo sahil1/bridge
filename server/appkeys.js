@@ -51,6 +51,8 @@ function read() {
     store: ['keychain', 'dpapi', 'secret-service', 'basic'].includes(j?.store) ? j.store : null,
     listen: j?.listen && /^(127\.0\.0\.1|::1)$/.test(String(j.listen.host)) && Number.isInteger(j.listen.port) && j.listen.port > 0 && j.listen.port < 65536 ? { host: j.listen.host, port: j.listen.port } : null,
     unreadable: j?.unreadable === true,
+    // (Tried again and still not opening: Start Over can be offered, signing.js.)
+    startOver: j?.unreadable === true && j?.startOver === true,
     testHeader: fromTest && j?.testHeader === true,
   }
   return got
