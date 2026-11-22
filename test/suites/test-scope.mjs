@@ -2,7 +2,7 @@
 // says which tests it would run as JSON without running any. CI works that out first: a pull
 // request's or a push's tests are only those for the files it changes (none for a change no test
 // covers, and then no machine is set up for them), a nightly's those for what changed since the last
-// nightly, and a release's tag, Friday night's run and a run by hand every test. The iPhone and
+// nightly, and a release's tag, the run each night and a run by hand every test. The iPhone and
 // Android builds go with every test, or a change to mobile/. Which tests a change picks
 // (lib/scope.mjs pick): a change made up here for each rule.
 import fs from 'node:fs'
@@ -142,7 +142,7 @@ ok(/node test\/run\.mjs --list \$args/.test(scope) && /echo "count=\$count"/.tes
 ok(/elif \[ "\$EVENT" = pull_request \]; then base="\$PR_BASE"/.test(scope) && /elif \[ "\$EVENT" = push \]; then base="\$BEFORE"/.test(scope), 'a pull request: since its base; a push to main: since the commit before')
 ok(/if \[ -n "\$ASKED" \]; then base="\$ASKED"/.test(scope) && /refs\/tags\/\*\ \]\]; then base=$/m.test(scope) && /args=--all; mobile=true/.test(scope), 'asked for a base (a nightly): since that; a tag: every test')
 ok(/isn't a commit here, so every test runs/.test(scope), 'a base that isn\'t a commit here: every test, never none')
-ok(/schedule:\s*\n\s*- cron: '0 6 \* \* 6'/.test(test), 'Friday night (6:00 UTC on Saturday): every test on main')
+ok(/schedule:\s*\n\s*- cron: '30 8 \* \* \*'/.test(test), 'each night (8:30 UTC): every test on main')
 ok(/test:\n\s*name: Tests \(\$\{\{ matrix\.name \}\}\)\n\s*needs: scope\n\s*if: needs\.scope\.outputs\.count != '0'/.test(test) && /node test\/run\.mjs \$ARGS --lanes 2/.test(test), 'the test machines only when a test applies, running just those')
 ok(/- name: Tests\n\s*if: steps\.share\.outputs\.count != '0'\n\s*shell: bash\n\s*env:\n\s*ARGS: \$\{\{ needs\.scope\.outputs\.args \}\} \$\{\{ matrix\.share \}\}\n\s*run: node test\/run\.mjs \$ARGS /.test(test), 'the tests in bash on Windows too, where PowerShell reads $ARGS as its own empty list (and ran none, 16 Nov)')
 const job = test.split('\n  test:\n')[1]?.split('\n  ios:\n')[0] || ''
