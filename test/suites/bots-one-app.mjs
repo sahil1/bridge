@@ -152,7 +152,7 @@ try {
     await card.waitFor({ timeout: 10000 })
     const move = card.locator('[data-setting="connection-share"][data-move="true"]')
     ok(/Move hiring_bot to @maya_bot/.test(await move.innerText().catch(() => '')), 'a phone: the move offered on hiring_bot\'s own card', await card.innerText())
-    await card.scrollIntoViewIfNeeded()
+    await move.scrollIntoViewIfNeeded()
     await sleep(300)
     const faults = await fits(p, `.bh .cn-card[data-connection="${mine}"]`)
     ok(!Object.keys(faults).length, 'the card fits a phone: nothing too small to tap, off the screen or cut short', faults)
