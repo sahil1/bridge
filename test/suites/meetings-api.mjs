@@ -512,9 +512,11 @@ try {
   ok(!await until(() => boardAsks().length > b0, 4000) && (await kit.api(`/meetings/${LB2.id}`)).liveBoard.id === null, 'off for a meeting, nothing is sent and there\'s no board')
   await kit.api(`/meetings/${LB2.id}/stop`, {})
 
-  // With a model on this computer (Ollama, the stand-in's): it's asked there, and the meeting says so.
+  // With a model on this computer (Ollama, the stand-in's) for the board and live AI Assist (their
+  // own rows in Models for Each Task, whatever writes the notes): it's asked there, and the meeting
+  // says so.
   await kit.api('/providers/ollama', { values: { OLLAMA_HOST: model.url } }, 'PUT')
-  await kit.api('/settings', { meetings: { model: 'ollama:llama3.1:8b' } }, 'PATCH')
+  await kit.api('/settings', { jobModels: { diagrams: ['ollama:llama3.1:8b'], live: ['ollama:llama3.1:8b'] } }, 'PATCH')
   const LL = await kit.api('/meetings', { title: 'Offsite plan', call: false })
   await kit.api(`/meetings/${LL.id}/board`, { on: true })
   said(LL.id, [['them', 2, `We decided to hold the offsite in Lisbon. ${WORDS}`]])
@@ -537,7 +539,7 @@ try {
   ok(laAsked.length === 1 && laAsked[0].path === '/api/chat' && laAsked[0].model === 'llama3.1:8b' && laAsked[0].format === 'json_schema' && la.length === 1 && la[0].model === 'ollama:llama3.1:8b' && /time difference between Lisbon and London/.test(la[0].q), 'answers with a model on this computer: asked there, held to the schema, and it answers', { asked: laAsked.map((x) => [x.path, x.model, x.format]), la })
   await kit.api(`/meetings/${LA.id}/stop`, {})
   await kit.api(`/meetings/${LA.id}/assist`, { on: false })
-  await kit.api('/settings', { meetings: { model: 'openai:gpt-5', board: false }, trials: { 'meeting-board': false, 'assist-answers': false } }, 'PATCH')
+  await kit.api('/settings', { meetings: { board: false }, jobModels: { diagrams: null, live: null }, trials: { 'meeting-board': false, 'assist-answers': false } }, 'PATCH')
 
   // ---------- Files you got lately ----------
   // In Downloads or on the Desktop, from around when it was: one named after someone in it, a
@@ -926,7 +928,11 @@ process.exit(1)`)
   await send(RR.id, Buffer.concat([pcm(6), pcm(2, true), pcm(1)]))
   await kit.api(`/meetings/${RR.id}/stop`, {})
   const r4 = await until(async () => { const m = await kit.api(`/meetings/${RR.id}`); return m.status === 'done' && !m.summarizing && !m.summaryStale && model.asked(/Write meeting notes in Markdown/).length > s0 && m }, 20000)
-  ok(!!r4 && r4.seconds === 33 && r4.transcript.filter((l) => l.t0 >= 29).length === 1, 'ended again, its summary is written again from all of it', r4 ? [r4.seconds, r4.summaryStale, r4.transcript.map((l) => [l.src, l.t0])] : (await kit.api(`/meetings/${RR.id}`)).summaryStale)
+  // It carried on from where it had got to: its 24 s, or past its last line to the second when a
+  // line was heard ending after that (the call's last words, read again, can end at 24.1 s); then
+  // the 9 s recorded since.
+  const from = Math.max(24, Math.ceil(Math.max(0, ...(r3?.transcript || []).map((l) => l.t1 || 0))))
+  ok(!!r4 && r4.resumedFrom === from && r4.seconds === from + 9 && r4.transcript.filter((l) => l.t0 >= from + 5).length === 1, 'ended again, its summary is written again from all of it', r4 ? [r4.seconds, r4.resumedFrom, from, r4.summaryStale, r4.transcript.map((l) => [l.src, l.t0, l.t1])] : (await kit.api(`/meetings/${RR.id}`)).summaryStale)
   await kit.api('/settings', { meetings: { autoSummary: false } }, 'PATCH')
 
   // ---------- Combined meetings ----------
@@ -994,7 +1000,7 @@ process.exit(1)`)
   ok((asked.match(/"Offsite"/g) || []).length === 2 && /Roadmap themes agreed/.test(asked) && /zebra hiring/.test(asked) && !/zebra roadmap across the day/.test(asked), 'a question about your meetings reads its meetings, not it as well', asked.slice(0, 600))
   await kit.api(`/meetings/${W2.id}/ask`, { question: 'What was the afternoon about?' })
   ok(/# Meeting 2 of 2: "Offsite"[^\n]*\n\n\[0:01\] You: Afternoon: zebra hiring/.test(model.asked(/Answer from the meeting only/).at(-1) || ''), 'a question on the combined meeting reads its meetings\' transcripts')
-  await kit.api('/settings', { trials: { 'meeting-insights': true } }, 'PATCH')
+  await kit.api('/settings', { meetings: { insights: true } }, 'PATCH')
   const ins = await tryApi('/meetings/insights?days=all')
   const listed = (await kit.api('/meetings')).meetings.filter((x) => !x.archived && !x.parts && !['recording', 'paused'].includes(x.status)).length
   ok(ins.total === listed, 'Meeting Insights counts its meetings, not it on top', { listed, total: ins.total, error: ins.error })

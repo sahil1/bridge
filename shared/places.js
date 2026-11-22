@@ -55,6 +55,12 @@ export const SETTINGS = {
   accounts: ['providers', 'Accounts'],
   cloud: ['providers', 'Cloud Agents'],
   'mcp-server': ['mcp', 'Bridge AI as an MCP Server'],
+  // Out of Beta Features in 3.22.0, each in its own place.
+  home: ['you', 'Home'],
+  'scheduled-routines': ['agents', 'Scheduled Routines'],
+  'meeting-insights': ['meetings', 'Meeting Insights'],
+  tidy: ['dictation', 'Tidy what I say'],
+  'enter-key': ['you', 'Enter Key'],
 }
 
 // Places outside Settings a message names, as names from the top: Bots' tabs (the sidebar's Bots,

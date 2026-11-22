@@ -16,6 +16,9 @@
 //   when there is one (Open, Reopen or Update Bridge AI there, Allow Screen Recording there), and
 //   what it's waiting for meanwhile; never a bare Try again when the reason is known. Each one also
 //   goes in this computer's log (server/remote.js didntShow), as that computer's has it.
+//   That computer locked (macOS and Windows let no app show a locked screen): said before the
+//   password, which waits until it's unlocked there, then goes on by itself; locked in a session,
+//   said over the last picture, nothing pressed, and the picture comes back by itself.
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'
 import { useMedia, store } from '../layout.jsx'
@@ -23,7 +26,7 @@ import { t, tn, locale } from '../../i18n/index.js'
 import { baseFor, remoteStatus, connect, pointOn, setViewing } from './remote.js'
 import { hostApi, viaRelay } from '../../api.js'
 import { newer } from '../../../shared/version.js'
-import { SWAP, swapsKeys, RATE, ACCESS, fitIn } from '../../../shared/remote.js'
+import { SWAP, swapsKeys, RATE, ACCESS, LOCKED_WAIT_MINUTES, fitIn } from '../../../shared/remote.js'
 import { where } from '../settings/search.js'
 import './remote.css'
 
@@ -112,6 +115,7 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
   const [box, setBox] = useState({ w: 0, h: 0 }) // the room for the picture
   const [choose, setChoose] = useState(null) // Which screen? up: 'start' (as the session starts) | 'pick'
   const [thumbs, setThumbs] = useState({}) // a still of each screen: id -> picture
+  const [locked, setLocked] = useState(null) // that computer's screen locked: { os }
   const [, tick] = useState(0)
   const root = useRef(null)
   const bar = useRef(null)
@@ -135,6 +139,7 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
   const retried = useRef(false) // closed before it said anything: connected again once, by itself
   const said = useRef(null) // the last error put in the log
   const updateLook = useRef(null) // an update there, looked at until it's back
+  const lockedNow = useRef(false) // (locked: nothing sent for it to press)
   const pickedKey = machine || 'here'
   const setMode = (m) => { setModeState(m); setZoom(1); store.set('cc-remote-size', m) }
 
@@ -190,11 +195,16 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
       const text = String(m.text ?? '')
       navigator.clipboard?.writeText(text).then(() => setNote({ text: t("Copied {name}'s clipboard here ({n} characters).", { name, n: text.length }) }), () => setNote({ text: t("This browser didn't let Bridge AI write to the clipboard. {name}'s clipboard says: {text}", { name, text: text.slice(0, 200) }) }))
     } else if (m.t === 'clip-sent') setNote({ text: t("This clipboard is on {name}'s now ({n} characters).", { name, n: Number(m.n) || 0 }) })
-    else if (m.t === 'error') { if (m.keep) setNote({ text: m.why, bad: true }); else { setWait(null); setErr({ why: m.why, code: m.code, cause: m.cause || null, until: m.until || null, by: m.by || null, at: m.at || null, reopen: !!m.reopen, fix: m.fix || null, waits: !!m.waits }); setGate(null); setSess((x) => ({ ...x, phase: 'ended' })) } }
+    else if (m.t === 'error') { if (m.keep) setNote({ text: m.why, bad: true }); else { setWait(null); unlocked(); setErr({ why: m.why, code: m.code, cause: m.cause || null, until: m.until || null, by: m.by || null, at: m.at || null, reopen: !!m.reopen, fix: m.fix || null, waits: !!m.waits, detail: typeof m.detail === 'string' ? m.detail : null }); setGate(null); setSess((x) => ({ ...x, phase: 'ended' })) } }
+    // That computer's screen locked: before the password, why nothing is asked yet; in a session, the
+    // last picture kept (a direct one paused on it), and nothing pressed, until it's unlocked.
+    else if (m.t === 'locked') { lockedNow.current = true; held.current.clear(); buttons.current.clear(); setLocked({ os: m.os || st?.os || null }); video.current?.pause?.() }
+    else if (m.t === 'unlocked') { unlocked(); if (video.current?.srcObject) video.current.play().catch(() => {}) }
     // A fix being carried out there: what it waits for, until the screen (or why not) comes.
     else if (m.t === 'wait') { setErr(null); setWait({ why: m.why, until: m.until || null }); setSess((x) => ({ ...x, phase: 'connecting' })) }
-    else if (m.t === 'ended') { setWait(null); setSess((x) => ({ ...x, phase: 'ended', text: m.why === 'here' ? t('Stopped on {name}.', { name }) : m.why === 'stopped' ? t('Stopped from {device}.', { device: m.by || t('another of your devices') }) : m.text })) }
+    else if (m.t === 'ended') { setWait(null); unlocked(); setSess((x) => ({ ...x, phase: 'ended', text: m.why === 'here' ? t('Stopped on {name}.', { name }) : m.why === 'stopped' ? t('Stopped from {device}.', { device: m.by || t('another of your devices') }) : m.text })) }
   }
+  const unlocked = () => { lockedNow.current = false; setLocked(null) }
 
   // The session: as long as this is open. Another of its screens goes over the same one. It starts on
   // the screen picked last time for this computer, while it's still there, else the main one; on a
@@ -202,6 +212,7 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
   const can = !!st?.screen?.can || !!fixing
   useEffect(() => {
     if (!can) return
+    let mine = true // (a session closed since, for another, is closed once that one has started)
     heard.current = false
     setSess({ phase: 'connecting' })
     setGate(null)
@@ -211,6 +222,7 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
     setNote(null)
     setChoose(null)
     setThumbs({})
+    unlocked()
     askedAtStart.current = false
     const last = store.get(PICKED, {})?.[pickedKey]
     const was = (st.screen?.sources || []).find((x) => x.kind === 'screen' && x.id === last)
@@ -237,16 +249,19 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
         message: (m) => { heard.current = true; onMessage(m) },
         // Closed before it said anything (the link dropped a moment): connected again once, by
         // itself; again, said. A fix offered in the session can't be chosen any more once it's closed.
+        // Closed later with nothing said (that computer says why it ends one: Stop there, an error):
+        // the link to it dropped, as it went to sleep or offline, or this device lost its network.
         closed: (code, reason) => {
+          if (!mine) return
           if (!heard.current && !retried.current) { retried.current = true; setRun((n) => n + 1); return }
           setWait(null)
           setErr((x) => (x ? (x.waits ? { ...x, fix: null, waits: false } : x) : heard.current ? x : { code: 'closed', why: reason || '' }))
-          setSess((x) => (x.phase === 'ended' ? x : { ...x, phase: 'ended' }))
+          setSess((x) => (x.phase === 'ended' ? x : { ...x, phase: 'ended', text: t('The connection to {name} dropped. It may have gone to sleep or offline, or this device lost its connection.', { name }) }))
         },
       },
     })
     conn.current = c
-    return () => { c.close(); conn.current = null; setViewing(session.current, false); session.current = null; if (lastUrl.current) { URL.revokeObjectURL(lastUrl.current); lastUrl.current = null } }
+    return () => { mine = false; c.close(); conn.current = null; setViewing(session.current, false); session.current = null; if (lastUrl.current) { URL.revokeObjectURL(lastUrl.current); lastUrl.current = null } }
   }, [can, base, run]) // eslint-disable-line react-hooks/exhaustive-deps
   // Which screen? up: a still of each, asked for (that computer sends them only in a session).
   useEffect(() => { if (choose && sess.phase === 'live') conn.current?.send({ t: 'thumbs?' }) }, [choose, sess.phase])
@@ -257,7 +272,7 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
   const live = sess.phase === 'live'
   const media = () => (sess.mode === 'p2p' ? video.current : img.current)
   const doSwap = swap ?? swapsKeys(HERE, hello?.os)
-  const send = (evs) => conn.current?.input(evs)
+  const send = (evs) => { if (!lockedNow.current) conn.current?.input(evs) }
   const releaseAll = () => {
     const evs = [...held.current].map((code) => ({ t: 'key', code, down: false }))
     held.current.clear()
@@ -522,6 +537,16 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
   const rate = st && sess.mode === 'relay' ? (hello?.rate || RATE.own) : null
   const limits = st?.access?.limits || ACCESS
   const takeable = !allowed && !!ctl?.on && cur?.kind === 'screen'
+  // Why control isn't there, in this device's language (that computer says it in English: its
+  // reasons, in the order it weighs them, server/remote.js controlWhy and controlChanged).
+  const setting = t('Let my other devices control this computer')
+  const ctlWhy = !ctl?.why ? null
+    : !ctl.on ? (st?.access?.password === false || st?.control?.needs === 'password'
+      ? t('Control needs a Remote Access Password on {name}. Set one there in {place}, then turn on "{setting}".', { name, place: where('remote'), setting })
+      : t('Control is off on {name}. Turn on "{setting}" there, in {place}.', { name, setting, place: where('remote') }))
+      : cur?.kind !== 'screen' ? t('Control works on a whole screen: pick one of the screens to control it.')
+        : ctl.idle ? t('View only now: nothing was pressed for {n} minutes. Choose Control to take it again.', { n: limits.idleMinutes || ACCESS.idleMinutes })
+          : t('Control is on now: choose Control to use it.') // (turned on there while this was view only)
   const record = tn('{name} shows that its screen is being seen, with Stop, and keeps a record of it.', { name: <b key="n">{name}</b> })
 
   // What shows in the middle of the stage until the picture does, and when it's gone.
@@ -534,6 +559,11 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
         device: t("{name} doesn't let this device connect. That's changed at {name} itself, in {place}.", { place: where('remote-devices'), name }),
         blocked: t("{name} doesn't let this device connect. That's changed at {name} itself, in {place}.", { place: where('remote-devices'), name: err.at || name }),
         stopped: t('Stopped from {device}.', { device: err.by || t('another of your devices') }),
+        // (What that computer says in English, said here in this device's language.)
+        trial: t('Remote Screen and Preview is off on {name}. Turn it on there in {place}.', { name, place: where('beta-remote-screen') }),
+        off: t('Remote Screen and Preview was turned off on {name}.', { name }),
+        changed: t('The Remote Access Password changed on {name}. Connect again.', { name }),
+        lost: t('The Bridge AI app on {name} stopped sharing its screen.', { name }),
         timeout: t("The password wasn't typed in time. Try again."),
         screenPermission: t("macOS doesn't let Bridge AI record the screen on {name}. On {name}, turn on Bridge AI in System Settings › Privacy & Security › Screen & System Audio Recording, then open Bridge AI again there.", { name }),
         reopen: t("Screen Recording was turned on for Bridge AI on {name} after it opened, and macOS lets it record only once it's reopened.", { name }),
@@ -545,8 +575,10 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
         offline: t("{name} isn't reachable just now: it may be asleep, or offline.", { name }),
         closed: t('The connection to {name} closed before its screen showed.', { name }),
         updateSlow: t("Bridge AI on {name} hasn't come back from its update yet. Try again in a minute.", { name }),
+        capture: t("Bridge AI couldn't start showing this screen. Try again; if it keeps happening, reopen Bridge AI on {name}.", { name }),
+        screenLocked: t("{name} stayed locked for {n} minutes, so this stopped. View it again once it's unlocked there.", { name, n: LOCKED_WAIT_MINUTES }),
       }
-      const icon = err.code === 'locked' ? 'lock' : ['denied', 'unanswered', 'device', 'blocked', 'stopped'].includes(err.code) ? 'ban' : 'alert'
+      const icon = err.code === 'locked' || err.code === 'screenLocked' ? 'lock' : ['denied', 'unanswered', 'device', 'blocked', 'stopped'].includes(err.code) ? 'ban' : 'alert'
       // The button that fixes it, when there's one; an older Bridge AI there, Update (it's what fixes
       // what one can't fix by itself), beside Try again.
       const fixWords = { open: t('Open Bridge AI on {name}', { name }), allow: t('Allow Screen Recording on {name}', { name }), reopen: t('Reopen Bridge AI on {name}', { name }) }
@@ -557,6 +589,7 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
         <div className={`rs-card c-${err.code || 'error'}`} role="alert">
           <Icon name={icon} size={22} />
           <p>{words[err.code] || err.why}</p>
+          {err.code === 'capture' && err.detail && <small className="muted rs-card-detail">{err.detail}</small>}
           {older && <p className="muted small">{t('{name} has an older Bridge AI. Updating it reopens it there, which usually sorts this.', { name })}</p>}
           <div className="rs-card-btns">
             {!windowed && <button type="button" className="btn" onClick={onClose}>{t('Close')}</button>}
@@ -564,7 +597,7 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
             {fix ? <button type="button" className="btn primary" onClick={() => doFix(fix)}>{fixWords[fix]}</button>
               : err.reopen ? <button type="button" className="btn primary" onClick={() => { conn.current?.send({ t: 'reopen' }); setErr((x) => ({ ...x, reopen: false })) }}>{t('Reopen Bridge AI on {name}', { name })}</button>
                 : update ? <button type="button" className="btn primary" onClick={updateThere}>{t('Update Bridge AI on {name}', { name })}</button>
-                  : err.code !== 'trial' && <button type="button" className="btn primary" disabled={lockedUntil > Date.now()} onClick={retry}>{t('Try again')}</button>}
+                  : err.code !== 'trial' && <button type="button" className="btn primary" disabled={lockedUntil > Date.now()} onClick={retry}>{err.code === 'screenLocked' ? t('View again') : t('Try again')}</button>}
           </div>
         </div>
       )
@@ -584,6 +617,21 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
           <p>{words[wait.why] || t('Connecting to {name}…', { name })}</p>
           {wait.why === 'update' && <small className="muted">{t("It reopens by itself when it's done, and its screen shows here then.")}</small>}
           {!windowed && <div className="rs-card-btns"><button type="button" className="btn" onClick={onClose}>{t('Close')}</button></div>}
+        </div>
+      )
+    }
+    // That computer locked: before the password, why nothing is asked yet, and that the picture
+    // starts by itself once it's unlocked there (Close stops waiting); in a session, over the last
+    // picture, the same.
+    if (locked && sess.phase !== 'ended') {
+      const words = live ? t("{name} locked: the picture comes back once it's unlocked there.", { name })
+        : locked.os === 'windows' ? t("{name} is locked. Windows doesn't let apps show the lock screen. Sign in there, and the picture starts here on its own.", { name })
+          : t("{name} is locked. macOS doesn't let apps show a locked screen. Unlock it there, and the picture starts here on its own.", { name })
+      return (
+        <div className={`rs-card c-screenLocked${live ? ' in-session' : ''}`} role="status">
+          <Icon name="lock" size={22} />
+          <p>{words}</p>
+          {!live && !windowed && <div className="rs-card-btns"><button type="button" className="btn" onClick={onClose}>{t('Close')}</button></div>}
         </div>
       )
     }
@@ -671,7 +719,7 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
             ? <button type="button" className={`btn small rs-take${controlling && allowed ? ' primary' : ''}`} aria-pressed={controlling && allowed} aria-label={controlling && allowed ? t('Controlling') : t('Control')} onClick={toggleControl} title={t('Use your mouse and keyboard on {name}. Anyone at {name} moving its mouse or pressing a key pauses you for a moment.', { name })}>
               <Icon name="keyboard" size={12} /> <span>{controlling && allowed ? t('Controlling') : t('Control')}</span>
             </button>
-            : live && ctl?.why && <span className="muted small rs-why" title={ctl.why} aria-label={t('View only')}><Icon name="eye" size={12} /> <span>{t('View only')}</span></span>}
+            : live && ctl?.why && <span className="muted small rs-why" title={ctlWhy} aria-label={t('View only')}><Icon name="eye" size={12} /> <span>{t('View only')}</span></span>}
           {live && allowed && controlling && !phone && <>
             {swapsKeys(HERE, hello?.os) || swap != null ? (
               <label className="rs-swap" title={t('⌘ here is Ctrl there, so copy, paste and undo work as you\'d expect.')}>
@@ -688,7 +736,7 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
         <div className={`rs-note ${note?.bad ? 'bad' : ''}`} role="status">
           {paused ? <><Icon name="pause" size={12} /> <span>{t('Paused: someone at {name} is using it. You can carry on in a moment.', { name })}</span></>
             : note ? <><span>{note.text}</span><button type="button" className="win-btn" onClick={() => setNote(null)} aria-label={t('Dismiss')}><Icon name="x" size={12} /></button></>
-              : <><Icon name="info" size={12} /> <span>{ctl.why}</span></>}
+              : <><Icon name="info" size={12} /> <span>{ctlWhy}</span></>}
         </div>
       )}
       <div className={`rs-stage${controlling && allowed ? ' controlling' : ''}${scrolls ? ' scrolls' : ''}${actual ? ' actual' : ''}`} ref={stage} tabIndex={0} data-mode={actual ? 'actual' : zoom > 1.01 ? 'zoom' : 'fit'}
@@ -698,7 +746,7 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
           <video ref={video} className="rs-media" muted playsInline autoPlay hidden={sess.mode !== 'p2p'} />
           <img ref={img} className="rs-media" alt="" hidden={sess.mode === 'p2p'} draggable={false} />
         </div>
-        {card && <div className={`rs-over${choose && viewing ? ' dim' : ''}`}>{card}</div>}
+        {card && <div className={`rs-over${(choose || locked) && viewing ? ' dim' : ''}`}>{card}</div>}
       </div>
       {phone && live && allowed && controlling && (
         <div className="rs-type">

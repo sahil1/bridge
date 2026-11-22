@@ -3,9 +3,10 @@ import Icon from '../Icon.jsx'
 import { AssistHead } from '../AiAssist.jsx'
 import { Guide, Connect, Owner, DiscordSetup, TeamsSetup, NewBot, AnswererList, PLATFORMS, platName } from '../settings/Bots.jsx'
 import { BotReach } from './Connections.jsx'
-import { ConnectionCard } from './ConnectionCard.jsx'
+import { ConnectionCard, UseForAll } from './ConnectionCard.jsx'
 import { api } from '../../api.js'
 import { t } from '../../i18n/index.js'
+import { useEnter, EnterHint } from '../EnterHint.jsx'
 import { where } from '../settings/search.js'
 import './bots-page.css'
 
@@ -294,7 +295,7 @@ function ConnectCard({ d, save, reload, again, platform }) {
       <div className="seg" role="tablist" aria-label={t('Where It Answers')}>
         {PLATFORMS.map(([k, label]) => <button key={k} type="button" role="tab" aria-selected={at === k} className={at === k ? 'on' : ''} onClick={() => setAt(k)}>{label}</button>)}
       </div>
-      <BotReach key={`reach-${at}`} d={d} platform={at} reload={reload} />
+      <BotReach key={`reach-${at}`} d={d} platform={at} reload={reload} offer={!via && <OwnForAll key={`own-${at}`} platform={at} reload={reload} />} />
       {via?.shared
         ? <SharedSteps key={via.id} id={via.id} d={d} platform={at} />
         : (
@@ -311,17 +312,34 @@ function ConnectCard({ d, save, reload, again, platform }) {
 }
 // The shared connection's own card (its app's steps, tokens and you there) until it's connected
 // with you there, made once for every bot on it; then this bot's own checklist, which ticks itself.
+// (With every connection beside it, so one never set up offers a bot's own app that's connected
+// instead, as on Connections, before the steps to make a second app.)
 function SharedSteps({ id, d, platform }) {
-  const [c, setC] = useState(null)
-  const load = () => api(`/connections/${id}`).then(setC, () => {})
+  const [all, setAll] = useState(null)
+  const load = () => api('/connections').then((x) => setAll(x.connections || []), () => {})
   useEffect(() => {
     load()
     const every = setInterval(() => { if (!document.hidden) load() }, 4000)
     return () => clearInterval(every)
   }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
+  const c = (all || []).find((x) => x.id === id) || null
   if (!c) return null
-  if (c.state !== 'connected' || !c.owner) return <ConnectionCard c={c} reload={load} open where="chat" />
+  if (c.state !== 'connected' || !c.owner) return <ConnectionCard c={c} reload={load} open where="chat" all={all} />
   return <Guide key={platform} d={d} platform={platform} where="chat" />
+}
+
+// No connection on a platform yet, where another bot's own app there is connected: that app for all
+// your bots, in one step (Use it for all your bots, as its card on Connections offers), before making
+// a second app for what the first does already.
+function OwnForAll({ platform, reload }) {
+  const [list, setList] = useState(null)
+  const [done, setDone] = useState(null)
+  const load = () => api('/connections').then((x) => setList(x.connections || []), () => {})
+  useEffect(() => { load() }, [platform]) // eslint-disable-line react-hooks/exhaustive-deps
+  if (done) return <p className="st-note ok" role="status" data-setting="connection-done"><Icon name="check" size={13} /><span>{done}</span></p>
+  const own = (list || []).find((c) => c.platform === platform && !c.shared && c.state === 'connected' && !c.paused)
+  if (!own) return null
+  return <UseForAll own={own} shared={null} reload={() => { load(); reload?.() }} onDone={(text) => setDone(text)} />
 }
 
 const EXAMPLES = () => [
@@ -407,6 +425,8 @@ export default function BotChat({ id = null, draft = false, phone = false, d = n
   const said = msgs.some((m) => m.who === 'you')
   const created = msgs.some((m) => m.kind === 'created')
   const showConnect = live && d && (created || !msgs.length || d.state !== 'connected')
+  // Enter as Settings › You › Enter Key has it (src/enter.js); a phone's keyboard on the screen sends, as before.
+  const enter = useEnter(text, () => ask(text))
   return (
     <div className={`bc${phone ? ' phone' : ''}`} data-setting="bots-chat">
       <AssistHead what={!id ? t('New bot') : t('Setting up {bot}', { bot: name })} onClose={onClose} closeLabel={t('Close AI Assist')}>
@@ -457,8 +477,9 @@ export default function BotChat({ id = null, draft = false, phone = false, d = n
       </ol>
       {error && !(draft && s?.proposal) && <p className="error-text small bc-error" role="alert">{error}</p>}
       <form className="bc-say" onSubmit={(e) => { e.preventDefault(); ask(text) }}>
-        <textarea className="st-input" rows={phone ? 2 : 3} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); ask(text) } }}
+        <textarea className="st-input" rows={phone ? 2 : 3} value={text} onChange={(e) => { setText(e.target.value); enter.box.onSelect(e) }} onKeyDown={enter.onKeyDown} {...enter.box}
           placeholder={live ? t('Say what to change') : draft ? t('Say what to change in it') : t('What should it do, and who is it for?')} aria-label={live || draft ? t('Say what to change') : t('What should it do, and who is it for?')} disabled={busy === 'ask'} />
+        <EnterHint show={enter.mid} />
         <button type="submit" className="btn small primary" disabled={!text.trim() || !!busy} aria-label={t('Send')}><Icon name="send" size={13} /></button>
       </form>
     </div>

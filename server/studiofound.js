@@ -25,6 +25,7 @@ import { spawn } from 'node:child_process'
 import { DATA, writeFileAtomic } from './paths.js'
 import { opens, kindOf } from './studio.js'
 import { mayLook } from './projects.js'
+import { isLockFile } from '../shared/lockfile.js'
 import { placeEn } from '../shared/places.js'
 
 const DIR = path.join(DATA, 'studio')
@@ -218,7 +219,7 @@ async function look(roots, { signal, until, budget }) {
       try { list = await fsp.readdir(dir, { withFileTypes: true }) } catch { continue }
       left -= list.length
       for (const e of list) {
-        if (e.name.startsWith('.') || e.name.startsWith('~$') || SKIP.has(e.name)) continue
+        if (e.name.startsWith('.') || isLockFile(e.name) || SKIP.has(e.name)) continue
         const p = path.join(dir, e.name)
         const ext = path.extname(e.name).toLowerCase()
         const apple = APPLE.has(ext) && !!OTHER[ext] // a Mac's Keynote, Pages or Numbers, maybe a package
@@ -293,7 +294,7 @@ export async function found({ roots = [], own = null, home = os.homedir(), signa
       if (!x.file) continue
       const file = path.resolve(x.file)
       const isOwn = ownDir && file.startsWith(ownDir + path.sep)
-      if (!lists(file) || (!isOwn && hiddenPath(file, home)) || path.basename(file).startsWith('~$')) continue
+      if (!lists(file) || (!isOwn && hiddenPath(file, home)) || isLockFile(file)) continue
       const at = Math.max(x.used || 0, x.changed || 0)
       if (!at) continue
       const was = by.get(file)

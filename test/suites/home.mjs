@@ -1,16 +1,18 @@
-// Home, a beta feature (`home`), in the browser named by BRIDGE_TEST_BROWSER. First what goes in it
+// Home (home.on, on unless you turn it off in Settings › You), in the browser named by BRIDGE_TEST_BROWSER. First what goes in it
 // (server/home.js, no server): what needs you (questions, permissions, failed runs, Chief of Staff's
 // tasks that wait on you), what's ready to look at (finished work, a meeting's notes with action
 // items not handed on, a whiteboard an agent drew since you looked, a task Chief of Staff finished),
 // what's coming up (its tasks), and the rest for Everything; a whiteboard you opened isn't news;
 // one row per thing (the same task twice, on one computer or two); the day a task names; an agent's
 // last message cut at a whole word; what's pinned, newest first, kept when Bridge AI starts again.
-// Then two Bridge AIs on relays of their own, linked: "Studio" with Home on and "Desk" with it off.
-// Off, Home's route says how to turn it on and nothing leads to it. On, Studio's Home lists a stand-in
+// Then two Bridge AIs on relays of their own, linked: "Studio" with Home on, as it starts, and "Desk"
+// with it turned off. Off, Home's route says where to turn it on and nothing leads to it. On, Studio's Home lists a stand-in
 // Claude Code asking for permission, the tasks that wait on you on both computers (Desk's asked for
 // with its summary), a meeting's notes with two action items, a whiteboard a Chief of Staff drew and
 // not one you made, the tasks coming up; a reply to a task with no Chief of Staff running says so.
-// In the app, on a desktop: it opens at Home; the sidebar's Home row and the top bar's chip lead
+// In the app, on a desktop: a window with nowhere to go back to (as on a new install) opens at Home;
+// switched to another computer and back, reloaded, or opened again in a new window (the app starting)
+// it stays where you were, Home never put over it; the sidebar's Home row and the top bar's chip lead
 // there; Yes answers the agent in place; a filter by kind and by device; the next meeting (the
 // calendar stood in for) with its brief from the last one in the series and the files in its invite;
 // To Chief of Staff hands the meeting's action items on; a whiteboard opens; a reply that can't go
@@ -275,16 +277,16 @@ try {
   const ra = await startRelay('home-studio')
   const rc = await startRelay('home-desk')
   relays.push(ra, rc)
-  const a = await kitWith('Studio', ra)
-  const c = await kitWith('Desk', rc)
+  const a = await kitWith('Studio', ra, { home: undefined }) // (as Bridge AI starts: on)
+  const c = await kitWith('Desk', rc, { home: { on: false } })
   await until(async () => (await a.api('/relay')).online && (await c.api('/relay')).online, 20000)
   const pair = (await a.api('/relay/pair', {})).pairing
   await c.api('/machines', { link: `${ra.url} ${pair.code}` })
   ok(!!(await until(async () => (await a.api('/machines')).machines.find((m) => m.name === 'Desk' && m.online), 30000)), 'Studio and Desk are linked')
 
-  // Off to start with: its route says how to turn it on.
-  const off = await err(a, '/home')
-  ok((await a.api('/config')).trials?.home === false && off?.status === 404 && /Home is a beta feature\. Turn it on in Settings › About & Updates › Beta Features/.test(off.message), 'Home is a beta feature, off to start with: its route says how to turn it on', off?.message)
+  // On as it starts, out of Beta Features; turned off (Desk), its route says where to turn it on.
+  const off = await err(c, '/home')
+  ok((await a.api('/config')).features?.home === true && !('home' in ((await a.api('/config')).trials || {})) && (await c.api('/config')).features?.home === false && off?.status === 404 && /Home is turned off\. Turn it on in Settings › You › Home\./.test(off.message), 'Home is on as Bridge AI starts, and no Beta Feature; turned off, its route says where to turn it on', off?.message)
   // What's on Studio: an agent asking for permission, tasks, a meeting with action items, boards.
   const dir = path.join(a.home, 'code', 'shop')
   fs.mkdirSync(dir, { recursive: true })
@@ -304,11 +306,10 @@ try {
   const drawn = await a.api('/boards', { title: 'Auth flow v2', source: { kind: 'mermaid', text: 'graph TD\n  A[Login] --> B[Token]' } })
   await a.api('/boards', { title: 'My sketch' })
 
-  await a.api('/settings', { trials: { home: true } }, 'PATCH')
   const list = await until(async () => { const h = await homeOf(a, '?live=1'); return h.items.some((i) => i.kind === 'agent' && i.type === 'permission' && i.qid) && h.items.some((i) => i.device === 'Desk' && i.kind === 'task') && h }, 40000, 800)
   const items = list?.items || []
   const at = (pred) => items.find(pred)
-  ok(!!list, 'turned on, it answers: Studio\'s and Desk\'s things in one list (Desk, with Home off, sends them when asked)', items.map((i) => `${i.device} ${i.id} ${i.group}`))
+  ok(!!list, 'it answers: Studio\'s and Desk\'s things in one list (Desk, with Home off, sends them when asked)', items.map((i) => `${i.device} ${i.id} ${i.group}`))
   ok(at((i) => i.kind === 'agent' && i.paneId === asking.paneId)?.group === 'needs' && at((i) => i.id === `task:${waitTask.id}` && i.device === 'Studio')?.group === 'needs' && at((i) => i.kind === 'task' && i.device === 'Desk' && i.task.title === 'Book the venue')?.group === 'needs', 'needs you: the agent asking, and the tasks that wait on you on both computers', items.filter((i) => i.group === 'needs').map((i) => `${i.device} ${i.id}`))
   const meet = at((i) => i.kind === 'meeting')
   ok(meet?.group === 'ready' && meet.unsent === 2 && at((i) => i.id === `board:${drawn.id}`)?.group === 'ready' && at((i) => i.id === 'board:My sketch')?.group === null, "ready to look at: the meeting's notes with its two action items, and the whiteboard Chief of Staff drew, not the one you made", items.filter((i) => i.kind === 'meeting' || i.kind === 'board').map((i) => [i.id, i.group, i.unsent]))
@@ -446,6 +447,22 @@ try {
     await p.locator('.ws-tab', { hasText: 'Auth flow v2' }).click()
     await p.locator('.rail-nav-btn.rail-home').click()
     ok(!!(await until(() => p.locator('.work.maxed .hm').isVisible(), 5000)), "and the sidebar's Home row")
+    // The app opened again (a new window, with the tabs as you left them, the whiteboard last):
+    // where you were, the whiteboard, and Home not put over it.
+    await p.keyboard.press('Escape')
+    await p.locator('.ws-tab', { hasText: 'Auth flow v2' }).click()
+    await until(onBoard, 5000)
+    {
+      const p2 = await ctx.newPage()
+      await p2.goto(a.url)
+      const onIt = async () => /Auth flow v2/.test(await p2.locator('.ws-tab.main').innerText().catch(() => '')) && !(await p2.locator('.work.maxed .hm').count())
+      const there = !!(await until(onIt, 20000))
+      await p2.waitForTimeout(2500)
+      ok(there && await onIt(), 'opened again in a new window (the app starting): where you were, the whiteboard, and still there once its first answers are in (Home not put over it)', await p2.locator('.ws-tab.main').innerText().catch(() => ''))
+      await p2.close()
+    }
+    await p.locator('.rail-nav-btn.rail-home').click()
+    await until(() => p.locator('.work.maxed .hm').isVisible(), 5000)
     // Everything: a lane per computer, or per kind.
     await hm.locator('.hm-every').click()
     const ey = p.locator('.ey')
@@ -1425,8 +1442,42 @@ try {
     await ctx.close()
   }
 
-  // Off again: nothing leads to it, and the app opens as it did.
-  await a.api('/settings', { trials: { home: false } }, 'PATCH')
+  // ---------- Where it opens, with a restart in the middle ----------
+  // A window left at a whiteboard; Bridge AI quits and starts again (an update, say) and the app's
+  // window opens: at the whiteboard, and Home not put over it once the first answers are in. Left at
+  // a whiteboard deleted since, or at an agent closed since: Home, saying nothing.
+  {
+    const boardTab = (id) => `view:studio:board:${encodeURIComponent(id)}`
+    const leftAt = (active) => ({ 'cc-ws': { tabs: [active], active, side: null, split: false, group: 'main' } })
+    const atHome = (pg) => pg.locator('.work.maxed .hm').isVisible().catch(() => false)
+    const soon = await a.api('/boards', { title: 'Gone soon' })
+    await a.restart()
+    {
+      const { ctx, p } = await pageAt(b, a.url, { width: 1440, store: leftAt(boardTab(drawn.id)) })
+      const onIt = async () => /Auth flow v2/.test(await p.locator('.ws-tab.main').innerText().catch(() => '')) && !(await atHome(p))
+      const there = !!(await until(onIt, 20000))
+      await p.waitForTimeout(2500)
+      ok(there && await onIt(), 'restarted, the app opened again: where it was left, the whiteboard, and Home not put over it', await p.locator('.ws-tab.main').innerText().catch(() => ''))
+      await ctx.close()
+    }
+    await a.api(`/boards/${encodeURIComponent(soon.id)}`, null, 'DELETE')
+    {
+      const { ctx, p, errors } = await pageAt(b, a.url, { width: 1440, store: leftAt(boardTab(soon.id)) })
+      const home = !!(await until(() => atHome(p), 20000))
+      const said = await p.locator('body').innerText().catch(() => '')
+      ok(home && !/Gone soon|No such whiteboard/.test(said), 'left at a whiteboard deleted since: Home, saying nothing about it', { home, said: said.slice(0, 300) })
+      ok(!errors.length, 'and no page errors', errors)
+      await ctx.close()
+    }
+    {
+      const { ctx, p } = await pageAt(b, a.url, { width: 1440, store: leftAt('w9:p99') })
+      ok(!!(await until(() => atHome(p), 20000)), 'left at an agent closed since: Home')
+      await ctx.close()
+    }
+  }
+
+  // Turned off: nothing leads to it, and the app opens where you were.
+  await a.api('/settings', { home: { on: false } }, 'PATCH')
   {
     const { ctx, p } = await pageAt(b, a.url, { width: 1280 })
     await p.waitForSelector('.rail-nav-btn', { timeout: 20000 })

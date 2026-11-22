@@ -8,10 +8,12 @@
 // long model and account named whole; Saved prompts fits too. An agent that's done working: no line
 // over the box, the same row. On each: nothing wider than the phone, past its edge, scrolling
 // sideways or cut off, every button a whole 40 px target nothing covers, and the field at 16 px (iOS
-// zooms into a smaller one).
+// zooms into a smaller one). Enter (src/enter.js): with a keyboard connected to the phone, as Enter
+// Key says (Smart: a new line with the caret back in the words, sends at the end); with its keyboard
+// on the screen, a new line as before, the send button sending.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, checks, until, browser, page, shot, phoneFaults, TEST } from '../lib/harness.mjs'
+import { startKit, checks, until, sleep, browser, page, shot, phoneFaults, TEST } from '../lib/harness.mjs'
 
 const { ok, done } = checks('phone-composer')
 const MODEL = 'us.anthropic.claude-sonnet-4-5-20250929-v1:0'
@@ -137,6 +139,35 @@ try {
     ok(!quiet.line && rowIs(quiet) && quiet.sendOn, `${at}, an agent that's done: no line over the box, and the same row, send ready`, quiet)
     await fits('an agent that\'s done', '.composer-stack', 'composer-idle')
     ok(errors.length === 0, `${at}: no page errors`, errors)
+    await ctx.close()
+  }
+
+  // Enter on the phone (src/enter.js): with a keyboard connected to it (nothing of the screen
+  // covered), as Enter Key says: the caret back in the words a new line, at the end it sends. With
+  // its keyboard on the screen (a keyboard's height of the page covered), a new line as before, at
+  // the end too; the send button sends.
+  {
+    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky', phone: true })
+    await p.waitForSelector('.tabbar button', { timeout: 20000 })
+    await p.evaluate((paneId) => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId } })), idle.paneId)
+    await until(async () => (await p.locator('.composer textarea').getAttribute('placeholder').catch(() => '')) === 'Message Billing idle…', 10000)
+    const box = p.locator('.composer textarea')
+    await box.fill('Run the billing tests')
+    for (let i = 0; i < 6; i++) await box.press('ArrowLeft')
+    await box.press('Enter')
+    ok((await box.inputValue()) === 'Run the billing\n tests', 'a keyboard connected to the phone: the caret back in the words, Enter is a new line', await box.inputValue())
+    await box.fill('Run the billing tests')
+    await box.press('Enter')
+    ok(!!(await until(async () => (await box.inputValue()) === '', 8000, 100)), 'and at the end, Enter sends', await box.inputValue())
+    await p.setViewportSize({ width: 390, height: 844 - 330 })
+    await sleep(300)
+    await box.fill('Run the billing tests again')
+    await box.press('Enter')
+    await sleep(800)
+    ok((await box.inputValue()) === 'Run the billing tests again\n', 'its keyboard on the screen: Enter at the end is a new line, as before', await box.inputValue())
+    await p.locator('.composer-stack .send').click()
+    ok(!!(await until(async () => (await box.inputValue()) === '', 8000, 100)), 'and the send button sends', await box.inputValue())
+    ok(errors.length === 0, 'Enter on the phone: no page errors', errors)
     await ctx.close()
   }
 } catch (e) {

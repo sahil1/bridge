@@ -61,18 +61,27 @@
 //     computer and a phone; peer-to-peer between two pages where the
 //     browser can (the capture page on Studio, with a canvas), said Direct; the agent's Preview tab
 //     on Laptop showing Studio's app at its own address, never Laptop's localhost;
+//   a locked screen (the desktop app's word on it, Electron stood in for): said before the password
+//     and waited for, the guardrails after, said only to a device that may connect; in a session,
+//     waited for over the last picture with nothing pressed, and taken again in the same session; 15
+//     minutes at most, by a clock the test moves on; a start that fails tried once more, then said
+//     plainly; in the viewer on a computer and a phone, light and dark;
 //   Which screen?: each display by its own name and size (desktop/remote.js, Electron stood in for, as
 //     a Mac, Windows and Linux give them), a still of each in a session only, asked first on a phone;
 //   your other devices told (BRIDGE_TEST_PUSH: what each would be sent): a session, control taken and
 //     an ask, never to the device viewing, with Stop and Block This Device carried out at Studio, and
 //     a device through Laptop blocked on Laptop; the card in every other window; Settings saying where
 //     they go, and with nowhere set up, saying so;
-//   a phone through its relay page (the apps' page), end to end, through the relay and peer-to-peer.
+//   a phone through its relay page (the apps' page), end to end, through the relay and peer-to-peer;
+//   the devices menu's control switch turned down, said there; a viewer in German told why control
+//   is off (or on now) and why a session ended there in German, not Studio's English; and the link
+//   dropping mid-session, said with why it may have, and View again once it's back.
 import fs from 'node:fs'
 import path from 'node:path'
 import http from 'node:http'
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
 import WebSocket, { WebSocketServer } from 'ws'
 import { startKit, startRelay, checks, until, browser, page, sleep, shot, changeAnswer, noServiceWorker, phoneFaults, ROOT, TEST, IS_WIN, freePort, stopTree } from '../lib/harness.mjs'
 import { linkAs } from '../lib/linkclient.mjs'
@@ -81,6 +90,11 @@ import { unpackFrame, keyFor, fitIn, pointAt, captureSize, bitrateFor, sdpBitrat
 
 const { ok, skip, done } = checks('remote-screen')
 const say = (...a) => console.log(...a)
+// A Mac and Windows say when the screen is locked (and no app may take it then); Linux doesn't.
+const LOCKS = process.platform !== 'linux'
+const OS = process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'windows' : 'linux'
+const LOCKED_SAID = OS === 'windows' ? "Windows doesn't let apps show the lock screen. Sign in there, and the picture starts here on its own." : "macOS doesn't let apps show a locked screen. Unlock it there, and the picture starts here on its own."
+const CANT_START = (name) => `Bridge AI couldn't start showing this screen. Try again; if it keeps happening, reopen Bridge AI on ${name}.`
 const enc = encodeURIComponent
 const relays = []
 const kits = []
@@ -1431,6 +1445,89 @@ try {
     ok(allowed === 1, 'Allow Screen Recording from a device: System Settings there, with the tile')
   })
 
+  // The desktop app's word on a locked screen (Electron's powerMonitor stood in for): on a Mac and on
+  // Windows, said to the server when it asks and each time it changes, numbered, and with the capture
+  // page's list of screens; the display neither woken nor kept awake while it's locked (only the lock
+  // screen would light up), and both once it's unlocked. Linux, or a system that doesn't say: nothing.
+  await part('the desktop app: a locked screen said to the server, the display not lit for it', async () => {
+    const { create } = createRequire(import.meta.url)(path.join(ROOT, 'desktop', 'remote.js'))
+    const { EventEmitter } = await import('node:events')
+    class Win {
+      constructor(o) { this.o = o; this.on_ = {}; this.webContents = { on: () => {} } }
+      loadURL(u) { this.url = u; return Promise.resolve() }
+      on(e, f) { this.on_[e] = f }
+      once(e, f) { this.on_[e] = f }
+      isDestroyed() { return !!this.gone }
+      destroy() { this.gone = true; this.on_.closed?.() }
+      setAlwaysOnTop() {}
+      setVisibleOnAllWorkspaces() {}
+      showInactive() {}
+    }
+    const main = { id: 1, bounds: { x: 0, y: 0, width: 1512, height: 982 }, workArea: { x: 0, y: 25, width: 1512, height: 900 }, size: { width: 1512, height: 982 }, scaleFactor: 2 }
+    const deskOn = (platform, state = 'active') => {
+      const posts = []
+      const blocks = []
+      const o = { posts, woke: 0 }
+      const pm = Object.assign(new EventEmitter(), { state, getSystemIdleState: (n) => (n === 1 ? pm.state : 'wrong threshold') })
+      o.pm = pm
+      o.awake = () => blocks.some((x) => x.kind === 'prevent-display-sleep' && x.on)
+      o.d = create({
+        BrowserWindow: Win, desktopCapturer: { getSources: async (q) => (q.types.includes('screen') ? [{ id: 'screen:1:0', name: 'Entire Screen', display_id: '1' }] : []) },
+        screen: { getAllDisplays: () => [main], getPrimaryDisplay: () => main }, systemPreferences: { getMediaAccessStatus: () => 'granted' },
+        session: { fromPartition: () => ({ setPermissionRequestHandler: () => {} }) }, nativeTheme: { shouldUseDarkColors: false }, URL_BASE: 'http://127.0.0.1:1', preload: '/preload.js', platform, keyFor,
+        fetch: async (u, x) => { posts.push({ u, ...JSON.parse(x.body) }); return { status: 200 } },
+        power: { start: (kind) => { blocks.push({ kind, on: true }); return blocks.length - 1 }, stop: (id) => { blocks[id].on = false } },
+        wake: () => { o.woke++ }, powerMonitor: pm,
+      })
+      return o
+    }
+    const mac = deskOn('darwin')
+    const s0 = await mac.d.sources()
+    ok(s0.lock?.locked === false && s0.lock.n === 0 && typeof s0.lock.id === 'string' && !mac.posts.length, 'a Mac, unlocked: the capture page\'s list says so (the server isn\'t told before it asks)', s0.lock)
+    mac.d.onEvent({ t: 'lock?' })
+    ok(mac.posts.length === 1 && /\/api\/remote\/screen-lock$/.test(mac.posts[0].u) && mac.posts[0].locked === false, 'asked (its feed connecting): said, to this computer\'s server', mac.posts)
+    mac.pm.state = 'locked'
+    mac.pm.emit('lock-screen')
+    const p1 = mac.posts.at(-1)
+    ok(p1.locked === true && p1.n === 1 && p1.id === s0.lock.id && mac.d.locked() === true, 'locked: said straight away, numbered on from the last', p1)
+    mac.d.onEvent({ t: 'sessions', list: [{ id: 'a', kind: 'screen' }] })
+    ok(mac.woke === 0 && !mac.awake(), 'someone viewing while it\'s locked: the display isn\'t woken nor kept awake (it would only light the lock screen)', { woke: mac.woke, awake: mac.awake() })
+    mac.pm.state = 'active'
+    mac.pm.emit('unlock-screen')
+    ok(mac.posts.at(-1).locked === false && mac.posts.at(-1).n === 2 && mac.woke === 1 && mac.awake(), 'unlocked while they view: said, and the display kept awake from then', { post: mac.posts.at(-1), woke: mac.woke })
+    mac.pm.state = 'locked'
+    mac.pm.emit('lock-screen')
+    ok(!mac.awake(), 'locked again in the session: let sleep')
+    mac.pm.state = 'active'
+    mac.pm.emit('unlock-screen')
+    mac.pm.emit('unlock-screen')
+    ok(mac.awake() && mac.posts.filter((x) => x.locked === false).length === 3, 'and kept awake once it\'s unlocked; the same word twice said once', mac.posts.map((x) => x.locked))
+    mac.d.onEvent({ t: 'sessions', list: [] })
+    ok(!mac.awake(), 'nobody viewing: let sleep')
+    // Just after it heard of an unlock, macOS saying it's locked still (not caught up yet): what it
+    // heard holds. A lock it didn't hear of at all: seen as the capture page asks for its list.
+    mac.pm.state = 'locked'
+    const s1 = await mac.d.sources()
+    ok(s1.lock?.locked === false && mac.posts.at(-1).locked === false, 'just unlocked, macOS not caught up yet: unlocked, as it heard', s1.lock)
+    const missed = deskOn('darwin')
+    missed.pm.state = 'locked'
+    const s3 = await missed.d.sources()
+    ok(s3.lock?.locked === true && missed.posts.at(-1)?.locked === true && s3.lock.n === missed.posts.at(-1).n, 'locked without a word from macOS: seen as the screens are listed, and said', { lock: s3.lock, posts: missed.posts })
+    const win = deskOn('win32', 'locked')
+    win.d.onEvent({ t: 'lock?' })
+    win.pm.state = 'active'
+    win.pm.emit('unlock-screen')
+    ok(win.posts.map((x) => x.locked).join() === 'true,false', 'Windows: the same', win.posts)
+    const lin = deskOn('linux', 'locked')
+    lin.pm.emit('lock-screen')
+    lin.d.onEvent({ t: 'lock?' })
+    const s2 = await lin.d.sources()
+    ok(!lin.posts.length && !s2.lock, 'Linux: nothing said, so nothing waits on it (as before)', { posts: lin.posts, lock: s2.lock })
+    const unknown = deskOn('darwin', 'unknown')
+    unknown.d.onEvent({ t: 'lock?' })
+    ok(!unknown.posts.length && !(await unknown.d.sources()).lock, 'a system that doesn\'t say (unknown): nothing said either', unknown.posts)
+  })
+
   // ---------- the picture's size and the pointer, as maths ----------
   await part('fit, the pointer, the capture size and the bitrate at several screens', async () => {
     const room = { left: 0, top: 52, width: 1440, height: 848 }
@@ -1501,7 +1598,8 @@ try {
     await view.waitFor({ timeout: 15000 })
     await view.click()
     const card = p.locator('.rs-card.c-password')
-    await card.waitFor({ timeout: 15000 })
+    // (What the viewer showed instead, when it doesn't come.)
+    await card.waitFor({ timeout: 15000 }).catch(async (e) => { throw new Error(`${e.message.split('\n')[0]} (the viewer: ${await p.locator('.rs-view').innerText({ timeout: 1000 }).then((s) => s.replace(/\s+/g, ' ').slice(0, 200), () => 'not there')})`) })
     ok(/Studio asks for its password before it shows its screen/.test(await card.innerText()) && !(await p.locator('.rs-view img.rs-media').getAttribute('src')), 'View screen: Studio asks for its Remote Access Password first, and nothing shows before it', await card.innerText())
     const b0 = await boxes(p)
     const cb = await card.boundingBox()
@@ -1512,7 +1610,9 @@ try {
     ok(/Wrong password\. 4 more wrong tries lock this device out for 15 minutes/.test(await p.locator('.rs-card-bad').innerText()), 'a wrong one: said, with the tries left', await p.locator('.rs-card-bad').innerText())
     await enterPw(p)
     ok(!!(await picture(p)), 'the right one: Studio\'s screen, its pictures shown')
-    ok(fills(await boxes(p), 1280, 800), 'the picture fills the viewer under the toolbar, its shape kept, centred on the letterbox', await boxes(p))
+    // (Measured once the room under the toolbar is: the toolbar can take another line as the picture comes, and the
+    // picture is fitted again a frame after.)
+    ok(!!(await until(async () => fills(await boxes(p), 1280, 800), 5000, 100)), 'the picture fills the viewer under the toolbar, its shape kept, centred on the letterbox', await boxes(p))
     ok(/Through the relay \(slower\)/.test(await p.locator('.rs-mode').innerText()), 'and says it comes through the relay, slower')
     ok(await p.locator('.rs-view').getByText('View only').isVisible(), 'View only: Studio hasn\'t allowed control')
     await shot(p, `${tag}remote-screen-view`)
@@ -1577,6 +1677,9 @@ try {
     const line = st.p.locator('.rs-here')
     await line.waitFor({ timeout: 10000 })
     ok(/Laptop is controlling this screen|Laptop is viewing this screen/.test(await line.innerText()), 'Studio says it\'s being seen, and by which device', await line.innerText())
+    const sinceLine = await line.innerText()
+    const started = (await studio.api('/remote')).sessions[0]?.started
+    ok(!started || Date.now() - new Date(started).getTime() >= 55000 || (/It started just now\./.test(sinceLine) && !/for 1 min now/.test(sinceLine)), 'in its first minute, it says it started just now (not "for 1 min now")', sinceLine)
     await shot(st.p, `${tag}remote-screen-studio-seen`)
     // The desktop app's badge, the same page in a window of its own.
     const badge = await page(b, `${studio.url}/?remote=badge`, { width: 520, height: 58 })
@@ -1617,12 +1720,14 @@ try {
       ok(await contrast(p.locator('.rs-card.c-password p').first()) >= 4.5 && await contrast(p.locator('.rs-card.c-password .btn').first()) >= 4.5, `${mode}: the password question and its buttons are readable`)
       await enterPw(p)
       await picture(p)
-      ok(fills(await boxes(p), 1280, 800), `${mode}: the picture fills the viewer`)
+      ok(!!(await until(async () => fills(await boxes(p), 1280, 800), 5000, 100)), `${mode}: the picture fills the viewer`, await boxes(p))
       if (mode === 'dark') await shot(p, `${tag}remote-screen-view${sfx}`)
       await p.context().close()
       // macOS not letting Bridge AI record the screen there (the owner's case), as Studio says it.
       const why = "macOS doesn't let Bridge AI record the screen on Studio. On Studio, turn on Bridge AI in System Settings › Privacy & Security › Screen & System Audio Recording, then open Bridge AI again there."
-      const q = await page(b, laptop.url, { mode, before: (ctx) => changeAnswer(ctx, /\/api\/remote\?sources=1/, (j) => ({ ...j, screen: { can: false, code: 'screenPermission', permission: 'denied', why } })) })
+      // (No service worker, as in the desktop app: WebKit's test build doesn't route what one fetches,
+      // so once the worker takes the page over Studio's real answer would come instead.)
+      const q = await page(b, laptop.url, { mode, before: async (ctx) => { await noServiceWorker(ctx); await changeAnswer(ctx, /\/api\/remote\?sources=1/, (j) => ({ ...j, screen: { can: false, code: 'screenPermission', permission: 'denied', why } })) } })
       errors.push(...q.errors)
       await ready(q.p)
       await viewOn(q.p)
@@ -1762,6 +1867,30 @@ try {
       }, async () => {
         ok(/The connection to Studio closed before its screen showed\./.test(await text('.rs-card.c-closed p')) && urls.length === 2, 'closed before anything was said: tried again once by itself, then said so', { urls: urls.length, said: await text('.rs-card') })
       })
+      // Its screen didn't start, tried twice there: said plainly, with what to do; what macOS said
+      // small under it.
+      await shows('capture', {
+        view: (ws) => { say(ws, H); say(ws, { t: 'error', code: 'capture', why: CANT_START('Studio'), detail: 'Could not start video source' }, 400) },
+      }, async () => {
+        ok((await text('.rs-card.c-capture p')) === CANT_START('Studio') && (await text('.rs-card.c-capture .rs-card-detail')) === 'Could not start video source' && await button('Try again').isVisible(), `${phone ? 'phone' : 'computer'}: a screen that wouldn't start: said plainly with what to do, what macOS said as a detail, and Try again`, await text('.rs-card'))
+      })
+      // Locked 15 minutes: it stopped waiting, saying why.
+      await shows('screen-locked-long', {
+        view: (ws) => { say(ws, { t: 'locked', os: 'mac', ms: 900000 }); say(ws, { t: 'error', code: 'screenLocked', why: 'Studio stayed locked for 15 minutes, so this stopped. View it again once it\'s unlocked there.' }, 400) },
+      }, async () => {
+        ok((await text('.rs-card.c-screenLocked p')) === 'Studio stayed locked for 15 minutes, so this stopped. View it again once it\'s unlocked there.' && await button('View again').isVisible(), `${phone ? 'phone' : 'computer'}: locked too long: said, with View again`, await text('.rs-card'))
+      })
+      // A Windows computer locked: in its own words (its lock screen, signing in).
+      status = (j) => j
+      statusCode = 0
+      onSent = () => {}
+      onView = (ws) => say(ws, { t: 'locked', os: 'windows', ms: 900000 })
+      await viewOn(p)
+      await p.locator('.rs-card.c-screenLocked').waitFor({ timeout: 10000 })
+      ok((await text('.rs-card.c-screenLocked p')) === "Studio is locked. Windows doesn't let apps show the lock screen. Sign in there, and the picture starts here on its own." && !(await p.locator('.rs-card.c-password').count()), `${phone ? 'phone' : 'computer'}: a Windows computer locked: said in its own words`, await text('.rs-card'))
+      await shot(p, `${tag}remote-screen-why-locked-windows${sfx}`)
+      await p.locator('.rs-view').getByRole('button', { name: 'Stop viewing' }).click()
+      await p.locator('.rs-view').waitFor({ state: 'detached', timeout: 5000 }).catch(() => {})
       await q.ctx.close()
     }
     ok(/Remote Screen: Studio's screen didn't show here \(noCapture, window; it has Bridge AI [\w.-]+\): The Bridge AI app on Studio didn't open its screen sharing\./.test(laptop.log()), 'each reason in the viewer\'s own log too', laptop.log().split('\n').filter((l) => /Remote Screen/.test(l)).slice(-3))
@@ -1785,7 +1914,7 @@ try {
       ok(look.title.left >= 76 && look.bar.height >= 52 && Math.abs(look.title.top + look.title.height / 2 - 26) <= 4 && /Studio's Screen · Bridge AI/.test(look.doc), `${mode}: the title clears the window's buttons, on their line, and names the window`, look)
       // (A browser that doesn't know the property says nothing of it either way.)
       ok(look.drag === 'drag' ? look.button === 'no-drag' : !look.drag && !look.button, `${mode}: the toolbar moves the window, its buttons stay buttons`, look)
-      ok(fills(await boxes(p), 1280, 800), `${mode}: the picture fills the window under it`)
+      ok(!!(await until(async () => fills(await boxes(p), 1280, 800), 5000, 100)), `${mode}: the picture fills the window under it`, await boxes(p))
       ok(!(await p.locator('.rs-view').getByRole('button', { name: 'Close' }).count()), `${mode}: no Close of its own beside the window's`)
       await shot(p, `${tag}remote-screen-window${mode === 'dark' ? '-dark' : ''}`)
       await p.context().close()
@@ -1922,7 +2051,8 @@ try {
     const st = await page(b, studio.url, { before })
     errors.push(...st.errors)
     const line = st.p.locator('.rs-here')
-    ok(!!(await until(async () => /Phone is connecting to this screen, for \d+ min now\./.test(await line.innerText().catch(() => '')), 10000)) && await line.getByRole('button', { name: 'Stop' }).isVisible(), 'Studio\'s window: who is connecting, for how long, with Stop', await line.innerText().catch(() => ''))
+    // (Under a minute, "It started just now": not "for 1 min now" from its first second.)
+    ok(!!(await until(async () => /Phone is connecting to this screen(\. It started just now|, for \d+ min now)\./.test(await line.innerText().catch(() => '')), 10000)) && await line.getByRole('button', { name: 'Stop' }).isVisible(), 'Studio\'s window: who is connecting, for how long, with Stop', await line.innerText().catch(() => ''))
     const bd = await page(b, `${studio.url}/?remote=badge`, { width: 520, height: 58, before })
     await bd.p.locator('.rs-badge').waitFor({ timeout: 8000 })
     ok(!!(await until(async () => /Phone is connecting to this screen/.test(await bd.p.locator('.rs-badge').innerText()), 8000)) && await bd.p.getByRole('button', { name: 'Stop' }).isVisible(), 'and its badge, with Stop', await bd.p.locator('.rs-badge').innerText())
@@ -2015,7 +2145,7 @@ try {
     const card = p.locator('.rs-live .ask-row', { hasText: 'Phone' })
     await card.waitFor({ timeout: 10000 })
     const said = await card.innerText()
-    ok(/Studio's screen is being viewed from Phone \(phone\)/.test(said) && /· 1 min/.test(said) && await card.getByRole('button', { name: 'Stop', exact: true }).isVisible() && await card.getByRole('button', { name: 'Block This Device' }).isVisible(), 'Laptop\'s window: a card saying Studio\'s screen is being viewed from Phone, for how long, with Stop and Block This Device', said)
+    ok(/Studio's screen is being viewed from Phone \(phone\)/.test(said) && /· (just now|1 min)/.test(said) && await card.getByRole('button', { name: 'Stop', exact: true }).isVisible() && await card.getByRole('button', { name: 'Block This Device' }).isVisible(), 'Laptop\'s window: a card saying Studio\'s screen is being viewed from Phone, for how long, with Stop and Block This Device', said)
     ok(await card.getByRole('button', { name: 'Stop', exact: true }).evaluate((el) => getComputedStyle(el).color) === 'rgb(255, 255, 255)', 'its Stop in white on red, whatever else Bridge AI has loaded')
     await shot(p, `${tag}remote-screen-card`)
     // Studio's own window says it in its own line (with its Stop), not the card as well.
@@ -2168,12 +2298,27 @@ try {
     const said = []
     let to = null
     await cap.p.routeWebSocket(/\/api\/remote\/capture/, (ws) => { to = ws; const server = ws.connectToServer(); ws.onMessage((m) => { said.push(String(m)); server.send(m) }) })
+    // The start held where it waits for the screen to play until the stop has come, so the stop comes
+    // while it starts however fast this computer is (sent straight after the start, it could come
+    // once the start was done, and then the screen is rightly taken until the stop). Each track
+    // stopped is counted: the start let go of its screen.
+    await cap.ctx.addInitScript(() => {
+      const play = HTMLMediaElement.prototype.play
+      window.__plays = 0
+      HTMLMediaElement.prototype.play = function () { window.__plays++; return new Promise((go) => { window.__letPlay = () => go(play.call(this)) }) }
+      const stop = MediaStreamTrack.prototype.stop
+      window.__trackStops = 0
+      MediaStreamTrack.prototype.stop = function () { window.__trackStops++; return stop.call(this) }
+    })
     await cap.p.reload()
     await until(() => to && said.some((m) => /"t":"hello"/.test(m)), 8000, 50)
     to.send(JSON.stringify({ t: 'start', session: 'stopped-1', source: { kind: 'screen', id: 'fake-1', name: 'Test screen', w: 640, h: 400 }, p2p: null, rate: 1, max: 180000 }))
+    const starting = await until(() => cap.p.evaluate(() => window.__plays === 1), 8000, 50)
     to.send(JSON.stringify({ t: 'stop', session: 'stopped-1' }))
-    await sleep(1500)
-    ok(!said.some((m) => /"started"/.test(m) && /stopped-1/.test(m)) && !(await cap.p.locator('.rs-capture').getAttribute('data-sessions')), 'stopped while it started: the screen isn\'t taken for it', said.filter((m) => /stopped-1/.test(m)))
+    // (After the stop: what the test sends the page, and what it runs there, reach it in order.)
+    await cap.p.evaluate(() => window.__letPlay())
+    const after = await until(async () => (await cap.p.evaluate(() => window.__trackStops > 0)) || said.some((m) => /"started"/.test(m) && /stopped-1/.test(m)), 8000, 50)
+    ok(!!starting && !!after && !said.some((m) => /"started"/.test(m) && /stopped-1/.test(m)) && !(await cap.p.locator('.rs-capture').getAttribute('data-sessions')), 'stopped while it started: the screen isn\'t taken for it', { starting, said: said.filter((m) => /stopped-1/.test(m)) })
     await cap.ctx.close()
   })
 
@@ -2339,6 +2484,283 @@ try {
     }
   })
 
+  // ---------- a locked screen ----------
+  // "Office", its screen taken by its capture page (the real one, ?fake=1, in a Chromium whatever this
+  // run is: the desktop app's is one), its lock said as its desktop app says it (screen-lock), its
+  // clock one the test moves on (stand-ins/clock.mjs BRIDGE_TEST_CLOCK_FILE). Phones view it through
+  // its relay: Pager; Spare, unticked there; Newbie, paired once Office had a password (New).
+  await part('a locked screen: said before the password and waited for, the guardrails after; in a session, waited for over the same connection with nothing pressed; 15 minutes at most', async () => {
+    const ro = await startRelay('remote-screen-office')
+    relays.push(ro)
+    const clockFile = path.join(TEST, '.out', `remote-screen-clock-${process.pid}.txt`)
+    const inO = path.join(TEST, '.out', `remote-screen-input-office-${process.pid}.jsonl`)
+    const clipO = path.join(TEST, '.out', `remote-screen-clip-office-${process.pid}.txt`)
+    for (const f of [clockFile, inO, `${inO}.local`, clipO]) fs.rmSync(f, { force: true })
+    const office = await kitWith('Office', ro, { BRIDGE_TEST_CAPTURE_TOKEN: CAPTOKEN, BRIDGE_TEST_SCREEN: 'fake', BRIDGE_TEST_INPUT: inO, BRIDGE_TEST_CLIPBOARD: clipO, BRIDGE_REMOTE_ASK_MS: '3000', NODE_OPTIONS: `--import=${pathToFileURL(path.join(TEST, 'stand-ins', 'clock.mjs')).href}`, BRIDGE_TEST_CLOCK_FILE: clockFile })
+    ok(!!(await until(async () => (await office.api('/relay')).online, 20000)), 'Office is on its relay')
+    const pair = async (name) => {
+      const c = await linkAs(ro.url, { code: (await office.api('/relay/pair', {})).pairing.code, name, about: { name } })
+      await until(async () => (await office.api('/remote')).access.devices.some((x) => x.name === name), 8000, 100)
+      return over(c)
+    }
+    const pg = await pair('Pager')
+    const spare = await pair('Spare')
+    let cb = null
+    let capCtx = null
+    if (which === 'chromium') capCtx = await b.newContext()
+    else {
+      cb = await (await import('playwright-core')).chromium.launch()
+      capCtx = await cb.newContext()
+      const cookie = await b.newContext()
+      await capCtx.addCookies(await cookie.cookies())
+      await cookie.close()
+    }
+    const LOCKED = 15 * 60000
+    const VIEW = '/api/remote/view?source=screen:&control=1'
+    const lockSet = (locked) => office.api('/remote/screen-lock', { locked })
+    // What the capture page hears from its app: { locked } or nothing (window.bridgeTestLock).
+    let cap = null
+    const capLock = (locked) => cap.evaluate((l) => { window.bridgeTestLock = l == null ? undefined : { locked: l } }, locked)
+    // Pictures, each acked as it comes: n more than there were.
+    const pictures = async (v, n = 2, ms = 10000) => {
+      const from = v.frames.length
+      return !!(await until(async () => { if (v.frames.length !== v.acked) { v.acked = v.frames.length; await v.send({ t: 'ack' }) } return v.frames.length >= from + n }, ms, 50))
+    }
+    const order = (v) => v.msgs.map((m) => m.t).filter((x) => !['size', 'thumb'].includes(x))
+    const downs = (n) => lines(inO).slice(n).filter((x) => x.t === 'down' || x.t === 'move' || (x.t === 'key' && x.down))
+    try {
+      cap = await capCtx.newPage()
+      await cap.goto(`${office.url}/?remote=capture&fake=1&token=${CAPTOKEN}`)
+      ok(!!(await until(async () => (await office.api('/remote?sources=1')).screen.sources?.some((y) => y.name === 'Built-in Retina Display'), 10000)), 'Office\'s capture page says its screens')
+      // Its lock is said by Office's own app only: never by a device.
+      const fromPhone = await pg.request('POST', '/api/remote/screen-lock', { locked: false })
+      ok(fromPhone.status === 403 && /at Office itself/.test(fromPhone.json?.error || ''), 'a phone can\'t say whether Office is locked: only Office itself', fromPhone.json)
+      if (!LOCKS) {
+        // Linux: no lock is known, so nothing waits on one (as before).
+        await lockSet(true)
+        const v = pg.socket(VIEW)
+        ok(!!(await through(v)) && !msg(v, 'locked') && (await office.api('/remote')).screen.locked == null, 'Linux: a lock said changes nothing, the screen shows as before', order(v))
+        await v.close()
+        return
+      }
+      await office.api('/remote/password', { password: PW })
+      const newbie = await pair('Newbie')
+      await office.api('/remote/devices', { id: (await office.api('/remote')).access.devices.find((d) => d.name === 'Spare').id, allowed: false })
+      await office.api('/remote/control', { on: true })
+
+      // Locked before the password: said, and waited for, nothing asked; only to a device that may.
+      await lockSet(true)
+      ok((await office.api('/remote')).screen.locked === true, 'Office locked, as its app says it')
+      const asked = await pg.request('GET', '/api/remote?sources=1')
+      ok(asked.status === 200 && !!asked.json?.screen && !('locked' in asked.json.screen), 'a device asking how Office is isn\'t told it\'s locked: that\'s said only in a session it may start', asked.json?.screen)
+      for (const [name, c] of [['Spare (unticked at Office)', spare], ['Newbie (New at Office)', newbie]]) {
+        const x = c.socket(VIEW)
+        await x.wait((s) => s.msgs.length || s.closed, 6000)
+        await sleep(300)
+        ok(!msg(x, 'locked') && !msg(x, 'password') && !msg(x, 'hello'), `${name}: turned away as ever, never told Office is locked`, x.msgs)
+        await x.close()
+      }
+      const stranger = await linkAs(ro.url, { name: 'Stranger' })
+      ok(!!stranger.refused || !!stranger.offline, 'a key Office never paired: turned away at the hello, before anything', stranger.refused)
+      const a1 = pg.socket(VIEW)
+      const a2 = pg.socket(VIEW)
+      await a1.wait((s) => msg(s, 'locked'))
+      await a2.wait((s) => msg(s, 'locked'))
+      const a3 = pg.socket(VIEW)
+      await a3.wait((s) => msg(s, 'error'))
+      ok(msg(a3, 'error')?.code === 'busy' && !msg(a3, 'locked'), 'waiting for the unlock counts as waiting to connect: a third at once from the same phone is turned away', msg(a3, 'error'))
+      await office.api('/settings', { trials: { 'remote-screen': false } }, 'PATCH')
+      await a1.wait((s) => msg(s, 'error'), 5000)
+      const offNow = pg.socket(VIEW)
+      await offNow.wait((s) => msg(s, 'error'))
+      ok(msg(a1, 'error')?.code === 'off' && msg(a2, 'error')?.code === 'off' && msg(offNow, 'error')?.code === 'trial' && !msg(offNow, 'locked'), 'Remote Screen turned off at Office: those waiting are told and go; one starting is told it\'s off, not that it\'s locked', [msg(a1, 'error'), msg(offNow, 'error')])
+      await office.api('/settings', { trials: { 'remote-screen': true } }, 'PATCH')
+      const v1 = pg.socket(VIEW)
+      await v1.wait((s) => msg(s, 'locked') || msg(s, 'password') || msg(s, 'error'))
+      await sleep(1500)
+      ok(msg(v1, 'locked')?.os === OS && msg(v1, 'locked').ms === LOCKED && !msg(v1, 'password') && !msg(v1, 'hello') && !v1.closed, 'View screen on a locked Office: told so before any password, and kept waiting', order(v1))
+      const st1 = await office.api('/remote')
+      ok(!st1.sessions.length && !st1.asks.length && !(await office.api('/remote/live')).list.length && !st1.log.some((e) => e.by?.name === 'Pager' && !e.ended), 'meanwhile no session at Office, nor one told to your other devices: it only waits', { sessions: st1.sessions, asks: st1.asks })
+      await lockSet(false)
+      await v1.wait((s) => msg(s, 'password'), 5000)
+      const o1 = order(v1)
+      ok(o1.indexOf('locked') < o1.indexOf('unlocked') && o1.indexOf('unlocked') < o1.indexOf('password') && !msg(v1, 'hello'), 'unlocked: it goes on by itself, to the password as ever', o1)
+      const h1 = await through(v1)
+      ok(!!h1 && await pictures(v1, 2), 'the right password: the screen, its pictures', h1 && { source: h1.source, control: h1.control })
+      const rec1 = (await office.api('/remote')).sessions.find((x) => x.id === h1?.session)
+      ok(rec1?.told?.some((x) => x.what === 'view'), 'and your other devices told of the session now it has started', rec1?.told)
+
+      // Locked in the session: waited over its last picture, nothing pressed; unlocked, taken again
+      // over the same connection.
+      let n = lines(inO).length
+      await v1.send({ t: 'input', evs: [{ t: 'move', x: 0.5, y: 0.5 }, { t: 'down', b: 0, x: 0.5, y: 0.5 }, { t: 'up', b: 0, x: 0.5, y: 0.5 }] })
+      ok(!!(await until(() => downs(n).some((x) => x.t === 'down'), 4000, 50)), 'controlling: a click is pressed')
+      await lockSet(true)
+      await v1.wait((s) => msgs(s, 'locked').length === 2, 5000)
+      // (The capture page hears it too, and its screen ends, as macOS ends it.)
+      await capLock(true)
+      await sleep(500)
+      const f0 = v1.frames.length
+      await v1.send({ t: 'ack' })
+      n = lines(inO).length
+      await v1.send({ t: 'input', evs: [{ t: 'move', x: 0.2, y: 0.2 }, { t: 'down', b: 0, x: 0.2, y: 0.2 }, { t: 'up', b: 0, x: 0.2, y: 0.2 }, { t: 'key', code: 'KeyA', down: true }, { t: 'key', code: 'KeyA', down: false }, { t: 'text', s: 'hi' }] })
+      await v1.send({ t: 'clip', text: 'not while locked' })
+      await v1.send({ t: 'thumbs?' })
+      await sleep(1500)
+      ok(!downs(n).length && !lines(inO).slice(n).some((x) => x.t === 'text'), 'locked: nothing it sends is pressed, typed or clicked', lines(inO).slice(n))
+      ok(msgs(v1, 'error').some((m) => m.code === 'clipboard' && m.keep && /Office is locked/.test(m.why)) && !fs.existsSync(clipO), 'nor the clipboard put there', msgs(v1, 'error'))
+      ok(v1.frames.length === f0 && !msgs(v1, 'thumb').length && !v1.closed && msgs(v1, 'hello').length === 1, 'no pictures while it\'s locked (the viewer keeps the last), nor a still of any screen; the session kept', { frames: v1.frames.length - f0, thumbs: msgs(v1, 'thumb').length, closed: v1.closed })
+      const sizes = msgs(v1, 'size').length
+      await capLock(null)
+      await lockSet(false)
+      await v1.wait((s) => msgs(s, 'unlocked').length === 2 && msgs(s, 'size').length > sizes, 8000)
+      ok(msgs(v1, 'size').length > sizes && await pictures(v1, 2) && !v1.closed && msgs(v1, 'hello').length === 1 && (await office.api('/remote')).sessions.map((x) => x.id).join() === h1.session, 'unlocked: the screen taken again (its own), its pictures again, in the same session over the same connection', { sizes: msgs(v1, 'size').length, sessions: (await office.api('/remote')).sessions.length })
+      n = lines(inO).length
+      await v1.send({ t: 'input', evs: [{ t: 'move', x: 0.5, y: 0.5 }, { t: 'down', b: 0, x: 0.5, y: 0.5 }, { t: 'up', b: 0, x: 0.5, y: 0.5 }] })
+      ok(!!(await until(() => downs(n).some((x) => x.t === 'down'), 4000, 50)), 'and what it presses is pressed again')
+      await v1.close()
+      await until(async () => !(await office.api('/remote')).sessions.length, 5000, 100)
+
+      // Locked just as the screen is taken, the capture page knowing it first: the session waits for
+      // it, and the screen is taken once it's unlocked.
+      await capLock(true)
+      const v2 = pg.socket(VIEW)
+      const h2 = await through(v2)
+      await v2.wait((s) => msg(s, 'locked') || msg(s, 'error'), 6000)
+      ok(!!h2 && !!msg(v2, 'locked') && !msg(v2, 'error') && (await office.api('/remote')).screen.locked === true, 'locked as the screen was taken (the capture page said so): the session waits, no error', order(v2))
+      await capLock(null)
+      await lockSet(false)
+      ok(!!(await v2.wait((s) => msg(s, 'unlocked'), 5000)) && await pictures(v2, 2), 'unlocked: its screen taken, and its pictures', order(v2))
+      await v2.close()
+      await until(async () => !(await office.api('/remote')).sessions.length, 5000, 100)
+
+      // Not locked, and it doesn't start (a display that just woke): tried again a second later.
+      await cap.evaluate(() => { window.bridgeTestFails = 1 })
+      const v3 = pg.socket(VIEW)
+      await through(v3)
+      ok(await pictures(v3, 2) && !msg(v3, 'error') && await cap.evaluate(() => window.bridgeTestFails) === 0, 'a screen that fails to start once: tried again, and shows', order(v3))
+      await v3.close()
+      await until(async () => !(await office.api('/remote')).sessions.length, 5000, 100)
+      await cap.evaluate(() => { window.bridgeTestFails = 2 })
+      const v4 = pg.socket(VIEW)
+      await through(v4)
+      await v4.wait((s) => msg(s, 'error'), 8000)
+      const e4 = msg(v4, 'error')
+      ok(e4?.code === 'capture' && e4.why === CANT_START('Office') && e4.detail === 'Could not start video source', 'twice: said plainly, with what to do, and what macOS said only as the detail', e4)
+      const rec4 = await until(async () => (await office.api('/remote')).log.find((x) => x.id === msg(v4, 'hello')?.session && x.ended), 4000, 100)
+      ok(rec4?.end === 'error' && rec4.error === e4?.why && !/video source/.test(rec4.error || ''), 'Screen Activity keeps the plain reason', rec4)
+      ok(/Remote Screen: Pager: the screen couldn't be taken: Could not start video source/.test(office.log()), 'and Office\'s log what macOS said')
+
+      // Ask Here First on: after the unlock, the password and then Allow at Office, as ever.
+      await office.api('/remote/ask-first', { on: true })
+      await lockSet(true)
+      const v5 = pg.socket(VIEW)
+      await v5.wait((s) => msg(s, 'locked'))
+      await sleep(800)
+      ok(!msg(v5, 'password') && !msg(v5, 'asking') && !(await office.api('/remote')).asks.length, 'Ask Here First on, locked: nothing asked there yet (nobody could answer)', order(v5))
+      await lockSet(false)
+      await v5.wait((s) => msg(s, 'password'))
+      await v5.send({ t: 'password', p: PW })
+      await v5.wait((s) => msg(s, 'asking') || msg(s, 'hello'))
+      const ask = (await office.api('/remote')).asks[0]
+      ok(!!msg(v5, 'asking') && !msg(v5, 'hello') && ask?.by?.name === 'Pager', 'unlocked: the password, then Allow asked at Office: neither skipped', order(v5))
+      if (ask) await office.api(`/remote/asks/${ask.id}`, { allow: false })
+      await v5.wait((s) => msg(s, 'error'))
+      ok(msg(v5, 'error')?.code === 'denied' && !msg(v5, 'hello'), 'and Deny there is a no', msg(v5, 'error'))
+      await office.api('/remote/ask-first', { on: false })
+
+      // 15 minutes at most, by Office's clock: in a session, then before the password.
+      const v6 = pg.socket(VIEW)
+      await through(v6)
+      await pictures(v6, 1)
+      await lockSet(true)
+      await v6.wait((s) => msg(s, 'locked'))
+      fs.writeFileSync(clockFile, String(LOCKED - 60000))
+      await sleep(2500)
+      ok(!msg(v6, 'error') && !v6.closed, '14 minutes locked: still waiting', order(v6))
+      fs.writeFileSync(clockFile, String(LOCKED + 1000))
+      await v6.wait((s) => msg(s, 'error') && s.closed, 6000)
+      ok(msg(v6, 'error')?.code === 'screenLocked' && /Office stayed locked for 15 minutes/.test(msg(v6, 'error').why), 'locked 15 minutes in a session: it ends, saying why', msg(v6, 'error'))
+      const rec6 = await until(async () => (await office.api('/remote')).log.find((x) => x.id === msg(v6, 'hello')?.session && x.ended), 4000, 100)
+      ok(rec6?.end === 'screenLocked' && !rec6.error, 'Screen Activity: ended as the screen stayed locked', rec6)
+      const v7 = pg.socket(VIEW)
+      await v7.wait((s) => msg(s, 'locked'))
+      fs.writeFileSync(clockFile, String(2 * (LOCKED + 1000)))
+      await v7.wait((s) => msg(s, 'error'), 6000)
+      ok(msg(v7, 'error')?.code === 'screenLocked' && !msg(v7, 'password'), 'and before the password: it stops waiting after 15 minutes, saying why, never asked for the password', order(v7))
+      // Screen Activity, as Office shows it.
+      const sa = await page(b, office.url)
+      errors.push(...sa.errors)
+      await devices(sa.p, 'remote')
+      const row = sa.p.locator('.rs-log li', { hasText: 'ended: this screen stayed locked for 15 minutes' })
+      ok(!!(await row.first().waitFor({ timeout: 10000 }).then(() => true, () => false)), 'Office\'s Screen Activity says so', await sa.p.locator('.rs-log').innerText().catch(() => ''))
+      await sa.ctx.close()
+      await lockSet(false)
+    } finally {
+      await capCtx?.close().catch(() => {})
+      await cb?.close().catch(() => {})
+      pg.stop()
+      spare.stop()
+    }
+  })
+
+  // Studio locked, as its desktop app says it: on Laptop at a computer's width, and on a phone through
+  // its relay page (in WebKit the iPhone app's engine, in Chromium the Android app's), light and dark.
+  // Before the password: why nothing is asked yet, with Close; unlocked, the password as ever, then
+  // the picture. Locked in the session: said over the last picture, dimmed, nothing new coming;
+  // unlocked, the picture back by itself, in the same session.
+  await part('a locked screen, as the viewer shows it: before the password, in a session, unlocked again; light and dark, on a computer and a phone', async () => {
+    if (!LOCKS) { skip('a locked screen in the viewer', 'Linux says nothing of a lock'); return }
+    const lockSet = (locked) => studio.api('/remote/screen-lock', { locked })
+    for (const phone of [false, true]) {
+      for (const mode of ['light', 'dark']) {
+        const sfx = `${phone ? '-phone' : ''}${mode === 'dark' ? '-dark' : ''}`
+        const how = `${phone ? 'phone' : 'computer'}, ${mode}`
+        const r = phone ? await relayPhone(mode) : await page(b, laptop.url, { mode })
+        const p = r.p
+        const f = phone ? r.f : r.p
+        if (!phone) errors.push(...r.errors)
+        await lockSet(true)
+        try {
+          if (phone) { await devices(f); await f.locator('.mch-row.here').getByRole('button', { name: 'View screen' }).click() } else { await ready(f); await viewOn(f) }
+          const card = f.locator('.rs-card.c-screenLocked')
+          await card.waitFor({ timeout: 15000 })
+          const close = card.getByRole('button', { name: 'Close' })
+          const x = await boxes(f)
+          const cb = await card.boundingBox()
+          ok((await card.locator('p').innerText()).trim() === `Studio is locked. ${LOCKED_SAID}` && !(await f.locator('.rs-card.c-password').count()) && await close.isVisible(), `${how}: Studio locked: said before the password, which isn't asked, with Close`, await card.innerText())
+          ok(Math.abs(cb.x + cb.width / 2 - (x.stage.x + x.stage.cw / 2)) <= 2 && Math.abs(cb.y + cb.height / 2 - (x.stage.y + x.stage.ch / 2)) <= 2 && await contrast(card.locator('p')) >= 4.5 && await contrast(close) >= 4.5, `${how}: in the middle of the viewer, readable`, { card: cb, stage: x.stage })
+          if (phone) ok(JSON.stringify(await phoneFaults(f, '.rs-view')) === '{}', `${how}: it fits the phone, Close a whole 40 px target`, await phoneFaults(f, '.rs-view'))
+          await shot(p, `${tag}remote-screen-locked${sfx}`)
+          await lockSet(false)
+          await enterPw(f)
+          if (phone) { await chooser(f).waitFor({ timeout: 15000 }); await chooser(f).getByRole('button', { name: 'Close' }).click() }
+          ok(!!(await picture(f)), `${how}: unlocked: the password as ever, then the picture`)
+          const sid = (await studio.api('/remote')).sessions[0]?.id
+          await lockSet(true)
+          const over = f.locator('.rs-card.c-screenLocked.in-session')
+          await over.waitFor({ timeout: 8000 })
+          const src = await f.locator('.rs-view img.rs-media').getAttribute('src')
+          await sleep(1200)
+          const seen = await f.evaluate(() => ({ dim: !!document.querySelector('.rs-over.dim'), canvas: !document.querySelector('.rs-canvas')?.hidden, src: document.querySelector('.rs-view img.rs-media')?.getAttribute('src'), buttons: document.querySelectorAll('.rs-card.c-screenLocked button').length }))
+          ok((await over.locator('p').innerText()).trim() === 'Studio locked: the picture comes back once it\'s unlocked there.' && seen.dim && seen.canvas && seen.src === src && !seen.buttons, `${how}: locked in the session: said over the last picture, dimmed, which stays as it was`, seen)
+          await shot(p, `${tag}remote-screen-locked-session${sfx}`)
+          await lockSet(false)
+          await over.waitFor({ state: 'detached', timeout: 8000 })
+          const back = await until(async () => (await f.locator('.rs-view img.rs-media').getAttribute('src')) !== src, 8000, 100)
+          ok(!!back && !(await f.locator('.rs-over.dim').count()) && (await studio.api('/remote')).sessions.map((y) => y.id).join() === sid, `${how}: unlocked: the picture back by itself, in the same session`, (await studio.api('/remote')).sessions.map((y) => y.id))
+          await shot(p, `${tag}remote-screen-unlocked${sfx}`)
+          await f.locator('.rs-bar').getByRole('button', { name: 'Stop viewing' }).click()
+          await until(async () => !(await studio.api('/remote')).sessions.length, 6000, 100)
+          if (phone) ok(!r.errs.length, `${how}: no page errors on the phone`, r.errs.slice(0, 3))
+        } finally {
+          await lockSet(false).catch(() => {})
+          await r.ctx.close()
+        }
+      }
+    }
+  })
+
   await part('the agent\'s Preview tab on Laptop', async () => {
     const port = (await laptop.api('/machines')).machines.find((m) => m.id === S.id)?.port
     const { p, errors: e2 } = await page(b, `http://127.0.0.1:${port}/m/${S.id}/?window=${enc(pane)}`)
@@ -2362,6 +2784,137 @@ try {
     ok(!!(await p.locator('.preview-bar a[href^="http://127.0.0.1:"]').count()), 'Open in a browser on this computer: its address here')
     await shot(p, `${tag}remote-screen-preview`)
     await p.context().close()
+  })
+
+  // The top bar's devices menu on Studio turns control on too; turned down (macOS not letting Bridge AI
+  // use the mouse and keyboard, here stood in for), it says why there, rather than staying off unsaid.
+  await part('the devices menu\'s control switch, turned down: said there', async () => {
+    const { p, errors: e5 } = await page(b, studio.url, { before: async (ctx) => { await noServiceWorker(ctx); await ctx.route('**/api/remote/control', (r) => r.fulfill({ status: 400, json: { error: 'macOS doesn\'t let Bridge AI use the mouse and keyboard on Studio.', code: 'controlUnavailable' } })) } })
+    errors.push(...e5)
+    await ready(p)
+    await p.locator('.mc-chip').click()
+    const item = p.locator('.mc-menu [role="menuitemcheckbox"]')
+    await item.waitFor({ timeout: 8000 })
+    ok(!!(await until(() => item.isEnabled(), 8000)), 'the devices menu offers "Let my other devices control this computer" (Studio has its password)')
+    await item.click()
+    const said = await p.locator('.mc-menu .mc-err').innerText({ timeout: 8000 }).catch(() => null)
+    ok(!!said && /doesn't let Bridge AI use the mouse and keyboard on Studio/.test(said), 'turned down: why, in the menu', said)
+    ok(await item.getAttribute('aria-checked') === 'false', 'and it stays off')
+    await shot(p, `${tag}remote-screen-menu-refused`)
+    await p.context().close()
+  })
+
+  // What Studio says of control and of a session it ends is in English: the viewer says it in its own
+  // language (German here), not Studio's words.
+  await part('in another language: why control is off, and a session ended there, in it', async () => {
+    const { p, errors: e4 } = await page(b, laptop.url, { store: { 'cc-lang': 'de' } })
+    errors.push(...e4)
+    const was = await studio.api('/remote')
+    await devices(p)
+    await p.locator('.mch-row', { hasText: 'Studio' }).getByRole('button', { name: 'Bildschirm ansehen' }).click()
+    await until(async () => (await p.locator('.rs-card.c-password').count()) || (!(await p.locator('.rs-card').count()) && (await studio.api('/remote')).sessions.length === 1), 15000, 100)
+    if (await p.locator('.rs-card.c-password').count()) await enterPw(p)
+    ok(!!(await picture(p)), 'Laptop, in German, views Studio\'s screen')
+    const line = await until(async () => { const x = await p.locator('.rs-note').innerText().catch(() => ''); return x.trim() ? x : null }, 8000)
+    const expect = was.access.password ? /^Steuern ist auf Studio aus\. Schalte dort „Meine anderen Geräte dürfen diesen Computer steuern“ ein, unter Einstellungen › / : /^Steuern braucht ein Fernzugriffspasswort auf Studio\. Lege dort eines fest unter Einstellungen › /
+    ok(!!line && expect.test(line.trim()) && !/Control is off|Control needs/.test(line), 'why control is off, under the toolbar: in German, naming Studio and where to turn it on there, not Studio\'s English', line)
+    await shot(p, `${tag}remote-screen-german`)
+    if (was.access.password) {
+      // Turned on at Studio meanwhile: said so, in German, with Control there to take it.
+      await studio.api('/remote/control', { on: true })
+      const now = await until(async () => { const x = await p.locator('.rs-note').innerText().catch(() => ''); return /jetzt/.test(x) ? x : null }, 8000)
+      ok(!!now && /^Steuern ist jetzt an: Wähle Steuern, um es zu nutzen\./.test(now.trim()), 'control turned on at Studio meanwhile: said in German too', now || await p.locator('.rs-note').innerText().catch(() => ''))
+      await studio.api('/remote/control', { on: false })
+    } else ok(false, 'Studio has its Remote Access Password by now')
+    await studio.api('/settings', { trials: { 'remote-screen': false } }, 'PATCH')
+    const ended = await until(async () => { const x = await p.locator('.rs-card').innerText().catch(() => ''); return x.trim() ? x : null }, 10000)
+    ok(!!ended && /Bildschirm und Vorschau aus der Ferne wurde auf Studio ausgeschaltet/.test(ended), 'Remote Screen and Preview turned off at Studio mid-session: said in German', ended)
+    await studio.api('/settings', { trials: { 'remote-screen': true } }, 'PATCH')
+    await p.context().close()
+  })
+
+  // Last, as it drops every link through Studio's relay (the phone's too).
+  await part('the link to Studio dropping while it\'s viewed: said why, with View again', async () => {
+    const { p, errors: e3 } = await page(b, laptop.url)
+    errors.push(...e3)
+    await devices(p)
+    await p.locator('.mch-row', { hasText: 'Studio' }).getByRole('button', { name: 'View screen' }).click()
+    await until(async () => (await p.locator('.rs-card.c-password').count()) || (await p.locator('.rs-view img.rs-media').getAttribute('src').catch(() => ''))?.startsWith('blob:'), 15000)
+    if (await p.locator('.rs-card.c-password').count()) await enterPw(p)
+    ok(!!(await picture(p)), 'Laptop views Studio\'s screen')
+    await ra.drop()
+    const said = await until(async () => { const x = await p.locator('.rs-view').innerText().catch(() => ''); return /The connection to Studio dropped/.test(x) ? x : null }, 15000)
+    ok(!!said && /gone to sleep or offline, or this device lost its connection/.test(said), 'the link dropping mid-session: the viewer says the connection to Studio dropped, and why it may have, not just that it stopped', said || await p.locator('.rs-view').innerText().catch(() => ''))
+    ok(await p.locator('.rs-card.c-ended').getByRole('button', { name: 'View again' }).isVisible(), 'with View again')
+    await shot(p, `${tag}remote-screen-dropped`)
+    await until(async () => (await laptop.api('/machines')).machines.find((m) => m.id === S.id)?.online, 20000, 300)
+    await p.locator('.rs-card.c-ended').getByRole('button', { name: 'View again' }).click()
+    // (The last picture stays in its place meanwhile: the password asked again, or the session there.)
+    await until(async () => (await p.locator('.rs-card.c-password').count()) || (!(await p.locator('.rs-card').count()) && (await studio.api('/remote')).sessions.length === 1), 15000, 100)
+    if (await p.locator('.rs-card.c-password').count()) await enterPw(p)
+    ok(!!(await until(async () => !(await p.locator('.rs-card').count()) && (await studio.api('/remote')).sessions.length === 1, 15000)) && !!(await picture(p)), 'View again, once the link is back: the screen again, in a session at Studio', await p.locator('.rs-view').innerText().catch(() => ''))
+    await p.locator('.rs-bar').getByRole('button', { name: 'Stop viewing' }).click()
+    await p.context().close()
+  })
+
+  // The agent's app in its Preview tab: on a phone through its relay page (drawn at Studio, shown as
+  // pictures), and on Laptop (at its own address, behind Studio's password); the link through Studio's
+  // relay dropping meanwhile: each says so, and why it may have, with View again, which shows it again.
+  await part('Preview, on a phone and on Laptop: the link dropping said, with View again', async () => {
+    const r = await relayPhone()
+    const { p, f } = r
+    await sendUntil(f, 'bridge-open-agent', { paneId: pane }, '[role="tab"][title="Preview"]')
+    await f.locator('[role="tab"][title="Preview"]').first().click()
+    const pages = f.locator('.pv-pages')
+    const phoneChip = f.locator('.preview-chip', { hasText: `:${dport}` })
+    await phoneChip.waitFor({ timeout: 20000 })
+    await phoneChip.click()
+    // (Shown: the picture in its place, nothing over it. The last one stays in the page meanwhile.)
+    const shows = async (where) => {
+      const live = async () => !(await where.locator('.viewer-empty, .rs-card').count()) && !!(await where.locator('img:not([hidden])').first().getAttribute('src').catch(() => ''))?.startsWith('blob:')
+      await until(async () => (await where.locator('.rs-card.c-password').count()) || await live(), 20000, 100)
+      if (await where.locator('.rs-card.c-password').count()) {
+        const box = where.locator('.rs-card.c-password input')
+        await until(async () => box.isEnabled(), 5000, 50)
+        await box.fill(PW)
+        await box.press('Enter')
+      }
+      return until(live, 20000, 100)
+    }
+    ok(!!(await shows(pages)), 'on the phone: Studio\'s app, as pictures drawn there', await pages.innerText().catch(() => ''))
+    // Laptop: the same app at its own address, past Studio's password (a session open while it shows).
+    const port = (await laptop.api('/machines')).machines.find((m) => m.id === S.id)?.port
+    const L = await page(b, `http://127.0.0.1:${port}/m/${S.id}/?window=${enc(pane)}`)
+    errors.push(...L.errors)
+    await L.p.getByRole('tab', { name: 'Preview' }).or(L.p.getByRole('button', { name: 'Preview' })).first().click()
+    const chip = L.p.locator('.preview-chip', { hasText: `:${dport}` })
+    await chip.waitFor({ timeout: 20000 })
+    await chip.click()
+    await enterPw(L.p)
+    const frame = L.p.locator('iframe.preview-frame')
+    ok(!!(await until(() => frame.count(), 20000)), 'on Laptop: the app, past Studio\'s password')
+    await ra.drop()
+    const DROPPED = /The connection to Studio dropped\. It may have gone to sleep or offline, or this device lost its connection\./
+    const said = await until(async () => { const x = await pages.innerText().catch(() => ''); return DROPPED.test(x) ? x : null }, 15000)
+    ok(!!said && await pages.getByRole('button', { name: 'View again' }).isVisible(), 'the phone\'s link dropping: the Preview tab says the connection to Studio dropped, and why it may have, with View again (not just that it isn\'t shown)', said || await pages.innerText().catch(() => ''))
+    await shot(p, `${tag}remote-screen-preview-phone-dropped`)
+    const body = L.p.locator('.preview-body')
+    const saidL = await until(async () => { const x = await body.innerText().catch(() => ''); return DROPPED.test(x) ? x : null }, 15000)
+    ok(!!saidL && await body.getByRole('button', { name: 'View again' }).isVisible(), 'and on Laptop the same, with View again', saidL || await body.innerText().catch(() => ''))
+    // The links back: View again shows each again.
+    // (The phone page's own link back: its bar saying it's reconnecting gone. A request alone can be
+    // answered from what the phone kept, link or no link.)
+    await until(async () => p.evaluate(() => document.getElementById('bar').hidden && document.getElementById('away').hidden).catch(() => false), 30000, 200)
+    await pages.getByRole('button', { name: 'View again' }).click()
+    const again = await shows(pages)
+    ok(!!again, 'View again on the phone, once the link is back: the app again', again ? undefined : { shown: (await pages.innerText().catch(() => '')).replace(/\s+/g, ' '), sessions: (await studio.api('/remote')).sessions.map((x) => ({ kind: x.kind, waiting: x.waiting, via: x.via })) })
+    await until(async () => (await laptop.api('/machines')).machines.find((m) => m.id === S.id)?.online, 30000, 300)
+    await body.getByRole('button', { name: 'View again' }).click()
+    if (await L.p.locator('.rs-card.c-password').waitFor({ timeout: 8000 }).then(() => true, () => false)) await enterPw(L.p)
+    ok(!!(await until(async () => (await frame.count()) && !DROPPED.test(await body.innerText().catch(() => '')), 20000)), 'and on Laptop', await body.innerText().catch(() => ''))
+    ok(!r.errs.filter((e) => !/^Error: (Your computer|Reconnecting|Connection lost)/.test(e)).length, 'no page errors on the phone', r.errs.slice(0, 3))
+    await L.ctx.close()
+    await r.ctx.close()
   })
   ok(!errors.length, 'no page errors', errors.slice(0, 3))
   t1.stop()

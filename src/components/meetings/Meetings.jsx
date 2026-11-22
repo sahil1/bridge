@@ -30,7 +30,7 @@ import './meetings.css'
 import SpeechSetup, { MeetingsSetup } from './SpeechSetup.jsx'
 import { ActionItems, SinceLastTime } from './work.jsx'
 import { MergePick, MergeHint, Merged } from './merge.jsx'
-import { useTrial } from '../../trials.js'
+import { useFeature } from '../../trials.js'
 import { InsightsView } from './insights.jsx'
 import { PeopleView } from './people.jsx'
 import Memory from '../memory/Memory.jsx'
@@ -149,6 +149,26 @@ function RecordingBar({ id, data }) {
 }
 
 
+// A meeting recording in another window, or on the computer seen from a phone: Pause (or Resume) and
+// Stop here too, as the floating card and the menu bar have them. The window recording it follows
+// (recording.jsx: it stops or pauses its mic once the server says so).
+function Elsewhere({ id, paused, onDone, onMsg }) {
+  const [busy, setBusy] = useState(null)
+  const go = (op) => async () => {
+    setBusy(op)
+    try { await api(`/meetings/${encodeURIComponent(id)}/${op}`, { method: 'POST' }); refetch('/meetings'); onDone?.() } catch (e) { onMsg({ error: true, text: e.message }) } finally { setBusy(null) }
+  }
+  return (
+    <div className="mt-elsewhere" role="group" aria-label={t('Recording')}>
+      <span className="muted small">{t('This meeting is recording in another window.')}</span>
+      {paused
+        ? <button type="button" className="btn small" disabled={!!busy} onClick={go('resume')}><Icon name="mic" size={13} /> {t('Resume')}</button>
+        : <button type="button" className="btn small" disabled={!!busy} onClick={go('pause')}><Icon name="pause" size={13} /> {t('Pause')}</button>}
+      <button type="button" className="btn small danger-soft" disabled={!!busy} onClick={go('stop')}><Icon name="stop" size={13} /> {t('Stop')}</button>
+    </div>
+  )
+}
+
 // A calendar event happening now or starting within 10 minutes, to take notes for: on a call, the
 // one it's for (eventNow).
 function useNextEvent() {
@@ -213,7 +233,7 @@ function InsightsOn({ n, onShow }) {
   return (
     <div className="mt-insights-on" role="status">
       <Icon name="trend" size={15} />
-      <p className="small"><b>{t('Meeting Insights is on.')}</b> {t('With {n} meetings recorded on this computer, Insights and People add them up: the time you spend in meetings, when, in which series and with whom. Worked out here and never sent. It\'s a beta feature, also in {place}.', { place: where('beta-meeting-insights'), n })}</p>
+      <p className="small"><b>{t('Meeting Insights is on.')}</b> {t('With {n} meetings recorded on this computer, Insights and People add them up: the time you spend in meetings, when, in which series and with whom. Worked out here and never sent. Its switch is in {place}.', { place: where('meeting-insights'), n })}</p>
       <div className="mt-insights-acts">
         <button type="button" className="btn small primary" disabled={busy} onClick={() => { onShow(); done() }}>{t('Show Insights')}</button>
         <button type="button" className="btn small" disabled={busy} onClick={() => done(true)}>{t('Turn off')}</button>
@@ -224,7 +244,7 @@ function InsightsOn({ n, onShow }) {
 }
 
 const SETUP = 'cc-meet-setup'
-// Memory always; Insights and People with Meeting Insights on (a beta feature). Dictations is a tab
+// Memory always; Insights and People with Meeting Insights on. Dictations is a tab
 // too once a dictation is kept, after Meetings: what you said with the dictation key
 // (dictations/Dictations.jsx), shown instead of all these with Meetings, Dictations and its own Memory
 // as its tabs. One row of tabs either way.
@@ -247,10 +267,10 @@ export function MeetingsHome({ onOpen }) {
   useEffect(() => { if (data && place && (place === ':archived' ? !archivedN : !folders.includes(place))) setPlace('') }, [data, place, archivedN, folders.join('|')]) // eslint-disable-line react-hooks/exhaustive-deps
   const hits = useSearch(q, place === ':archived')
   // Memory beside the list (memory/Memory.jsx), what came up in your meetings to start with; Insights
-  // and People too, a beta feature (insights.jsx). ⌘K opens any of them, through the tab kept here and
+  // and People too, with Meeting Insights on (insights.jsx). ⌘K opens any of them, through the tab kept here and
   // bridge-meetings-tab for a list already open (memory/open.js meetingsAt). And Dictations in place
   // of all of them, the meetings' own tab kept meanwhile (for the sidebar's Meetings).
-  const insightsOn = useTrial('meeting-insights')
+  const insightsOn = useFeature('meeting-insights')
   const [tabKept, setTab] = usePersisted('cc-meet-tab', 'list')
   const tab = tabKept === 'memory' || (insightsOn && ['insights', 'people'].includes(tabKept)) ? tabKept : 'list'
   const [kind, setKind] = usePersisted('cc-meet-kind', 'meetings')
@@ -446,7 +466,7 @@ function Line({ l, id, me, onSaved, onError, onWho, onPlay, playing = false, now
       {edit != null ? (
         <span className="mt-text mt-line-edit">
           <textarea value={edit} onChange={(e) => setEdit(e.target.value)} autoFocus rows={Math.min(6, Math.ceil(edit.length / 70) + 1)} aria-label={t('Line text')}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); put(edit) } if (e.key === 'Escape') setEdit(null) }} />
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) { e.preventDefault(); put(edit) } if (e.key === 'Escape') setEdit(null) }} />
           <span className="mt-line-edit-acts"><button type="button" className="btn small primary" onClick={() => put(edit)}>{t('Save')}</button><button type="button" className="ghost-btn" onClick={() => setEdit(null)}>{t('Cancel')}</button></span>
         </span>
       ) : (
@@ -578,6 +598,11 @@ function WrittenFrom({ from, onView }) {
 // Board: AI Assist's live board, a beta feature (board.jsx), there once the server says how it is.
 // A combined meeting (several as one) has its summary, your notes on it and the meetings in it.
 const VIEWS = [['summary', 'sparkle', tx('Summary')], ['assist', 'bulb', tx('Suggestions')], ['board', 'shapes', tx('Board')], ['mine', 'edit', tx('My notes')], ['transcript', 'chat', tx('Transcript')], ['video', 'video', tx('Video')], ['parts', 'layers', tx('Meetings')], ['files', 'paperclip', tx('Files')]]
+// The kinds of meeting the summary's Template picks from (server meetings.js KINDS), by their names
+// in the packs: the server's own are in English.
+const KIND_NAMES = { general: tx('Any meeting'), one_on_one: tx('1:1'), standup: tx('Standup'), customer: tx('Customer call'), interview: tx('Interview'), brainstorm: tx('Brainstorm') }
+// The least the meeting's name (with its icon) keeps in the header before the views go to icons.
+const TITLE_ROOM = 140
 // Resume recording is offered in the header for this long after a meeting ended (stopped by
 // mistake, or by itself); after, it's in ⋯.
 const RESUME_MS = 4 * 3600e3
@@ -586,10 +611,31 @@ const tilde = (p) => String(p || '').replace(/^\/Users\/[^/]+/, '~')
 // For <input type="datetime-local">: the time where you are.
 const localInput = (iso) => { const d = new Date(iso); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16) }
 
+// A meeting that isn't there any more (deleted, here or on another device, or merged into another)
+// while its tab was open, or opened from a link to it: said, with the way on, rather than the
+// meeting as it was or Loading… for ever.
+function MeetingGone({ id, list, onBack }) {
+  useEffect(() => { refetch('/meetings') }, [])
+  const into = (list?.meetings || []).find((x) => (x.merged || []).some((y) => y.id === id))
+  return (
+    <div className="mt-view">
+      <div className="mt-page">
+        <div className="mt-gone" role="status">
+          <p><b>{t("This meeting isn't here any more.")}</b> {into ? t('It was merged into {title}.', { title: into.title }) : t('It was deleted, here or on another of your devices.')}</p>
+          <div className="mt-gone-acts">
+            {into && <button type="button" className="btn small primary" onClick={() => { onBack?.(); openMeeting(into.id) }}>{t('Open it')}</button>}
+            <button type="button" className="btn small" onClick={() => onBack?.()}>{t('All meetings')}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function MeetingPage({ id, onBack }) {
   const m = useMeetings()
   const live = m?.rec?.id === id
-  const { data, refresh } = usePoll(`/meetings/${encodeURIComponent(id)}`, live ? 1500 : 4000)
+  const { data, refresh, errorCode } = usePoll(`/meetings/${encodeURIComponent(id)}`, live ? 1500 : 4000)
   useCropping(id, data, refresh)
   const { data: list } = usePoll('/meetings', 60_000)
   const models = useChatModels()
@@ -650,6 +696,29 @@ export function MeetingPage({ id, onBack }) {
     if (!el || phone || typeof ResizeObserver === 'undefined') { setFlow(false); return }
     const ro = new ResizeObserver(() => setFlow(el.clientHeight > 0 && el.clientHeight < 440))
     ro.observe(el)
+    return () => ro.disconnect()
+  }, [loaded, phone])
+  // The views by their icons alone (their names in their tooltips) once the meeting's name would be
+  // squeezed out of the header: in a longer language (German, French) or a narrower window, before
+  // the pane's own width says so (styles.css, at 880 px), as the header has more in it than most.
+  // Their names come back once there's room for them and the meeting's name. Not on a phone, whose
+  // header has a row of its own for the views.
+  const [tight, setTight] = useState(false)
+  const tightAt = useRef(0) // how wide the header has to be for both
+  useEffect(() => {
+    const head = pageRef.current?.parentElement?.querySelector(':scope > .pane-head')
+    const title = head?.querySelector('.pane-title')
+    tightAt.current = 0
+    setTight(false)
+    if (!title || phone || typeof ResizeObserver === 'undefined') return
+    const look = () => {
+      const w = head.clientWidth
+      if (!w) return
+      if (!tightAt.current && title.clientWidth < TITLE_ROOM) { tightAt.current = w + TITLE_ROOM - title.clientWidth; setTight(true) } else if (tightAt.current && w >= tightAt.current) { tightAt.current = 0; setTight(false) }
+    }
+    const ro = new ResizeObserver(look)
+    ro.observe(head)
+    ro.observe(title)
     return () => ro.disconnect()
   }, [loaded, phone])
   // Voices in a room: whether they can be told apart here, and Who spoke's answer once it's done.
@@ -809,7 +878,8 @@ export function MeetingPage({ id, onBack }) {
   })
   const cleanUp = () => act('clean', async () => {
     setMsg({ text: t('Cleaning up the transcript: fixing misheard words and names, and leaving out what nobody said…') })
-    const r = await api(`/meetings/${encodeURIComponent(id)}/cleanup`, { method: 'POST', body: { model: opts?.model || undefined } })
+    // (On its own row's model, Titles and tidy-ups: the summary's Model is the notes'.)
+    const r = await api(`/meetings/${encodeURIComponent(id)}/cleanup`, { method: 'POST', body: {} })
     setMsg({ text: r.fixed || r.dropped ? t('Fixed {n} lines and left out {left}. Each says what was heard; Undo puts one back.', { n: r.fixed, left: r.dropped }) : t('Nothing needed fixing.') })
   })
   const uncleanAll = () => act('clean', async () => { await api(`/meetings/${encodeURIComponent(id)}/cleanup/undo`, { method: 'POST', body: {} }); setMsg({ text: t('The transcript is back to what was heard.') }) })
@@ -864,6 +934,7 @@ export function MeetingPage({ id, onBack }) {
     if (rest.length) linkFiles(id, rest).then((n) => { setMsg({ text: n === 1 ? t("Linked {n} file to this meeting. They're read when the notes are written.", { n }) : t("Linked {n} files to this meeting. They're read when the notes are written.", { n }) }); refresh() }, (err) => setMsg({ error: true, text: err.message }))
   }
 
+  if (errorCode === 'no_meeting') return <MeetingGone id={id} list={list} onBack={onBack} />
   if (!data) return <div className="mt-view"><div className="mt-page"><p className="muted small mt-loading">{t('Loading…')}</p></div></div>
   const done = data.status === 'done'
   const recording = isRecording
@@ -890,7 +961,8 @@ export function MeetingPage({ id, onBack }) {
   // Heard by a light model on this computer: Large turbo would hear names and jargon better.
   const light = lines.find((l) => /^whisper\.cpp (Small|Base)\b/.test(l.engine || ''))?.engine?.replace(/^whisper\.cpp /, '') || null
   const again = data.status === 'transcribing' && data.again && !data.again.done
-  const kinds = list?.kinds || [{ id: 'general', label: t('Any meeting') }]
+  // (Their names as the server has them, in English: meetings.js KINDS, each in the packs.)
+  const kinds = (list?.kinds || [{ id: 'general', label: KIND_NAMES.general }]).map((k) => ({ ...k, label: t(KIND_NAMES[k.id] || k.label) }))
   const o = opts || { language: 'auto', model: '', kind: 'general' }
   // The transcript as a timeline: what was said, with the screen's pictures and your stamped notes
   // where they happened.
@@ -1220,17 +1292,17 @@ export function MeetingPage({ id, onBack }) {
   ) : null
 
   return (
-    <div className="mt-view">
+    <div className={`mt-view${tight ? ' tight' : ''}`}>
       {head}
       <div ref={pageRef} className={`mt-page${dropping ? ' dropping' : ''}${flow ? ' flow' : ''}`} onDragOver={(e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); setDropping(true) } }} onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDropping(false) }} onDrop={onDrop}>
         {phone && <div className="mt-meta">{meta}</div>}
         <RecordingBar id={id} data={data} />
         {!combined && (recording || Date.now() - Date.parse(data.startedAt) < 36 * 3600e3) && <SinceLastTime path={`/meetings/${encodeURIComponent(id)}/since`} onOpen={(mid) => window.dispatchEvent(new CustomEvent('bridge-open-meeting', { detail: { id: mid } }))} />}
         {(data.status === 'recording' || data.status === 'paused') && <SpeechSetup recording />}
-        {!live && (data.status === 'recording' || data.status === 'paused') && <p className="muted small">{t('This meeting is recording in another window.')}</p>}
+        {!live && (data.status === 'recording' || data.status === 'paused') && <Elsewhere id={id} paused={data.status === 'paused'} onDone={refresh} onMsg={setMsg} />}
         {canResume && recent && phone && <div className="mt-resume-row">{resumeBtn}</div>}
         {/* Bridge AI closed while it recorded (server meetings.js recover): said here until it carries on. */}
-        {done && data.interrupted && <p className="mt-interrupted small" role="status"><Icon name="alert" size={12} /> <span>{t('Recording stopped when Bridge AI closed at {time}. What was recorded until then is kept.', { time: timeOf(data.interrupted.at) })}</span>{canResume && <button type="button" className="link-btn" onClick={resumeRec} disabled={busy === 'resume'}>{t('Resume recording')}</button>}</p>}
+        {done && data.interrupted && <p className="mt-interrupted small" role="status"><Icon name="alert" size={12} /> <span>{t('Recording stopped when Bridge AI closed at {time}. What was recorded until then is kept.', { time: timeOf(data.interrupted.at) })}</span>{canResume && ' '}{canResume && <button type="button" className="link-btn" onClick={resumeRec} disabled={busy === 'resume'}>{t('Resume recording')}</button>}</p>}
         {!combined && <MergeHint data={data} onMerged={merged} onMsg={setMsg} />}
         {!combined && <Merged data={data} onDone={refresh} onMsg={setMsg} />}
         {micErr && <MicFix stale={micErr.stale} onClose={() => setMicErr(null)} onAllowed={resumeRec} />}

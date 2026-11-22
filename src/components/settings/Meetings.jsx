@@ -3,25 +3,26 @@ import Icon from '../Icon.jsx'
 import { useMeetings } from '../meetings/recording.jsx'
 import { useScreenAccess, useAllowCall, allowSteps } from '../meetings/allowcall.jsx'
 import { api, usePoll } from '../../api.js'
-import { useSettings, SaveNote } from './General.jsx'
-import { useTrial } from '../../trials.js'
+import { useSettings, useSwitch, SaveNote } from './General.jsx'
+import { useTrial, useFeature } from '../../trials.js'
 import { openMemory } from '../meetings/tools.jsx'
 import { where } from './search.js'
-import { t, tx, currentLang } from '../../i18n/index.js'
+import { t, tx, currentLang, locale } from '../../i18n/index.js'
 import { MEETING_KEYS } from '../../../shared/mentions.js'
 import { Advanced, Line, More, Needs } from './Advanced.jsx'
 import { Betas } from './Beta.jsx'
 import '../meetings/meetings.css'
 
 // Settings › Meetings & Voice › Meetings: its beta features' switches first (Live Meeting Board,
-// Answers in AI Assist, Meeting Insights, Speakers From the Call's Video on a Mac); which engine turns speech into text (on this computer, or a service you have
+// Answers in AI Assist, Speakers From the Call's Video on a Mac); which engine turns speech into text (on this computer, or a service you have
 // a key for), the language, names and terms, the model that writes the notes and what it does by
 // itself (the summary, cleaning up, naming who spoke, preparing: on unless turned off, and what each
 // reads goes to that model, so which and where it runs is said there), AI Assist's live board (a
 // beta feature: on for every meeting, and what it sends where), Answers in AI Assist (a beta
 // feature: what it answers from, and what goes where, the web too), calls and their sound (and, in
-// the desktop app, the floating card's reminder before a meeting), cropping pictures of a call, and
-// saving them as Markdown. Under Advanced: the other speech services, suggesting what to ask, who
+// the desktop app, the floating card's reminder before a meeting), cropping pictures of a call,
+// Meeting Insights (meetings.insights: on by itself once 5 meetings are recorded here, unless you
+// set it) and saving them as Markdown. Under Advanced: the other speech services, suggesting what to ask, who
 // spoke, the key that mentions a meeting in a message, the floating card, and where and how notes
 // are saved. Server: speech.js, meetings.js.
 const LANGS = [['auto', 'Detect it'], ['en', 'English'], ['es', 'Spanish'], ['fr', 'French'], ['de', 'German'], ['it', 'Italian'], ['pt', 'Portuguese'], ['nl', 'Dutch'], ['hi', 'Hindi'], ['zh', 'Chinese'], ['ja', 'Japanese'], ['ko', 'Korean'], ['ar', 'Arabic'], ['ru', 'Russian'], ['pl', 'Polish'], ['tr', 'Turkish'], ['sv', 'Swedish'], ['uk', 'Ukrainian']]
@@ -153,6 +154,8 @@ function RoomVoices({ v, m, set, refresh }) {
 const openSpeechKeys = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'providers-speech' } }))
 const openVoice = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'voice' } }))
 const openProviders = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'providers' } }))
+// Meeting notes' model is picked in one place: Models for Each Task.
+const openModelJobs = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'model-jobs' } }))
 
 export default function Meetings({ onOpenAgent }) {
   const { s, save, note } = useSettings()
@@ -165,10 +168,11 @@ export default function Meetings({ onOpenAgent }) {
   // Preparing for meetings needs the calendar: only where there's one (a Mac).
   const conf = usePoll('/config', 10 * 60 * 1000).data
   const calendar = conf?.calendar === true
-  const home = useTrial('home') // Home, a beta feature: named only when it's there
+  const home = useFeature('home') // Home: named only when it's there
   const liveBoard = useTrial('meeting-board') // AI Assist's live board, a beta feature
   const answers = useTrial('assist-answers') // Answers in AI Assist, a beta feature
   const [web, setWeb] = useState(null) // the route that looks things up on the web (consult.js: Perplexity), once asked
+  const [insightsOn, setInsights] = useSwitch(s?.effective?.meetings?.insights === true, (insights) => save({ meetings: { insights } }))
   useEffect(() => { if (answers) api('/consult').then((l) => setWeb((Array.isArray(l) ? l : []).find((x) => x.id === 'perplexity') || { available: false }), () => setWeb({ available: false })) }, [answers])
   useEffect(() => { api('/chat/models').then((r) => { setModels(r.models || []); setAuto(r.automatic || null); setShort(r.short || null) }).catch(() => setModels([])) }, [])
   const m = s?.effective?.meetings || {}
@@ -195,9 +199,10 @@ export default function Meetings({ onOpenAgent }) {
   )
   const mine = d.services.filter((x) => x.ready || d.engine === x.id)
   const others = d.services.filter((x) => !mine.includes(x))
-  // The model that writes the notes, and with it cleans up, names who spoke and prepares: which, and
-  // where it runs, said where each is turned on (what it reads leaves this computer unless it's local).
-  const notes = models && (m.model || auto) ? models.find((x) => x.id === (m.model || auto)) || null : null
+  // The model that writes the notes, and with it names who spoke and prepares: which, and where it
+  // runs, said where each is turned on (what it reads leaves this computer unless it's local). It's
+  // picked in one place, Models for Each Task's Meeting notes (auto: the one that gives now).
+  const notes = models && auto ? models.find((x) => x.id === auto) || null : null
   const by = notes ? (notes.via === 'local' ? t('{model}, on this computer', { model: notes.label }) : t('{model}, at {provider}', { model: notes.label, provider: notes.provider })) : null
   const prepWhy = home ? t("Fifteen minutes before a meeting with other people, AI Assist suggests goals and questions, with the model that writes your notes, from who's coming, last time with them, the invite and your mail with them. Off, it does this only when you ask, with AI Assist on the meeting in Calendar, or Prepare on Home.")
     : t("Fifteen minutes before a meeting with other people, AI Assist suggests goals and questions, with the model that writes your notes, from who's coming, last time with them, the invite and your mail with them. Off, it does this only when you ask, with AI Assist on the meeting in Calendar.")
@@ -206,7 +211,7 @@ export default function Meetings({ onOpenAgent }) {
     <div className="st-sections st-meet">
       <SaveNote note={note} />
       {/* The beta features of meetings, each switch marked Beta, at the top of the tab. */}
-      <Betas ids={['meeting-board', 'assist-answers', 'meeting-insights', 'call-video']} mac={conf?.platform === 'darwin'} />
+      <Betas ids={['meeting-board', 'assist-answers', 'call-video']} mac={conf?.platform === 'darwin'} />
 
       <section className="st-sec" data-setting="transcribe">
         <h4>{t('Transcribe with')}</h4>
@@ -265,15 +270,15 @@ export default function Meetings({ onOpenAgent }) {
 
       <section className="st-sec" data-setting="notes-model">
         <h4>{t('Notes are written by')}</h4>
-        <p className="muted small" data-notes-where>{!models ? '\u00a0' : m.model && !notes ? t("{model} can't be used just now, so the next model that can writes them.", { model: m.model })
+        <p className="muted small" data-notes-where>{!models ? '\u00a0'
           : !notes ? t('No model to write them yet: sign in to an agent, or add one in {place}.', { place: where('providers') })
           : notes.via === 'local' ? t('{model} runs on this computer: what it reads stays here.', { model: notes.label })
             : t('{model}, at {provider}: the transcript, and what each one below reads, go there.', { model: notes.label, provider: notes.provider })}</p>
-        {!m.model && short && <p className="muted small" data-notes-short>{t('Meetings up to about {n} minutes are written by {model} on this computer instead (Auto, in {place}).', { n: short.minutes, model: short.label, place: where('model-jobs') })}</p>}
-        <select className="st-input" value={m.model || ''} onChange={(e) => set({ model: e.target.value || null })} aria-label={t('Model for meeting notes')}>
-          <option value="">{t('Automatic (your Claude sign-in first, then a key or a local model)')}</option>
-          {(models || []).map((x) => <option key={x.id} value={x.id}>{x.label} ({x.provider})</option>)}
-        </select>
+        {short && <p className="muted small" data-notes-short>{t('Meetings up to about {n} minutes are written by {model} on this computer instead (Auto, in {place}).', { n: short.minutes, model: short.label, place: where('model-jobs') })}</p>}
+        <div className="st-row" data-notes-pick>
+          <span className="muted small">{t('Picked in {place}, with the models to fall back on.', { place: where('model-jobs') })}</span>
+          <button type="button" className="btn small" onClick={openModelJobs}>{t('Change it')}</button>
+        </div>
         <label className="st-check">
           <input type="checkbox" checked={m.autoSummary !== false} onChange={(e) => set({ autoSummary: e.target.checked })} />
           <span><b>{t('Write the summary when a meeting ends')}</b> <span className="muted small">{t('Otherwise, Summarize on the meeting when you want it.')}</span></span>
@@ -356,6 +361,14 @@ export default function Meetings({ onOpenAgent }) {
           <span><b>{t("Crop pictures of a call to what's shared")}</b> <span className="muted small">{m.cropShots !== false
             ? t("The slide or page, without the people and the call's buttons. Whole screen on a picture puts it back.")
             : t('Pictures stay whole. Crop on a picture of a call crops that one.')} <More>{t("When a watched screen shows a call, its pictures keep the slide or page being shared, and leave out the people beside it, the call's buttons and its window. Only when the picture plainly shows a call, and never into what's shared. Worked out on this computer; the picture as it was taken is kept too.")}</More></span></span>
+        </label>
+      </section>
+
+      {/* Meeting Insights: on by itself once there are meetings to add up, unless you set it (server/index.js insightsByItself). */}
+      <section className="st-sec" data-setting="meeting-insights">
+        <label className="st-check">
+          <input type="checkbox" checked={insightsOn} onChange={(e) => setInsights(e.target.checked)} />
+          <span><b>{t('Meeting Insights')}</b> <span className="muted small">{t('Your meetings added up, and the people you meet.')}{conf?.featuresAuto?.['meeting-insights'] && insightsOn ? ` ${t('Turned on by itself on {date}, once there were meetings to add up.', { date: new Date(conf.featuresAuto['meeting-insights']).toLocaleDateString(locale(), { month: 'long', day: 'numeric' }) })}` : ''} <More>{t('Your meetings added up (how much time, when in the week, which series, your share of the talk) and the people you meet, worked out on this computer. It turns on by itself once 5 meetings are recorded here, unless you turn it off.')}</More></span></span>
         </label>
       </section>
 

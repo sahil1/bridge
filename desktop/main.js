@@ -145,6 +145,11 @@ const machinePorts = () => {
 }
 const pages = senders.create(PORT, { ports: machinePorts })
 const isLocal = pages.local
+// A frame in a window (a project's app in Preview, another computer's page in a tab) never moves the
+// window: only the window's own page does (initiator: the frame that asked; a frame has a parent).
+// One it sends out of the app opens in its own app, as before. No initiator (that frame gone since)
+// counts as a frame's.
+const byFrame = (e) => { try { return !e?.initiator || !!e.initiator.parent } catch { return true } }
 // Every message from a page is checked first: only this computer's own page, but for what a window
 // showing another computer needs too, and the Allow access tile's own (senders.js MACHINE, SELF).
 const ipc = pages.guard(ipcMain, { refused: (ch, e) => console.warn(`Refused ${ch} from ${e?.senderFrame?.url || 'a frame that has gone'}: not this computer's own page`) })
@@ -208,7 +213,7 @@ async function createWindow() {
   // file the app shows, opened in a new tab, in the browser.
   win.webContents.setWindowOpenHandler(openLink(win))
   backForward(win)
-  win.webContents.on('will-navigate', (e, url) => { if (!isLocal(url) && !url.startsWith('data:')) { e.preventDefault(); openOutside(url) } })
+  win.webContents.on('will-navigate', (e, url) => { if (!isLocal(url) && !url.startsWith('data:')) { e.preventDefault(); openOutside(url) } else if (byFrame(e)) e.preventDefault() })
   // Its title as the page says it (what waits on you, and which computer it is, for the Dock's and
   // the Window menu's list of windows); the count also goes on the Dock's badge.
   win.webContents.on('page-title-updated', (e, title) => { e.preventDefault(); win?.setTitle(title); updateBadge(title) })
@@ -289,7 +294,7 @@ ipc.handle('bridge:popout', (e, { paneId, title, machine } = {}) => {
   })
   w.once('ready-to-show', () => w.show())
   w.webContents.setWindowOpenHandler(openLink(w))
-  w.webContents.on('will-navigate', (ev, url) => { if (!isLocal(url)) { ev.preventDefault(); openOutside(url) } })
+  w.webContents.on('will-navigate', (ev, url) => { if (!isLocal(url)) { ev.preventDefault(); openOutside(url) } else if (byFrame(ev)) ev.preventDefault() })
   w.loadURL(on ? pages.machineUrl(on, `/?window=${encodeURIComponent(paneId.slice(on.length + 1))}`) : `${URL_BASE}/?window=${encodeURIComponent(paneId)}`)
   pops.set(paneId, w)
   w.on('closed', () => { if (pops.get(paneId) === w) pops.delete(paneId) })
@@ -326,7 +331,7 @@ ipc.handle('bridge:open-machine', (e, { id = null, agent = null, pass = '' } = {
   })
   w.once('ready-to-show', () => w.show())
   w.webContents.setWindowOpenHandler(openLink(w))
-  w.webContents.on('will-navigate', (ev, url) => { if (!isLocal(url)) { ev.preventDefault(); openOutside(url) } })
+  w.webContents.on('will-navigate', (ev, url) => { if (!isLocal(url)) { ev.preventDefault(); openOutside(url) } else if (byFrame(ev)) ev.preventDefault() })
   backForward(w)
   if (was?.maximized) w.maximize()
   for (const ev of ['resize', 'move', 'close']) w.on(ev, () => saveDeviceBounds(key, w))
@@ -1241,6 +1246,8 @@ app.whenReady().then(async () => {
     power: powerSaveBlocker,
     wake: () => { if (IS_MAC) execFile('/usr/bin/caffeinate', ['-u', '-t', '2'], { timeout: 5000 }, () => {}) },
     taken: () => noPicker('remote'),
+    // Whether the screen is locked (a device waits for it to be unlocked: no app may take it then).
+    powerMonitor,
   })
   watchFleet()
   watchCalls()

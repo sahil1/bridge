@@ -4,6 +4,7 @@ import { api } from '../../api.js'
 import { ago } from '../Machines.jsx'
 import { platName } from '../settings/Bots.jsx'
 import { t } from '../../i18n/index.js'
+import { useEnter, EnterAt } from '../EnterHint.jsx'
 import './bots-home.css'
 
 // Test this connection (server/conncheck.js): every part of a connection checked end to end, from
@@ -186,6 +187,8 @@ function TryMessage({ c: card }) {
     } catch (err) { setError(err.message); setOut(null) }
     setBusy(false)
   }
+  // Enter as Settings › You › Enter Key has it (src/enter.js); a phone's keyboard on the screen tries it, as before.
+  const enter = useEnter(text, run)
   const then = out ? thenSaid(out) : null
   const lead = out?.bot ? out.bot.name : out?.rule === 'asked' ? t('It would ask which') : out?.rule === 'none' ? t('No bot: the polite no') : out?.rule === 'help' ? t('Its bots, listed') : t('Not for any bot')
   return (
@@ -193,7 +196,7 @@ function TryMessage({ c: card }) {
       <summary><Icon name="chevron" size={11} />{t('Try a message')}</summary>
       <p className="muted small">{t('Type a message as someone would send it to {app}, and see which bot would take it, and why. A dry run: nothing is sent, answered or kept, and no bot runs.', { app })}</p>
       <form onSubmit={run} className="ro-try-form">
-        <textarea className="st-input" rows={2} value={text} onChange={(e) => setText(e.target.value)} placeholder={x.platform === 'slack' ? t('Pricing Desk: what does the team plan cost? Or {command} pricing …', { command: x.command || '/' }) : t('Pricing Desk: what does the team plan cost?')} aria-label={t('The message to try')} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) run(e) }} />
+        <EnterAt show={enter.mid}><textarea className="st-input" rows={2} value={text} onChange={(e) => { setText(e.target.value); enter.box.onSelect(e) }} placeholder={x.platform === 'slack' ? t('Pricing Desk: what does the team plan cost? Or {command} pricing …', { command: x.command || '/' }) : t('Pricing Desk: what does the team plan cost?')} aria-label={t('The message to try')} onKeyDown={enter.onKeyDown} {...enter.box} /></EnterAt>
         <div className="sb-sched-row">
           <label className="sb-field"><span>{t('Where')}</span>
             <select className="st-input" value={where} onChange={(e) => setWhere(e.target.value)} aria-label={t('Where it\'s asked')}>

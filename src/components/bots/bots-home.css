@@ -152,7 +152,9 @@
 /* ---------- On a phone ---------- */
 .bh.phone .bh-head { padding: 12px 12px 0; }
 .bh.phone .bh-tabs { align-self: stretch; margin: 8px 12px 0; display: flex; }
-.bh.phone .bh-tabs button { flex: 1; justify-content: center; min-height: 40px; }
+/* (Each as wide as what's in it, and what's left shared out: a long name and its count, Verbindungen in
+   German, fit inside its tab rather than running to its edge.) */
+.bh.phone .bh-tabs button { flex: 1 1 auto; justify-content: center; min-height: 40px; }
 .bh.phone .bh-body { padding: 12px 12px 32px; }
 .bh.phone .bh-cards { grid-template-columns: minmax(0, 1fr); }
 :is(.bh, .bp).phone :is(.bo-card, .bh-sess, .sb-chip) { min-height: 44px; }
@@ -215,3 +217,5 @@
 .bh-status-words .link-btn { margin-left: 6px; }
 .bh-status-row > .btn { color: var(--ink); }
 .bh.phone .bh-tools .sb-grow { display: none; }
+.bh-quick-warn { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 6px; margin: 0; color: var(--ink-2); }
+.bh-quick-warn > .icon { flex: none; align-self: center; color: var(--warning); }

@@ -1,5 +1,5 @@
 import Icon from '../Icon.jsx'
-import { useBots, STATUS, needsCount, isBotsPlace, botsView } from './bots.js'
+import { useBots, STATUS, needsCount, isBotsPlace, botsView, firstTab } from './bots.js'
 import { t } from '../../i18n/index.js'
 import './bots-page.css'
 
@@ -18,7 +18,7 @@ export default function RailBots({ selected, onOpen }) {
   return (
     <div className="rail-nav rail-bots" data-setting="rail-bots">
       <div className="rail-nav-row">
-        <button type="button" className={`rail-nav-btn ${here ? 'on' : ''}`} onClick={() => onOpen(botsView(needs ? 'sessions' : 'bots'))} title={t('Your bots, their connections and every conversation they\'re having')}>
+        <button type="button" className={`rail-nav-btn ${here ? 'on' : ''}`} onClick={() => onOpen(botsView(firstTab(list)))} title={t('Your bots, their connections and every conversation they\'re having')}>
           <Icon name="bot" size={14} /> {t('Bots')}
           {needs > 0 && <span className="mc-needs" aria-label={needs === 1 ? t('{n} needs you', { n: needs }) : t('{n} need you', { n: needs })}>{needs}</span>}
         </button>
@@ -36,7 +36,7 @@ export function MiniBots({ selected, onOpen }) {
   if (!on) return null
   const needs = needsCount(list) > 0
   return (
-    <button type="button" className={`mini-nav ${isBotsPlace(selected) ? 'on' : ''}`} onClick={() => onOpen(botsView(needs ? 'sessions' : 'bots'))} aria-label={needs ? t('Bots (one needs you)') : t('Bots')} title={t('Bots')}>
+    <button type="button" className={`mini-nav ${isBotsPlace(selected) ? 'on' : ''}`} onClick={() => onOpen(botsView(firstTab(list)))} aria-label={needs ? t('Bots (one needs you)') : t('Bots')} title={t('Bots')}>
       <Icon name="bot" size={15} />{needs && <span className="mini-needs" />}
     </button>
   )

@@ -12,7 +12,7 @@ import { Markdown } from 'tiptap-markdown'
 import Icon from '../../Icon.jsx'
 import { t, locale } from '../../../i18n/index.js'
 import { api } from '../../../api.js'
-import { textOf, rawUrl, base64 } from '../files.js'
+import { textOf, rawUrl, base64, shownWidth } from '../files.js'
 import { readDocx, writeDocx, fingerprint } from '../ooxml.js'
 import { wordExtensions, fontStack } from '../wordschema.js'
 import { docInfo, wordCss, listPlugin, commentPlugin, pagePlugin, pageOf, hfRenderer } from '../docview.js'
@@ -42,7 +42,7 @@ export default function DocEditor({ file, data, onDirty, onStats, handle, readOn
     const urls = []
     if (md || plain) setStart({ text: textOf(data) })
     else {
-      readDocx(data, { urlOf: (bytes, mime) => { const u = URL.createObjectURL(new Blob([bytes], { type: mime })); urls.push(u); return u } })
+      readDocx(data, { urlOf: (bytes, mime) => { const u = URL.createObjectURL(new Blob([bytes], { type: mime })); urls.push(u); return u }, far: (p) => !!file.parts?.has(p), farUrl: (p, w) => file.parts.url(p, shownWidth(w || 640)) })
         .then((model) => on && setStart({ model }), (e) => on && setStart({ error: e.message }))
     }
     return () => { on = false; for (const u of urls) URL.revokeObjectURL(u) }
@@ -736,6 +736,10 @@ function WordDoc({ file, model, onDirty, onStats, handle, readOnly, onOpen }) {
   const print = () => {
     const dom = editor.view.dom.cloneNode(true)
     for (const x of dom.querySelectorAll('.sd-pb, .sd-pb-top, .sd-pb-end, tr.sd-pb-row, [data-resize-handle], .ProseMirror-separator')) x.remove()
+    // Every picture loaded before it's printed, not only those near the top: the print's frame is a
+    // pixel wide, and WebKit (Safari, the iPhone app) loads a lazy one only once it's scrolled to,
+    // so the rest printed blank. (The frame's load waits for pictures that aren't lazy.)
+    for (const img of dom.querySelectorAll('img[loading]')) img.removeAttribute('loading')
     dom.removeAttribute('contenteditable')
     const hfText = (json) => {
       const p = json?.content?.find((b) => b.type === 'paragraph' && (b.content || []).length)

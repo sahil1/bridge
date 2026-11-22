@@ -177,8 +177,9 @@ try {
   await api('/setup', { name: me })
   await desk.api('/setup', { name: me })
   await api('/providers/openai', { values: { OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: `${model.url}/v1` } }, 'PUT')
-  // Meeting Insights off to start with (it would turn itself on at the fifth meeting).
-  await api('/settings', { meetings: { engine: 'openai', model: 'openai:gpt-5', autoSummary: false, cleanup: false }, dictation: { tidyModel: 'openai:gpt-5' }, trials: { 'dictation-cleanup': true, 'meeting-insights': false } }, 'PATCH')
+  // Meeting Insights off to start with (it would turn itself on at the fifth meeting), and Tidy what
+  // I say on (with no local model here, it's off to start with).
+  await api('/settings', { meetings: { engine: 'openai', model: 'openai:gpt-5', autoSummary: false, cleanup: false, insights: false }, dictation: { tidyModel: 'openai:gpt-5', tidy: true } }, 'PATCH')
   // A dictation from before memory is first looked at.
   await api('/dictations', { text: 'Send the Atlas numbers to Priya Shah before the Northwind call', ms: 2400 })
 
@@ -197,7 +198,7 @@ try {
   const betas = p.locator('.modal.settings .st-sec', { has: p.locator('h4', { hasText: 'Beta Features' }) })
   await betas.locator('.st-check').first().waitFor({ timeout: 8000 })
   const listed = (await betas.locator('.st-check b').allInnerTexts()).map((x) => x.trim())
-  ok(listed.includes('Home') && !listed.includes('Memory'), 'and Beta Features doesn\'t list it', listed)
+  ok(listed.includes('Bots') && !listed.includes('Memory'), 'and Beta Features doesn\'t list it', listed)
   await p.keyboard.press('Escape')
   await until(async () => !(await p.locator('.modal.settings').count()), 5000)
   // Dictations after: one with a name only ever said in dictations.
@@ -340,11 +341,11 @@ try {
   ok(lines.length >= 5 && !lines.some((x) => x.lone) && !!(await home.locator('.mm-you').isVisible()), '1280 wide, About You beside it: each name\'s Edit on its line, none alone on a line of its own', { n: lines.length, lone: lines.filter((x) => x.lone), you: await home.locator('.mm-you').isVisible() })
   await home.locator('.mm-find input').fill('')
   await p.setViewportSize({ width: 1440, height: 900 })
-  // People: with Meeting Insights off (a beta feature) nothing of it shows; on, the people you meet, one kept.
+  // People: with Meeting Insights off nothing of it shows; on, the people you meet, one kept.
   await home.locator('.mm-colls button[data-coll="person"]').click()
   await home.locator('.mm-colls button[data-coll="person"][aria-selected="true"]').waitFor({ timeout: 5000 }).catch(() => {})
-  ok(!(await home.locator('.mm-met').count()) && !/Meeting Insights/i.test(await home.innerText()), 'People, with Meeting Insights off: only the people memory has, and nothing about the beta feature', await home.innerText().catch(() => ''))
-  await api('/settings', { trials: { 'meeting-insights': true } }, 'PATCH')
+  ok(!(await home.locator('.mm-met').count()) && !/Meeting Insights/i.test(await home.innerText()), 'People, with Meeting Insights off: only the people memory has, and nothing about Meeting Insights', await home.innerText().catch(() => ''))
+  await api('/settings', { meetings: { insights: true } }, 'PATCH')
   // All memory picked, then a reload: Meetings in front at Memory and People, from meetings again.
   await home.locator('.mm-scope button[data-scope="all"]').click()
   await until(async () => (await scope(home)) === 'all', 5000)

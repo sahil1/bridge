@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import Icon from '../../Icon.jsx'
 import { api } from '../../../api.js'
 import { t } from '../../../i18n/index.js'
-import { base64 } from '../files.js'
+import { base64, shownWidth } from '../files.js'
 import { keys, withKeys } from '../keys.js'
 import * as P from '../pptxdoc.js'
 import * as X from '../pptxtext.js'
@@ -26,7 +26,7 @@ import '../doc.css'
 export default function SlidesEditor(props) {
   const [doc, setDoc] = useState(null)
   const [err, setErr] = useState(null)
-  useEffect(() => { P.readPptx(props.data).then(setDoc, (e) => setErr(e.message)) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { P.readPptx(props.data, { parts: props.file.parts || null }).then(setDoc, (e) => setErr(e.message)) }, []) // eslint-disable-line react-hooks/exhaustive-deps
   if (err) return <div className="sd-empty" role="alert"><Icon name="alert" size={20} /><b>{t("Couldn't read its slides: {error}", { error: err })}</b><span className="muted small">{t('Ask an agent to change it, or open it in PowerPoint or Keynote.')}</span></div>
   if (!doc) return <div className="sd-empty sd-loading" role="status"><Icon name="refresh" size={16} className="spin" /><span className="muted">{t('Opening {name}…', { name: props.file.name })}</span></div>
   return <Slides {...props} doc={doc} />
@@ -283,11 +283,16 @@ function Slides({ doc, file, onDirty, onStats, handle, readOnly = false, onOpen 
   const [stageAt, stage] = useSize()
   const stageEl = useCallback((n) => { stageRef.current = n; stageAt(n) }, [stageAt])
 
-  // Pictures, as addresses the page can show: the file's own, and ones put in here.
+  // Pictures, as addresses the page can show: the file's own, and ones put in here. A big file's are
+  // left on its computer until they're shown, then come at about the width they're drawn at (px, in
+  // the slide's px), as wide as this screen shows them (files.js shownWidth).
   const urls = useRef(new Map())
-  doc.urlOf = (part) => {
+  doc.urlOf = (part, px = 0) => {
     if (!P.showable(part)) return null
     if (urls.current.has(part)) return urls.current.get(part)
+    const slideW = doc.size.cx / P.EMU_PX
+    if (doc.parts?.has(part) && !media.current.has(part)) { const u = doc.parts.url(part, shownWidth(px || slideW, slideW)); urls.current.set(part, u); return u }
+    if (media.current.get(part)?.url && !media.current.get(part)?.bytes) return media.current.get(part).url
     const bytes = doc.bin.get(part) || media.current.get(part)?.bytes
     if (!bytes) return null
     const u = URL.createObjectURL(new Blob([bytes], { type: P.mimeOf(part) }))
@@ -316,6 +321,21 @@ function Slides({ doc, file, onDirty, onStats, handle, readOnly = false, onOpen 
   const view = viewOf(shown)
   const objAt = (i, v = view) => v.objs.find((o) => o.at === i)
   useEffect(() => { onStats?.({ text: t('Slide {n} of {count}', { n: at + 1, count }) }) }, [at, count, onStats])
+  // A big file in parts: the next two slides' pictures fetched ahead, so they're there when you go on.
+  const ahead = useRef(new Set())
+  useEffect(() => {
+    if (!doc.parts) return undefined
+    const id = setTimeout(() => {
+      for (const s of slides.slice(at + 1, at + 3)) for (const u of picturesIn(viewOf(s))) {
+        if (ahead.current.has(u) || !u.includes('/api/studio/part?')) continue
+        ahead.current.add(u)
+        const img = new Image()
+        img.decoding = 'async'
+        img.src = u
+      }
+    }, 400)
+    return () => clearTimeout(id)
+  }, [at, slides, viewOf, doc])
   useEffect(() => { if (cur !== at) setCur(at) }, [cur, at])
 
   // ---------- Changes, undo and redo ----------
@@ -694,10 +714,14 @@ function Slides({ doc, file, onDirty, onStats, handle, readOnly = false, onOpen 
     let left = 0
     for (const [rid, r] of Object.entries(rels)) {
       if (r.external) { out[rid] = r; continue }
-      if (r.type === 'image' && (from.bin.get(r.target) || from === doc)) {
+      if (r.type === 'image' && (from.bin.get(r.target) || from.parts?.has(r.target))) {
         const ext = r.target.split('.').pop().toLowerCase()
         const path = P.newMediaPath(doc, media.current, ext)
-        media.current.set(path, { bytes: from.bin.get(r.target), type: P.mimeOf(r.target) })
+        // One left on the other deck's computer: shown from there now, its bytes fetched for the save.
+        const far = !from.bin.get(r.target)
+        const m = { bytes: far ? null : from.bin.get(r.target), type: P.mimeOf(r.target), ...(far ? { url: from.parts.url(r.target, 1920) } : {}) }
+        if (far) m.pending = from.parts.bytes(r.target).then((b) => { m.bytes = b })
+        media.current.set(path, m)
         out[rid] = { ...r, target: path }
       }
     }
@@ -1090,7 +1114,7 @@ function Slides({ doc, file, onDirty, onStats, handle, readOnly = false, onOpen 
 
   // ---------- Saving, exporting ----------
   handle.current = {
-    save: async () => { flushTyping(); return P.writePptx(doc, slidesRef.current, { media: media.current, threads: threads.save() }) },
+    save: async () => { flushTyping(); await Promise.all([...media.current.values()].map((m) => m.pending)); return P.writePptx(doc, slidesRef.current, { media: media.current, threads: threads.save() }) },
     selection: () => {
       const s = window.getSelection?.()
       const text = s && !s.isCollapsed && canvasRef.current?.contains(s.anchorNode) ? s.toString() : P.textsOf(slidesRef.current[curRef.current]).map((x) => P.plainOf(x.t)).join('\n')
@@ -1103,7 +1127,8 @@ function Slides({ doc, file, onDirty, onStats, handle, readOnly = false, onOpen 
     const f = document.createElement('iframe')
     f.className = 'sd-print-frame'
     f.setAttribute('aria-hidden', 'true')
-    const pages = slidesRef.current.map((s, i) => (s.hidden ? '' : `<div class="pg">${draw(s, i + 1)}</div>`)).join('')
+    // (Every picture loaded for the print, not only those in view.)
+    const pages = slidesRef.current.map((s, i) => (s.hidden ? '' : `<div class="pg">${draw(s, i + 1)}</div>`)).join('').replace(/ loading="lazy"/g, '')
     f.srcdoc = `<!doctype html><meta charset="utf-8"><title>${file.name.replace(/[<&]/g, '')}</title><style>${SLIDE_CSS}html,body{margin:0;background:#fff}.pg{width:${W}px;height:${H}px;overflow:hidden;page-break-after:always;break-after:page}@page{size:${W}px ${H}px;margin:0}</style>${pages}`
     f.onload = () => { setTimeout(() => { try { f.contentWindow.focus(); f.contentWindow.print() } finally { setTimeout(() => f.remove(), 60_000) } }, 300) }
     document.body.appendChild(f)
@@ -1114,20 +1139,47 @@ function Slides({ doc, file, onDirty, onStats, handle, readOnly = false, onOpen 
     try {
       const was = doc.urlOf
       const data = new Map()
-      doc.urlOf = (part) => { if (!P.showable(part)) return null; if (!data.has(part)) { const b = doc.bin.get(part) || media.current.get(part)?.bytes; data.set(part, b ? `data:${P.mimeOf(part)};base64,${base64(b)}` : null) } return data.get(part) }
-      const html = slideHtml(P.slideView(doc, slidesRef.current[curRef.current]), { number: curRef.current + 1, font, words })
+      // A big file's pictures on this slide, fetched first (they're left on its computer).
+      const far = new Map()
+      const need = new Set()
+      doc.urlOf = (part) => { if (doc.parts?.has(part)) need.add(part); return null }
+      P.slideView(doc, slidesRef.current[curRef.current])
+      for (const p of need) far.set(p, await doc.parts.bytes(p))
+      doc.urlOf = (part) => { if (!P.showable(part)) return null; if (!data.has(part)) { const b = doc.bin.get(part) || far.get(part) || media.current.get(part)?.bytes; data.set(part, b ? `data:${P.mimeOf(part)};base64,${base64(b)}` : null) } return data.get(part) }
+      const html = slideHtml(P.slideView(doc, slidesRef.current[curRef.current]), { number: curRef.current + 1, font, words }).replace(/ loading="lazy"/g, '')
       doc.urlOf = was
       const scale = 2
       // An SVG's own HTML has to be XML: the browser writes it so.
       const box = document.createElement('div')
       box.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml')
       box.innerHTML = `<style>${SLIDE_CSS}</style>${html}`
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W * scale}" height="${H * scale}"><foreignObject width="${W}" height="${H}" transform="scale(${scale})">${new XMLSerializer().serializeToString(box)}</foreignObject></svg>`
+      // Drawn at the slide's size and made twice as big on the canvas (an SVG is drawn anew at the size
+      // it's drawn at): WebKit (Safari, the iPhone app) ignores a transform on a foreignObject, and
+      // drew the slide at its own size in the picture's top left corner, the rest of it empty.
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><foreignObject width="${W}" height="${H}">${new XMLSerializer().serializeToString(box)}</foreignObject></svg>`
       const img = new Image()
       await new Promise((ok, no) => { img.onload = ok; img.onerror = () => no(new Error(t('the browser couldn\'t draw it'))); img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`; setTimeout(() => no(new Error(t('the browser took too long to draw it'))), 10_000) })
+      await img.decode?.().catch(() => {})
       const c = document.createElement('canvas')
       c.width = W * scale; c.height = H * scale
-      c.getContext('2d').drawImage(img, 0, 0)
+      // WebKit draws the pictures in it only once it's decoded them, which a draw starts (the first
+      // time, a slide without its photos): drawn again and again, a little longer apart each time,
+      // until it comes out the same twice (three times at least; three seconds at most).
+      const g = c.getContext('2d')
+      const small = document.createElement('canvas')
+      small.width = 64; small.height = 36
+      const sg = small.getContext('2d', { willReadFrequently: true })
+      const look = () => { sg.clearRect(0, 0, 64, 36); sg.drawImage(c, 0, 0, 64, 36); return sg.getImageData(0, 0, 64, 36).data.join(',') }
+      let drawn = null
+      const stopAt = Date.now() + 3000
+      for (let n = 0; ; n++) {
+        g.clearRect(0, 0, c.width, c.height)
+        g.drawImage(img, 0, 0, W * scale, H * scale)
+        const now = look()
+        if ((n >= 2 && now === drawn) || Date.now() > stopAt) break
+        drawn = now
+        await new Promise((r) => setTimeout(r, 120 * (n + 1)))
+      }
       const blob = await new Promise((ok, no) => { try { c.toBlob((b) => (b ? ok(b) : no(new Error(t('the browser couldn\'t draw it')))), 'image/png') } catch (e) { no(e) } })
       const a = document.createElement('a')
       a.href = URL.createObjectURL(blob)
@@ -1141,7 +1193,8 @@ function Slides({ doc, file, onDirty, onStats, handle, readOnly = false, onOpen 
     flushTyping(); setMenu(null)
     try {
       const { deckFromPptx } = await import('../pptx.js')
-      const deck = await deckFromPptx(await P.writePptx(doc, slidesRef.current, { media: media.current }), file.name)
+      await Promise.all([...media.current.values()].map((m) => m.pending))
+      const deck = await deckFromPptx(await P.writePptx(doc, slidesRef.current, { media: media.current }), file.name, { parts: doc.parts })
       const name = file.name.replace(/\.pptx$/i, '')
       const dir = file.path.includes('/') ? file.path.slice(0, file.path.lastIndexOf('/')) : ''
       // Its master's background, its titles' colour and its accent go with it, so it opens looking
@@ -1430,16 +1483,35 @@ function Slides({ doc, file, onDirty, onStats, handle, readOnly = false, onOpen 
   )
 }
 
-// A drawn slide at width w (the strip, the grid, galleries, presenting).
-const Drawn = memo(function Drawn({ html, w, W, H, className = '' }) {
+// A drawn slide at width w (the strip, the grid, galleries, presenting). lazy: drawn only once it's
+// near the screen (the strip's and the grid's), so a big file's pictures come for the slides you
+// scroll to, not all at once.
+const Drawn = memo(function Drawn({ html, w, W, H, className = '', lazy = false }) {
   const [ref, size] = useSize()
+  const [near, setNear] = useState(!lazy)
+  const box = useRef(null)
+  useEffect(() => {
+    if (near) return undefined
+    if (!box.current || typeof IntersectionObserver !== 'function') { setNear(true); return undefined }
+    const io = new IntersectionObserver(([x]) => { if (x.isIntersecting) { setNear(true); io.disconnect() } }, { rootMargin: '480px' })
+    io.observe(box.current)
+    return () => io.disconnect()
+  }, [near])
   const width = w || size.w
   return (
-    <div ref={ref} className={`sd-slide px-slide-box ${className}`} style={w ? { width: w, height: Math.round((w * H) / W) } : { width: '100%', aspectRatio: `${W} / ${H}` }}>
-      {width > 0 && <div className="px-in" style={{ width: W, height: H, transform: `scale(${width / W})` }} dangerouslySetInnerHTML={{ __html: html }} />}
+    <div ref={(n) => { box.current = n; ref(n) }} className={`sd-slide px-slide-box ${className}`} style={w ? { width: w, height: Math.round((w * H) / W) } : { width: '100%', aspectRatio: `${W} / ${H}` }}>
+      {width > 0 && near && <div className="px-in" style={{ width: W, height: H, transform: `scale(${width / W})` }} dangerouslySetInnerHTML={{ __html: html }} />}
     </div>
   )
 })
+// The pictures a slide's drawing shows, by their addresses: its background's, and each thing's.
+function picturesIn(v) {
+  const out = []
+  const walk = (list) => { for (const o of list || []) { if (o.img?.url) out.push(o.img.url); if (o.fill?.url) out.push(o.fill.url); if (o.kids) walk(o.kids) } }
+  if (v?.bg?.url) out.push(v.bg.url)
+  walk(v?.under); walk(v?.objs)
+  return out
+}
 // A slide in the strip or the grid: its number, its drawing, skipped or not; picked by a click (⌘
 // or ⇧ for more), dragged into order, its menu on a right click.
 const Thumb = memo(function Thumb({ s, i, draw, w, h, on, picked, readOnly, drop, onPick, onMenu, onDragStart, onDragOver, onDrop, onDragEnd }) {
@@ -1453,7 +1525,7 @@ const Thumb = memo(function Thumb({ s, i, draw, w, h, on, picked, readOnly, drop
       onDragOver={(e) => { e.preventDefault(); const r = e.currentTarget.getBoundingClientRect(); onDragOver(w ? e.clientY < r.top + r.height / 2 : e.clientX < r.left + r.width / 2) }}
       onDrop={(e) => { e.preventDefault(); const r = e.currentTarget.getBoundingClientRect(); onDrop(w ? e.clientY < r.top + r.height / 2 : e.clientX < r.left + r.width / 2) }} onDragEnd={onDragEnd}>
       <span className="sd-thumb-n">{i + 1}{s.hidden && <G name="skip" size={12} />}</span>
-      <button type="button" className="sd-thumb-btn" aria-current={on ? 'true' : undefined} aria-selected={on || picked} aria-label={s.hidden ? t('Slide {n}, skipped', { n: i + 1 }) : t('Slide {n}', { n: i + 1 })} title={s.hidden ? t('Slide {n}: skipped when presenting', { n: i + 1 }) : t('Slide {n}', { n: i + 1 })}><Drawn html={html} w={w} W={W} H={H} /></button>
+      <button type="button" className="sd-thumb-btn" aria-current={on ? 'true' : undefined} aria-selected={on || picked} aria-label={s.hidden ? t('Slide {n}, skipped', { n: i + 1 }) : t('Slide {n}', { n: i + 1 })} title={s.hidden ? t('Slide {n}: skipped when presenting', { n: i + 1 }) : t('Slide {n}', { n: i + 1 })}><Drawn html={html} w={w} W={W} H={H} lazy /></button>
       {!readOnly && <button type="button" className="sd-thumb-more" onClick={(e) => { e.stopPropagation(); onMenu(e) }} aria-label={t('More for slide {n}', { n: i + 1 })} title={t('More for slide {n}', { n: i + 1 })}><Icon name="more" size={13} /></button>}
     </li>
   )

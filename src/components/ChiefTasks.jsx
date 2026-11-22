@@ -19,6 +19,10 @@ const day = (d) => {
   const diff = Math.round((new Date().setHours(12, 0, 0, 0) - at) / 864e5)
   return diff === 0 ? t('today') : diff === 1 ? t('yesterday') : at.toLocaleDateString(locale(), { month: 'short', day: 'numeric' })
 }
+// What a task marked done in the Tasks panel says it came to, as kept on the list (where the chief
+// reads it, in English), and as shown here, in your language.
+const DONE_HERE = 'Marked done in the Tasks panel'
+export const outcomeOf = (o) => (o === DONE_HERE ? t('Marked done in the Tasks panel') : o)
 // A role as the chief named it (marketing, user-research), as a label: Marketing, User research.
 const roleName = (r) => { const s = String(r || '').replace(/-/g, ' '); return s ? `${s[0].toUpperCase()}${s.slice(1)}` : '' }
 
@@ -153,13 +157,13 @@ export default function ChiefTasks({ agent, onOpenPath, onBoard }) {
         <div className="ct-main">
           <span className="ct-title"><span className="ct-id">{it.id}</span>{it.role && <span className="ct-role">{roleName(it.role)}</span>}{it.title}</span>
           {it.status === 'waiting' && it.needs && <span className="ct-needs">{t('Needs: {needs}', { needs: it.needs })}</span>}
-          {isDone && it.outcome && <span className="ct-outcome">{it.outcome}</span>}
+          {isDone && it.outcome && <span className="ct-outcome">{outcomeOf(it.outcome)}</span>}
           {it.link && <span className="ct-links"><Result link={it.link} cwd={agent.cwd} onOpenPath={onOpenPath} /></span>}
         </div>
         <span className="ct-meta">{isDone ? t('Done {day}', { day: day(it.done) }) : queued ? t('Queued') : asks ? t('Needs you') : `${it.status === 'open' ? '' : `${t(LABEL[it.status])} · `}${it.from === 'you' ? t('from you, {day}', { day: day(it.added) }) : day(it.added)}`}</span>
         {isDone
           ? <button className="ct-act" onClick={() => set(it, { status: 'open' })} disabled={busy === it.id} title={t('Reopen')} aria-label={t('Reopen task {id}', { id: it.id })}><Icon name="undo" size={12} /><span>{t('Reopen')}</span></button>
-          : <button className="ct-act" onClick={() => set(it, { status: 'done', outcome: 'Marked done in the Tasks panel' })} disabled={busy === it.id} title={t('Mark done')} aria-label={t('Mark task {id} done', { id: it.id })}><Icon name="check" size={12} /><span>{t('Done')}</span></button>}
+          : <button className="ct-act" onClick={() => set(it, { status: 'done', outcome: DONE_HERE })} disabled={busy === it.id} title={t('Mark done')} aria-label={t('Mark task {id} done', { id: it.id })}><Icon name="check" size={12} /><span>{t('Done')}</span></button>}
       </li>
     )
   }
@@ -248,7 +252,7 @@ function Card({ it, col, cwd, onOpenPath, onRetry, busy }) {
         <span className="cb-title">{it.title}</span>
         {now && <span className={`cb-now${col === 'needs' ? ' needs' : ''}`}>{h?.doing?.tool && col === 'working' && <Icon name="tool" size={10} />}<span>{now}</span></span>}
       </Main>
-      {col === 'done' && it.outcome && <p className="cb-outcome">{it.outcome}</p>}
+      {col === 'done' && it.outcome && <p className="cb-outcome">{outcomeOf(it.outcome)}</p>}
       {h?.end === 'failed' && h.error && it.status !== 'done' && <p className="cb-error" role="alert"><Icon name="alert" size={11} /><span>{t("Couldn't start: {error}", { error: h.error })}</span></p>}
       {(files.length > 0 || off) && (
         <div className="cb-acts">

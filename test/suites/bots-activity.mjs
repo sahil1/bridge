@@ -181,7 +181,8 @@ try {
     ok(added?.broken?.file === `${month}.jsonl` && added.broken.line === 1, 'a month put in from elsewhere: the chain says the line after it doesn\'t follow', added)
     await p.locator('.sb-keep [role="radio"]', { hasText: '90 days' }).click()
     ok(!!(await until(async () => !fs.existsSync(path.join(TRACE, `${oldMonth}.jsonl`)), 8000)), 'kept 90 days: an older month is deleted whole')
-    ok(events().some((e) => e.type === 'trace.deleted' && e.months.includes(oldMonth) && e.keep === '90d') && events().some((e) => e.type === 'settings.changed' && e.setting === 'retention' && e.old === '1y' && e.new === '90d'), 'and that\'s in the record, as the setting\'s change is')
+    // (Written once the months are deleted, a moment after the file is gone.)
+    ok(!!(await until(() => events().some((e) => e.type === 'trace.deleted' && e.months.includes(oldMonth) && e.keep === '90d') && events().some((e) => e.type === 'settings.changed' && e.setting === 'retention' && e.old === '1y' && e.new === '90d'), 5000)), 'and that\'s in the record, as the setting\'s change is')
     ok((await activity()).integrity.ok, 'and the chain holds again')
     // A line changed.
     const now = traceLines()

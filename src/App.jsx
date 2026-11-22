@@ -12,7 +12,7 @@ import TabStrip from './components/TabStrip.jsx'
 import Dock from './components/Dock.jsx'
 import Console, { MateEmpty, showChat, showView } from './components/Console.jsx'
 import { Settings, Onboarding, HerdrView, Terminals, ShellTab, MeetingsHome, MeetingPage, StudioHome, StudioPage, UsageStats, BotPage, BotsHome, SessionView, preloadViews } from './lazy.jsx'
-import { useBots, needsCount, botPlace, BOT_VIEW, BOTS_VIEW, SESSION_VIEW, botView, botsView, sessionView } from './components/bots/bots.js'
+import { useBots, needsCount, firstTab, botPlace, BOT_VIEW, BOTS_VIEW, SESSION_VIEW, botView, botsView, sessionView } from './components/bots/bots.js'
 import { sessionTitle } from './components/bots/sessions.js'
 import Home from './components/Home.jsx'
 import { FirstRunAnswers } from './components/FirstRun.jsx'
@@ -54,6 +54,7 @@ import { RemoteHere, ScreenLive } from './components/remote/Here.jsx'
 import Dictation from './dictation/Dictation.jsx'
 import BackForward from './components/BackForward.jsx'
 import { start as navStart, stop as navStop, seen as navSeen, recheck as navRecheck, usePlaces, placeOf, placeLabel, showPlaceIn, replacedWith, renamedTab, slotOf } from './backForward.js'
+import { start as phoneStart, stop as phoneStop, seen as phoneSeen, backward as phoneBackward } from './phoneBack.js'
 import { WHERE_KEY, SHELF } from './components/files/fsapi.js'
 import { t, tn, tx } from './i18n/index.js'
 import { where } from './components/settings/search.js'
@@ -140,11 +141,6 @@ function useLaunchMate(onOpen) {
 // The iPhone or Android app this page is in, when it's older than this page needs (src/fresh.js).
 const appTooOld = oldApp()
 
-// Whether this window has shown Bridge AI before: a reload, or a switch to another of your computers
-// (which loads that computer's page in the same window). Kept for the window's life alone, so a new
-// window (the app opening) starts afresh.
-const openedBefore = (() => { try { const was = sessionStorage.getItem('cc-opened') === '1'; sessionStorage.setItem('cc-opened', '1'); return was } catch { return false } })()
-
 // The phone apps' way back to their start screen, from the phone's Cloud agents (cloudOnly).
 const toStart = !cloudOnly ? null : window.bridgeAndroid?.home ? () => window.bridgeAndroid.home()
   : window.bridgeNative?.post ? () => window.bridgeNative.post({ type: 'home' }) : null
@@ -217,21 +213,35 @@ const VIEWS = { 'view:home': { title: tx('Home'), icon: 'home' }, 'view:everythi
 const BOARD = 'view:whiteboard:'
 // A Studio file's tab: its root (an agent's pane, or place:<id>) and path, each encoded. A
 // whiteboard in Studio's Preview is root board, its name the path.
-// A beta feature's tab (Home's), left open from before it was turned off (or opened on another
-// computer where it's on): says so, with the way to turn it on.
-function TrialOff({ name }) {
+// A beta feature's tab (Bots'), or Home's, left open from before it was turned off (or opened on
+// another computer where it's on): says so, with the way to turn it on. setting: its own switch, for
+// one that isn't a beta feature (Home's, in Settings › You).
+function TrialOff({ name, setting = null }) {
   return (
     <div className="trial-off" role="status">
       <Icon name="layers" size={20} />
-      <b>{t('{name} is a beta feature, off here.', { name })}</b>
-      <p className="muted small">{t('Turn it on in {place}.', { place: where('beta') })}</p>
-      <button type="button" className="btn small" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'about' } }))}>{t('Open Settings')}</button>
+      <b>{setting ? t('{name} is turned off here.', { name }) : t('{name} is a beta feature, off here.', { name })}</b>
+      <p className="muted small">{t('Turn it on in {place}.', { place: where(setting || 'beta') })}</p>
+      <button type="button" className="btn small" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: setting || 'about' } }))}>{t('Open Settings')}</button>
     </div>
   )
 }
 const STUDIO = 'view:studio:'
 const studioId = (f) => `${STUDIO}${encodeURIComponent(f.root)}:${encodeURIComponent(f.path)}`
 const studioOf = (id) => { const [r, p] = id.slice(STUDIO.length).split(':'); return { root: decodeURIComponent(r || ''), path: decodeURIComponent(p || '') } }
+// Whether the meeting, file or whiteboard a tab was left at has been deleted since (Home opens in its
+// place: App's opening). Only a plain "not there" counts, never a computer that couldn't be asked.
+const notThere = (e) => e?.status === 404 || e?.code === 'ENOENT' || /no such|not found|no pane/i.test(e?.message || '')
+async function placeGone(id) {
+  let ask = null
+  if (id.startsWith('view:meeting:')) ask = `/meetings/${encodeURIComponent(id.slice(13))}`
+  else if (id.startsWith(STUDIO)) {
+    const f = studioOf(id)
+    if (f.root && f.path) ask = f.root === 'board' ? `/boards/${encodeURIComponent(f.path)}` : `/studio/changed?root=${encodeURIComponent(f.root)}&path=${encodeURIComponent(f.path)}`
+  }
+  if (!ask) return false
+  return api(ask).then(() => false, notThere)
+}
 const isView = (id) => typeof id === 'string' && id.startsWith('view:')
 // Whiteboards are one of Studio's kinds: its Files lists them and one opens in its Preview, so they
 // have no page or tab of their own. Folders is Studio's home, every file on your computers. Whatever
@@ -350,11 +360,12 @@ function App() {
   // The live herdr view exists only when herdr is the runtime (see server/runtime).
   const confPoll = usePoll('/config', 10 * 60 * 1000)
   const conf = confPoll.data
-  // Meeting Insights and People, tabs of Meetings (a beta feature): ⌘K opens Meetings at either.
-  const insightsOn = conf?.trials?.['meeting-insights'] === true
-  // Home is a beta feature too: with it on, it's where the app opens, and what needs you opens there.
-  const homeOn = conf?.trials?.home === true
-  const routinesOn = conf?.trials?.routines === true
+  // Meeting Insights and People, tabs of Meetings: ⌘K opens Meetings at either.
+  const insightsOn = conf?.features?.['meeting-insights'] === true
+  // Home, on unless you turn it off (Settings › You): what needs you opens there, and the app starts
+  // there when there's nowhere to go back to.
+  const homeOn = conf?.features?.home === true
+  const routinesOn = conf?.features?.routines === true // Scheduled Routines
   // Onboarding stays up from the first sign that setup is needed until you close it, so its last
   // screen (how Bridge AI works) isn't swept away the moment setup is saved.
   const [onboarding, setOnboarding] = useState(false)
@@ -534,8 +545,16 @@ function App() {
     if (relayActivity && fleet && !fleet.down) relayActivity(agents.map((a) => ({ id: a.paneId, name: nameOf(a), status: a.subagents?.running && (a.status === 'done' || a.status === 'idle') ? 'working' : a.status })), { session: fleet.session || null })
   }, [fleet]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Where the window opens (below): whether that's been settled yet, whether you've picked a place
+  // first (picked: a tap, a click, a key, or something opened here before then), and the place it was
+  // left at, as this computer's tabs and phone tab were saved (none: it never had one).
+  const homed = useRef(false)
+  const picked = useRef(false)
+  const lastPlace = useRef(null)
+  if (lastPlace.current === null) lastPlace.current = { wide: W.active || null, phone: store.get('cc-mtab', null) }
   // replace: the chief's thread bar shows another thread in the same tab.
   const openAgent = useCallback((paneId, { toSide = false, replace = null } = {}) => {
+    picked.current = true
     if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission()
     // Memory is a tab of Meetings and of Dictations, no longer a page of its own: ⌘K's Memory,
     // Settings › Voice & Meetings' Open Memory and anything else that still asks for view:memory get
@@ -771,13 +790,17 @@ function App() {
     window.addEventListener('bridge-open-event', on)
     return () => window.removeEventListener('bridge-open-event', on)
   }, [])
-  // Home on: a new window opens there (an agent a link names still comes after). A reload, or this
-  // window switched to another of your computers and back, opens what you were on there instead:
-  // each computer keeps its own tabs, layout and phone tab (layout.jsx), so Home only when there's
-  // nothing to go back to. Nor once you've tapped, clicked or pressed a key here before the page's
-  // first answers came: you've picked where you are (it used to take you to Home from there).
-  const homed = useRef(false)
-  const picked = useRef(false)
+  // Where the window opens: where you were. The app starting (after a restart or an update too), a
+  // reload, or this window switched to another of your computers and back opens the place it was
+  // left at: each computer keeps its own tabs, layout and phone tab (layout.jsx). Home is never put
+  // over that; it's a click away (the sidebar, the phone's first tab). With Home on (as it is unless
+  // turned off), it's where the window starts only where there's no place to go back to: a new
+  // install, a window with no place of its own yet (another computer shown for the first time), the
+  // phone app's very first open, or a place that's gone (a closed agent, a meeting or a file deleted
+  // since), which says nothing and shows Home. Nor once you've tapped, clicked or pressed a key here
+  // before the page's first answers came, or something was opened meanwhile (an agent, a card, a
+  // Today tab: the desktop app's notification, say): you've picked where you are, or it was picked
+  // for you (picked, above). An agent a link names still comes after.
   useEffect(() => {
     const on = (e) => { if (e.isTrusted) picked.current = true }
     window.addEventListener('pointerdown', on, true)
@@ -788,10 +811,16 @@ function App() {
     if (homed.current || !fleet || !conf || cloudOnly) return
     homed.current = true
     if (!homeOn || picked.current) return
-    const back = openedBefore && (wide ? !!W.active && (isView(W.active) || isRemote(W.active) || !!byId[W.active]) : store.get('cc-mtab', null) != null)
-    if (back) return
-    if (wide) { setW((w) => ({ ...w, tabs: w.tabs.includes('view:home') ? w.tabs : ['view:home', ...w.tabs], active: 'view:home', group: 'main' })); set({ max: 'main' }) }
-    else { setMtab('home'); setHomeView('home') }
+    const toHome = () => {
+      if (wide) { setW((w) => ({ ...w, tabs: w.tabs.includes('view:home') ? w.tabs : ['view:home', ...w.tabs], active: 'view:home', group: 'main' })); set({ max: 'main' }) }
+      else { setMtab('home'); setHomeView('home') }
+    }
+    if (!wide) { if (lastPlace.current.phone == null) toHome(); return }
+    const at = lastPlace.current.wide
+    if (!at || (!isView(at) && !isRemote(at) && !byId[at])) { toHome(); return }
+    // A meeting, a file or a whiteboard it showed: Home instead if it's been deleted since (asked
+    // once; and only while it's still what's shown, with nothing picked meanwhile).
+    placeGone(at).then((gone) => { if (gone && !picked.current && wsRef.current?.active === at) toHome() })
   }, [fleet, conf]) // eslint-disable-line react-hooks/exhaustive-deps
   // Opened from a notification link (?agent=... or ?card=...): go there once agents have loaded.
   const linked = useRef(false)
@@ -827,6 +856,7 @@ function App() {
   // The phone's Usage: a row of its own in More, Home on or off.
   const phoneUsage = () => { setMtab('more'); setMoreView('usage') }
   const showCard = (id) => {
+    picked.current = true
     store.set(`cc-card-${id}`, true)
     setView('command')
     setTodayTab('overview')
@@ -838,6 +868,7 @@ function App() {
 
   // Open a Today tab full size (desktop) or in the phone's Today tab.
   const showToday = (tab, detail) => {
+    picked.current = true
     setView('command')
     setTodayTab(tab)
     if (!wide) { if (tab === 'usage') phoneUsage(); else phoneToday() }
@@ -1123,7 +1154,7 @@ function App() {
   // Home off says how to turn it on, once the settings say it's off (until they're in, nothing).
   const viewFor = (id, { onBack } = {}) => (
     <ErrorBoundary key={id} name="This view" resetKey={id}>
-      {(id === 'view:home' || id === 'view:everything') && !homeOn ? <section className="pane view-pane">{conf && <TrialOff name={t('Home')} />}</section>
+      {(id === 'view:home' || id === 'view:everything') && !homeOn ? <section className="pane view-pane">{conf && <TrialOff name={t('Home')} setting="home" />}</section>
         : id === 'view:home' ? <section className="pane view-pane"><NeedsHome {...homeProps} onEverything={openEverything} /></section>
         : id === 'view:everything' ? <section className="pane view-pane"><Everything {...homeProps} onOpenAgent={(x) => openOn(x.machine, x.a.paneId, { device: x.device, title: x.a.name || x.a.title, kind: x.a.kind })} onBack={wide ? null : () => setHomeView('home')} /></section>
         : id === 'view:new' ? <Home fleet={fleet} onLaunched={fromHome} onMore={(init) => setNewAgent(init)} />
@@ -1134,7 +1165,7 @@ function App() {
         : id.startsWith(STUDIO) && StudioPage ? <section className="pane view-pane"><StudioPage {...studioOf(id)} onBack={() => openAgent('view:studio', { replace: id })} onOpen={(f, o) => openAgent(studioId(f), o?.replace ? { replace: id } : {})} /></section>
         : id.startsWith(BOTS_VIEW) ? <section className="pane view-pane">{bots.on ? <BotsHome tab={id.slice(BOTS_VIEW.length)} phone={!wide} onTab={(x) => openAgent(botsView(x), wide ? { replace: id } : {})} /> : conf && <TrialOff name={t('Bots')} />}</section>
         : id.startsWith(SESSION_VIEW) ? <section className="pane view-pane">{bots.on ? <SessionView key={id} sid={id.slice(SESSION_VIEW.length)} phone={!wide} fleet={fleet} /> : conf && <TrialOff name={t('Bots')} />}</section>
-        : id.startsWith(BOT_VIEW) ? <section className="pane view-pane">{bots.on ? <BotPage id={id.slice(BOT_VIEW.length)} phone={!wide} onOpen={(bid, o) => openAgent(botView(bid), o?.replace ? { replace: id } : {})} onTab={(x) => openAgent(botsView(x), wide ? { replace: id } : {})} onGone={() => (wide ? closeTab(id) : setMoreView(botsView('bots')))} /> : conf && <TrialOff name={t('Bots')} />}</section>
+        : id.startsWith(BOT_VIEW) ? <section className="pane view-pane">{bots.on ? <BotPage id={id.slice(BOT_VIEW.length)} phone={!wide} onOpen={(bid, o) => openAgent(botView(bid), o?.replace ? { replace: id } : {})} onTab={(x) => openAgent(botsView(x), wide ? { replace: id } : {})} onGone={() => { if (wide) closeTab(id); else { phoneBackward(); setMoreView(botsView('bots')) } }} /> : conf && <TrialOff name={t('Bots')} />}</section>
         : <section className="pane view-pane"><MeetingPage id={id.slice(13)} onBack={onBack || (() => openAgent('view:meetings', { replace: id }))} /></section>}
     </ErrorBoundary>
   )
@@ -1213,6 +1244,30 @@ function App() {
   const openTabs = W.tabs.join('\n')
   useEffect(() => { navRecheck() }, [openTabs])
 
+  // ---------- The phone's Back (src/phoneBack.js) ----------
+  // On a phone's layout (not its Cloud agents, which keep their own), what it shows is a place: its
+  // tab and, in it, the view More shows, the agent the Agents tab has open, the meeting Meetings has
+  // open, Home or Everything. Each is an entry in the browser's history, so the system's Back goes
+  // to the one before and leaves Bridge AI only from the first.
+  const phoneOn = !wide && !cloudOnly && navReady.current
+  const phonePlace = !phoneOn ? null : { tab: mtab, more: mtab === 'more' ? moreView || null : null, agent: mtab === 'agents' ? mobileAgent || null : null, meeting: mtab === 'meetings' ? mobileMeeting || null : null, home: mtab === 'home' ? homeView : null }
+  const phoneKey = phonePlace ? JSON.stringify(phonePlace) : ''
+  const phoneShow = useRef(null)
+  phoneShow.current = (pl) => {
+    if (!pl?.tab) return
+    setMtab(pl.tab)
+    if (pl.tab === 'more') setMoreView(pl.more || null)
+    if (pl.tab === 'agents') setMobileAgent(pl.agent || null)
+    if (pl.tab === 'meetings') setMobileMeeting(pl.meeting || null)
+    if (pl.tab === 'home') setHomeView(pl.home || 'home')
+  }
+  useEffect(() => {
+    if (!phoneOn) return undefined
+    phoneStart({ show: (pl) => phoneShow.current(pl) })
+    return () => phoneStop()
+  }, [phoneOn])
+  useEffect(() => { if (phoneOn) phoneSeen(phonePlace, phoneKey) }, [phoneKey, phoneOn]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // ---------- Phone ----------
   // The phone's Cloud agents: their list (or the first key), and one agent at a time.
   if (cloudOnly) {
@@ -1244,7 +1299,7 @@ function App() {
       { id: 'terminals', icon: 'terminal', label: t('Terminals'), hint: t("Every agent's terminal, live"), run: () => setMoreView('terminals') },
       { id: 'map', icon: 'grid', label: t('Agent Map'), hint: t("What's running on each of your computers"), run: () => setMoreView('view:map') },
       // Bots (a beta feature): its Connections, Bots and Sessions, as the computer's.
-      bots.on && { id: 'bots', icon: 'bot', label: t('Bots'), hint: t('Connections, bots and every conversation they\'re having'), count: needsCount(bots.list), run: () => setMoreView(botsView(needsCount(bots.list) ? 'sessions' : 'bots')) },
+      bots.on && { id: 'bots', icon: 'bot', label: t('Bots'), hint: t('Connections, bots and every conversation they\'re having'), count: needsCount(bots.list), run: () => setMoreView(botsView(firstTab(bots.list))) },
       { id: 'needs', icon: 'bell', label: t('Needs You'), hint: t("What's waiting on you, on every device"), count: waiting, run: () => setInbox({}) },
       { id: 'history', icon: 'clock', label: t('History'), hint: t('Every conversation, and closed agents'), run: () => setHistory(true) },
       { id: 'settings', icon: 'settings', label: t('Settings'), hint: t('Devices, voice, appearance and more'), run: () => setSettings('all') },
@@ -1262,14 +1317,14 @@ function App() {
           {mtab === 'mate' && (mateShown ? <Console key={mateShown.paneId} agent={mateShown} variant="mobile" queued={queuedFor(mateShown.paneId)} delivered={deliveredFor(mateShown.paneId)} agents={agents} onThread={(id) => setMateId(id)} /> : <MateEmpty onLaunch={mateLaunch.launch} {...mateLaunch} />)}
           {mtab === 'agents' && (mAgent
             ? mAgent.view
-              ? <div className="m-view">{!mAgent.paneId.startsWith('view:meeting:') && <button type="button" className="ghost-btn m-view-back" onClick={() => setMobileAgent(null)}><Icon name="back" size={14} /> {t('Agents')}</button>}{viewFor(mAgent.paneId, { onBack: () => openAgent('view:meetings') })}</div>
-              : <Console agent={mAgent} variant="mobile" onBack={() => setMobileAgent(null)} queued={queuedFor(mAgent.paneId)} delivered={deliveredFor(mAgent.paneId)} />
+              ? <div className="m-view">{!mAgent.paneId.startsWith('view:meeting:') && <button type="button" className="ghost-btn m-view-back" onClick={() => { phoneBackward(); setMobileAgent(null) }}><Icon name="back" size={14} /> {t('Agents')}</button>}{viewFor(mAgent.paneId, { onBack: () => openAgent('view:meetings') })}</div>
+              : <Console agent={mAgent} variant="mobile" onBack={() => { phoneBackward(); setMobileAgent(null) }} queued={queuedFor(mAgent.paneId)} delivered={deliveredFor(mAgent.paneId)} />
             : <><SessionSwitcher fleet={fleet} phone /><Board fleet={fleet} compact onOpen={openAgent}
               action={<span className="m-acts"><button className="btn small" onClick={openMap} aria-label={t('Agent Map')} title={t("What's running on each of your computers")}><Icon name="grid" size={12} /> {t('Map')}</button><button className="btn small" onClick={openNew} aria-label={t('Start something new')}><Icon name="plus" size={12} /> {t('New')}</button></span>} /></>)}
           {mtab === 'meetings' && (
             <div className="m-view m-meetings">
               {/* Meetings, with Dictations a tab of it (Meetings.jsx), or a meeting. */}
-              {viewFor(mobileMeeting || 'view:meetings', { onBack: () => setMobileMeeting(null) })}
+              {viewFor(mobileMeeting || 'view:meetings', { onBack: () => { phoneBackward(); setMobileMeeting(null) } })}
             </div>
           )}
           {mtab === 'more' && (moreView
@@ -1277,8 +1332,8 @@ function App() {
               <div className="m-view m-more-view">
                 {/* A file in Studio has its own way back, to Studio. */}
                 {!moreView.startsWith(STUDIO) && (moreView.startsWith(BOT_VIEW) || moreView.startsWith(SESSION_VIEW)
-                  ? <button type="button" className="ghost-btn m-view-back" onClick={() => setMoreView(botsView(moreView.startsWith(SESSION_VIEW) ? 'sessions' : 'bots'))}><Icon name="back" size={14} /> {t('Bots')}</button>
-                  : <button type="button" className="ghost-btn m-view-back" onClick={() => setMoreView(null)}><Icon name="back" size={14} /> {t('More')}</button>)}
+                  ? <button type="button" className="ghost-btn m-view-back" onClick={() => { phoneBackward(); setMoreView(botsView(moreView.startsWith(SESSION_VIEW) ? 'sessions' : 'bots')) }}><Icon name="back" size={14} /> {t('Bots')}</button>
+                  : <button type="button" className="ghost-btn m-view-back" onClick={() => { phoneBackward(); setMoreView(null) }}><Icon name="back" size={14} /> {t('More')}</button>)}
                 {moreView === 'terminals' ? <Terminals key={fleet?.session || ''} onChat={(id) => openAgent(id)} />
                   : moreView === 'bots' ? viewFor(botsView('bots'))
                   : moreView === 'today' ? <div className="m-today"><TodayTabs tab={todayTab} setTab={setTodayTab} compact /><div className={`m-today-body tab-${todayTab}`}><TodayBody phone onOpenAgent={openAgent} tab={todayTab} setTab={setTodayTab} stackClass="m-stack" /></div></div>

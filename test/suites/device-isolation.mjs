@@ -42,8 +42,8 @@ const senders = require('../../desktop/senders.js')
   const pages = senders.create(P, { ports: () => ({ desk1: DP, other: 7434 }) })
   const m = (id, rest = '/', at = DP) => `http://127.0.0.1:${at}/m/${id}${rest}`
   const cases = [
-    [`http://127.0.0.1:${P}/`, 'own'], [`http://localhost:${P}/?window=w1`, 'own'], [`http://127.0.0.1:${P}/?dictate=1`, 'own'],
-    [m('desk1', '/?window=w1%3Ap2'), 'machine'], [`http://localhost:${DP}/m/desk1/`, 'machine'],
+    [`http://127.0.0.1:${P}/`, 'own'], [`http://localhost:${P}/?window=w1`, null], [`http://[::1]:${P}/`, null], [`http://127.0.0.1:${P}/?dictate=1`, 'own'],
+    [m('desk1', '/?window=w1%3Ap2'), 'machine'], [`http://localhost:${DP}/m/desk1/`, null], [`http://[::1]:${DP}/m/desk1/`, null],
     [`http://127.0.0.1:${P}/m/desk1/`, null], [`http://127.0.0.1:${P}/api/agents/w1/site/index.html`, null], [`http://127.0.0.1:${P + 1}/`, null],
     [m('other'), null], [`http://127.0.0.1:${DP}/`, null], [m('desk1', '/', 7999), null], ['https://example.com/', null], ['data:text/html,hi', null], [`http://m-6465736b31.localhost:${P}/m/desk1/`, null],
   ]
@@ -57,7 +57,7 @@ const senders = require('../../desktop/senders.js')
   const links = [
     [`http://127.0.0.1:${P}/api/agents/w1%3Ap3/raw?path=scan.pdf`, 'browser'], [`http://127.0.0.1:${P}/api/agents/w1/site/index.html`, 'browser'], [m('desk1', '/api/agents/p2/raw?path=a.png'), 'browser'], [`http://127.0.0.1:${P}/m/desk1/api/uploads/a.png`, 'browser'],
     ['https://example.com/', 'outside'], ['mailto:me@example.com', 'outside'], [`http://127.0.0.1:${P + 1}/`, 'outside'],
-    [`http://127.0.0.1:${P}/`, null], [`http://localhost:${P}/?window=w1`, null], [m('desk1'), null], [`http://127.0.0.1:${P}/apis`, null], ['file:///etc/hosts', null], ['smb://nas/share', null], ['not a link', null],
+    [`http://127.0.0.1:${P}/`, null], [`http://localhost:${P}/?window=w1`, 'outside'], [m('desk1'), null], [`http://127.0.0.1:${P}/apis`, null], ['file:///etc/hosts', null], ['smb://nas/share', null], ['not a link', null],
   ]
   const went = links.map(([u]) => pages.opens(u, OWN))
   ok(links.every(([, want], i) => went[i] === want), 'a link opened in a new window: a file the app shows in the browser, the web and mail in their own apps, the app\'s own pages and other schemes nowhere', links.map(([u], i) => `${u} ${went[i]}`))
@@ -78,6 +78,13 @@ const senders = require('../../desktop/senders.js')
   const main = src('main.js')
   const chans = [...new Set([...main.matchAll(/\bipc\.(?:handle|on)\('([\w:-]+)'/g), ...src('dictation.js').matchAll(/\bipcMain\.(?:handle|on)\('([\w:-]+)'/g)].map((x) => x[1]))]
   ok(chans.length > 40 && !/\bipcMain\.(handle|on)\(/.test(main) && /electron: parts/.test(main) && /ipcMain: ipc\b/.test(main), 'main.js answers no message but through the check, and hands dictation.js the checked one', { chans: chans.length })
+  // localhost and [::1] are other addresses, where another program can listen at the app's port: not
+  // the app's (above), nor anywhere its windows go; and a frame in a window never moves the window.
+  ok(!pages.local(`http://localhost:${P}/`) && !pages.local(`http://[::1]:${P}/`) && !pages.local(`http://localhost:${DP}/m/desk1/`) && pages.local(`http://127.0.0.1:${P}/`), 'localhost and [::1] at the app\'s port are no place of the app\'s windows')
+  const navs = main.split("on('will-navigate', ").slice(1).map((x) => x.split(/\r?\n/)[0])
+  ok(navs.length >= 4 && navs.every((h) => /^\((e|ev)\) => \1\.preventDefault\(\)\)$/.test(h) || /else if \(byFrame\((e|ev)\)\) \1\.preventDefault\(\) \}\)$/.test(h)) && /const byFrame = \(e\) => \{ try \{ return !e\?\.initiator \|\| !!e\.initiator\.parent \} catch \{ return true \} \}/.test(main), 'every window\'s navigation refuses what a frame in it asks (a project\'s app in Preview can\'t move the window), or refuses all', navs)
+  const pre = src('preload.js')
+  ok(/location\.hostname === '127\.0\.0\.1'/.test(pre) && !/'localhost'/.test(pre), 'the preload gives this computer\'s own only to a page at 127.0.0.1')
   const handlers = main.split('setWindowOpenHandler(').slice(1).map((x) => x.split(/\r?\n/)[0]) // (Windows checks out CRLF)
   ok(handlers.length >= 4 && handlers.every((h) => /^openLink\((win|w|float)\)\)$/.test(h) || h === "() => ({ action: 'deny' }))"), 'every window\'s links opened in a new window go where that says for the page it shows (or, the tile\'s, nowhere)', handlers)
   const handled = {}

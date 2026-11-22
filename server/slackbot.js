@@ -95,6 +95,7 @@ import fs from 'node:fs'
 import WebSocket from 'ws'
 import { writeFileAtomic } from './paths.js'
 import { safeName } from './safename.js'
+import { unreached, UNREACHED_FIX } from './connector.js'
 
 const BASE = () => String(process.env.BRIDGE_SLACK_URL || 'https://slack.com').replace(/\/+$/, '')
 const API = () => `${BASE()}/api`
@@ -225,6 +226,25 @@ export function commandOf(name) {
   const slug = String(name || '').toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 31).replace(/-+$/, '')
   return slug ? `/${slug}` : '/ask-bot'
 }
+// Each bot's own slash command on a shared app (A slash command for each bot), by its id: its name's,
+// unique among them and apart from the app's own (reserved), as Slack wants each of an app's commands
+// to be. The first by its number keeps it plain; another with the same one, or a name with no Latin
+// letters (/ask-bot), has its number after it: /sales-4, /ask-bot-3. A bot keeps its command as others
+// come and go, unless one before it in number had the same.
+export function commandsOf(bots, reserved = []) {
+  const taken = new Set(reserved)
+  const out = new Map()
+  const num = (b) => Number(String(b.id).replace(/\D/g, '')) || 0
+  for (const b of [...bots].sort((x, y) => num(x) - num(y))) {
+    const n = String(num(b))
+    const base = commandOf(b.name)
+    let c = base
+    for (let k = 1; c === '/ask-bot' || taken.has(c); k++) { const suf = k === 1 ? `-${n}` : `-${n}-${k}`; c = `${base.slice(0, 32 - suf.length).replace(/-+$/, '')}${suf}` }
+    taken.add(c)
+    out.set(b.id, c)
+  }
+  return out
+}
 // Its message shortcut's name (Slack's: 25 characters at most).
 export function shortcutOf(name) {
   const n = String(name || '').trim()
@@ -238,7 +258,8 @@ export function shortcutOf(name) {
 export function connectionManifest(c = {}, bots = [], you = '') {
   const who = String(you || '').trim()
   const m = manifest({ name: c.name, description: bots.length ? `Answers for ${who || 'its owner'}: ${bots.map((b) => b.name).join(', ')}` : '' }, you)
-  if (c.perBot) m.features.slash_commands.push(...bots.map((b) => ({ command: commandOf(b.name), description: `Ask ${b.name} a question`.slice(0, 100), usage_hint: 'your question', should_escape: false })).filter((x) => x.command !== commandOf(c.name)).slice(0, 24))
+  const each = commandsOf(bots, [commandOf(c.name)])
+  if (c.perBot) m.features.slash_commands.push(...bots.map((b) => ({ command: each.get(b.id), description: `Ask ${b.name} a question`.slice(0, 100), usage_hint: 'your question', should_escape: false })).slice(0, 24))
   m.features.slash_commands[0].usage_hint = bots.length ? `${String(bots[0].name).toLowerCase().split(/\s+/)[0]} your question` : 'your question'
   m.oauth_config.scopes.bot = SHARED_SCOPES
   return m
@@ -358,7 +379,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
       try {
         res = await fetch(`${API()}/${method}`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/x-www-form-urlencoded' }, body, signal: AbortSignal.timeout(20000) })
       } catch (e) {
-        throw Object.assign(new Error(`Couldn't reach Slack: ${e.cause?.code || e.message}`), { code: 'offline', method })
+        throw Object.assign(new Error(`Couldn't reach Slack: ${unreached(e)}`), { code: 'offline', method })
       }
       if (res.status === 429) {
         const said = Math.max(1, Number(res.headers.get('retry-after')) || 1)
@@ -458,7 +479,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
         if (m.type === 'hello') return done({ ok: true, n: Number(m.num_connections), ours: 1 + (ws?.readyState === WebSocket.OPEN && st.state === 'connected' ? 1 : 0) })
         if (m.envelope_id) envelope(m, s)
       })
-      s.on('error', (e) => done({ ok: false, why: `The connection failed: ${e.message}` }))
+      s.on('error', (e) => done({ ok: false, why: `The connection failed: ${unreached(e)}` }))
       s.on('close', () => done({ ok: false, why: 'Slack closed the connection before saying hello' }))
     })
   }
@@ -494,7 +515,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
       // answered by Slack itself, and so is any frame).
       pinger = setInterval(() => {
         if (mine !== gen) return
-        if (!alive) { drop(socket); later('The connection went quiet; connecting again'); return }
+        if (!alive) { drop(socket); later('The connection went quiet'); return }
         alive = false
         try { socket.ping() } catch { /* closing */ }
       }, PING_MS)
@@ -541,12 +562,12 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
       if (mine !== gen || socket !== ws) return
       st.drops++
       say({ what: 'dropped', ok: false, why: `The connection closed (${code})` })
-      later(`The connection closed (${code}); connecting again`)
+      later('The connection closed')
     })
     socket.on('error', (e) => {
       if (mine !== gen || socket !== ws) return
       drop(socket)
-      later(`The connection failed: ${e.message}`)
+      later(`The connection failed: ${unreached(e)}`)
     })
   }
 
@@ -1194,7 +1215,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
       let res
       try {
         res = await fetch(u.upload_url, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: bytes, signal: AbortSignal.timeout(60000) })
-      } catch (e) { throw Object.assign(new Error(`Couldn't reach Slack: ${e.cause?.code || e.message}`), { code: 'offline' }) }
+      } catch (e) { throw Object.assign(new Error(`Couldn't reach Slack: ${unreached(e)}`), { code: 'offline' }) }
       if (!res.ok) throw Object.assign(new Error(`Slack didn't take the file (${res.status})`), { code: `http_${res.status}` })
       const thread = reply.thread || ts || null
       await call('files.completeUploadExternal', { files: [{ id: u.file_id, title: f.title || name }], channel_id: reply.channel, ...(thread ? { thread_ts: thread } : {}), ...(f.comment ? { initial_comment: f.comment } : {}) }, { waits: 2 })
@@ -1448,7 +1469,7 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
       let res
       try {
         res = await fetch(url, { headers: tokenFor(url) ? { authorization: `Bearer ${kept.botToken}` } : {}, redirect: 'manual', signal: AbortSignal.timeout(60000) })
-      } catch (e) { throw Object.assign(new Error(`Couldn't reach Slack for ${name}: ${e.cause?.code || e.message}`), { code: 'offline' }) }
+      } catch (e) { throw Object.assign(new Error(`Couldn't reach Slack for ${name}: ${unreached(e)}`), { code: 'offline' }) }
       if (res.status >= 300 && res.status < 400 && res.headers.get('location') && hop < 3) { url = new URL(res.headers.get('location'), url).href; continue }
       if (!res.ok) throw Object.assign(new Error(`Slack wouldn't give ${name} (${res.status})`), { code: `http_${res.status}` })
       if (/text\/html/i.test(res.headers.get('content-type') || '') && !/html?$/i.test(name)) throw Object.assign(new Error(`Slack sent a sign-in page instead of ${name}: the app may lack files:read`), { code: 'not_a_file' })
@@ -1525,9 +1546,9 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
       kept.scopes = who.scopes
       kept.team = { id: who.team_id, name: who.team, url: who.url }
       kept.bot = { userId: who.user_id, botId: who.bot_id || null, name: who.user }
-    } catch (e) { bad = { detail: `The bot token: ${e.message}`, fix: 'Copy the Bot User OAuth Token (xoxb-) again from OAuth & Permissions in your Slack app, and paste it in Advanced' } }
+    } catch (e) { bad = e.code === 'offline' ? { detail: e.message, fix: UNREACHED_FIX } : { detail: `The bot token: ${e.message}`, fix: 'Copy the Bot User OAuth Token (xoxb-) again from OAuth & Permissions in your Slack app, and paste it in Advanced' } }
     if (!bad) {
-      try { await call('apps.connections.open', {}, { token: kept.appToken, waits: 1 }) } catch (e) { bad = { detail: `The app-level token: ${e.message}`, fix: e.code === 'missing_scope' ? 'Give the app-level token the connections:write scope (Basic Information › App-Level Tokens)' : 'Copy the app-level token (xapp-) again from Basic Information › App-Level Tokens, and paste it in Advanced' } }
+      try { await call('apps.connections.open', {}, { token: kept.appToken, waits: 1 }) } catch (e) { bad = e.code === 'offline' ? { detail: e.message, fix: UNREACHED_FIX } : { detail: `The app-level token: ${e.message}`, fix: e.code === 'missing_scope' ? 'Give the app-level token the connections:write scope (Basic Information › App-Level Tokens)' : 'Copy the app-level token (xapp-) again from Basic Information › App-Level Tokens, and paste it in Advanced' } }
     }
     if (bad) { add('tokens', 'Tokens', 'fail', bad.detail, bad.fix); skipRest('scopes', 'Needs working tokens first'); return out }
     add('tokens', 'Tokens', 'ok', `@${who.user} in ${who.team}`)
@@ -1645,8 +1666,8 @@ export function makeSlack({ id = 'slack', file, say = () => {}, threads = () => 
     const bot = String(botToken || '').trim()
     if (!/^xapp-/.test(app)) throw new Error('The app-level token starts with xapp-: it\'s under Basic Information › App-Level Tokens')
     if (!/^xoxb-/.test(bot)) throw new Error('The bot token starts with xoxb-: it\'s under OAuth & Permissions, once the app is installed')
-    const who = await call('auth.test', {}, { token: bot }).catch((e) => { throw new Error(`The bot token: ${e.message}`) })
-    await call('apps.connections.open', {}, { token: app }).catch((e) => { throw new Error(`The app-level token: ${e.message}${e.code === 'missing_scope' ? ': give it connections:write' : ''}`) })
+    const who = await call('auth.test', {}, { token: bot }).catch((e) => { throw new Error(e.code === 'offline' ? `${e.message}. Nothing was kept: connect again once Slack can be reached` : `The bot token: ${e.message}`) })
+    await call('apps.connections.open', {}, { token: app }).catch((e) => { throw new Error(e.code === 'offline' ? `${e.message}. Nothing was kept: connect again once Slack can be reached` : `The app-level token: ${e.message}${e.code === 'missing_scope' ? ': give it connections:write' : ''}`) })
     const other = !!kept.team?.id && kept.team.id !== who.team_id
     kept = { ...(other ? {} : kept), appToken: app, botToken: bot, team: { id: who.team_id, name: who.team, url: who.url }, bot: { userId: who.user_id, botId: who.bot_id || null, name: who.user }, scopes: who.scopes, since: other || !kept.since ? String(Date.now() / 1000) : kept.since }
     save()

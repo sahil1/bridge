@@ -16,7 +16,7 @@ import { useTrial } from '../../trials.js'
 import { t, locale } from '../../i18n/index.js'
 import { useRemote, remoteDo, viewing } from './remote.js'
 import { onFor } from '../Machines.jsx'
-import { plainName } from '../../../shared/remote.js'
+import { plainName, LOCKED_WAIT_MINUTES } from '../../../shared/remote.js'
 import './remote.css'
 
 // Who: a device, and the one it was for when it came through another of your computers. Names as
@@ -32,6 +32,8 @@ const fromWho = (s) => (s.for ? t('{device} ({kind}) · through {name}', { devic
 // The one Block This Device unticks: the device itself, on the computer it came through when it did.
 const blockText = (x) => (x.for ? t('{device} can\'t connect through {name} any more. It\'s let back in at {name} itself.', { device: plainName(x.for), name: nameOf(x) }) : t('{who} can\'t connect to {computer} any more. It\'s let back in at {computer} itself.', { who: nameOf(x), computer: plainName(x.computer) }))
 const since = (iso) => Math.max(1, Math.round((Date.now() - new Date(iso).getTime()) / 1000))
+// How long so far: "just now" for the first minute (not "1 min" from its first second), then minutes.
+const sinceNow = (iso) => (since(iso) < 60 ? t('just now') : onFor(since(iso)))
 const timeOf = (iso) => new Date(iso).toLocaleString(locale(), { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 const clockOf = (iso) => new Date(iso).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' })
 const watching = (list) => (list || []).filter((s) => s.kind === 'screen')
@@ -94,7 +96,7 @@ export function Badge() {
       <span className="rs-dot on" aria-hidden="true" />
       <span className="rs-badge-text">
         <b>{list.length === 1 ? (s.waiting ? t('{who} is connecting to this screen', { who: whoOf(s) }) : s.controlled ? t('{who} is controlling this screen', { who: whoOf(s) }) : t('{who} is viewing this screen', { who: whoOf(s) })) : t('{n} of your devices are viewing this screen', { n: list.length })}</b>
-        <small>{err || onFor(since(s.started))}</small>
+        <small>{err || sinceNow(s.started)}</small>
       </span>
       <button type="button" className="btn small danger" onClick={() => act('/stop')}>{t('Stop')}</button>
     </main>
@@ -130,7 +132,9 @@ export function RemoteHere() {
       {list.map((s) => (
         <div key={s.id} className="ask-row">
           <Icon name="screen" size={14} />
-          <span>{s.waiting ? t('{who} is connecting to this screen, for {time} now.', { who: whoOf(s), time: onFor(since(s.started)) }) : s.controlled ? t('{who} is controlling this screen ({source}), for {time} now.', { who: whoOf(s), source: s.source?.name || t('a screen'), time: onFor(since(s.started)) }) : t('{who} is viewing this screen ({source}), for {time} now.', { who: whoOf(s), source: s.source?.name || t('a screen'), time: onFor(since(s.started)) })}
+          <span>{since(s.started) < 60
+            ? (s.waiting ? t('{who} is connecting to this screen. It started just now.', { who: whoOf(s) }) : s.controlled ? t('{who} is controlling this screen ({source}). It started just now.', { who: whoOf(s), source: s.source?.name || t('a screen') }) : t('{who} is viewing this screen ({source}). It started just now.', { who: whoOf(s), source: s.source?.name || t('a screen') }))
+            : s.waiting ? t('{who} is connecting to this screen, for {time} now.', { who: whoOf(s), time: onFor(since(s.started)) }) : s.controlled ? t('{who} is controlling this screen ({source}), for {time} now.', { who: whoOf(s), source: s.source?.name || t('a screen'), time: onFor(since(s.started)) }) : t('{who} is viewing this screen ({source}), for {time} now.', { who: whoOf(s), source: s.source?.name || t('a screen'), time: onFor(since(s.started)) })}
             {untold(s.told) && <span className="rs-untold"> {t('Your other devices weren\'t told: no notification channel is set up.')} <button type="button" className="link-btn" onClick={notifications}>{t('Set Up Notifications')}</button></span>}</span>
           <span className="ask-btns"><button type="button" className="btn small danger" onClick={() => act(`/sessions/${encodeURIComponent(s.id)}/stop`)}>{t('Stop')}</button></span>
         </div>
@@ -206,7 +210,7 @@ export function ScreenLive() {
         return (
           <div key={k} className="ask-row">
             <i className="rs-dot on" aria-hidden="true" />
-            <span><b>{text}</b> <span className="muted">· {x.ask ? t('{n} seconds left', { n: left(x.until) }) : onFor(since(x.started))}</span></span>
+            <span><b>{text}</b> <span className="muted">· {x.ask ? t('{n} seconds left', { n: left(x.until) }) : sinceNow(x.started)}</span></span>
             <span className="ask-btns">
               <button type="button" className="btn small danger" disabled={busy === k} onClick={() => act(x, false)}>{x.ask ? t('Deny') : t('Stop')}</button>
               <button type="button" className="btn small" disabled={busy === k} onClick={() => act(x, true)} title={x.for ? t('{device} can\'t connect through {name} until it\'s let back in at {name} itself.', { device: plainName(x.for), name: nameOf(x) }) : t('{who} can\'t connect to {computer} until it\'s let back in at {computer} itself.', { who: nameOf(x), computer })}><Icon name="ban" size={12} /> {t('Block This Device')}</button>
@@ -225,7 +229,8 @@ export function Sessions({ log, here }) {
   if (!log?.length) return <p className="muted small">{t('Nobody has viewed this computer\'s screen yet.')}</p>
   const how = (e) => (e.end === 'here' ? t('stopped here') : e.end === 'device' ? t('stopped: not allowed any more')
     : e.end === 'stopped' ? t('stopped from {device}', { device: e.stoppedBy || t('another of your devices') }) : e.end === 'blocked' ? t('blocked from {device}', { device: e.stoppedBy || t('another of your devices') })
-      : e.end === 'error' || e.end === 'lost' ? t('ended with an error') : null)
+      : e.end === 'error' || e.end === 'lost' ? t('ended with an error')
+        : e.end === 'screenLocked' ? t('ended: this screen stayed locked for {n} minutes', { n: LOCKED_WAIT_MINUTES }) : null)
   // The sessions, and apart from them a few of the latest turned away (each line counting repeats).
   const shown = [...log.filter((e) => !refused(e)).slice(0, 30), ...log.filter(refused).slice(0, 10)].sort((a, b) => log.indexOf(a) - log.indexOf(b))
   return (

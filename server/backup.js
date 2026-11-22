@@ -88,14 +88,15 @@ const TAG = 16
 // The settings that mean the same on another computer, by their key in config.json. Left out: where
 // this one listens (port, host, allowedHosts), its runtime and herdr's session, its own name
 // (deviceName), its agents' paths, its local model, the terminal app, its update channel and
-// early-access code, the assistant's folder, whether outside apps may send to its agents through
-// Bridge AI's MCP server (mcpServer: each computer's own say), sign-ins, and what's only kept for
+// early-access code, the assistant's folder, Bridge AI's MCP server and whether outside apps may send
+// to its agents through it (mcpServer: each computer's own say), sign-ins, and what's only kept for
 // its own start.
-const SETTINGS = ['name', 'location', 'defaultAgent', 'chief', 'mail', 'market', 'mortgage', 'news', 'quota', 'simple', 'moreModels', 'keepAgents', 'trials', 'alertSounds', 'notify', 'voice', 'studio', 'consult', 'resumeWork', 'filesAssist', 'modelJobs', 'jobModels', 'llmModel', 'dictation', 'meetings', 'calendar', 'commands', 'crashReports', 'counts']
+const SETTINGS = ['name', 'location', 'defaultAgent', 'chief', 'mail', 'market', 'mortgage', 'news', 'quota', 'simple', 'moreModels', 'keepAgents', 'trials', 'home', 'routines', 'alertSounds', 'enterKey', 'notify', 'voice', 'studio', 'consult', 'resumeWork', 'filesAssist', 'modelJobs', 'jobModels', 'llmModel', 'dictation', 'meetings', 'calendar', 'commands', 'crashReports', 'counts']
 // (Meetings' folder and the Chief of Staff's are folders of this computer's. And a beta feature that
 // lets another device see or use this screen is turned on only by someone at this computer:
-// remote-screen stays as it is.)
-const PER_COMPUTER_TRIALS = ['remote-screen']
+// remote-screen stays as it is; so does the MCP server's switch in a backup from before 3.22.0, when
+// it was a beta feature too.)
+const PER_COMPUTER_TRIALS = ['remote-screen', 'mcp-server']
 const settingsOf = (all) => {
   const out = {}
   for (const k of SETTINGS) if (all?.[k] !== undefined) out[k] = all[k]
@@ -581,16 +582,17 @@ async function handoff(r) {
 // ---------- Routes ----------
 // x: { here(req): asked from this computer, machineOf(req): the linked computer asking, or null;
 // viaMachine(req), kept(req): not a device paired a moment ago that hasn't been kept yet, deviceOf,
-// notify(o) }. Each answers with why it couldn't, and its status and code.
+// notify(o) }. Each answers with why it couldn't, and its status and code (not-kept: with this
+// computer's name, for the device to say where it's kept).
 const wrap = (fn) => async (req, res) => {
-  try { res.json(await fn(req, res)) } catch (e) { res.status(e.status >= 400 && e.status < 600 ? e.status : 502).json({ error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}) }) }
+  try { res.json(await fn(req, res)) } catch (e) { res.status(e.status >= 400 && e.status < 600 ? e.status : 502).json({ error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}), ...(e.computer ? { computer: e.computer } : {}) }) }
 }
 export function routes(app, x) {
   const hereOnly = (req, what) => { if (!x.here(req)) throw fail(`${what} on this computer itself`, 403, 'here') }
   // (From this computer, or a phone paired with it and kept there: never another computer's link.)
   const mine = (req) => {
     if (x.viaMachine(req)) throw fail('Another computer can\'t do that here', 403, 'machine')
-    if (!x.kept(req)) throw fail(`Keep ${x.deviceOf?.(req) || 'that device'} in Bridge AI on ${h.computer?.() || 'this computer'} first`, 403, 'not-kept')
+    if (!x.kept(req)) throw Object.assign(fail(`Keep ${x.deviceOf?.(req) || 'that device'} in Bridge AI on ${h.computer?.() || 'this computer'} first`, 403, 'not-kept'), { computer: h.computer?.() || null })
   }
   const fromMachine = (req) => { const m = x.machineOf(req); if (!m) throw fail('Only another of your computers sends this', 403); return m }
   const pausedNow = () => conns.list().filter((c) => c.paused).map((c) => {

@@ -400,7 +400,8 @@ const MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'im
 // A PowerPoint as a Markdown deck: { md, media: [{ id, type, bytes }], look, skipped: how many
 // things on its slides Studio doesn't show (charts, diagrams, video) }. Its pictures are named
 // media:<id> in the Markdown.
-export async function deckFromPptx(buf, name = 'Deck') {
+// parts: a big file opened in parts (files.js partsOf), whose pictures are fetched from its computer.
+export async function deckFromPptx(buf, name = 'Deck', { parts = null } = {}) {
   const JSZip = (await import('jszip')).default
   const zip = await JSZip.loadAsync(buf)
   const read = async (p) => (zip.file(p) ? zip.file(p).async('string') : null)
@@ -438,7 +439,7 @@ export async function deckFromPptx(buf, name = 'Deck') {
         const ext = pic.target.split('.').pop().toLowerCase()
         if (!MIME[ext] || ext === 'emf' || ext === 'wmf') { skipped++; continue }
         const id = `${media.length + 1}.${ext}`
-        media.push({ id, type: MIME[ext], bytes: await f.async('uint8array') })
+        media.push({ id, type: MIME[ext], bytes: parts?.has(f.name) ? await parts.bytes(f.name) : await f.async('uint8array') })
         mediaId.set(pic.target, id)
       }
       pics.push({ ...pic, id: mediaId.get(pic.target) })

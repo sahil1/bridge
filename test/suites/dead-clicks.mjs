@@ -51,9 +51,11 @@ const QUIET = [
 ]
 
 // ---------- a Bridge AI with something in each view ----------
-// (Bots are on too, for their section in Settings, with no Slack to reach: harness.mjs.)
-const TRIALS_ON = ['home', 'routines', 'meeting-insights', 'usage-everywhere', 'slack-bot']
-const kit = await startKit(NAME, { config: { trials: Object.fromEntries(TRIALS_ON.map((id) => [id, true])) } })
+// (Bots are on too, for their section in Settings, with no Slack to reach: harness.mjs. Home and
+// Scheduled Routines as Bridge AI starts, on, and Meeting Insights turned on, as it is by itself
+// after 5 meetings.)
+const TRIALS_ON = ['usage-everywhere', 'slack-bot']
+const kit = await startKit(NAME, { config: { trials: Object.fromEntries(TRIALS_ON.map((id) => [id, true])), meetings: { insights: true }, home: undefined } })
 // macOS's open, osascript (Finder, Terminal) and xdg-open: written down, never run.
 const NOTE = "require('fs').appendFileSync(require('path').join(__dirname, 'opened.log'), JSON.stringify(process.argv.slice(1)) + '\\n')\n"
 for (const n of ['open', 'osascript', 'xdg-open']) kit.program(n, NOTE)

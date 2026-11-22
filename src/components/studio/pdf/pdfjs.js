@@ -43,13 +43,47 @@ export function openPdfAt(lib, url) {
   return lib.getDocument({ url, disableAutoFetch: true, disableStream: true, rangeChunkSize: 65536, BinaryDataFactory: BuiltIn, cMapUrl: 'cmaps/', standardFontDataUrl: 'standard_fonts/', wasmUrl: 'wasm/' })
 }
 
-// Opening a PDF's bytes (copied: pdf.js hands them to its worker). onPassword(retry, wrong): it's
-// locked with a password, asked of you.
-export function openPdf(lib, data, { onPassword } = {}) {
+// Opening a PDF's bytes (copied: pdf.js hands them to its worker), or a big one at its address (url),
+// read in the parts that are shown: the pages in view, as they're scrolled to (a 64 KB part at a time,
+// asked for with Range; through another computer's window or a phone, only those go). onPassword(retry,
+// wrong): it's locked with a password, asked of you.
+// (Each part asked for with Range here, so pdf.js never asks for the whole file first to see whether
+// it can ask for parts: through a phone's link, that alone sent megabytes before it stopped.) size:
+// the file's, from Studio's open. onFail(error): a part that didn't come (the file gone, its
+// computer or the phone's link down), after trying again: pdf.js has no way to hear of it, and would
+// wait for it for ever, the PDF "Opening…" or its page blank, so it's said instead.
+export function openPdf(lib, data, { onPassword, onFail, url = null, size = 0 } = {}) {
+  const ranged = url && size ? new Ranges(lib, url, size, onFail) : null
   const task = lib.getDocument({
-    data: new Uint8Array(data.slice(0)),
+    ...(ranged ? { range: ranged, disableAutoFetch: true, disableStream: true, rangeChunkSize: CHUNK } : url ? { url, disableAutoFetch: true, disableStream: true, rangeChunkSize: CHUNK } : { data: new Uint8Array(data.slice(0)) }),
     BinaryDataFactory: BuiltIn, cMapUrl: 'cmaps/', standardFontDataUrl: 'standard_fonts/', wasmUrl: 'wasm/',
   })
   if (onPassword) task.onPassword = (retry, reason) => onPassword(retry, reason === lib.PasswordResponses.INCORRECT_PASSWORD)
   return task
+}
+const CHUNK = 65536
+// pdf.js's way in for a file read in parts by someone else: it asks for a range, this fetches it.
+// A part that doesn't come is asked for twice more (a phone's link drops for a moment), then said
+// (onFail), once: its error, with the server's words when it gave some, and what the fetch failed
+// with as `offline` (the link, not the file).
+function Ranges(lib, url, size, onFail) {
+  const t = new lib.PDFDataRangeTransport(size, null)
+  let failed = false
+  const get = (begin, end, tries = 0) => {
+    fetch(url, { headers: { range: `bytes=${begin}-${end - 1}` }, credentials: 'same-origin' })
+      .then(async (r) => {
+        if (!r.ok) { const j = await r.json().catch(() => null); throw Object.assign(new Error(j?.error || `HTTP ${r.status}`), { status: r.status }) }
+        const b = new Uint8Array(await r.arrayBuffer())
+        // The whole file, where a server answered without the range: the part asked for, from it.
+        return r.status === 200 && b.length === size && end - begin < size ? b.subarray(begin, end) : b
+      })
+      .then((b) => { if (!failed) t.onDataRange(begin, b) }, (e) => {
+        if (failed) return
+        if (tries < 2 && !(e.status >= 400 && e.status < 500)) { setTimeout(() => get(begin, end, tries + 1), 700 * (tries + 1)); return }
+        failed = true
+        onFail?.(e.status ? e : Object.assign(e, { offline: true }))
+      })
+  }
+  t.requestDataRange = (begin, end) => get(begin, end)
+  return t
 }

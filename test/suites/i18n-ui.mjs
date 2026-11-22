@@ -2,7 +2,7 @@
 // (src/i18n/<code>.json) is valid and keeps each string's {placeholders} (scripts/i18n.js), and
 // Settings › You offers every pack, named in its own words. Then each language: the page says which it is, the
 // sidebar, Settings' sections and its look (You) are in its words, nothing is wider than the window (or
-// a phone, for the longest), with no page errors; Match this computer follows the browser's
+// a phone, for the longest), Share Links' Beta switch in its words, with no page errors; Match this computer follows the browser's
 // language; and picking one in Settings › You switches to it, in another open window too.
 import fs from 'node:fs'
 import path from 'node:path'
@@ -22,6 +22,16 @@ const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'i18n.js'), 'c
 ok(r.status === 0, 'every language file is valid and keeps each string\'s {placeholders}', r.stdout + r.stderr)
 console.log(r.stdout.trim())
 ok(LANGS.length > 0 && LANGS.every((l) => !!words[l]), 'every pack reads', LANGS)
+// These places, though, in every language: About & Updates (its version line and update chip), the
+// Account and Phone tabs' words for Bridge AI's relay, your devices and Remote Screen and Preview.
+const WHOLE = /(^|, )(components\/settings\/(About|Account|Relay)\.jsx|components\/remote\/[\w.]+|components\/(Machines|Preview)\.jsx)(,|$)/
+const behind = Object.fromEntries(LANGS.map((l) => {
+  const out = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'i18n.js'), 'todo', l], { encoding: 'utf8' }).stdout
+  let list = []
+  try { list = JSON.parse(out.slice(out.indexOf('['))) } catch { list = [{ en: `(todo didn't answer: ${out.slice(0, 120)})`, where: 'components/settings/About.jsx' }] }
+  return [l, list.filter((x) => WHOLE.test(x.where)).map((x) => x.en)]
+}).filter(([, list]) => list.length))
+ok(!Object.keys(behind).length, 'About & Updates, the Account and Phone tabs\' relay, your devices and Remote Screen and Preview: every string in every language', behind)
 
 const kit = await startKit('i18n-ui')
 const { b, which } = await browser()
@@ -79,6 +89,12 @@ try {
       return { ok: !!a && Math.abs((a.top + a.bottom) / 2 - (q.top + q.bottom) / 2) < 8 && a.left >= q.right - 1, a: a && [a.left, a.top], q: [q.right, q.top] }
     })
     ok(inline === true || inline.ok, `${l}: and its link in the line`, inline)
+    // Settings › Devices & Access › Share Links: the beta feature's switch at the top, in its words.
+    await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'sharing' } })))
+    const beta = p.locator('.modal.settings [data-beta="share-links"]')
+    const short = say(l, "A link for people outside your devices to a file, a folder, a Studio document or an agent's app.")
+    const betaSaid = await until(async () => (await beta.locator('.st-beta-name').innerText().catch(() => '')).includes(say(l, 'Share Links')) && (await beta.locator('.st-beta-text > .muted').innerText().catch(() => '')).startsWith(short), 8000)
+    ok(!!betaSaid && (await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 1, `${l}: Settings › Devices & Access › Share Links, its Beta switch in its words, nothing wider than the window`, await beta.innerText().catch(() => ''))
     if (phone) {
       const ph = await page(b, kit.url, { ...look, phone: true, store: { 'cc-lang': l } })
       await ph.p.waitForSelector('.tabbar button', { timeout: 15000 })

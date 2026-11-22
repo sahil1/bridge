@@ -1361,7 +1361,7 @@ function Scheduled({ d, reload }) {
     <section className="st-sec" data-setting="slack-scheduled">
       <h4>{t('Scheduled Posts')}</h4>
       <p className="muted small">{t('A question it answers on a schedule and posts in a channel: a weekly status, a Monday summary. Each goes through its usual approvals: a draft for you, unless it answers without asking.')}</p>
-      {!d.routinesOn && <p className="st-note warn"><Icon name="info" size={13} /><span>{t('Scheduled posts need Scheduled Routines: turn it on in {place}.', { place: placeIn('beta-routines') })}</span></p>}
+      {!d.routinesOn && <p className="st-note warn"><Icon name="info" size={13} /><span>{t('Scheduled posts need Scheduled Routines: turn it on in {place}.', { place: placeIn('scheduled-routines') })}</span></p>}
       {list.length > 0 && (
         <ul className="sb-sched">
           {list.map((r) => {
@@ -1540,7 +1540,7 @@ function ReachLine({ d }) {
               <span key={k} className="small sb-reach-row" data-platform={k} data-state={s.state}>
                 <span className={`sb-dot ${STATE[s.state] || 'warn'}`} aria-hidden="true" />
                 <span>{t('Reached through {name}', { name: k === 'teams' ? c.name : `@${c.name}` })}</span>
-                <span className="muted">· {[k !== 'slack' ? label : null, c.shared ? null : t('its own app'), said(s.state)].filter(Boolean).join(' · ')}</span>
+                <span className="muted">· {[k !== 'slack' ? label : null, c.shared ? null : t('its own app'), said(s.state), k === 'slack' && d.ownCommand ? t('its own command {command}', { command: d.ownCommand }) : null].filter(Boolean).join(' · ')}</span>
                 {k === 'slack' && (d.updateApp?.missing || []).length > 0 && <span className="sb-reach-warn">· {t('its app needs updating')}</span>}
               </span>
             ))

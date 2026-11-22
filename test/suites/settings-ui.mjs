@@ -10,13 +10,20 @@
 // it, Advanced opened to show it near the top, and that opening isn't kept. A link to one
 // (bridge-open-settings) does the same, and the ids that opened a section before it moved (general,
 // appearance, voice, sharing, slack-bot…) land where it is now. Every data-setting any section shows
-// is one ⌘K knows (settings/search.js), so nothing in Settings is out of its reach. What's on unless
+// is one ⌘K knows (settings/search.js), so nothing in Settings is out of its reach; a beta feature's
+// own settings it finds only while it's on, its switch always (Share Links'). What's on unless
 // turned off and sends what it reads off the computer is never under Advanced: Meetings' cleanup,
 // naming who spoke and preparing (with which model writes the notes and where it runs said there:
 // none yet, then a key's), Mail's learning again, the Agents tab's picking up unfinished work.
-// Nothing was lost: every setting there was (each control by its name) is still in its place,
+// You's Enter Key (src/enter.js): Smart, Always Sends or ⌘Enter Sends, Smart until another is picked,
+// each kept, and Smart again taken out of your settings. Nothing was lost: every setting there was (each control by its name) is still in its place,
 // Advanced opened. Each beta feature's switch is at the top of its own place, marked Beta; About &
-// Updates › Beta Features lists only what's still in beta, each with the way to its place. A setting
+// Updates › Beta Features lists only what's still in beta, each with the way to its place. The ones
+// out of beta (Home, Scheduled Routines, Meeting Insights, Bridge AI as an MCP Server) are regular
+// cards in Your Features and ordinary switches in their own places, with no Beta mark; and a
+// settings file from before 3.22.0 with their Beta Features switches on, off or never set comes up
+// as it was left (on stays on, off stays off, never set takes each one's default), and so after a
+// restart. A setting
 // that needs another one on shows greyed with Turn On (Dictation's extras), and Which Devices May
 // Connect shows with Remote Screen and Preview off. Meetings & Voice and Devices & Access have four
 // tabs each: a link to one of them lands on it, the section's own id and its row in the list on the
@@ -39,7 +46,8 @@ const stand = (bin, name, source) => {
   fs.writeFileSync(path.join(bin, name), `#!/bin/sh\nexec "${process.execPath}" "${path.join(bin, `${name}.cjs`)}" "$@"\n`, { mode: 0o755 })
   return path.join(bin, name)
 }
-const kit = await startKit('settings-ui', { env: ({ bin }) => (IS_MAC ? {
+// (Home as Bridge AI starts, on: its card and switch are checked as they come.)
+const kit = await startKit('settings-ui', { config: { home: undefined }, env: ({ bin }) => (IS_MAC ? {
   BRIDGE_CALLWATCH: stand(bin, 'callwatch', `const fs = require('node:fs'), path = require('node:path')
 const read = () => { try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'callwatch.json'), 'utf8')) } catch { return {} } }
 const say = (o) => { process.stdout.write(JSON.stringify(o) + '\\n'); process.exit(0) }
@@ -62,14 +70,14 @@ const TABBED = {
 }
 const SECTIONS = ['Your Features', 'You', 'Agents & Models', 'Meetings & Voice', ...(IS_MAC ? ['Mail & Calendar'] : []), 'Bots', 'Devices & Access', 'Notifications', 'Back Up & Move', 'About & Updates']
 const FIRST = {
-  'Your Features': ['Meetings', 'Dictation', 'Chief of Staff', 'Phone', 'Share Links', 'Notifications', 'Beta', 'Bots', 'Remote Screen and Preview', 'Bridge AI as an MCP Server', 'Set up'],
-  You: ['Home', 'Your name', 'Location', 'Layout', 'Color Mode', 'Theme', 'Text Size', 'Language'],
+  'Your Features': ['Home', 'Meetings', 'Meeting Insights', 'Dictation', 'Chief of Staff', 'Scheduled Routines', 'Phone', 'Share Links', 'Notifications', 'Bridge AI as an MCP Server', 'Beta', 'Bots', 'Remote Screen and Preview', 'Set up'],
+  You: ['Home', 'Your name', 'Location', 'Layout', 'Enter Key', 'Color Mode', 'Theme', 'Text Size', 'Language'],
   Agents: ['Scheduled Routines', 'Default agent', 'Pick up unfinished work', 'Chief of Staff', 'Runs on', 'Helpers at once', 'Your Agents'],
   'Model Providers': ['Usage Across Every Provider', /model labs/i, /run locally/i],
   'Which Model Does What': ['Agents and the Chief of Staff', 'New agents and chats', 'Models for Each Task', 'Speech and Dictation', 'Speech to text'],
   'Speech Models': ['Speech Model'],
   'Spoken Answers': ['Voice'],
-  Dictation: ['Tidy what I say', 'Talk to your agents'],
+  Dictation: ['Talk to your agents'],
   Meetings: ['Live Meeting Board', 'Answers in AI Assist', 'Meeting Insights', 'Transcribe with', 'Language', 'Names and terms', 'Notes are written by', 'Write the summary when a meeting ends', 'Clean up the transcript when a meeting ends', 'Name who spoke on the call', ...(IS_MAC ? ['Prepare for each meeting'] : []), 'Record the other side of calls', 'Notice calls', 'Save every meeting as Markdown'],
   'Mail & Calendar': ['How You Write', 'Learn it again now and then', 'Working days', 'Working hours', 'Read-Only'],
   Bots: ['Bots', /beta/i, 'Open Bots'],
@@ -77,7 +85,7 @@ const FIRST = {
   Phone: [/relay|Cloudflare/i],
   Computers: ['Your Devices', 'Link a device'],
   'Remote Access': ['Remote Screen and Preview', 'Which Devices May Connect'],
-  'Share Links': [/Nothing is shared now/],
+  'Share Links': ['Share Links', /beta/i, /Nothing is shared now/],
   Notifications: ['Notifications on this device', 'What to notify about', 'An agent needs you', 'Notification sounds', 'Screen Sharing Notifications', 'Needs Remote Screen and Preview on'],
   'Back Up & Move': ['Back Up to a File', 'Restore From a File'],
   'About & Updates': ['Version', 'Check for new versions', 'Beta Features', 'Privacy', 'Report a problem'],
@@ -86,30 +94,38 @@ const FIRST = {
 // its place with Advanced opened. Platform's own: Mail only on a Mac, Prepare for each meeting only
 // with a calendar (a Mac).
 const ALL = {
-  You: ['input|Your name', 'button|Simple', 'button|Everything', 'button|Use my location', 'input|Search for a city', 'button|Light', 'button|Dark', 'button|Sync with system', 'button|Midnight', 'button|Custom', 'button|Copy', 'input|Paste a theme', 'button|Use', 'button|Small', 'button|Large', 'button|Comfortable', 'button|Compact', 'button|Geist', 'button|Rounded', 'input|Weather', 'input|Clock', 'input|Usage', 'input|Updates', 'input|Restart to apply', 'input|Setup', 'input|Notification sounds', 'select|Language', 'button|Reset appearance', 'input|Home'],
+  You: ['input|Your name', 'button|Simple', 'button|Everything', 'button|Smart', 'button|Always Sends', 'button|Enter Sends', 'button|Use my location', 'input|Search for a city', 'button|Light', 'button|Dark', 'button|Sync with system', 'button|Midnight', 'button|Custom', 'button|Copy', 'input|Paste a theme', 'button|Use', 'button|Small', 'button|Large', 'button|Comfortable', 'button|Compact', 'button|Geist', 'button|Rounded', 'input|Weather', 'input|Clock', 'input|Usage', 'input|Updates', 'input|Restart to apply', 'input|Setup', 'input|Notification sounds', 'select|Language', 'button|Reset appearance', 'input|Home'],
   Agents: ['input|Scheduled Routines', 'button|More agents', 'button|Refresh', 'button|Install', 'button|Copy the command', 'select|Chief of Staff runs on', 'select|Helpers at once', 'button|Off', 'button|On', 'select|Terminal app', 'button|Built in', 'button|herdr', 'input|Keep agents running when Bridge AI quits', 'input|Pick up unfinished work after an update, a crash or a restart'],
   'Model Providers': ['input|Usage Across Every Provider', 'input|Show more models (Qwen Code, DeepSeek, Kimi, GLM)', 'button|Anthropic', 'button|OpenAI', 'button|Azure OpenAI', 'button|AWS Bedrock', 'button|OpenRouter', 'button|Groq', 'button|Ollama', 'button|LM Studio', 'button|Deepgram', 'button|AssemblyAI', 'button|Another speech service', 'button|Cursor', 'button|GitHub Copilot', 'button|Jules'],
   'Which Model Does What': ['button|Model for Meeting notes', 'button|Model for Diagrams', 'button|Change'],
   'Speech Models': ['button|Download'],
   'Spoken Answers': ['select|Voice', 'select|Speed', 'button|Test'],
-  Dictation: ['input|Tidy what I say', 'input|Talk to your agents', 'button|Change', 'input|Light cleanup', 'input|Mention files by saying them', 'input|Show the words as you talk', 'input|Keep a history of what you dictate', 'input|30 days', 'input|1 year', 'input|Always', 'input|Keep the recordings too', 'button|Delete all dictations'],
-  Meetings: ['input|Live Meeting Board', 'input|Answers in AI Assist', 'input|Meeting Insights', 'input|On this computer', 'input|OpenAI', 'input|Groq', 'input|Deepgram', 'input|AssemblyAI', 'input|Another OpenAI-style service', 'button|Speech models', 'select|Meeting language', 'button|Open Memory', 'input|More words to listen for', 'input|Record the other side of calls', 'select|Model for meeting notes', 'input|Write the summary when a meeting ends', 'input|Clean up the transcript when a meeting ends', 'input|Suggest what to ask, in every meeting', 'select|How often AI Assist suggests something', ...(IS_MAC ? ['input|Prepare for each meeting', "input|Speakers From the Call's Video"] : []), 'input|Name who spoke on the call', 'textarea|Your own instructions for every summary', 'input|Tell voices apart in a room', 'input|Tell voices apart on a call', 'input|Learn my voice', 'input|Remember voices you name', 'select|The key that mentions a meeting', 'input|Notice calls', 'input|Stop by itself when the call ends', 'select|What to save', 'input|Folder', 'input|Subfolders', 'input|File name', 'input|Front matter', 'input|Your mic, as', 'input|The call, as', 'input|Keep saved notes up to date', 'input|Save every meeting as Markdown'],
+  Dictation: ['input|Talk to your agents', 'button|Change', 'input|Light cleanup', 'input|Mention files by saying them', 'input|Show the words as you talk', 'input|Keep a history of what you dictate', 'input|30 days', 'input|1 year', 'input|Always', 'input|Keep the recordings too', 'button|Delete all dictations'],
+  Meetings: ['input|Live Meeting Board', 'input|Answers in AI Assist', 'input|Meeting Insights', 'input|On this computer', 'input|OpenAI', 'input|Groq', 'input|Deepgram', 'input|AssemblyAI', 'input|Another OpenAI-style service', 'button|Speech models', 'select|Meeting language', 'button|Open Memory', 'input|More words to listen for', 'input|Record the other side of calls', 'button|Change it', 'input|Write the summary when a meeting ends', 'input|Clean up the transcript when a meeting ends', 'input|Suggest what to ask, in every meeting', 'select|How often AI Assist suggests something', ...(IS_MAC ? ['input|Prepare for each meeting', "input|Speakers From the Call's Video"] : []), 'input|Name who spoke on the call', 'textarea|Your own instructions for every summary', 'input|Tell voices apart in a room', 'input|Tell voices apart on a call', 'input|Learn my voice', 'input|Remember voices you name', 'select|The key that mentions a meeting', 'input|Notice calls', 'input|Stop by itself when the call ends', 'select|What to save', 'input|Folder', 'input|Subfolders', 'input|File name', 'input|Front matter', 'input|Your mic, as', 'input|The call, as', 'input|Keep saved notes up to date', 'input|Save every meeting as Markdown'],
   'Mail & Calendar': ['input|Learn it again now and then', 'button|Mon', 'button|Sun', 'input|From', 'input|To', 'select|Kept clear around meetings', 'select|Around a meeting somewhere else', 'select|How many times to offer'],
   Bots: ['input|Bots', 'button|Open Bots'],
   'MCP Servers': ['input|Bridge AI as an MCP Server', 'button|Add server', 'button|Refresh'],
   Phone: ['button|Sign in with Cloudflare', 'button|Use an API token instead', 'button|Check again'],
   Computers: ['button|Details', "input|The other device's link", 'button|Link'],
   'Remote Access': ['input|Remote Screen and Preview'],
+  'Share Links': ['input|Share Links'],
   Notifications: ['button|Turn on notifications', 'input|An agent needs you (a question, a permission)', 'input|An agent finished', 'select|Usage running low', 'input|Notification sounds', 'input|Answer buttons for simple questions (yes or no, or two short choices)', "input|Notify my phone even when I'm at the computer", 'input|Screen Sharing Notifications', 'button|Turn On'],
   'Back Up & Move': ['input|Passphrase', 'button|Back Up', 'button|Choose a Backup'],
-  'About & Updates': ['button|Check now', 'input|Check for new versions', 'button|Take the tour', 'a|Report a problem', 'a|Suggest an idea', 'button|Copy details', 'input|Home', 'input|Tidy what I say', 'input|Usage Across Every Provider', 'input|Meeting Insights', 'input|Scheduled Routines', 'input|Bridge AI as an MCP Server', 'button|Copy path', 'textarea|config.json', 'button|Save', 'button|Effective settings', 'button|Defaults', ...(IS_MAC ? ["input|Speakers From the Call's Video"] : [])],
+  'About & Updates': ['button|Check now', 'input|Check for new versions', 'button|Take the tour', 'a|Report a problem', 'a|Suggest an idea', 'button|Copy details', 'input|Usage Across Every Provider', 'input|Share Links', 'button|Copy path', 'textarea|config.json', 'button|Save', 'button|Effective settings', 'button|Defaults', ...(IS_MAC ? ["input|Speakers From the Call's Video"] : [])],
 }
 // Beta Features: only those still in beta, in order (Studio, Sign PDFs, Comments and @bridge, Make a
 // Sheet, Back and Forward, Tab Groups, Files and Recommended Settings are part of the app since
-// 3.19.0); Speakers From the Call's Video only where the server runs on a Mac. Each one's switch is
-// first in its own place too.
-const BETAS = ['Home', 'Tidy what I say', 'Usage Across Every Provider', 'Meeting Insights', 'Scheduled Routines', 'Live Meeting Board', 'Answers in AI Assist', 'Bots', 'Bridge AI as an MCP Server', 'Remote Screen and Preview', ...(IS_MAC ? ["Speakers From the Call's Video"] : [])]
-const BETA_AT = { Home: 'You', 'Tidy what I say': 'Dictation', 'Usage Across Every Provider': 'Model Providers', 'Meeting Insights': 'Meetings', 'Scheduled Routines': 'Agents', 'Live Meeting Board': 'Meetings', 'Answers in AI Assist': 'Meetings', Bots: 'Bots', 'Bridge AI as an MCP Server': 'MCP Servers', 'Remote Screen and Preview': 'Remote Access', "Speakers From the Call's Video": 'Meetings' }
+// 3.19.0; Home, Tidy what I say, Meeting Insights, Scheduled Routines and Bridge AI as an MCP Server
+// since 3.22.0); Speakers From the Call's Video only where the server runs on a Mac. Each one's
+// switch is first in its own place too.
+// Your Features' cards in a browser: 15, and the Mac's Speakers From the Call's Video (Tidy What I
+// Say's only in the desktop app, where it can hear the key from other apps).
+const CARDS = IS_MAC ? 16 : 15
+const BETAS = ['Usage Across Every Provider', 'Live Meeting Board', 'Answers in AI Assist', 'Bots', 'Remote Screen and Preview', 'Share Links', ...(IS_MAC ? ["Speakers From the Call's Video"] : [])]
+const BETA_AT = { 'Share Links': 'Share Links', 'Usage Across Every Provider': 'Model Providers', 'Live Meeting Board': 'Meetings', 'Answers in AI Assist': 'Meetings', Bots: 'Bots', 'Remote Screen and Preview': 'Remote Access', "Speakers From the Call's Video": 'Meetings' }
+// Out of beta: each an ordinary switch in its own place, by its data-setting, with no Beta mark (Tidy
+// what I say only in the desktop app, where the key works from other apps: dictation-cleanup has it).
+const OUT_AT = { home: 'You', 'scheduled-routines': 'Agents', 'meeting-insights': 'Meetings', 'mcp-server': 'MCP Servers' }
 // Every setting ⌘K knows (search.js), by id, and the ones known by the start of theirs (each agent's
 // row, each group of providers).
 const SEARCH = fs.readFileSync(path.join(ROOT, 'src', 'components', 'settings', 'search.js'), 'utf8')
@@ -187,8 +203,23 @@ try {
     await settled(p)
     const cards = await p.locator('.ft-card').evaluateAll((l) => l.map((c) => ({ id: c.dataset.feature, name: c.querySelector('.ft-name b')?.innerText.trim(), status: c.querySelector('.ft-status')?.innerText.trim(), open: !!c.querySelector('.ft-open'), beta: !!c.querySelector('.st-chip.beta'), sw: !!c.querySelector('input[role="switch"]') })))
     const betaCards = cards.filter((c) => c.beta).map((c) => c.name)
-    ok(cards.length >= 16 && cards.every((c) => c.name && c.status && c.open) && JSON.stringify(betaCards) === JSON.stringify(BETAS) && cards.filter((c) => c.beta).every((c) => c.sw), 'Your Features: a card for each feature, each with a line on how it\'s doing and Open, every beta there and marked, with its switch', cards)
+    ok(cards.length >= CARDS && cards.every((c) => c.name && c.status && c.open) && JSON.stringify(betaCards) === JSON.stringify(BETAS) && cards.filter((c) => c.beta).every((c) => c.sw), 'Your Features: a card for each feature, each with a line on how it\'s doing and Open, every beta there and marked, with its switch', cards)
     ok(cards.find((c) => c.id === 'remote-screen')?.status === 'See and control your other computers' && cards.every((c) => c.status !== 'Off') && cards.find((c) => c.id === 'dictation')?.sw && /^Hold .+ and talk$/.test(cards.find((c) => c.id === 'dictation')?.status || ''), 'and says how each is: Remote Screen, off, says what it is (its switch says it\'s off), Dictation is on with its key', cards.filter((c) => ['remote-screen', 'dictation'].includes(c.id)))
+    // The ones out of beta: regular cards, each with its switch, as each starts.
+    const card = (id) => cards.find((c) => c.id === id) || {}
+    const sw = (id) => p.locator(`.ft-card[data-feature="${id}"] input[role="switch"]`)
+    ok(['home', 'meeting-insights', 'routines', 'mcp-server'].every((id) => card(id).sw && !card(id).beta) && !card('tidy').name
+      && await sw('home').isChecked() && await sw('routines').isChecked() && !(await sw('meeting-insights').isChecked()) && !(await sw('mcp-server').isChecked())
+      && card('home').status === 'Your day at a glance' && card('meeting-insights').status === 'On by itself after 5 meetings' && card('routines').status === 'None on a schedule yet' && card('mcp-server').status === 'Your boards and files in other AI apps',
+    'Home, Meeting Insights, Scheduled Routines and Bridge AI as an MCP Server: regular cards with their switches, Home and Scheduled Routines on, Meeting Insights on by itself after 5 meetings, the MCP server off; Tidy What I Say only in the desktop app', ['home', 'meeting-insights', 'routines', 'mcp-server', 'tidy'].map((id) => [id, card(id)]))
+    await sw('meeting-insights').check()
+    ok(!!(await until(async () => (await kit.api('/config')).features?.['meeting-insights'] === true && (await kit.api('/settings')).user.meetings?.insights === true, 5000)), 'its card\'s switch turns Meeting Insights on, saved as its own setting')
+    await p.locator('.ft-card[data-feature="meeting-insights"] .ft-open').click()
+    const insightsAt = p.locator('.modal.settings [data-setting="meeting-insights"] input[type="checkbox"]')
+    ok(!!(await until(async () => (await p.locator('.st-tabs [role="tab"][aria-selected="true"]').innerText().catch(() => '')) === 'Meetings' && await insightsAt.isChecked().catch(() => false), 8000)), 'and Open goes to its switch in Settings › Meetings & Voice › Meetings, on')
+    await insightsAt.uncheck()
+    ok(!!(await until(async () => (await kit.api('/config')).features?.['meeting-insights'] === false, 5000)), 'turned off there, it\'s off')
+    await nav(p, 'Your Features')
     const lines = await p.locator('.ft-status').evaluateAll((l) => l.map((e) => ({ t: e.innerText, one: e.getBoundingClientRect().height < parseFloat(getComputedStyle(e).lineHeight) * 1.5 })))
     ok(lines.every((x) => x.one), 'each card\'s line is one line', lines.filter((x) => !x.one))
     await shot(p, `${tag}settings-ui-your-features`)
@@ -217,6 +248,12 @@ try {
       if (TABBED[section]) ok(await p.locator('.st-head p').count() === 0, `${name}: no line under the section's name, where its tabs are`)
       if (['Your Features', 'Which Model Does What', 'Speech Models', 'Spoken Answers', 'Computers', 'Remote Access', 'Share Links', 'Bots', 'MCP Servers'].includes(name)) ok(!has, `${name}: nothing under Advanced, so no Advanced`, { has })
       else ok(has && (await isOpen(p)) === false, `${name}: the rest under Advanced, at the end, closed`, { has, open: await isOpen(p) })
+      // A feature out of beta: its switch here, an ordinary one.
+      for (const [id, at] of Object.entries(OUT_AT)) {
+        if (at !== name) continue
+        const sw = p.locator(`.modal.settings [data-setting="${id}"]`).first()
+        ok(await sw.isVisible() && !(await sw.locator('.st-chip.beta').count()) && !(await sw.evaluate((e) => !!e.closest('.st-beta, .st-adv'))) && await sw.locator('input[type="checkbox"]').count() >= 1, `${name}: ${id}'s switch is here, an ordinary one (no Beta mark, not under Advanced)`)
+      }
       // A beta's switch, first in its place and marked.
       for (const [beta, at] of Object.entries(BETA_AT)) {
         if (at !== name || (beta === "Speakers From the Call's Video" && !IS_MAC)) continue
@@ -232,6 +269,20 @@ try {
         ok(!lost.length, `${name}: every setting there was is still here`, { lost, got })
       }
       for (const id of await unknownSettings(p)) if (!known(id)) strays.add(`${name}: ${id}`)
+      if (name === 'You') {
+        // Enter Key (src/enter.js): Smart until another is picked; each pick kept, Smart by taking it out.
+        const opts = p.locator('.modal.settings [data-setting="enter-key"] [role="radio"]')
+        const said = (await opts.allInnerTexts()).map((x) => x.trim())
+        ok(said.length === 3 && said[0] === 'Smart' && said[1] === 'Always Sends' && /^(⌘Enter|Ctrl\+Enter) Sends$/.test(said[2]) && (await opts.first().getAttribute('aria-checked')) === 'true', 'You: Enter Key, Smart, Always Sends or ⌘Enter Sends (Ctrl+Enter off a Mac), Smart picked', said)
+        // Kept: saved, in /config, and the page showing it picked (it draws that once the save is back).
+        const kept = (v, i) => until(async () => (await kit.api('/settings')).user.enterKey === v && (await kit.api('/config')).enterKey === (v || 'smart') && (await opts.nth(i).getAttribute('aria-checked')) === 'true', 5000, 100)
+        await opts.nth(2).click()
+        ok(!!(await kept('mod', 2)), 'You: ⌘Enter Sends picked is kept', (await kit.api('/settings')).user.enterKey)
+        await opts.nth(1).click()
+        ok(!!(await kept('always', 1)), 'You: Always Sends picked is kept', (await kit.api('/settings')).user.enterKey)
+        await opts.nth(0).click()
+        ok(!!(await kept(undefined, 0)), 'You: Smart again takes it out of your settings (the default)', (await kit.api('/settings')).user)
+      }
       if (name === 'About & Updates') {
         const betas = (await p.locator('[data-setting="beta"] .ab-trial .st-check b').allInnerTexts()).map((x) => x.trim())
         ok(JSON.stringify(betas) === JSON.stringify(BETAS), 'About & Updates › Beta Features lists only the features still in beta', betas)
@@ -301,6 +352,23 @@ try {
     ok(!!(await until(() => hit.isVisible(), 4000)) && /Settings › Meetings & Voice › Dictation/.test(await hit.innerText()), '⌘K "dictation history": in Settings › Meetings & Voice › Dictation', await p.locator('.pal-list').innerText().catch(() => ''))
     await hit.click()
     ok(!!(await until(async () => (await at()).tab === 'Dictation' && await p.locator('.modal.settings [data-setting="dictation-history"]').isVisible(), 8000, 100)), 'and it opens the Dictation tab at it', await at())
+    // A beta feature's own settings are in ⌘K only while it's on; its switch always (Share Links).
+    const found = async (words) => {
+      await p.locator('button[aria-label="Close settings"]').click().catch(() => {})
+      await p.keyboard.press('ControlOrMeta+K')
+      await p.locator('.palette input').fill(words)
+      await until(() => p.locator('.pal-item[data-id="s:beta-share-links"]').isVisible(), 4000)
+      const ids = await p.locator('.pal-item[data-id^="s:"]').evaluateAll((l) => l.map((e) => e.dataset.id))
+      await p.keyboard.press('Escape')
+      return ids
+    }
+    const offIds = await found('share links')
+    await kit.api('/settings', { trials: { 'share-links': true } }, 'PATCH')
+    await p.reload()
+    await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
+    const onIds = await found('share links')
+    await kit.api('/settings', { trials: { 'share-links': false } }, 'PATCH')
+    ok(offIds.includes('s:beta-share-links') && !offIds.includes('s:shares') && onIds.includes('s:beta-share-links') && onIds.includes('s:shares'), '⌘K "share links": its switch, on or off; the links you shared only while Share Links is on', { offIds, onIds })
     // A setting that needs another one on: greyed where it is, with Turn On, not gone.
     await kit.api('/settings', { dictation: { on: false } }, 'PATCH')
     await p.reload()
@@ -536,10 +604,80 @@ try {
     await settled(p)
     const ff = await phoneFaults(p, '.modal.settings .st-scroll')
     const opens = await p.locator('.modal.settings.phone .ft-open').evaluateAll((l) => l.map((e) => Math.round(e.getBoundingClientRect().height)))
-    ok(!ff.wider && !ff.past && !ff.sideways && !ff.cut && opens.length >= 16 && opens.every((h) => h >= 40), 'phone: Your Features, nothing wider than the screen or cut off, each Open a whole 40 px target', { ff, opens })
+    ok(!ff.wider && !ff.past && !ff.sideways && !ff.cut && opens.length >= CARDS && opens.every((h) => h >= 40), 'phone: Your Features, nothing wider than the screen or cut off, each Open a whole 40 px target', { ff, opens })
     await shot(p, `${tag}settings-ui-phone-features`)
+    // Every field in every section and tab, Advanced open, at 16 px or more: iOS zooms into a smaller
+    // one as it's tapped (Link a device's field, Notifications' Usage running low), and stays zoomed.
+    const zoomy = {}
+    for (const id of ['you', 'agents', 'providers', 'models', 'mcp', 'meetings', 'dictation', 'voice', 'spoken', 'bots', 'phone', 'machines', 'remote', 'sharing', 'notifications', 'backup', 'about']) {
+      await p.evaluate((s) => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: s } })), id)
+      await settled(p)
+      if (await p.locator('.modal.settings details.st-adv summary').first().isVisible().catch(() => false)) { await advanced(p); await settled(p) }
+      const small = await p.locator('.modal.settings .st-scroll').evaluate((el) => [...el.querySelectorAll('input:not([type=checkbox], [type=radio], [type=range], [type=color], [type=file]), select, textarea')]
+        .filter((e) => e.getBoundingClientRect().width > 0 && parseFloat(getComputedStyle(e).fontSize) < 16)
+        .map((e) => `${e.getAttribute('aria-label') || e.getAttribute('placeholder') || e.name || e.tagName} ${getComputedStyle(e).fontSize}`))
+      if (small.length) zoomy[id] = small
+    }
+    ok(!Object.keys(zoomy).length, 'phone: every field of every section and tab, Advanced open, at 16 px or more (iOS zooms into a smaller one as it\'s tapped)', zoomy)
     ok(errors.length === 0, 'phone: no page errors', errors)
     await ctx.close()
+  }
+
+  // ---------- A settings file from before 3.22.0 ----------
+  // Its Beta Features switches for the five out of beta all on, all off (Tidy what I say's own switch
+  // on under it), or never set, beside one still in beta: as it starts, each is its own setting, as it
+  // was left; the one still in beta stays in Beta Features.
+  {
+    const FIVE = ['home', 'routines', 'meeting-insights', 'mcp-server', 'dictation-cleanup']
+    const was = {
+      on: { trials: { ...Object.fromEntries(FIVE.map((id) => [id, true])), 'meeting-board': true }, dictation: { tidy: true } },
+      off: { trials: Object.fromEntries(FIVE.map((id) => [id, false])), dictation: { tidy: true } },
+      never: { name: 'Tester', home: undefined },
+    }
+    const want = {
+      on: { features: { home: true, routines: true, 'meeting-insights': true, 'mcp-server': true, 'dictation-cleanup': true }, saved: { home: { on: true }, routines: { on: true }, insights: true, mcp: { on: true }, tidy: true, trials: { 'meeting-board': true } } },
+      off: { features: { home: false, routines: false, 'meeting-insights': false, 'mcp-server': false, 'dictation-cleanup': false }, saved: { home: { on: false }, routines: { on: false }, insights: false, mcp: { on: false }, tidy: false, trials: undefined } },
+      never: { features: { home: true, routines: true, 'meeting-insights': false, 'mcp-server': false, 'dictation-cleanup': false }, saved: { home: undefined, routines: undefined, insights: undefined, mcp: undefined, tidy: undefined, trials: undefined } },
+    }
+    const olds = {}
+    try {
+      for (const [k, config] of Object.entries(was)) olds[k] = await startKit(`settings-ui-was-${k}`, { config })
+      // (Where a build of the local model came with this checkout, never set, it's on.)
+      want.never.features['dictation-cleanup'] = !!(await olds.never.api('/llm')).offered
+      await until(async () => (await olds.never.api('/config')).features?.['dictation-cleanup'] === want.never.features['dictation-cleanup'], 5000)
+      for (const [k, o] of Object.entries(olds)) {
+        const conf = await o.api('/config')
+        const f = JSON.parse(fs.readFileSync(path.join(o.data, 'config.json'), 'utf8'))
+        const saved = { home: f.home, routines: f.routines, insights: f.meetings?.insights, mcp: f.mcpServer, tidy: f.dictation?.tidy, trials: f.trials }
+        const features = Object.fromEntries(FIVE.map((id) => [id, conf.features?.[id]]))
+        ok(JSON.stringify(features) === JSON.stringify(want[k].features) && JSON.stringify(saved) === JSON.stringify(want[k].saved) && !FIVE.some((id) => id in (conf.trials || {})),
+          `the Beta Features switches ${k === 'never' ? 'never set: each takes its default' : `all ${k}: each its own setting, ${k}`}${k === 'on' ? ', and the one still in beta stays one' : ''}`, { features, saved })
+      }
+      ok((await olds.on.api('/config')).trials?.['meeting-board'] === true, 'Live Meeting Board, still in beta, still on')
+      // Restarted: each as it was saved (nothing read again from the old switches, which are gone).
+      const savedOff = fs.readFileSync(path.join(olds.off.data, 'config.json'), 'utf8')
+      await olds.off.restart()
+      const offAgain = await olds.off.api('/config')
+      ok(fs.readFileSync(path.join(olds.off.data, 'config.json'), 'utf8') === savedOff && FIVE.every((id) => offAgain.features?.[id] === false), 'all off, restarted: still off, the settings file as it was saved', offAgain.features)
+      // In the app: each card and its switch as it was left, and Beta Features without them.
+      for (const k of ['on', 'off']) {
+        const { ctx, p, errors } = await page(b, olds[k].url)
+        await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
+        await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'features' } })))
+        await p.locator('.ft-card[data-feature="mcp-server"]').waitFor({ timeout: 10000 })
+        await settled(p)
+        const states = await p.locator('.ft-card').evaluateAll((l) => Object.fromEntries(l.filter((c) => ['home', 'meeting-insights', 'routines', 'mcp-server'].includes(c.dataset.feature)).map((c) => [c.dataset.feature, c.querySelector('input[role="switch"]')?.checked])))
+        ok(Object.values(states).length === 4 && Object.values(states).every((v) => v === (k === 'on')), `${k}: Your Features' cards say so`, states)
+        await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'about' } })))
+        await p.locator('.modal.settings [data-setting="beta"] .ab-trial').first().waitFor({ timeout: 10000 })
+        const listed = (await p.locator('[data-setting="beta"] .ab-trial .st-check b').allInnerTexts()).map((x) => x.trim())
+        ok(JSON.stringify(listed) === JSON.stringify(BETAS), `${k}: Beta Features lists only the ones still in beta`, listed)
+        ok(!errors.length, `${k}: no page errors`, errors)
+        await ctx.close()
+      }
+    } finally {
+      for (const o of Object.values(olds)) o.stop()
+    }
   }
 } catch (e) {
   ok(false, `crashed: ${e.stack}`)

@@ -27,6 +27,7 @@ import PermissionFix, { InstallFix, protectedFolder } from './PermissionFix.jsx'
 import { OfficeView, Menu, menuItems, NameDialog, fileOp, onComputer } from './FileExtras.jsx'
 import { MediaView, PictureView, OtherFile, useSave, canSave, saveLabel } from './FileMedia.jsx'
 import { ShareDialog } from './Share.jsx'
+import { useTrial } from '../trials.js'
 import { SendDialog, UploadSheet, TransferStrip, PlacesMenu, usePlaces, canCopyHere, copyHereLabel, canAddPlace, canDrag, dragData, dropOk, onDrop } from './Transfers.jsx'
 import { locale, t, tn, tx } from '../i18n/index.js'
 import { FileDrawing } from '../lazy.jsx'
@@ -35,6 +36,7 @@ import Assist from './files/Assist.jsx'
 import AiAssist from './AiAssist.jsx'
 import { useBusy } from '../busy.js'
 import { FindFile } from './FileLinks.jsx'
+import { MidName, holdName } from './files/names.jsx'
 // The kinds of file Studio opens (server/studio.js).
 export const STUDIO_OPENS = /\.(docx|md|markdown|txt|xlsx|xlsm|csv|tsv|pptx|pdf|html?)$/i
 
@@ -71,12 +73,12 @@ function TreeNode({ pane, entry, depth, selected, onOpen, expanded, toggle, show
       <button className={`tree-row ${selected === entry.path ? 'on' : ''} ${over ? 'drop-on' : ''}`} style={{ paddingLeft: 8 + depth * 14 }}
         onClick={() => (entry.dir ? toggle(entry.path) : onOpen(entry.path))} title={entry.path}
         draggable={canDrag} onDragStart={canDrag ? (e) => dragData(e, entry, pane) : undefined} {...drops}
-        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onMenu(entry, e) }}>
+        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onMenu(entry, e) }} {...holdName(entry.name, { onHold: (e) => onMenu(entry, e) })}>
         {entry.dir
           ? <Icon name="chevron" size={11} className={`tree-caret ${open ? 'rot90' : ''}`} />
           : <span className="tree-caret-sp" />}
         <Icon name={entry.dir ? (open ? 'folder-open' : 'folder') : iconFor(entry.name)} size={14} className={entry.dir ? 'ico-dir' : 'ico-file'} />
-        <span className="tree-name">{entry.name}</span>
+        <MidName name={entry.name} className="tree-name" title={false} />
       </button>
       {entry.dir && open && (data?.entries || []).map((e) => (
         <TreeNode key={e.path} pane={pane} entry={e} depth={depth + 1} selected={selected} onOpen={onOpen} expanded={expanded} toggle={toggle} showHidden={showHidden} ver={ver} onMenu={onMenu} onDropIn={onDropIn} />
@@ -476,6 +478,7 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
   const linked = (usePoll('/machines', 30000).data?.machines || []).some((m) => m.state === 'linked')
   const [send, setSend] = useState(null) // { src, here }
   const [sharing, setSharing] = useState(null) // what a Share Link is being made for (Share.jsx)
+  const shareOn = useTrial('share-links') // Share Link… only while Share Links (a beta feature) is on
   const [picked, setPicked] = useState(null) // files picked on this device, to send
   const [dropAt, setDropAt] = useState(false)
   const pickRef = useRef(null)
@@ -664,7 +667,7 @@ export function FilesView({ agent, openPath, onConsumed, onMention }) {
             onOpen={({ rel, dir }) => { if (dir) { if (rel) open(rel, true) } else open(rel); if (narrow) setAssist(null) }} />
         </div>
       )}
-      {menu && <Menu x={menu.x} y={menu.y} items={menuItems(menu.entry, act, { onMention: place ? null : onMention, send: linked, copyHere: canCopyHere ? copyHereLabel() : null, assist: assistOn ? (e) => setAssist(e.path) : null, share: true })} onClose={closeMenu} />}
+      {menu && <Menu x={menu.x} y={menu.y} items={menuItems(menu.entry, act, { onMention: place ? null : onMention, send: linked, copyHere: canCopyHere ? copyHereLabel() : null, assist: assistOn ? (e) => setAssist(e.path) : null, share: shareOn })} onClose={closeMenu} />}
       {placesAt && <PlacesMenu x={placesAt.x} y={placesAt.y} agentName={agent.cwd.split(/[\\/]/).pop()} agentPath={agent.cwd.replace(/^\/Users\/[^/]+/, '~')} current={placeId} places={places}
         onPick={setPlaceId} onAdded={(p, gone) => { refreshPlaces(); if (p) setPlaceId(p.id); if (gone && gone.id === placeId) setPlaceId(null) }} onClose={() => setPlacesAt(null)} />}
       {send && <SendDialog src={send.src} here={send.here} onClose={() => setSend(null)} />}

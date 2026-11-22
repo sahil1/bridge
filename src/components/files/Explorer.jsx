@@ -7,7 +7,7 @@
 // opens a document in Studio's editor and anything else in its own app, or shows it. Only to look
 // for now: nothing is renamed, moved or deleted from here. On a phone, one column at a time: the
 // sidebar, then a folder or a list, then a file (a tap opens it).
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import Icon from '../Icon.jsx'
 import { Handle, usePersisted, useWidth } from '../layout.jsx'
 import { api, machineId, onThisComputer } from '../../api.js'
@@ -24,6 +24,7 @@ import Info from './Info.jsx'
 import Assist, { folderAssist } from './Assist.jsx'
 import AiAssist from '../AiAssist.jsx'
 import { ShareDialog } from '../Share.jsx'
+import { useTrial } from '../../trials.js'
 import { baseOf, getJson, postJson, useFolder, sorted, grouped, enc, joinFull, parentOf, nameOf, kindName, fmtSize, fmtWhen, WHERE_KEY, SHELF } from './fsapi.js'
 import { sayPlace, takePlace, onPlaceShow, useNav, keyDir } from '../../backForward.js'
 import './explorer.css'
@@ -105,6 +106,7 @@ export default function Explorer({ head = null, className = '', shelves = null, 
   const [ql, setQl] = useState(false)
   const [info, setInfo] = useState(null) // the entry Get Info is on
   const [sharing, setSharing] = useState(null) // what a Share Link is being made for (Share.jsx)
+  const shareOn = useTrial('share-links')
   const [menu, setMenu] = useState(null) // { x, y, entry }
   const [opts, setOpts] = useState(false) // View Options open
   const [q, setQ] = useState('')
@@ -217,6 +219,20 @@ export default function Explorer({ head = null, className = '', shelves = null, 
   }, [marks, loc.root, machine])
   const rootLabel = shelfRow ? shelfRow.label : loc.root === 'home' ? 'Home' : side.data?.drives?.find((d) => d.root === loc.root)?.label || side.data?.projects?.find((p) => p.root === loc.root && !p.path)?.label || t('Folder')
   const parts = loc.path ? loc.path.split('/') : []
+  // The path bar: the folders above shrink first (cut with …), and when even then it's wider than
+  // its room, it's scrolled to its end, so the folder you're in shows (it showed the start, the
+  // folder you're in out of sight past the right edge).
+  const pathRef = useRef(null)
+  useLayoutEffect(() => {
+    const el = pathRef.current
+    if (!el) return undefined
+    const toEnd = () => { el.scrollLeft = el.scrollWidth }
+    toEnd()
+    if (typeof ResizeObserver !== 'function') return undefined
+    const ro = new ResizeObserver(toEnd)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [loc.root, loc.path])
   const folderEntry = { name: parts.at(-1) || named(rootLabel), path: loc.path, dir: true, ...(loc.path ? {} : { drive: loc.root !== 'home' }) }
   // The one picked kept in view (after the arrow keys, a sort, a refresh).
   useEffect(() => {
@@ -264,8 +280,9 @@ export default function Explorer({ head = null, className = '', shelves = null, 
       !e.dir && studioOpens(e) && appOpens(e) && { label: t('Open in its app'), icon: 'external', run: () => openInApp(e) },
       here && { label: revealLabel, icon: 'folder-open', run: () => reveal(e) },
       // A Share Link (Share.jsx): a document Studio opens as a Studio document (its latest, as a page);
-      // anything else as it is. On this computer's files (another's are shared from that one).
-      !machine && { label: t('Share Link…'), icon: 'link', run: () => setSharing({ kind: e.dir ? 'folder' : studioOpens(e) && !/\.(html?|pdf)$/i.test(e.name) ? 'doc' : 'file', root: loc.root, path: e.path, name: e.name }) },
+      // anything else as it is. On this computer's files (another's are shared from that one), while
+      // Share Links (a beta feature) is on.
+      !machine && shareOn && { label: t('Share Link…'), icon: 'link', run: () => setSharing({ kind: e.dir ? 'folder' : studioOpens(e) && !/\.(html?|pdf)$/i.test(e.name) ? 'doc' : 'file', root: loc.root, path: e.path, name: e.name }) },
       'sep',
       { label: t('Copy path'), icon: 'copy', run: () => copy(fullOf(e)) },
       isFolderHere && { label: hidden ? t('Hide hidden files') : t('Show hidden files'), icon: hidden ? 'eye-off' : 'eye', hint: '⌘⇧.', run: () => setHidden(!hidden) },
@@ -325,6 +342,9 @@ export default function Explorer({ head = null, className = '', shelves = null, 
     if (mod || e.altKey) return
     if (k === ' ') return current && hit(() => setQl((v) => !v))
     if (k === 'Enter') return current && hit(() => openEntry(current))
+    // Esc: Get Info first, when it's open (opened by ⌘I or its button, focus stays on the folder,
+    // and its own Esc never came), then what's picked.
+    if (k === 'Escape' && info) return hit(() => setInfo(null))
     if (k === 'Escape' && sel) return hit(() => setSel(null))
     if (k === 'ArrowDown') return hit(() => step(view === 'icons' ? 10 : 1))
     if (k === 'ArrowUp') return hit(() => step(view === 'icons' ? -10 : -1))
@@ -341,6 +361,18 @@ export default function Explorer({ head = null, className = '', shelves = null, 
   useEffect(() => { sayPlace(PLACE, { machine: loc.machine || null, root: loc.root, path: loc.path }, folderName) }, [loc.machine, loc.root, loc.path, folderName])
   const retry = () => setVer((v) => v + 1)
   const problem = (st) => {
+    // Another computer of yours that's offline (as the sidebar already says): said at once, not
+    // grey rows for the 12 s its link waits before it gives up, then its words in English.
+    if (machine && computer && computer.online === false) {
+      return (
+        <div className="fx-state" role="alert" data-state="offline">
+          <Icon name="laptop" size={22} />
+          <b>{t('{name} is offline', { name: computer.name })}</b>
+          <p className="muted">{t('Its files show here once it\'s on and connected again.')}</p>
+          <button type="button" className="ghost-btn" onClick={retry}><Icon name="refresh" size={12} /> {t('Try again')}</button>
+        </div>
+      )
+    }
     const g = st.guard || guard
     const where = g === 'volume' ? t('this drive') : g === 'iCloud Drive' ? t('iCloud Drive') : g ? t('your {folder} folder', { folder: t(g) }) : folderName
     if (st.loading) {
@@ -433,6 +465,8 @@ export default function Explorer({ head = null, className = '', shelves = null, 
     // On a computer, it picks on a click and opens on a double-click, its keys in shelfKeys (and the
     // keys back here once Quick Look closes); on a phone, a tap opens.
     if (shelf) return <div className="sd-shelf" data-shelf={shelf}>{shelves.render(shelf, { q, tap: narrow, keys: shelfKeys, focus: () => mainRef.current?.focus({ preventScroll: true }) })}</div>
+    // Another computer, offline: said, whatever this window had of it before.
+    if (machine && computer?.online === false) return problem(folder)
     if (searching) {
       return (
         <>
@@ -481,7 +515,7 @@ export default function Explorer({ head = null, className = '', shelves = null, 
 
   // A phone has no room for columns: the list instead.
   const shownView = narrow && view === 'columns' ? 'list' : view
-  const sideEl = <Sidebar side={side.data} error={side.error && (side.code === 'trial' && machine ? t('{name} has an older Bridge AI.', { name: computer?.name || '' }) : side.error)} computers={computers} machine={machine} loc={{ ...loc, machine }} onGo={(w) => go({ machine, ...w })} onComputer={toComputer}
+  const sideEl = <Sidebar side={side.data} error={machine && computer?.online === false ? t('{name} is offline', { name: computer.name }) : side.error && (side.code === 'trial' && machine ? t('{name} has an older Bridge AI.', { name: computer?.name || '' }) : side.error)} computers={computers} machine={machine} loc={{ ...loc, machine }} onGo={(w) => go({ machine, ...w })} onComputer={toComputer}
     shelves={shelves?.rows} shelf={shelf} onShelf={toShelf} />
   const showSide = !narrow || screen === 'side'
   const showMain = !narrow || screen === 'folder'
@@ -500,7 +534,7 @@ export default function Explorer({ head = null, className = '', shelves = null, 
                 <button type="button" className="win-btn" onClick={forward} disabled={!hist.fwd.length} aria-label={t('Forward')} title={t('Forward (⌘])')}><Icon name="chevron" size={13} /></button>
               </>}
               {narrow && <h3 className="fx-path-title" title={loc.path || named(rootLabel)}>{machine && <span className="fx-crumb-pc"><Icon name="laptop" size={12} /> {computer?.name}</span>}{folderName}</h3>}
-              <nav className="fx-path" aria-label={t('Path')} hidden={narrow}>
+              <nav className="fx-path" ref={pathRef} aria-label={t('Path')} hidden={narrow}>
                 {machine && <span className="fx-crumb fx-crumb-pc"><Icon name="laptop" size={12} /> {computer?.name}</span>}
                 <button type="button" className="fx-crumb" onClick={() => go({ ...loc, path: '' })} aria-current={!parts.length ? 'location' : undefined}>{named(rootLabel)}</button>
                 {parts.map((p, i) => (

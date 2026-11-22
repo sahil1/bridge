@@ -102,6 +102,18 @@ const clip = (s, n) => { const t = String(s ?? '').trim(); return t.length > n ?
 export const sleep = (ms) => new Promise((r) => { const t = setTimeout(r, ms); t.unref?.() })
 // An error with a code, for the desk (and how long to wait, for a rate limit).
 export const failure = (message, code, extra = {}) => Object.assign(new Error(message), { code, ...extra })
+// Why a platform couldn't be reached at all (a request that never got an answer), in words a person
+// reads on a card: never the network library's own codes (ENOTFOUND, UND_ERR_SOCKET…).
+export function unreached(e) {
+  const c = String(e?.cause?.code || e?.code || '')
+  if (e?.name === 'TimeoutError' || e?.cause?.name === 'TimeoutError' || /TIMEOUT|ETIMEDOUT/.test(c)) return 'it didn\'t answer in time'
+  if (/ENOTFOUND|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|ENETDOWN/.test(c)) return 'this computer seems to be offline'
+  if (/ECONNREFUSED|ECONNRESET|EPIPE|UND_ERR_SOCKET|UND_ERR_CLOSED/.test(c)) return 'the connection was cut off'
+  if (/CERT|SSL|TLS/i.test(c)) return 'the connection wasn\'t secure (a proxy or firewall may be in the way)'
+  return 'the network didn\'t let it through'
+}
+// What to do when it couldn't be reached: nothing about tokens, which weren't checked.
+export const UNREACHED_FIX = 'Check this computer\'s internet connection, then test again: its tokens couldn\'t be checked until then'
 // A secret shown: its last four, never the rest.
 export const masked = (t, kind = '') => (t ? `${kind}…${String(t).slice(-4)}` : null)
 

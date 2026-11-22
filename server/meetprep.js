@@ -68,10 +68,10 @@ const nameKey = (s) => [...partsOf(s)].sort().join(' ')
 const isMe = (name) => !!me() && (meetings.sameName(name, me()) || (String(name).includes('@') && meetings.sameName(String(name).split('@')[0], me())))
 // The people Meeting Insights knows, asked at most once a minute (it reads every meeting once, then
 // only those that changed). null when it can't say.
-// Meeting Insights is a beta feature: while it's off, nobody is said to be met before or new.
+// While Meeting Insights is off, nobody is said to be met before or new.
 let known = { at: 0, list: null }
 async function people() {
-  if (cfg.trials?.['meeting-insights'] !== true) return null
+  if (cfg.meetings?.insights !== true) return null
   if (known.list && Date.now() - known.at < 60e3) return known.list
   try {
     const r = await within(insights.list(), 8000, 'Meeting Insights')
@@ -155,11 +155,11 @@ function keep(key, entry) {
   const fresh = Object.entries(c).filter(([, v]) => Date.parse(v.start || 0) > Date.now() - 2 * 864e5).sort((a, b) => String(b[1].at).localeCompare(String(a[1].at))).slice(0, 100)
   try { fs.mkdirSync(path.dirname(FILE), { recursive: true }); writeFileAtomic(FILE, JSON.stringify(Object.fromEntries(fresh), null, 1)) } catch { /* next time */ }
 }
-// The model that writes your meeting notes (Settings › Voice & Meetings), else the one they'd use
-// for this much text (with Auto, a short one on this computer). strict: when meeting notes are set to
+// The model that writes your meeting notes (Settings › Models for Each Task's Meeting notes), for
+// this much text (with Auto, a short one on this computer). strict: when meeting notes are set to
 // stay on this computer and can't, the error saying why rather than none.
 async function writer(text = null, { strict = false } = {}) {
-  const id = cfg.meetings?.model || await (strict ? helpers.pickModel(text) : helpers.pickModel(text).catch(() => null))
+  const id = await (strict ? helpers.pickModel(text) : helpers.pickModel(text).catch(() => null))
   if (!id) return null
   const list = await helpers.models().catch(() => [])
   return { id, label: list.find((m) => m.id === id)?.label || id }

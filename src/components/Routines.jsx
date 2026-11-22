@@ -3,9 +3,10 @@ import Icon from './Icon.jsx'
 import { Card, Updated } from './Trackers.jsx'
 import AgentMark from './settings/agentMark.jsx'
 import { api, usePoll, fmtRelative, refetch, BASE } from '../api.js'
-import { useTrial } from '../trials.js'
+import { useFeature } from '../trials.js'
 import { parse, tidy, toText, describe, next, EXAMPLE } from '../../shared/schedule.js'
 import { makeRoutine, nameFrom, shortDir } from './routineDraft.js'
+import { where } from './settings/search.js'
 import { t, tx, locale, tn } from '../i18n/index.js'
 
 const EVERY = [['day', tx('Daily')], ['weekday', tx('Weekdays')], ['2d', tx('Every 2 days')], ['3d', tx('Every 3 days')], ['week', tx('Weekly')], ['2w', tx('Every 2 weeks')], ['month', tx('Monthly')]]
@@ -24,7 +25,7 @@ function useFlash() {
   return [msg, setMsg]
 }
 
-// ---------- Schedules (Scheduled Routines, a beta feature: shared/schedule.js) ----------
+// ---------- Schedules (Scheduled Routines, on unless you turn it off: shared/schedule.js) ----------
 
 // A schedule in words, in this page's language.
 export const scheduleSaid = (w) => { const [s, v] = describe(w, locale()); return t(s, v) }
@@ -258,7 +259,7 @@ function RoutineRow({ r, editing, onChanged, onOpenAgent, setFlash, beta, comput
             {launched && <span title={exact(r.lastLaunch.at)}>{t('Started {time}', { time: fmtRelative(r.lastLaunch.at) })}</span>}
             <span>{everyLabel(r.every)}</span>
             {r.link && <a href={r.link} target="_blank" rel="noreferrer">{t('Open output')} <Icon name="external" size={10} /></a>}
-            {r.auto && r.at && !beta && <span className="r-note">{t("Doesn't run by itself while Scheduled Routines is off (Beta Features)")}</span>}
+            {r.auto && r.at && !beta && <span className="r-note">{t("Doesn't run by itself while Scheduled Routines is off ({place})", { place: where('scheduled-routines') })}</span>}
           </div>
         )}
       </div>
@@ -321,7 +322,7 @@ export function Suggested({ limit = 2, onMade }) {
 // filled in, then where it runs and when it runs next.
 export function RoutineDialog({ initial = {}, onClose, onShow }) {
   const { data } = usePoll('/routines', 5 * 60 * 1000)
-  const beta = useTrial('routines')
+  const beta = useFeature('routines')
   const [made, setMade] = useState(null)
   useEffect(() => {
     const k = (e) => { if (e.key === 'Escape') onClose() }
@@ -363,7 +364,7 @@ export function RoutineDialog({ initial = {}, onClose, onShow }) {
 
 export function Routines({ onOpenAgent }) {
   const { data, error, refresh } = usePoll('/routines', 5 * 60 * 1000)
-  const beta = useTrial('routines')
+  const beta = useFeature('routines')
   const [editing, setEditing] = useState(false)
   const [adding, setAdding] = useState(false)
   const [flash, setFlash] = useFlash()

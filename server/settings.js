@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
-import { ROOT, dataFile, ensureDir, DATA, IS_MAC, writeFileAtomic } from './paths.js'
+import { ROOT, dataFile, ensureDir, DATA, IS_MAC, writeFileAtomic, outOfBeta } from './paths.js'
 import { gitReady } from './gitready.js'
 
 export const FILE = dataFile('config.json')
@@ -24,7 +24,9 @@ function writeUser(obj) {
 // Which top-level keys differ, so the app can say what needs a restart.
 const changedKeys = (a, b) => [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]))
 
-// Your settings with a patch merged in. Objects merge one level deep; null removes a key.
+// Your settings with a patch merged in. Objects merge one level deep; null removes a key. A Beta
+// Features switch for a feature out of beta, sent the old way, is saved as that feature's setting
+// (paths.js outOfBeta).
 export function merged(before, p) {
   const next = { ...before }
   for (const [k, v] of Object.entries(p)) {
@@ -32,7 +34,7 @@ export function merged(before, p) {
     else if (v && typeof v === 'object' && !Array.isArray(v) && next[k] && typeof next[k] === 'object' && !Array.isArray(next[k])) next[k] = { ...next[k], ...v }
     else next[k] = v
   }
-  return next
+  return outOfBeta(next)
 }
 // ...saved.
 export function patch(p) {
@@ -48,9 +50,53 @@ export function replaceRaw(text) {
   let obj
   try { obj = JSON.parse(text) } catch (e) { throw Object.assign(new Error(`Not valid JSON: ${e.message}`), { status: 400 }) }
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) throw Object.assign(new Error('The file must hold a JSON object ({ ... })'), { status: 400 })
+  obj = outOfBeta(obj)
   const before = readUser()
   writeUser(obj)
   return changedKeys(before, obj)
+}
+
+// ---------- The model meeting notes are written with ----------
+// One place: Models for Each Task's Meeting notes (jobModels.notes, with the ones to fall back on).
+// Settings › Meetings & Voice had a model of its own for the notes (meetings.model), which also went
+// ahead of AI Assist's, Mail's, live suggestions', the board's and the cleanup's own. Picked there
+// (before 3.22.0, or sent by an app that still has it), it goes first in Meeting notes' row instead,
+// so the notes keep it, and every other task goes by its own row. falls: the models the notes fell
+// back on with it (index.js notesFallbacks: up to three of the others you have, in the order they
+// were tried), after it in the row, so it falls back as it did; a row there before stays after them.
+// (A row can't end in Automatic, so those models are named.)
+export const MODEL_ID = /^[a-z][\w-]*:\S{1,200}$/
+export const notesPick = (o) => (o?.meetings && typeof o.meetings === 'object' && 'model' in o.meetings ? o.meetings.model : undefined)
+export function notesModel(o, falls = []) {
+  if (notesPick(o) === undefined) return o
+  const { model, ...meetings } = o.meetings
+  const next = { ...o, meetings }
+  if (typeof model === 'string' && MODEL_ID.test(model)) {
+    const had = Array.isArray(o.jobModels?.notes) ? o.jobModels.notes : []
+    const row = [...new Set([model, ...falls, ...had].filter((x) => typeof x === 'string' && MODEL_ID.test(x)))].slice(0, 6)
+    next.jobModels = { ...(o.jobModels && typeof o.jobModels === 'object' ? o.jobModels : {}), notes: row }
+  }
+  return next
+}
+// One in the file now (saved before 3.22.0, sent since, or typed into it), moved with what it fell
+// back on: the keys that changed.
+export function moveNotesModel(falls = []) {
+  const before = readUser()
+  const next = notesModel(before, falls)
+  if (next === before) return []
+  writeUser(next)
+  return changedKeys(before, next)
+}
+
+// As the server starts: a settings file from before 3.22.0 with Beta Features switches for the
+// features out of beta, saved with those switches as their settings, once. Nothing is written when
+// there are none, or when the file can't be read.
+export function settle() {
+  const before = readUser()
+  const next = outOfBeta(before)
+  if (next === before) return []
+  writeUser(next)
+  return changedKeys(before, next)
 }
 
 // ---------- Location ----------

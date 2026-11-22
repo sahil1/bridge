@@ -8,6 +8,7 @@ import { WhiteboardsHome } from '../../lazy.jsx'
 import QuickLook from '../files/QuickLook.jsx'
 import { FileIcon } from '../files/art.jsx'
 import { usePick } from '../files/pick.js'
+import { MidName, holdName } from '../files/names.jsx'
 
 // Studio's lists of your files, beside your folders on its home (Studio.jsx): what you opened here,
 // the documents, sheets, decks and PDFs on this computer (server/studiofound.js: Spotlight on a Mac,
@@ -102,9 +103,11 @@ export function YourFiles({ files, group, q = '', refreshRecent, describe, onOpe
   const [note, setNote] = useState(null) // { text, error }: what came of Open in app
   useEffect(() => { if (!note || note.error) return undefined; const id = setTimeout(() => setNote(null), 4000); return () => clearTimeout(id) }, [note])
   const openInApp = (f) => fileOp(f.root, 'open', f.path).then(() => setNote({ text: t('Opening {name} in its own app…', { name: f.name }) }), (e) => setNote({ text: t("Couldn't open {name}: {error}", { name: f.name, error: e.message }), error: true }))
-  const needle = q.trim().toLocaleLowerCase()
+  // Names compared composed (NFC): a Mac's own apps often write é or Japanese ガ as two characters,
+  // and "café" typed found nothing in "Café menu".
+  const needle = q.trim().normalize('NFC').toLocaleLowerCase()
   const kind = String(group).startsWith('kind:') ? KINDS.find(([k]) => `kind:${k}` === group) : null
-  const shown = needle ? rows.filter((f) => f.name.toLocaleLowerCase().includes(needle)) : kind ? rows.filter((f) => f.kind === kind[0]) : recentRows
+  const shown = needle ? rows.filter((f) => f.name.normalize('NFC').toLocaleLowerCase().includes(needle)) : kind ? rows.filter((f) => f.kind === kind[0]) : recentRows
   const forget = (f) => api(`/studio/recent?root=${encodeURIComponent(f.root)}&path=${encodeURIComponent(f.path)}`, { method: 'DELETE' }).then(refreshRecent)
   const sources = [...(found?.sources || []), ...(boards.data ? ['boards'] : [])].map((s) => t(SOURCE[s] || s))
   const capped = Object.entries(found?.capped || {})
@@ -146,10 +149,10 @@ export function YourFiles({ files, group, q = '', refreshRecent, describe, onOpe
             const other = f.opens === false
             const go = openOf(f)
             return (
-              <div key={keyOf(f)} className={`sd-files-row${other ? ' other' : ''}${picked === f ? ' on' : ''}`} role="row" {...pick.itemProps(f)}>
+              <div key={keyOf(f)} className={`sd-files-row${other ? ' other' : ''}${picked === f ? ' on' : ''}`} role="row" {...pick.itemProps(f)} {...(tap ? holdName(f.name) : {})}>
                 <span role="gridcell" className="sd-file-name" title={d.full || f.path}>
                   <span className={`sd-file-ic${f.kind ? ` k-${f.kind}` : ''}`}><FileIcon e={f} art={f.kind === 'board' ? 'board' : null} size={32} /></span>
-                  <span className="sd-file-text"><b>{f.name}</b><small className="muted">{other ? t('{kind}, opened in its own app', { kind: d.kind }) : d.kind}</small></span>
+                  <span className="sd-file-text"><b><MidName name={f.name} /></b><small className="muted">{other ? t('{kind}, opened in its own app', { kind: d.kind }) : d.kind}</small></span>
                 </span>
                 <span role="gridcell" className="sd-file-dir" title={d.full || d.folder || ''}><Icon name="folder" size={12} /><span>{d.folder || '—'}</span></span>
                 <span role="gridcell" className="sd-file-when" title={f.changed ? new Date(f.changed).toLocaleString(locale()) : f.opened ? new Date(f.opened).toLocaleString(locale()) : ''}>{f.changed ? ago(f.changed) : f.opened ? t('Opened {when}', { when: ago(f.opened) }) : ''}</span>

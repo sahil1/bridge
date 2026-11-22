@@ -7,6 +7,8 @@
 .sd-shelf > * { max-width: 1040px; }
 .fx-body > .sd-new-sec { max-width: 1040px; margin: 16px 26px 12px; }
 .sd-home-say { margin: 0 0 16px; line-height: 1.5; }
+/* Shared: Share Links' beta switch over the links (settings/Beta.jsx). */
+.sd-shared > .st-beta { margin-bottom: 14px; }
 /* Studio's headers (its home, a file's page; a whiteboard's, in whiteboard.css, the same): every
    control one height, 30px, as the toolbar's under them are, so a row of them lines up top and
    bottom. */
@@ -72,6 +74,10 @@
 .sd-note-bar .win-btn { flex: none; width: 24px; height: 24px; }
 .sd-conflict { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12.5px; background: color-mix(in srgb, var(--warning) 12%, var(--pane)); }
 .sd-conflict > span { flex: 1 1 280px; line-height: 1.45; }
+/* Moved or deleted while open: where to save a copy, beside its buttons. */
+.sd-gone-where { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.sd-gone-where select { max-width: 280px; height: 28px; padding: 0 8px; border: 1px solid var(--line-2, var(--line)); border-radius: 8px; background: var(--pane); color: var(--ink); font: 12.5px var(--font); min-width: 0; }
+.sd-gone-err { flex: 1 1 100%; }
 .sd-body { position: relative; grid-row: 5; display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; }
 .sd-body.with-panel { grid-template-columns: minmax(0, 1fr) 280px; }
 .sd-editor { position: relative; min-width: 0; min-height: 0; overflow: auto; }
@@ -87,6 +93,7 @@
 .sd-file .pane-head .sd-tabs { margin-right: 4px; }
 .sd-save-state { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 4px; color: var(--ink-3); font: 500 12.5px var(--font); white-space: nowrap; cursor: default; }
 .sd-save-state > svg { flex: none; }
+.sd-save-state.bad { color: var(--critical); }
 .sd-head-icons { display: inline-flex; align-items: center; gap: 2px; }
 @container (max-width: 1000px) {
   .sd-file .pane-head :is(.sd-ask-btn, .sd-open-in) .sd-btn-label { display: none; }
@@ -271,13 +278,18 @@
 /* Versions */
 .sd-panel { border-left: 1px solid var(--line); min-height: 0; overflow: auto; background: var(--pane); }
 .sd-panel-head { position: sticky; top: 0; display: flex; align-items: center; gap: 8px; padding: 8px 10px 8px 14px; border-bottom: 1px solid var(--line); background: var(--pane); }
+/* How many versions a big file keeps, said over its list. */
+.sd-v-note { margin: 0; padding: 8px 14px 2px; line-height: 1.4; }
 .sd-versions { list-style: none; margin: 0; padding: 6px; display: grid; gap: 2px; }
-.sd-versions li { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 8px; }
+/* Who and when on a line of their own when Compare, Open and Restore don't fit beside them (a long
+   name, a longer language): the links go under them, nothing squeezed to a few letters. */
+.sd-versions li { display: flex; flex-wrap: wrap; align-items: center; column-gap: 8px; row-gap: 2px; padding: 7px 8px; border-radius: 8px; }
 .sd-versions li:hover { background: var(--pane-2); }
 .sd-versions li.now { background: color-mix(in srgb, var(--accent) 7%, transparent); }
-.sd-v-who { flex: 1; min-width: 0; display: grid; }
-.sd-v-who b { font-weight: 550; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sd-v-acts { display: flex; gap: 8px; font-size: 12px; }
+.sd-v-who { flex: 1 1 auto; min-width: 0; max-width: 100%; display: grid; }
+.sd-v-who b, .sd-v-who small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-v-who b { font-weight: 550; font-size: 12.5px; }
+.sd-v-acts { flex: none; display: flex; gap: 8px; font-size: 12px; margin-left: auto; }
 
 /* Compare: a version against the file as it is now */
 .sd-compare { display: grid; grid-template-rows: auto minmax(0, 1fr); width: min(920px, 100%); max-height: min(80vh, 900px); border-radius: 14px; background: var(--pane); box-shadow: 0 0 0 1px var(--line), 0 18px 50px rgb(0 0 0 / .28); overflow: hidden; }
@@ -334,7 +346,7 @@
    sideways, and the header leaving the file's name its room (Save and Ask an agent as icons). */
 .app.narrow .sd-file .pane-head { padding-left: max(6px, env(safe-area-inset-left)); padding-right: max(6px, env(safe-area-inset-right)); gap: 4px; }
 .app.narrow .sd-file .pane-head .pane-icon { display: none; }
-.app.narrow .sd-file .pane-head .win-btn { width: 40px; height: 40px; }
+.app.narrow .sd-file .pane-head .win-btn { width: 40px; height: 40px; flex: none; }
 .app.narrow .sd-file .pane-head .btn.small { width: 40px; height: 40px; padding: 0; gap: 0; }
 .app.narrow .sd-file .pane-extras { gap: 2px; }
 /* There, Ask an agent an icon as the clock beside it is (AI Assist keeps its button, as everywhere,
@@ -368,6 +380,8 @@
 .app.narrow .sd-status-btn.vers { display: none; } /* the header's clock is there */
 .app.narrow .sd-empty .btn.small { height: 40px; padding: 0 14px; }
 .app.narrow .sd-conflict .btn.small, .app.narrow .sd-conflict .ghost-btn { min-height: 40px; }
+.app.narrow .sd-gone-where { flex: 1 1 100%; }
+.app.narrow .sd-gone-where select { flex: 1; max-width: none; height: 40px; font-size: 16px; }
 .app.narrow .sd-versions li { padding: 4px 6px; }
 .app.narrow .sd-v-acts { gap: 4px; }
 .app.narrow .sd-v-acts .link-btn { min-height: 40px; min-width: 40px; display: inline-flex; align-items: center; justify-content: center; }

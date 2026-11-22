@@ -62,6 +62,13 @@
 .mt-msg { margin: -2px 0 0; }
 .mt-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; min-height: 30px; }
 .mt-loading { padding: 20px; }
+/* A meeting recording somewhere else (Elsewhere): it says so, with Pause and Stop. */
+.mt-elsewhere { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.mt-elsewhere > span { flex: 1 1 280px; min-width: 0; }
+/* A meeting that isn't there any more (MeetingGone): what became of it, and the way on. */
+.mt-gone { display: grid; gap: 10px; max-width: 560px; padding: 20px 4px; }
+.mt-gone p { margin: 0; line-height: 1.5; }
+.mt-gone-acts { display: flex; flex-wrap: wrap; gap: 8px; }
 
 .mt-recbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 9px 12px; border-radius: 12px; border: 1px solid color-mix(in srgb, #e5484d 30%, var(--line-2)); background: color-mix(in srgb, #e5484d 5%, var(--pane)); }
 .mt-recbar.paused { border-color: var(--line-2); background: var(--pane-2); }
@@ -579,6 +586,10 @@ span.mt-when { cursor: default; }
   .mt-view .pane-sub .mt-people { flex: 0 1 auto; min-width: 0; }
   .mt-people-in { width: 160px; }
 }
+/* The views by their icons once the meeting's name would be squeezed out (Meetings.jsx tight), as
+   styles.css does for every pane below 880 px. */
+.mt-view.tight > .pane-head .seg span { display: none; }
+.mt-view.tight > .pane-head .seg button { padding: 0 8px; }
 
 /* Speech to text not set up yet (SpeechSetup.jsx) */
 .mt-setup { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border-radius: 10px; background: color-mix(in srgb, var(--warning) 10%, var(--pane)); border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent); color: var(--ink); }
@@ -631,8 +642,8 @@ button.mt-who:not(:disabled):hover { text-decoration: underline dotted; text-und
 .mt-part-open { display: grid; flex: 1; min-width: 0; gap: 2px; padding: 8px 10px; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; }
 .mt-part-open b { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mt-part > .ghost-btn { flex: none; margin-right: 6px; }
-.mt-stale { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; padding: 7px 10px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--warning, #b7791f) 35%, var(--line-2)); background: color-mix(in srgb, var(--warning, #b7791f) 6%, var(--pane)); }
-.mt-stale svg { flex: none; color: var(--warning, #b7791f); }
+.mt-stale { display: block; line-height: 1.5; margin: 0; padding: 7px 10px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--warning, #b7791f) 35%, var(--line-2)); background: color-mix(in srgb, var(--warning, #b7791f) 6%, var(--pane)); }
+.mt-stale > svg { display: inline-block; vertical-align: -2px; margin-right: 6px; color: var(--warning, #b7791f); }
 .mt-resume-row { display: flex; }
 /* One meeting recorded as two (merge.jsx): the suggestion on the later one, what was merged into
    one, and a recording that stopped when Bridge AI closed. */
@@ -641,8 +652,11 @@ button.mt-who:not(:disabled):hover { text-decoration: underline dotted; text-und
 .mt-merge-text { display: grid; gap: 2px; flex: 1; min-width: 200px; }
 .mt-merge-text small { line-height: 1.45; }
 .mt-merge-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.mt-merged, .mt-interrupted { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; }
-.mt-merged svg { flex: none; }
+/* Each a sentence with its icon and its link in it: on a phone the words wrap under the icon and
+   the link follows them, rather than the icon, the words and the link each on a line of their own. */
+.mt-merged, .mt-interrupted { display: block; margin: 0; line-height: 1.5; }
+.mt-merged > svg, .mt-interrupted > svg { display: inline-block; vertical-align: -2px; margin-right: 6px; }
+.mt-merged-end { white-space: nowrap; }
 .mt-interrupted { padding: 7px 10px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--warning, #b7791f) 35%, var(--line-2)); background: color-mix(in srgb, var(--warning, #b7791f) 6%, var(--pane)); }
 .mt-interrupted svg { flex: none; color: var(--warning, #b7791f); }
 .mt-stopped > svg { color: var(--warning, #b7791f); }
@@ -876,6 +890,10 @@ button.mt-from-chip:hover { color: var(--ink); border-color: color-mix(in srgb, 
 .app.narrow .mt-view .pane-head .mt-ai-btn { order: 6; align-self: center; }
 .app.narrow .mt-view .pane-head:has(.mt-ai-btn) .seg { flex-basis: calc(100% - 46px); }
 .app.narrow .mt-view .pane-head:has(.mt-ai-btn) .seg button { flex: 1 1 auto; padding: 0 4px; }
+/* Five views (Suggestions, or the Board, with the rest) leave a phone's row no room beside them:
+   AI Assist goes up beside the name and ⋯ instead of on a row of its own under the views. */
+.app.narrow .mt-view .pane-head:has(.seg > button:nth-child(5)) .mt-ai-btn { order: 0; }
+.app.narrow .mt-view .pane-head:has(.mt-ai-btn):has(.seg > button:nth-child(5)) .seg { flex-basis: 100%; }
 /* A phone on its side has the width but not the height: the views go beside the name. */
 @media (orientation: landscape) and (max-height: 520px) {
   .app.narrow .mt-view .pane-head .seg { order: 0; flex: none; }
@@ -1014,7 +1032,7 @@ button.mt-from-chip:hover { color: var(--ink); border-color: color-mix(in srgb, 
 .mt-talk .c4 { background: var(--series-5); }
 .mt-talk .c5 { background: var(--series-7); }
 
-/* ============ Insights and People (insights.jsx, people.jsx, a beta feature) ============
+/* ============ Insights and People (insights.jsx, people.jsx: Meeting Insights) ============
    Usage's tiles, cards, bars and heatmap (styles.css .us-*, .hm), with what each number is based on
    under it. Recurring is the first series color, one-off the second, as the legend says. */
 .mt-home:has(> .mi) { max-width: 1120px; }

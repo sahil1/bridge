@@ -52,7 +52,9 @@
 .rs-card small { font-size: 12px; line-height: 1.45; }
 .rs-card > svg { color: var(--ink-3); }
 .rs-card.c-locked > svg, .rs-card.c-denied > svg, .rs-card.c-unanswered > svg, .rs-card.c-device > svg, .rs-card.c-error > svg, .rs-card.c-screenPermission > svg { color: var(--critical); }
-.rs-card.c-password > svg { color: var(--accent); }
+.rs-card.c-password > svg, .rs-card.c-screenLocked > svg { color: var(--accent); }
+/* What the system said, under the plain words: small, as a detail. */
+.rs-card-detail { font: 11.5px/1.45 var(--font-mono); overflow-wrap: anywhere; }
 .rs-card .st-input { width: 100%; text-align: center; }
 .rs-card-bad { color: var(--critical); font-size: 12.5px; }
 .rs-card-btns { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 2px; }

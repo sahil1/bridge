@@ -9,8 +9,10 @@
 //   A job's own list (modeljobs.js): kept as ids, each once, at most six; its first that can run now,
 //   the ones before it passed over with why; none, an error saying why rather than anything else.
 //   The server: every model and the providers a key would reach, to pick from; the pick used for
-//   meeting notes, diagrams and AI Assist; a pick where it's used still first (Settings › Meetings &
-//   Voice, a meeting's own); a provider over its limit and one with no key passed over for the
+//   meeting notes, diagrams and AI Assist; a notes model picked as Meetings & Voice had it going
+//   first in Meeting notes' row (sent, or saved before and moved as Bridge AI starts), for the notes
+//   only (live AI Assist, the board and the cleanup on their own rows), and a meeting's own pick for
+//   its notes still first; a provider over its limit and one with no key passed over for the
 //   next, each said in the job's last run, the usage log and under the notes; a list none of which
 //   can run says so and runs nothing; a model on this computer that can't run never goes elsewhere
 //   unless the list says so.
@@ -48,6 +50,21 @@ r = jobs.fromList({ job: 'notes', own: ['groq:llama-3.3-70b-versatile'], models:
 ok(r.error?.code === 'not_ready' && /^Meeting notes can't run: llama-3\.3-70b-versatile isn't set up here: no Groq key for it in Model Providers\./.test(r.error.message), 'none that can run: an error saying why, not a model elsewhere', r.error?.message)
 r = jobs.fromList({ job: 'live', own: ['lmstudio:gemma3'], models: reached })
 ok(r.error && !r.id, 'a model on this computer that isn\'t running, alone in the list: no cloud model instead', r)
+// A call that failed, said as what happened and what to do (modellist.js explain, every job's reply
+// in server/index.js): "fetch failed" was all AI Assist said.
+const named2 = (route) => ({ openai: 'OpenAI', ollama: 'Ollama', anthropic: 'Anthropic' }[route] || route)
+const unreached = Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:9'), { code: 'ECONNREFUSED' }) })
+let x = list.explain('openai:gpt-5', unreached, named2)
+ok(x.code === 'unreachable' && x.message === 'Couldn\'t reach OpenAI. Check this computer\'s connection, or pick another model in Settings › Agents & Models › Which Model Does What.', 'not reached: "Couldn\'t reach OpenAI. Check this computer\'s connection, or pick another model in Settings › Agents & Models › Which Model Does What."', x.message)
+x = list.explain('ollama:gemma3:4b', unreached, named2)
+ok(x.code === 'unreachable' && /^Couldn't reach Ollama on this computer: start it, or pick another model in Settings › Agents & Models › Which Model Does What\.$/.test(x.message), 'one on this computer not reached: start it', x.message)
+x = list.explain('openai:gpt-5', new DOMException('The operation was aborted due to timeout', 'TimeoutError'), named2)
+ok(x.code === 'timeout' && /^OpenAI took too long to answer, so Bridge AI stopped waiting\. Try again, or pick a faster model in Settings › Agents & Models › Which Model Does What\.$/.test(x.message), 'too slow: its own words', x.message)
+x = list.explain('anthropic:claude-opus-5-5', Object.assign(new Error('Anthropic turned the key down (invalid x-api-key).'), { status: 401, body: { error: { message: 'invalid x-api-key' } } }), named2)
+ok(x.code === 'key_refused' && x.status === 401 && x.message === 'Anthropic refused the key ("invalid x-api-key"). Check it, or paste a new one, in Settings › Agents & Models › Model Providers.', 'the key turned down: "Anthropic refused the key", and where to fix it', x.message)
+const limit = Object.assign(new Error('OpenAI says you\'re over your limit for now'), { status: 429 })
+const aborted = Object.assign(new Error('The user aborted a request.'), { name: 'AbortError' })
+ok(list.explain('openai:gpt-5', limit, named2) === limit && list.explain('openai:gpt-5', aborted, named2) === aborted && list.explain('cli:claude', unreached, named2) === unreached, 'anything else as it was: a rate limit, a stop asked for, a sign-in\'s own')
 
 // ---------- The server ----------
 // Anthropic's API here: an answer, or over its limit (busy).
@@ -57,6 +74,9 @@ const anthSrv = http.createServer((req, res) => {
   req.on('data', (c) => { body += c })
   req.on('end', () => {
     anth.asked++
+    // Down (the connection cut, as a provider not reached is), or turning the key down.
+    if (anth.down) return req.socket.destroy()
+    if (anth.reject) { res.writeHead(401, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } })) }
     res.writeHead(anth.busy ? 429 : 200, { 'content-type': 'application/json' })
     res.end(JSON.stringify(anth.busy ? { type: 'error', error: { type: 'rate_limit_error', message: 'Rate limited' } } : { content: [{ type: 'text', text: '## Summary\n- Written by the Anthropic stand-in.' }], usage: { input_tokens: 10, output_tokens: 5 } }))
   })
@@ -103,14 +123,52 @@ try {
   let m = await notes('Its own model')
   ok(m.summaryModel === 'ollama:gemma3:4b' && ollama.sent().length > 0 && anth.asked === 0, 'Meeting notes on a model of its own: written by it (Ollama, on this computer), not the cloud model Automatic would use', { model: m.summaryModel, error: m.summaryError })
   ok((await jobOf('notes')).last?.model === 'ollama:gemma3:4b', 'its last run says so')
-  // A pick where it's used still comes first.
+  // Meeting notes' model has one place, its row here. One picked as Meetings & Voice had it
+  // (meetings.model: before 3.22.0, or an app that still sends it) goes first in that row, with the
+  // models it fell back on then after it (up to three of the others, in Automatic's order: here
+  // Anthropic's, then Ollama's), then what the row had.
   await kit.api('/settings', { meetings: { model: 'openai:gpt-5' } }, 'PATCH')
+  let user = (await kit.api('/settings')).user
+  ok(JSON.stringify(user.jobModels?.notes) === '["openai:gpt-5","anthropic:claude-opus-5-5","ollama:gemma3:4b"]' && !('model' in (user.meetings || {})), 'a notes model picked as Meetings & Voice had it goes first in Meeting notes\' row, the models it fell back on after it, and nowhere else', { notes: user.jobModels?.notes, meetings: user.meetings })
   let n = openaiAsked()
   m = await notes('Meetings & Voice picks')
-  ok(m.summaryModel === 'openai:gpt-5' && openaiAsked() > n, 'Settings › Meetings & Voice\' model still comes first', m.summaryModel)
-  await kit.api('/settings', { meetings: { model: null } }, 'PATCH')
+  ok(m.summaryModel === 'openai:gpt-5' && openaiAsked() > n, 'and writes the notes', m.summaryModel)
+  // It's for the notes only: live AI Assist, the live board and the transcript's cleanup go by their
+  // own rows, Automatic here (your first model, Anthropic's), as before; nor does a meeting's own pick
+  // for its notes change them. Each row's last run names the model that answered.
+  await kit.api('/settings', { trials: { 'meeting-board': true } }, 'PATCH')
+  const L = await meeting('Notes picked, the rest their own')
+  await kit.api(`/meetings/${L}/summary`, { model: 'openai:gpt-5' })
+  await until(async () => { const x = await kit.api(`/meetings/${L}`); return !x.summarizing && (x.summary || x.summaryError) }, 30000)
+  const before = anth.asked
+  await kit.api(`/meetings/${L}/assist`, {}).catch(() => {})
+  await kit.api(`/meetings/${L}/board`, {}).catch(() => {})
+  await kit.api(`/meetings/${L}/cleanup`, {}).catch(() => {})
+  const rows = Object.fromEntries(await Promise.all(['notes', 'live', 'diagrams', 'tidy'].map(async (j) => [j, (await jobOf(j)).last])))
+  ok(rows.notes?.model === 'openai:gpt-5' && (await kit.api(`/meetings/${L}`)).summaryModel === 'openai:gpt-5', 'the notes on the model picked for them, and their row says so', rows.notes)
+  ok(['live', 'diagrams', 'tidy'].every((j) => rows[j]?.model === 'anthropic:claude-opus-5-5') && anth.asked >= before + 3, 'live AI Assist, the board and the cleanup on their own rows (Automatic: Anthropic), not the notes\' model, each row naming the model that answered', rows)
+  await kit.api('/settings', { trials: { 'meeting-board': false } }, 'PATCH')
+  await own('notes', ['ollama:gemma3:4b'])
+  // Saved before 3.22.0 (Meetings & Voice's own pick in the file): moved into Meeting notes' row as
+  // Bridge AI starts, with what it fell back on then; the other rows as they were.
+  await own('diagrams', ['openai:gpt-5'])
+  await kit.restart(() => {
+    const f = path.join(kit.data, 'config.json')
+    const c = JSON.parse(fs.readFileSync(f, 'utf8'))
+    fs.writeFileSync(f, JSON.stringify({ ...c, meetings: { ...c.meetings, model: 'anthropic:claude-opus-5-5' } }))
+  })
+  user = await until(async () => { const u = (await kit.api('/settings')).user; return !('model' in (u.meetings || {})) && u }, 10000)
+  ok(JSON.stringify(user?.jobModels?.notes) === '["anthropic:claude-opus-5-5","openai:gpt-5","ollama:gemma3:4b"]' && JSON.stringify(user.jobModels?.diagrams) === '["openai:gpt-5"]' && !user.jobModels?.live, 'one saved before: in Meeting notes\' row once Bridge AI starts, with the models it fell back on, the other rows as they were', user && { jobModels: user.jobModels, meetings: user.meetings })
+  // It falls back as it did: over its limit, the next one writes the notes, and the row says which.
+  anth.busy = true
+  m = await notes('Its pick over its limit')
+  const moved = (await jobOf('notes')).last
+  ok(m.summaryModel === 'openai:gpt-5' && !m.summaryError && moved?.model === 'openai:gpt-5' && moved.passed?.[0]?.id === 'anthropic:claude-opus-5-5' && /over your limit/.test(moved.passed[0].why), 'the pick moved there over its limit: the next one writes the notes, and the row\'s last run says which, and why', { model: m.summaryModel, error: m.summaryError, moved })
+  anth.busy = false
+  await own('diagrams', null)
+  await own('notes', ['ollama:gemma3:4b'])
   m = await notes('The meeting picks', 'anthropic:claude-opus-5-5')
-  ok(m.summaryModel === 'anthropic:claude-opus-5-5', 'and so does a meeting\'s own pick', m.summaryModel)
+  ok(m.summaryModel === 'anthropic:claude-opus-5-5', 'a meeting\'s own pick for its notes comes first', m.summaryModel)
 
   // Diagrams on Anthropic, over its limit for now: the next in its list draws, and why is kept.
   anth.busy = true
@@ -123,6 +181,14 @@ try {
   await until(() => usage().some((l) => l.feature === 'board' && l.model === 'gpt-5' && l.instead === 'anthropic:claude-opus-5-5'), 5000, 200)
   const line = usage().find((l) => l.feature === 'board' && l.instead === 'anthropic:claude-opus-5-5')
   ok(!!line && /over your limit/.test(line.why), 'and the usage log: the answer that stood in, for which, and why', line)
+  // Meeting notes on Anthropic alone, over its limit: the meeting and the row say why, in words for
+  // them (not the chat agent's "/model", which means nothing on a meeting's page).
+  await own('notes', ['anthropic:claude-opus-5-5'])
+  m = await notes('Over its limit')
+  last = (await jobOf('notes')).last
+  ok(/over your limit for now \(Rate limited\)\. Try again later, or pick another model\.$/.test(m.summaryError || '') && !/\/model/.test(`${m.summaryError} ${last?.error} ${last?.passed?.[0]?.why}`), 'notes over its limit: the meeting and the row say why, and no "/model"', { error: m.summaryError, last })
+  await kit.api(`/meetings/${m.id}`, null, 'DELETE') // (its summary isn't tried again)
+  await own('notes', ['ollama:gemma3:4b'])
   anth.busy = false
   // One whose provider has no key: passed over before it's tried.
   await own('diagrams', [GROQ, 'openai:gpt-5'])
@@ -133,6 +199,18 @@ try {
   await own('assist', [GROQ, 'openai:gpt-5'])
   const deck = await kit.api('/studio/deck/ai', { mode: 'deck', prompt: 'Shipping on Friday' })
   ok(deck.model === 'openai:gpt-5' && (await jobOf('assist')).last?.passed?.[0]?.id === GROQ, 'AI Assist the same: its deck by the next in its list', { model: deck.model, last: (await jobOf('assist')).last })
+  // Its only model's provider not reached, then turning the key down: said as such, through the
+  // same reply every job's calls go through (it said "fetch failed").
+  await own('assist', ['anthropic:claude-opus-5-5'])
+  anth.down = true
+  let said = await kit.api('/studio/deck/ai', { mode: 'deck', prompt: 'Shipping on Friday' }).then(() => null, (e) => e.message)
+  ok(said === 'Couldn\'t reach Anthropic. Check this computer\'s connection, or pick another model in Settings › Agents & Models › Which Model Does What.', 'AI Assist, its provider not reached: "Couldn\'t reach Anthropic…", with where to pick another', said)
+  ok(/couldn't answer: Couldn't reach Anthropic\./.test((await jobOf('assist')).last?.error || ''), 'and its last run says the same', (await jobOf('assist')).last)
+  anth.down = false
+  anth.reject = true
+  said = await kit.api('/studio/deck/ai', { mode: 'deck', prompt: 'Shipping on Friday' }).then(() => null, (e) => e.message)
+  ok(said === 'Anthropic refused the key ("invalid x-api-key"). Check it, or paste a new one, in Settings › Agents & Models › Model Providers.', 'its key turned down: "Anthropic refused the key", and where to fix it', said)
+  anth.reject = false
 
   // Its only model has no key: it can't run, says why, and nothing else writes it.
   await own('notes', [GROQ])
@@ -217,6 +295,16 @@ try {
   await row.locator('.pv-job-model').click()
   await row.locator('[data-model-pick] [data-key="together"]').click()
   ok(!!(await until(async () => (await row.locator('[data-key-form="together"]').count()) === 1, 5000, 100)) && !(await saved()).notes, 'Together AI: its key form, and nothing picked until there\'s a model')
+  // Settings › Meetings & Voice: which model writes the notes, as this row has it, and Change it to
+  // come here: no picker of its own.
+  await own('notes', ['openai:gpt-5'])
+  await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'notes-model' } })))
+  const notesSec = p.locator('.modal.settings [data-setting="notes-model"]')
+  ok(!!(await until(async () => /^gpt-5, at OpenAI:/.test(await notesSec.locator('[data-notes-where]').innerText().catch(() => '')), 10000)) && (await notesSec.locator('select').count()) === 0, 'Meetings & Voice says which model writes the notes, as Models for Each Task has it, with no picker of its own', await notesSec.innerText().catch(() => ''))
+  await shot(p, `model-jobs-${which}-4-meetings`)
+  await notesSec.locator('[data-notes-pick] button', { hasText: 'Change it' }).click()
+  ok(!!(await until(async () => (await p.locator('[data-model-jobs] li[data-job="notes"]').isVisible().catch(() => false)) && /gpt-5/.test(await p.locator('[data-model-jobs] li[data-job="notes"] .pv-job-model').innerText().catch(() => '')), 8000)), 'Change it: Models for Each Task, at Meeting notes\' row')
+  await own('notes', null)
   ok(!errors.length, 'no page errors', errors)
   await ctx.close()
 

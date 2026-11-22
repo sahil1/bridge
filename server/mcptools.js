@@ -13,6 +13,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { asData, clean, SHAPES_URI } from './mcpdefs.js'
 import { placeEn } from '../shared/places.js'
+import { isLockFile } from '../shared/lockfile.js'
 
 const PAGE = 12_000
 const MAX_READ = 400_000
@@ -29,7 +30,7 @@ const ago = (ms) => {
 const say = (text, isError = false) => ({ content: [{ type: 'text', text }], ...(isError ? { isError: true } : {}) })
 const why = (e) => Object.assign(new Error(e), { said: true })
 
-// on(): the feature is on (a beta feature); sendOn(): sending to agents is; boards, meetings,
+// on(): the feature is on (mcpServer.on, off until you turn it on); sendOn(): sending to agents is; boards, meetings,
 // places, files, studio, doctext: the server's modules; tasks: the task list (chieftasks.js);
 // agents(): the agents running ({ paneId, name, kind, status, folder }); deliver(paneId, text): sends
 // a message to one, now or once it's free; outside: outside.js.
@@ -125,7 +126,7 @@ export function make({ on, sendOn, boards, meetings, places, files, studio, doct
       const items = await fsp.readdir(dir, { withFileTypes: true }).catch(() => [])
       for (const e of items) {
         if (++seen > 6000) return
-        if (e.name.startsWith('.') || SKIP.has(e.name)) continue
+        if (e.name.startsWith('.') || isLockFile(e.name) || SKIP.has(e.name)) continue
         const full = path.join(dir, e.name)
         if (e.isDirectory()) await go(full, depth + 1)
         else if (e.isFile() && studio.opens(e.name)) {
