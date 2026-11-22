@@ -65,10 +65,39 @@ export function writeFileAtomic(to, data, { mode } = {}) {
 
 const readJSON = (file) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')) } catch { return {} } }
 
+// Out of Beta Features in 3.22.0, each a setting in its own place now: Home (home.on), Scheduled
+// Routines (routines.on), Meeting Insights (meetings.insights), Bridge AI as an MCP Server
+// (mcpServer.on) and Tidy What I Say (dictation.tidy). A Beta Features switch for one (trials.<id>),
+// in a settings file from before or sent by a page or a backup from before, is that setting as it was
+// left: on stays on, off stays off. Tidy What I Say's Beta off leaves tidying off whatever its own
+// switch said (it wasn't tidying); on leaves its own switch as it was. One never set takes the
+// setting's default (index.js). The Beta Features switch itself goes: what's saved is the setting.
+const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {})
+export const OUT_OF_BETA = {
+  home: (s, on) => ({ home: { ...obj(s.home), on } }),
+  routines: (s, on) => ({ routines: { ...obj(s.routines), on } }),
+  'meeting-insights': (s, on) => ({ meetings: { ...obj(s.meetings), insights: on } }),
+  'mcp-server': (s, on) => ({ mcpServer: { ...obj(s.mcpServer), on } }),
+  'dictation-cleanup': (s, on) => (on ? {} : { dictation: { ...obj(s.dictation), tidy: false } }),
+}
+// The settings with those switches made into theirs: the same object when there are none.
+export function outOfBeta(s) {
+  const was = s?.trials
+  if (!was || typeof was !== 'object' || Array.isArray(was)) return s
+  const ids = Object.keys(OUT_OF_BETA).filter((id) => id in was)
+  if (!ids.length) return s
+  let next = { ...s }
+  for (const id of ids) if (typeof was[id] === 'boolean') next = { ...next, ...OUT_OF_BETA[id](next, was[id]) }
+  const rest = Object.fromEntries(Object.entries(was).filter(([k]) => !ids.includes(k)))
+  if (Object.keys(rest).length) next.trials = rest
+  else delete next.trials
+  return next
+}
+
 // Defaults from the repo, then your settings: ~/.bridge-ai/config.json (and config.local.json
 // next to the code, for people who prefer keeping it there; it's gitignored).
 export function loadConfig() {
-  const yours = { ...readJSON(dataFile('config.json')), ...readJSON(path.join(ROOT, 'config.local.json')) }
+  const yours = outOfBeta({ ...readJSON(dataFile('config.json')), ...readJSON(path.join(ROOT, 'config.local.json')) })
   // Show more models was saved as chinaModels before 3.0.1: one saved that way still counts.
   if (yours.moreModels === undefined && yours.chinaModels !== undefined) yours.moreModels = yours.chinaModels
   const example = readJSON(path.join(ROOT, 'config.example.json'))

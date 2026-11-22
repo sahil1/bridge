@@ -2,7 +2,7 @@
 // (how many, how long, your share of the talk, words spoken and heard, by week and by kind of
 // meeting), and People: everyone you've met, from invites and the names on transcripts, each with
 // how often, when last and next, the time together, their share of the talk and what you talk
-// about. A beta feature (meeting-insights). Worked out here, never sent, and nothing in it is a
+// about. On by itself once 5 meetings are recorded here (meetings.insights; index.js). Worked out here, never sent, and nothing in it is a
 // score of anyone: only what a transcript and a calendar can say, each with what it's based on.
 //
 // Each meeting is read once into a digest (who talked how long, words, questions, its people, the

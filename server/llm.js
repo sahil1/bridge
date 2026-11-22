@@ -196,6 +196,15 @@ export async function fit() {
   fitted = { at: Date.now(), ok: r.ok, why: r.why, runtime: { ok: rt.ok, why: rt.why }, bin: use?.bin || null, gpu, machine: m, models: each, recommended: rt.ok ? recommend(m, { gpu }) : null }
   return fitted
 }
+// Whether the local model fits this computer, from what's known without starting anything: a build
+// for it came with this copy of Bridge AI, and the computer has the memory the smallest model needs
+// (fit() goes on to try the build, once something asks it). Tidy What I Say is on to start with where
+// it does (index.js FEATURES).
+export async function fits() {
+  if (fitted) return fitted.ok
+  const m = await machine()
+  return fitModel(model(DEFAULT), m, { build: builds(m)[0] || null }).ok
+}
 // Whether that model runs here: { ok, why }.
 const runsHere = (f, mid) => f.models?.[mid] || { ok: false, why: 'No such model' }
 // The model Settings › Model Providers acts on: the one you picked when it runs here, else the one
