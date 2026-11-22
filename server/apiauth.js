@@ -13,7 +13,9 @@
 // program on this computer can send the same headers (guard.js only turns away someone else).
 // Public on purpose, with no key: the app's built files (its code, styles and pictures, the same for
 // everyone with this version, so a page can load to say how to get in), /api/health (that Bridge AI
-// is here, and its version), and the one-time link itself. The relay's pages and the demo aren't
+// is here, and its version), the server's proof to the desktop app that it's the one the app started
+// (index.js: only at this computer, and nothing in it is a secret; the app sends its key to no server
+// before that), and the one-time link itself. The relay's pages and the demo aren't
 // served here at all: Cloudflare and the website serve them.
 //
 // An HTML preview's own files load from its sandbox, which carries no cookie (it's no site at all
@@ -37,7 +39,7 @@ import { placeEn } from '../shared/places.js'
 const SITE = /^(\/m\/[A-Za-z0-9_-]{1,20})?\/api\/agents\/([^/]+)\/site\/~([A-Za-z0-9_-]{16,64})\//
 const CODE_MS = 2 * 60_000
 const COOKIE_DAYS = 400 // as long as browsers keep one
-const PUBLIC_API = new Set(['/api/health'])
+const PUBLIC_API = new Set(['/api/health', '/api/window/proof'])
 
 // A file of the built UI in the folder ui (not its page, nor anything else here): public, and the
 // same for everyone with this version (letin.js lets a device not let in have these too). Only as

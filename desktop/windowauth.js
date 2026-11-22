@@ -103,23 +103,29 @@ function bodyHash(uploadData) {
 // Whether the server at host:port is the one this app started: it answers the app's nonce with this
 // start's secret over this very connection, naming its own address and port and the app's end's port
 // as the app sees them from its end, so a program passing requests on to it from elsewhere can't.
-// headers: the app's key.
-function proves({ host = '127.0.0.1', port, launch, headers = {} }) {
-  if (!launch) return Promise.resolve(false)
+// What it comes to: 'ok'; 'wrong', an answer without that secret (another program, or a server the
+// app didn't start); 'slow', no answer in time (a busy start, a Mac waking up, a server held up for a
+// moment), which says nothing either way; 'down', nothing there. It needs no key (it gives nothing
+// away), and the app's key goes to no server before it has proved itself (main.js).
+function proof({ host = '127.0.0.1', port, launch, headers = {}, timeout = 3000 }) {
+  if (!launch) return Promise.resolve('wrong')
   const n = rand(24)
   return new Promise((resolve) => {
-    const req = http.get({ host, port, path: `/api/window/proof?n=${n}`, headers, timeout: 3000, agent: false }, (res) => {
+    let slow = false
+    const req = http.get({ host, port, path: `/api/window/proof?n=${n}`, headers, timeout, agent: false }, (res) => {
       const s = res.socket
       const there = `${s.remoteAddress?.includes(':') ? `[${s.remoteAddress}]` : s.remoteAddress}:${s.remotePort}`
       const want = hmac(launch, `bridge-ai server 2\n${n}\n${there}\n${s.localPort}`)
       let body = ''
       res.on('data', (c) => { body += c })
-      res.on('end', () => { try { resolve(res.statusCode === 200 && same(JSON.parse(body).mac, want)) } catch { resolve(false) } })
+      res.on('end', () => { try { resolve(res.statusCode === 200 && same(JSON.parse(body).mac, want) ? 'ok' : 'wrong') } catch { resolve('wrong') } })
+      res.on('error', () => resolve(slow ? 'slow' : 'down'))
     })
-    req.on('timeout', () => req.destroy())
-    req.on('error', () => resolve(false))
+    req.on('timeout', () => { slow = true; req.destroy() })
+    req.on('error', () => resolve(slow ? 'slow' : 'down'))
   })
 }
+const proves = async (o) => (await proof(o)) === 'ok'
 // Whether the server has this app's window secret, never sending it: its nonce, the app's MAC of it.
 // tofu (from source only): a server with none yet is given it, once.
 async function hello(fetch, base, secret, { tofu = false } = {}) {
@@ -134,4 +140,4 @@ async function hello(fetch, base, secret, { tofu = false } = {}) {
   } catch { return false }
 }
 
-module.exports = { keysAt, windowHeader, bodyHash, proves, hello }
+module.exports = { keysAt, windowHeader, bodyHash, proof, proves, hello }

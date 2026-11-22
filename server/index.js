@@ -799,9 +799,16 @@ function signPhoneOf(req) {
   const d = id ? relay.deviceOf(id) : null
   return d && d.kind !== 'computer' && !d.fresh && remote.admits(id) ? id : null
 }
-// (The app's own feeds, for what signing tells the app: Start Over, signing.js.)
+// (The app's own feeds, for what signing tells the app: Start Over, signing.js. With none connected
+// yet, as for a few seconds after the app starts its server, it's kept for the first that connects,
+// so a Start Over confirmed then isn't lost.)
 const appFeeds = new Set()
-const tellApp = (event, data) => { for (const res of appFeeds) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`) }
+const toApp = []
+const tellApp = (event, data) => {
+  const line = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
+  if (!appFeeds.size) { toApp.push(line); toApp.splice(0, toApp.length - 5); return }
+  for (const res of appFeeds) res.write(line)
+}
 signing.routes(app, { wrap, rootOf, sq, window: signWindow, phone: signPhoneOf, nameOf: (req) => whoAsks(req), record: (x) => studio.noteSigned(x), tellApp })
 // The app checking this server before it sends anything (windowkey.js): that it's the one the app
 // started (proof, to the app's nonce), and that it has the app's window secret (hello: a nonce, then
@@ -1819,7 +1826,7 @@ app.get('/api/events', (req, res) => {
   // ...and your signatures' list's version and whether Ask Before Signing is on, which the app keeps
   // where a copy of the list put back can't reach (signstore.js, appkeys.js).
   const offSign = appFeed ? signStore.onChange((st) => res.write(`event: sign-state\ndata: ${JSON.stringify(st)}\n\n`)) : null
-  if (appFeed) appFeeds.add(res)
+  if (appFeed) { appFeeds.add(res); for (const line of toApp.splice(0)) res.write(line) }
   if (appFeed) signStore.olderNote().then((o) => (o ? null : signStore.state())).then((st) => { if (st && !res.writableEnded) res.write(`event: sign-state\ndata: ${JSON.stringify(st)}\n\n`) }, () => {})
   req.on('close', () => { clients.delete(res); appFeeds.delete(res); off?.(); offRemote?.(); offSign?.() })
 })
@@ -3729,10 +3736,13 @@ async function servedUi() {
 // (apiauth.js), or one with a key that's wrong.
 // in: this browser or program is let in (the page saying how to get in looks, to open by itself).
 // With Bots on, each bot's connection too, asked on this computer (the Docker image's health check
-// says it): its name and whether it's connected, and why not.
+// says it): its name and whether it's connected, and why not. And, asked on this computer, which
+// server this is (bundled, build, pid), for the desktop app to tell an older one of its own from
+// anything else before it sends this server its key (desktop/main.js replaceStale).
 const localAsk = (req) => !req.headers['x-bridge-relay'] && !guard.viaTailnet(req) && /^(::1|127\.\d+\.\d+\.\d+|::ffff:127\.\d+\.\d+\.\d+)$/.test(String(req.socket?.remoteAddress || ''))
 app.get('/api/health', (req, res) => res.json({
   ok: true, app: 'Bridge AI', version: VERSION, in: auth.allowed(req),
+  ...(localAsk(req) ? { bundled: !!process.versions.electron, build: BUILD, pid: process.pid } : {}),
   ...(localAsk(req) && trialOn('slack-bot') ? { bots: botsStore.live().map((b) => { const st = desk.channel(b.id)?.state() || { state: 'off' }; return { id: b.id, name: b.name, state: st.state, why: st.why || null, paused: b.paused, where: Object.fromEntries(Object.entries(st.platforms || {}).filter(([, x]) => x.state !== 'no-tokens').map(([k, x]) => [k, { state: x.state, why: x.why || null }])) } }) } : {}),
 }))
 // A one-time link that lets a browser on this computer in (apiauth.js): View › Open in Browser in

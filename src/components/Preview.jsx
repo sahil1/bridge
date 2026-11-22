@@ -223,7 +223,11 @@ function Granted({ port, name, onOpen, children }) {
   return <div className="viewer-empty"><Icon name="alert" size={22} /><p>{st.why || t('Not showing the app any more.')}</p><button type="button" className="btn small" onClick={() => setRun((n) => n + 1)}>{t('Try again')}</button></div>
 }
 
+// The project's app runs as it would in a tab of its own (its scripts, storage, forms, dialogs,
+// popups and downloads), but can't send Bridge AI's page anywhere: no top navigation (the desktop app
+// refuses one from a frame too: desktop/main.js).
+const FRAME_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-downloads allow-pointer-lock allow-presentation'
 function Frame({ src, title }) {
   const ref = useRef(null)
-  return <iframe ref={ref} className="preview-frame" src={src} title={title} allow="clipboard-read; clipboard-write; fullscreen" />
+  return <iframe ref={ref} className="preview-frame" src={src} title={title} sandbox={FRAME_SANDBOX} allow="clipboard-read; clipboard-write; fullscreen" />
 }

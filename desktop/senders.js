@@ -8,7 +8,10 @@
 // there, so one from a frame in it (another computer's agent in a tab, a project's app in Preview)
 // comes from a page that got past its own. Each channel takes this computer's own page, and the few
 // a window showing another computer needs take that too (guard).
-const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]'])
+// Only 127.0.0.1, where the app's server listens and its windows load: localhost and [::1] are
+// other addresses, where another program (a project's server an agent runs) can listen at the same
+// port, so a page there is never the app's or another computer's.
+const LOOPBACK = new Set(['127.0.0.1'])
 
 // What a window showing another computer needs of the app: windows (an agent in one of its own, this
 // computer's main one, a device in one of its own), saying what an update would lose in it, and the
@@ -81,7 +84,16 @@ function create(port, { ports = () => ({}), proven = () => true } = {}) {
   const permits = (perm, { url, mainFrame = true } = {}) => (!proven() ? false : perm === 'clipboard-sanitized-write' ? local(url) : ASK.has(perm) && mainFrame !== false && of(url)?.kind === 'own')
   // Another computer's page, for a window: asked of the app's address, which sends it to its port.
   const machineUrl = (id, rest = '/') => `http://127.0.0.1:${port}/m/${id}${rest}`
-  return { of, local, opens, from, own, guard, permits, machineUrl }
+  // A redirect while a window's page loads (Electron's will-redirect: details, url): one out of the
+  // app (another program at another name for this computer, a site a linked computer's page sends it
+  // to) refused and handed to out(), which opens it in its own app as a link is; one that a frame in
+  // the window asked for refused. A page the app opens itself has no initiator.
+  const redirect = (e, url, out = () => {}) => {
+    if (e?.isMainFrame === false) return
+    const to = String(e?.url || url || '')
+    if (!local(to)) { e.preventDefault(); out(to) } else if (e?.initiator?.parent) e.preventDefault()
+  }
+  return { of, local, opens, from, own, guard, permits, machineUrl, redirect }
 }
 
 module.exports = { create, MACHINE, SELF, OUTSIDE }

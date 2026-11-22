@@ -38,12 +38,17 @@ const URL_BASE = `http://127.0.0.1:${PORT}`
 // requests on to this).
 const SERVER_PORT = PORT - (DEV ? 1 : 0)
 // Bridge AI's key for its API (apitoken.js): sent with the app's own requests to its server, at this
-// computer's address and the server's ports only, never another program's; and its cookie, given to
-// the app's windows before any of them opens (whenReady below), so each one's page is let in
-// without ever holding either.
+// computer's address and the server's ports only, never another program's (built app: only once the
+// server there has proved it's the one the app started, below); and its cookie, given to the app's
+// windows before any of them opens (whenReady below), so each one's page is let in without ever
+// holding either.
 const apiKey = () => apiToken.read(DATA) || apiToken.ensure(DATA)
 const ownServer = (u) => { try { const x = new URL(String(u)); return x.protocol === 'http:' && x.hostname === '127.0.0.1' && [PORT, SERVER_PORT].includes(Number(x.port)) } catch { return false } }
-const fetch = (u, o = {}) => globalThis.fetch(u, ownServer(u) ? { ...o, headers: { ...(o.headers || {}), authorization: `Bearer ${apiKey()}` } } : o)
+const fetch = (u, o = {}) => globalThis.fetch(u, ownServer(u) && (!BUNDLED || gate.proven) ? { ...o, headers: { ...(o.headers || {}), authorization: `Bearer ${apiKey()}` } } : o)
+// What's at the app's address (servergate.js): its server's ports and each linked computer's
+// (machines.json, below), by any way a window reaches them, and another name for this computer at one.
+const servergate = require('./servergate.js')
+const { isServer: atServer, isAlias: atAlias } = servergate.addresses(() => [PORT, SERVER_PORT, ...Object.values(machinePorts())])
 async function letInWindows() {
   try { await apiToken.letIn(session.defaultSession, { port: SERVER_PORT, token: apiKey() }) } catch (e) { console.warn(`Couldn't give the windows Bridge AI's key: ${e.message}`) }
 }
@@ -64,10 +69,13 @@ const appKeys = () => (keys ||= windowAuth.keysAt(path.join(app.getPath('userDat
 // app: servergate.js holds everything back until it has, and checks again before each page loads),
 // or, from source (no pipe: npm and node --watch don't pass it on), one that has the app's window
 // secret (given once, the first time).
-const gate = require('./servergate.js').create({
+// (A proof that isn't answered in time is tried again for a while, and never taken for another
+// program's: windowauth.js proof, servergate.js.)
+const gate = servergate.create({
   bundled: BUNDLED,
-  isServer: (u) => ownServer(u),
-  prove: () => windowAuth.proves({ port: SERVER_PORT, launch: appKeys().launch, headers: { authorization: `Bearer ${apiKey()}` } }),
+  isServer: atServer,
+  isAlias: atAlias,
+  prove: () => windowAuth.proof({ port: SERVER_PORT, launch: appKeys().launch }),
 })
 let devProven = false
 const serverProven = () => (BUNDLED ? gate.proven : devProven)
@@ -84,28 +92,35 @@ function serverGone() { gate.set(false); devProven = false }
 // request's id. One whose body the app can't read (a file, a blob) goes without, and isn't taken as
 // the window's.
 const bodies = new Map() // request id -> its body's SHA-256
+// Windows whose page was held back (other than the main one, which connect() looks after): opened
+// again once the server has proved itself. webContents -> the address it was opening.
+const held = new Map()
 function windowsSendSecret() {
-  const all = [...new Set([PORT, SERVER_PORT])].map((p) => `http://127.0.0.1:${p}/*`)
   const urls = [...new Set([PORT, SERVER_PORT])].map((p) => `http://127.0.0.1:${p}/api/*`)
-  session.defaultSession.webRequest.onBeforeRequest({ urls: all }, (d, cb) => {
-    gate.request(d).then((r) => {
-      if (!r.cancel && /^\/api\//.test(new URL(d.url).pathname)) {
-        if (bodies.size > 500) bodies.clear()
-        bodies.set(d.id, windowAuth.bodyHash(d.uploadData))
-      }
-      cb(r)
-    }, () => cb({ cancel: BUNDLED }))
-  })
-  // A page held back (ERR_BLOCKED_BY_CLIENT): the main window says why; any other window closes.
-  app.on('web-contents-created', (_e, wc) => {
-    wc.on('did-fail-load', (_ev, code, _desc, url, isMain) => {
-      if (!isMain || !gate.blocked(code, url)) return
+  // Every request any window makes (any address, any port, a WebSocket too), decided by the gate.
+  // A page held back (ERR_BLOCKED_BY_CLIENT): the main window says why (another program's answer),
+  // or that Bridge AI is starting (no answer yet), and connect() goes on from there; any other
+  // window opens it again once the server has proved itself (one with retries of its own, a
+  // device's window or Remote Screen's, carries on with them too).
+  servergate.wire(gate, {
+    session: session.defaultSession,
+    app,
+    after: (d, r) => {
+      if (r.cancel || !ownServer(d.url) || !/^\/api\//.test(new URL(d.url).pathname)) return
+      if (bodies.size > 500) bodies.clear()
+      bodies.set(d.id, windowAuth.bodyHash(d.uploadData))
+    },
+    blocked: (wc, url) => {
       const w = BrowserWindow.fromWebContents(wc)
       if (!w || w.isDestroyed()) return
-      if (w === win) w.loadURL(splash(NOT_OURS)).catch(() => {})
-      else w.destroy()
-    })
+      if (w === win) w.loadURL(splash(gate.wrong() ? NOT_OURS : STARTING)).catch(() => {})
+      else if (atServer(url)) held.set(wc, url)
+    },
   })
+  gate.onProven(() => {
+    for (const [wc, url] of held) { held.delete(wc); if (!wc.isDestroyed()) wc.loadURL(url).catch(() => {}) }
+  })
+  app.on('web-contents-created', (_e, wc) => { wc.on('destroyed', () => held.delete(wc)) })
   session.defaultSession.webRequest.onBeforeSendHeaders({ urls }, (d, cb) => {
     const h = d.requestHeaders
     for (const k of Object.keys(h)) if (k.toLowerCase() === 'x-bridge-window') delete h[k]
@@ -150,8 +165,10 @@ function loginPath() {
   })
 }
 
+// Something answers at the app's address (/api/health needs no key: none goes there before the server
+// proves itself).
 async function serverUp() {
-  try { const r = await fetch(`${URL_BASE}/api/config`, { signal: AbortSignal.timeout(1500) }); return r.ok } catch { return false }
+  try { const r = await fetch(`${URL_BASE}/api/health`, { signal: AbortSignal.timeout(1500) }); return r.ok } catch { return false }
 }
 
 // From source the server needs your shell's PATH to find node, so look it up while the app is
@@ -195,12 +212,40 @@ async function startServer() {
   if (typeof log === 'number') try { fs.closeSync(log) } catch { /* the server has its own copy */ }
   // Same pid file as `npm start`, so `npm run stop` and "Quit and Stop Agents" both find it.
   if (BUNDLED) try { fs.mkdirSync(path.dirname(PID), { recursive: true }); fs.writeFileSync(PID, String(child.pid)) } catch { /* not fatal */ }
-  // Ended without being asked to, while this app runs: written down, to offer a report once it's back.
-  child.on('exit', (code, signal) => { if (!stoppingServer) crashes.note(crashes.fromServerExit(code, signal), { base: URL_BASE, data: DATA, version: app.getVersion(), fetch }).catch(() => {}) })
+  serverChild = child
+  // Ended without being asked to, while this app runs: written down, to offer a report once it's back,
+  // and started again (restartServer).
+  child.on('exit', (code, signal) => {
+    if (serverChild === child) serverChild = null
+    if (stoppingServer) return
+    crashes.note(crashes.fromServerExit(code, signal), { base: URL_BASE, data: DATA, version: app.getVersion(), fetch }).catch(() => {})
+    if (BUNDLED && !quitting && !relaunching && (signal ? !STOPS.includes(signal) : code !== 0)) restartServer().catch(() => {})
+  })
   child.unref()
   startedServer = true
 }
 let stoppingServer = false
+// The server this app started, while it runs (null once it has ended).
+let serverChild = null
+// What asks the server to stop (an update, `npm run stop`, the computer shutting down): it isn't
+// started again for those, nor when it ends by itself without an error.
+const STOPS = ['SIGTERM', 'SIGINT', 'SIGHUP']
+// The server ended by itself (a crash, an error, killed outright): started again while the app runs,
+// three times in five minutes at most, checked as at the start, and the main window shown its page
+// again if it was left waiting (a reload while it was down). Its windows' pages reconnect by
+// themselves once it has proved itself (servergate.js).
+const restarts = []
+async function restartServer() {
+  const now = Date.now()
+  while (restarts.length && now - restarts[0] > 5 * 60_000) restarts.shift()
+  if (restarts.length >= 3) return
+  restarts.push(now)
+  await new Promise((r) => setTimeout(r, 500))
+  if (quitting || stoppingServer || serverChild || await serverUp() || serverChild) return
+  await startServer()
+  for (let i = 0; i < 300 && !(await serverUp()); i++) await new Promise((r) => setTimeout(r, 100))
+  if (await proveServer() && win && !win.isDestroyed() && !isLocal(win.webContents.getURL())) win.loadURL(URL_BASE).catch(() => {})
+}
 
 function loadBounds() {
   try { return JSON.parse(fs.readFileSync(STATE, 'utf8')) } catch { return { width: 1500, height: 960 } }
@@ -224,6 +269,14 @@ const machinePorts = () => {
 }
 const pages = senders.create(PORT, { ports: machinePorts, proven: () => gate.proven })
 const isLocal = pages.local
+// A frame in a window (a project's app in Preview, another computer's page in a tab) never moves the
+// window: only the window's own page does (initiator: the frame that asked; a frame has a parent).
+// One it sends out of the app opens in its own app, as before. No initiator (that frame gone since)
+// counts as a frame's.
+const byFrame = (e) => { try { return !e?.initiator || !!e.initiator.parent } catch { return true } }
+// A redirect while a window's page loads: one out of the app refused and opened in its own app, as a
+// link is; one a frame in it asked for refused (senders.js redirect).
+const redirects = (e, url) => pages.redirect(e, url, (to) => openOutside(to))
 // Every message from a page is checked first: only this computer's own page, but for what a window
 // showing another computer needs too, and the Allow access tile's own (senders.js MACHINE, SELF).
 const ipc = pages.guard(ipcMain, { refused: (ch, e) => console.warn(`Refused ${ch} from ${e?.senderFrame?.url || 'a frame that has gone'}: not this computer's own page`) })
@@ -287,7 +340,8 @@ async function createWindow() {
   // file the app shows, opened in a new tab, in the browser.
   win.webContents.setWindowOpenHandler(openLink(win))
   backForward(win)
-  win.webContents.on('will-navigate', (e, url) => { if (!isLocal(url) && !url.startsWith('data:')) { e.preventDefault(); openOutside(url) } })
+  win.webContents.on('will-navigate', (e, url) => { if (!isLocal(url) && !url.startsWith('data:')) { e.preventDefault(); openOutside(url) } else if (byFrame(e)) e.preventDefault() })
+  win.webContents.on('will-redirect', redirects)
   // Its title as the page says it (what waits on you, and which computer it is, for the Dock's and
   // the Window menu's list of windows); the count also goes on the Dock's badge.
   win.webContents.on('page-title-updated', (e, title) => { e.preventDefault(); win?.setTitle(title); updateBadge(title) })
@@ -313,33 +367,39 @@ async function createWindow() {
 async function replaceStale() {
   if (!BUNDLED) return
   const mine = (() => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')) } catch { return {} } })()
-  let theirs = null
-  try { const r = await fetch(`${URL_BASE}/api/version`, { signal: AbortSignal.timeout(1500) }); theirs = r.ok ? await r.json() : null } catch { /* older server */ }
-  if (theirs && (!theirs.bundled || (theirs.version === app.getVersion() && theirs.build === (mine.bridgeBuild || null)))) return
-  let pid = theirs?.pid
-  // Servers from before 2.2.1 don't say who they are: only the app's own bundled server, by its pid file.
-  if (!pid && process.platform !== 'win32') {
-    try {
-      const p = Number(fs.readFileSync(PID, 'utf8'))
-      const cmd = require('node:child_process').execFileSync('ps', ['-o', 'command=', '-p', String(p)], { encoding: 'utf8' })
-      if (/app-root[\\/]server[\\/]index\.js/.test(cmd)) pid = p
-    } catch { /* not running */ }
-  }
-  if (!pid) return
+  const theirs = await whoAnswers()
+  if (theirs?.bundled === false || (theirs?.bundled && theirs.version === app.getVersion() && theirs.build === (mine.bridgeBuild || null))) return
+  // Servers from before 3.22 don't say who they are without the key, and ones from before 2.2.1 not
+  // at all: only the app's own bundled server, by its pid file.
+  const pid = Number.isInteger(theirs?.pid) ? theirs.pid : pidFile()
+  if (!bundledServer(pid)) return
   try { process.kill(pid, 'SIGTERM') } catch { return }
   for (let i = 0; i < 50 && await serverUp(); i++) await new Promise((r) => setTimeout(r, 100))
 }
-// A server of the app's own (Bridge AI's bundled one, by its command line) that isn't the one this app
-// started (it can't prove it has that start's secret: started by an older run, by hand, or not
-// handed the app's keys): stopped, so the app starts its own. Anything else on the port is left
-// alone, and gets nothing from the app's windows.
+// Who answers at the app's address, as it says itself: /api/health, which says it to a program on this
+// computer without the key (none goes there before the server proves itself).
+async function whoAnswers() {
+  try { const r = await fetch(`${URL_BASE}/api/health`, { signal: AbortSignal.timeout(1500) }); return r.ok ? await r.json() : null } catch { return null }
+}
+const pidFile = () => { try { return Number(fs.readFileSync(PID, 'utf8')) || null } catch { return null } }
+// Whether pid is a bundled server of the app's own (its command line: app-root/server/index.js; on
+// Windows, which can't be asked here, the one the app last started, by its pid file), and never the
+// one this app is running now.
+function bundledServer(pid) {
+  if (!Number.isInteger(pid) || pid <= 1 || pid === process.pid || pid === serverChild?.pid) return false
+  if (process.platform === 'win32') return pidFile() === pid
+  try { return /app-root[\\/]server[\\/]index\.js/.test(require('node:child_process').execFileSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' })) } catch { return false }
+}
+// A server of the app's own (Bridge AI's bundled one, by its command line) that answers the proof
+// without this start's secret (started by an older run, by hand, or not handed the app's keys):
+// stopped, so the app starts its own. Never one that only answered slowly (a busy start, a Mac
+// waking up: servergate.js), nor the one this app started; anything else on the port is left alone,
+// and gets nothing from the app's windows.
 async function replaceUnproven() {
-  let pid = null
-  try { const r = await fetch(`${URL_BASE}/api/version`, { signal: AbortSignal.timeout(1500) }); pid = r.ok ? (await r.json()).pid : null } catch { /* none */ }
-  if (!Number.isInteger(pid) || pid <= 1) return
-  if (process.platform !== 'win32') {
-    try { if (!/app-root[\\/]server[\\/]index\.js/.test(require('node:child_process').execFileSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' }))) return } catch { return }
-  }
+  if (!gate.wrong()) return
+  const said = (await whoAnswers())?.pid
+  const pid = Number.isInteger(said) ? said : pidFile()
+  if (!bundledServer(pid)) return
   try { process.kill(pid, 'SIGTERM') } catch { return }
   for (let i = 0; i < 50 && await serverUp(); i++) await new Promise((r) => setTimeout(r, 100))
   if (await serverUp()) return
@@ -386,7 +446,8 @@ ipc.handle('bridge:popout', (e, { paneId, title, machine } = {}) => {
   })
   w.once('ready-to-show', () => w.show())
   w.webContents.setWindowOpenHandler(openLink(w))
-  w.webContents.on('will-navigate', (ev, url) => { if (!isLocal(url)) { ev.preventDefault(); openOutside(url) } })
+  w.webContents.on('will-navigate', (ev, url) => { if (!isLocal(url)) { ev.preventDefault(); openOutside(url) } else if (byFrame(ev)) ev.preventDefault() })
+  w.webContents.on('will-redirect', redirects)
   w.loadURL(on ? pages.machineUrl(on, `/?window=${encodeURIComponent(paneId.slice(on.length + 1))}`) : `${URL_BASE}/?window=${encodeURIComponent(paneId)}`)
   pops.set(paneId, w)
   w.on('closed', () => { if (pops.get(paneId) === w) pops.delete(paneId) })
@@ -423,7 +484,8 @@ ipc.handle('bridge:open-machine', (e, { id = null, agent = null, pass = '' } = {
   })
   w.once('ready-to-show', () => w.show())
   w.webContents.setWindowOpenHandler(openLink(w))
-  w.webContents.on('will-navigate', (ev, url) => { if (!isLocal(url)) { ev.preventDefault(); openOutside(url) } })
+  w.webContents.on('will-navigate', (ev, url) => { if (!isLocal(url)) { ev.preventDefault(); openOutside(url) } else if (byFrame(ev)) ev.preventDefault() })
+  w.webContents.on('will-redirect', redirects)
   backForward(w)
   if (was?.maximized) w.maximize()
   for (const ev of ['resize', 'move', 'close']) w.on(ev, () => saveDeviceBounds(key, w))
@@ -720,24 +782,42 @@ ipc.handle('bridge:focus-popout', (e, paneId) => {
 })
 
 const NOT_OURS = `Another program is answering on port ${PORT}, where Bridge AI's server should be, and it isn't the one this app started, so Bridge AI won't show it.<br>Quit that program (or set <code>"port"</code> in ~/.bridge-ai/config.json), then reopen Bridge AI.`
+const STARTING = 'Starting Bridge AI…'
+// Once something answers at the app's address: the app's page when it proves it's the server this app
+// started; another program's answer (a wrong proof: servergate.js) said as such, and its page never
+// shown here; a server that doesn't answer the proof in time (a busy start, a Mac waking up) waited
+// for, as starting, for up to a minute. From source, the page.
+async function showServer() {
+  if (!BUNDLED) { await proveServer(); return win.loadURL(URL_BASE) }
+  const until = Date.now() + 60_000
+  let said = false
+  while (Date.now() < until) {
+    if (await proveServer()) return win.loadURL(URL_BASE)
+    if (gate.wrong()) return win.loadURL(splash(NOT_OURS))
+    if (!said) { said = true; win.loadURL(splash(STARTING)).catch(() => {}) }
+    await new Promise((r) => setTimeout(r, 1000))
+  }
+  return win.loadURL(splash(`Bridge AI's server on port ${PORT} isn't answering.<br>Quit Bridge AI from its menu and open it again.`))
+}
 async function connect() {
   // Never in the way of opening: if the check fails, use whatever server is there.
   if (await serverUp()) await replaceStale().catch(() => {})
-  if (await serverUp() && !(await proveServer()) && BUNDLED) await replaceUnproven().catch(() => {})
+  if (await serverUp() && BUNDLED && !(await proveServer())) await replaceUnproven().catch(() => {})
   // (A server this app can't prove it started, on the address it uses: its page isn't shown here.)
-  if (await serverUp()) return BUNDLED && !serverProven() ? win.loadURL(splash(NOT_OURS)) : win.loadURL(URL_BASE)
-  win.loadURL(splash('Starting Bridge AI…'))
+  if (await serverUp()) return showServer()
+  win.loadURL(splash(STARTING))
   // Dev mode needs both ports; a normal server already on the API port would block it.
   if (DEV && !startedServer) {
     const api = await fetch(`http://127.0.0.1:${PORT - 1}/api/config`, { signal: AbortSignal.timeout(1500) }).then((r) => r.ok, () => false)
     if (api) return win.loadURL(splash(`Bridge AI is already running without hot reload.<br>Run <code>npm run stop</code>, then <code>npm run desktop:dev</code> again.`))
   }
-  if (!startedServer) await startServer().catch(() => {})
+  // (And again when the one it started has ended since: stopped with `npm run stop`, say.)
+  if (!startedServer || (BUNDLED && !serverChild)) await startServer().catch(() => {})
   // The server is usually up in under half a second, so check often (for up to a minute; the dev
   // server can take longer the first time).
   for (let i = 0; i < 600; i++) {
     await new Promise((r) => setTimeout(r, 100))
-    if (await serverUp()) { await proveServer(); return BUNDLED && !serverProven() ? win.loadURL(splash(NOT_OURS)) : win.loadURL(URL_BASE) }
+    if (await serverUp()) return showServer()
   }
   win.loadURL(splash(BUNDLED
     ? `Couldn't start Bridge AI on port ${PORT}.<br>Another program may be using it: set <code>"port"</code> in ~/.bridge-ai/config.json and reopen.`
@@ -805,11 +885,12 @@ function onFleet(f) {
 async function watchFleet() {
   for (;;) {
     try {
+      // (A server found running, or one that restarted: checked again before the app or its windows
+      // send it anything, its key included; one that isn't proven is tried again in a moment.)
+      if (!(await proveServer()) && BUNDLED) throw new Error('not proven')
       // x-bridge-desktop: this is the app's own feed, which also hears "allow it here" (onFixAsk).
       const res = await fetch(`${URL_BASE}/api/events`, { headers: { Accept: 'text/event-stream', 'x-bridge-desktop': app.getVersion() } })
       reportPerms()
-      // (A server found running, or one that restarted: checked again before the windows send it anything.)
-      await proveServer()
       if (!res.ok || !res.body) throw new Error(String(res.status))
       const dec = new TextDecoder()
       let buf = ''
@@ -850,8 +931,7 @@ async function startOverServer() {
   stoppingServer = false
   await startServer()
   for (let i = 0; i < 300 && !(await serverUp()); i++) await new Promise((r) => setTimeout(r, 100))
-  await proveServer()
-  if (win && !win.isDestroyed()) win.loadURL(serverProven() ? URL_BASE : splash(NOT_OURS)).catch(() => {})
+  if (win && !win.isDestroyed()) await showServer().catch(() => {})
 }
 // Quitting leaves the server (and your agents) running. This stops the server; agents keep
 // running in the terminal host unless Keep agents running is off (Settings › General).
@@ -1353,6 +1433,9 @@ app.whenReady().then(async () => {
   buildMenu()
   globalShortcut.register(SHORTCUT, toggleWindow)
   await letInWindows()
+  // The app's page has no service worker (src/pwa.js: that's for a phone or a browser): any one an
+  // older version left in the app's windows goes, so nothing answers for the server but the server.
+  await session.defaultSession.clearStorageData({ storages: ['serviceworkers'] }).catch(() => {})
   windowsSendSecret()
   createWindow()
   // Remote Screen and Preview's windows: the capture page, the badge, a project's app drawn off screen.
