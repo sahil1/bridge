@@ -67,6 +67,10 @@ Bots now have Connections, Bots and Sessions: each conversation is a live Claude
 - A bot's run answers Claude Code's question about trusting its folder, so Try It and first questions no longer wait 10 minutes for nothing.
 - Slack bots: another copy of Bridge AI on the same app is found and said, a mention in a channel the app isn't in says so with the fix, and one rate-limited conversation doesn't hold up the others.
 - Crash reports leave out the names of paired phones and of devices seen through your other computers.
+- The desktop app counts only its own address as itself, and a page shown in a frame (an agent's app in Preview) can no longer send the window somewhere else.
+- An MCP server that stops reading while its tools are listed no longer stops Bridge AI's server.
+- Mail: Z (undo) puts a message back in Needs You and keeps it there; for up to a minute it could show as Done again.
+- Messages queued for a busy agent keep their order when one of them is answered.
 - **Meetings:**
   - Start recording pressed twice, or Take notes on the floating card and in the window at once, makes one recording.
   - Notes cut off by Bridge AI closing are written when it's back, and so are the notes of a meeting stopped just before it closed. They no longer say "Writing the summary…" for ever.
@@ -100,6 +104,8 @@ Bots now have Connections, Bots and Sessions: each conversation is a live Claude
   - Slack, Discord or Teams out of reach says so in words, and tokens pasted while offline say nothing was kept.
   - Bots opens at Connections when a connection was turned down. On a phone a bot's Access line no longer spills out of its box, and Bots' tabs fit in German.
   - A task marked done in the Tasks panel says so in your language.
+  - A follow-up in Slack that arrives just as a run ends becomes its own question, instead of being marked done and never answered.
+  - In AI Assist's chat for setting up a bot, a refused setting's error stays until your next step, instead of disappearing after a few seconds.
 
 ## 3.22.0-rc.1
 
