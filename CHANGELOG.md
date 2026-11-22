@@ -101,6 +101,10 @@ Bots now have Connections, Bots and Sessions: each conversation is a live Claude
   - Bots opens at Connections when a connection was turned down. On a phone a bot's Access line no longer spills out of its box, and Bots' tabs fit in German.
   - A task marked done in the Tasks panel says so in your language.
 
+## 3.22.0-rc.1
+
+The release candidate of 3.22.0, for Early Access before it goes to everyone. Bots get Connections, Bots and Sessions, with each conversation a live Claude Code session. Share Links (a Beta Feature) gives people outside your devices a link to a file, a folder, a Studio document or an agent's app. Settings opens on Your Features, in nine sections. Also Models for Each Task, Back Up & Move, Which Devices May Connect, meetings merged and carried on, Scan QR code on the phone, the Enter Key, Studio's big files opened in parts, and a locked computer said and waited for in Remote Screen. Home, Tidy What I Say, Meeting Insights, Scheduled Routines and Bridge AI as an MCP Server are out of Beta Features. And the fixes from a bug hunt across Meetings, Studio and Files, Remote Screen, the phone, devices and Bots.
+
 ## 3.21.0
 
 Bots answer the people you choose in Slack, Discord and Microsoft Teams, from folders on your computer, and each answer waits for you unless you say otherwise. Remote Screen and Preview shows another of your computers' screen and its agents' apps, and its mouse and keyboard can be used once you allow that there. Both are Beta Features. Settings › About & Updates has an Update Channel anyone can pick. Studio's files work as Finder's do, meetings save as Word and PDF, and a file an agent names in its chat opens where it is. And fixes: switching relays keeps phones and computers paired, and messages to Codex are sent.
