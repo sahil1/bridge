@@ -536,6 +536,9 @@ try {
       await x.p.waitForTimeout(300)
       faults = await fits(x.p, '.bp.phone')
       ok(!Object.keys(faults).length, `${mode}, a phone: its Settings fit`, faults)
+      // (A folder's name level with its × to take it off, which is a phone's 40 px.)
+      const row = await x.p.locator('.bp.phone [data-setting="slack-folders"] .sb-folders li').first().evaluate((li) => { const mid = (e) => { const r = e.getBoundingClientRect(); return r.top + r.height / 2 }; return { name: Math.round(mid(li.querySelector('code'))), x: Math.round(mid(li.querySelector('.icon-btn'))) } })
+      ok(Math.abs(row.name - row.x) <= 2, `${mode}, a phone: a folder's name level with its ×`, row)
       // (Its Access line takes two lines on a phone: its box as tall as its words, on Settings and
       // on its Overview, however long the page under it is.)
       for (const tb of ['settings', 'overview']) {
