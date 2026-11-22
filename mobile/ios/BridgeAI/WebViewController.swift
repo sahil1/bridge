@@ -44,7 +44,9 @@ final class WebViewController: UIViewController, WKScriptMessageHandler, WKUIDel
         web.scrollView.backgroundColor = Self.background
         // The page lays itself out around the notch and the Home indicator (env(safe-area-inset-*)).
         web.scrollView.contentInsetAdjustmentBehavior = .never
-        web.allowsBackForwardNavigationGestures = false
+        // A swipe from the left edge is Back: the view before in Bridge AI, whose phone layout keeps
+        // each of its views a step in the page's history (src/phoneBack.js), as Android's Back is.
+        web.allowsBackForwardNavigationGestures = true
         #if DEBUG
         if #available(iOS 16.4, *) { web.isInspectable = true }
         #endif

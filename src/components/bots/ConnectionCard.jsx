@@ -62,6 +62,10 @@ export function ConnectionCard({ c, reload, open = null, where = null, all = nul
   // (A bot's own app that's connected, to use instead of a shared one that isn't: the first, where
   // there are more; each one's own card offers it too.)
   const ownsUp = c.shared && !works(c) ? peers.filter((x) => !x.shared && works(x)).slice(0, 1) : []
+  // (A bot's own app never set up, where the shared one works: the bot isn't reached until that app
+  // is made, so moving it back onto the shared one is offered before the app's steps, which stay
+  // for whoever gave it an app of its own on purpose.)
+  const toShared = !c.shared && !setUp && works(shared) ? shared : null
   const setup = (
     <div className="bh-setup" data-setting="connection-setup">
       <Guide key={`${c.id}-guide`} d={d} platform={c.platform} where={where} />
@@ -77,7 +81,7 @@ export function ConnectionCard({ c, reload, open = null, where = null, all = nul
         <span className="sb-plat cn-kind" data-setting="connection-kind">{c.shared ? (n === 1 ? t('Shared · 1 bot') : t('Shared · {n} bots', { n })) : t('{bot}\'s own app', { bot: c.own?.name || '' })}</span>
       </header>
       {done && <p className="st-note ok" role="status" data-setting="connection-done"><Icon name="check" size={13} /><span>{done}</span></p>}
-      {!setUp && <p className={`st-note ${STATE[c.state] || 'warn'} cn-state`} role="status"><Icon name="info" size={13} /><span className="sb-status-text">{ownsUp.length && n ? (n === 1 ? t('Not set up yet, so {bot} isn\'t reached.', { bot: c.bots[0].name }) : t('Not set up yet, so {bots} aren\'t reached.', { bots: listOf(c.bots.map((b) => b.name)) })) : said(c)}</span></p>}
+      {!setUp && <p className={`st-note ${STATE[c.state] || 'warn'} cn-state`} role="status"><Icon name="info" size={13} /><span className="sb-status-text">{(ownsUp.length || toShared) && n ? (n === 1 ? t('Not set up yet, so {bot} isn\'t reached.', { bot: c.bots[0].name }) : t('Not set up yet, so {bots} aren\'t reached.', { bots: listOf(c.bots.map((b) => b.name)) })) : said(c)}</span></p>}
       {setUp && <TestConnection c={c} onDone={reload} tone={STATE[c.state] || 'warn'} status={<><Icon name={up ? 'check' : c.state === 'error' ? 'alert' : 'info'} size={13} /><span className="sb-status-text">{said(c)}</span>{['error', 'reconnecting'].includes(c.state) && <button type="button" className="link-btn" onClick={again}>{t('Connect again')}</button>}</>} />}
       {/* (Another copy is the server's others; its numConnections counts Test this connection's own
           look at Slack's hello too, so it isn't one by itself.) */}
@@ -85,6 +89,7 @@ export function ConnectionCard({ c, reload, open = null, where = null, all = nul
       {c.limited && <p className="st-note warn" role="status" data-setting="connection-limited"><Icon name="clock" size={13} /><span>{t('{platform} is making it wait before it reads more ({n} s): answers that need the thread come a little later.', { platform: label, n: Math.round(Number(c.limited.wait) || 0) })}</span></p>}
       {c.catchingUp && <p className="st-note" role="status" data-setting="connection-catching-up"><Icon name="refresh" size={13} /><span>{t('Catching up on what was asked while it was away: {done} of {of}.', { done: c.catchingUp.done || 0, of: c.catchingUp.of || 0 })}</span></p>}
       {ownsUp.map((o) => <UseForAll key={o.id} own={o} shared={c} reload={reload} onDone={finished} from="shared" />)}
+      {toShared && <UseForAll own={c} shared={toShared} reload={reload} onDone={finished} from="own" />}
       {/* (Its app's steps; folded where a bot's own app that's connected can be used instead.) */}
       {!setUp && !ownsUp.length && setup}
       {!setUp && ownsUp.length > 0 && <details className="sb-how bh-adv" data-setting="connection-setup-folded"><summary><Icon name="chevron" size={11} />{t('Or set up {app} itself', { app: appName(c) })}</summary>{setup}</details>}
@@ -132,7 +137,7 @@ export function ConnectionCard({ c, reload, open = null, where = null, all = nul
 // work is replaced, its bots coming here. Where the shared one works, the bot moves onto it instead
 // (POST /bots/:id/move). Each asks first, saying what happens. from: the card it's on, the bot's own
 // app's ("own") or the shared one's that doesn't work ("shared").
-function UseForAll({ own, shared, reload, onDone, from = 'own' }) {
+export function UseForAll({ own, shared, reload, onDone, from = 'own' }) {
   const [sure, setSure] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
@@ -149,7 +154,7 @@ function UseForAll({ own, shared, reload, onDone, from = 'own' }) {
     try {
       if (move) {
         const x = await api(`/bots/${own.own?.id}/move`, { method: 'POST', body: { platform: own.platform } })
-        onDone?.(t('Moved {bot} to {to}. You can delete its old app, {from}, on {platform} now.', { bot, to: appName(shared), from: app, platform: label }), x)
+        onDone?.(own.tokens ? t('Moved {bot} to {to}. You can delete its old app, {from}, on {platform} now.', { bot, to: appName(shared), from: app, platform: label }) : t('Moved {bot} to {to}: it\'s reached through it now, like your other bots.', { bot, to: appName(shared) }), x)
       } else {
         const x = await api(`/connections/${own.id}/share`, { method: 'POST', body: shared ? { replace: shared.id } : {} })
         const n = x?.bots?.length || 0
@@ -171,7 +176,7 @@ function UseForAll({ own, shared, reload, onDone, from = 'own' }) {
         : t('Use {app} for all your bots: each is reached through it by its name, with {bot} as their Chief.', { app, bot })
   const then = own.platform === 'slack' ? ` ${t('Slack then asks you to update the app once, so each answer shows its bot\'s name.')}` : ''
   const ask = move
-    ? t('Move {bot} to {name}? Its own app\'s tokens are deleted here; delete that app on {platform} afterwards.', { bot, name: appName(shared), platform: label })
+    ? (own.tokens ? t('Move {bot} to {name}? Its own app\'s tokens are deleted here; delete that app on {platform} afterwards.', { bot, name: appName(shared), platform: label }) : t('Move {bot} to {name}? Its own app, never set up, is removed.', { bot, name: appName(shared) }))
     : shared
       ? `${shared.tokens ? t('{name} is removed, its tokens deleted here (its app stays on {platform} until you delete it there).', { name: appName(shared), platform: label }) : t('{name}, never set up, is removed.', { name: appName(shared) })} ${moving.length > 1 ? (keeps ? t('{bots} move to {app}, each reached by its name, and {chief} stays their Chief.', { bots: listOf(moving), app, chief: keeps }) : t('{bots} move to {app}, each reached by its name, with {bot} as their Chief.', { bots: listOf(moving), app, bot })) : moving.length ? (keeps ? t('{one} moves to {app}, reached by its name, and {chief} stays its Chief.', { one: moving[0], app, chief: keeps }) : t('{one} moves to {app}, reached by its name, with {bot} as its Chief.', { one: moving[0], app, bot })) : t('{bot} becomes the Chief of every bot reached through it.', { bot })}${then}`
       : `${t('Every bot without an app of its own is reached through {app} by its name, and {bot} becomes their Chief: it takes what names no bot. Its tokens stay as they are.', { app, bot })}${then}`
@@ -372,7 +377,7 @@ export function ConnectionsList({ phone = false }) {
       ))}
       {missing.length > 0 && (
         <section className="st-sec cn-new" data-setting="connections-new">
-          <h4>{list.some((c) => c.shared) ? t('Add a Connection') : t('Make Your First Connection')}</h4>
+          <h4>{list.length ? t('Add a Connection') : t('Make Your First Connection')}</h4>
           {!list.length && <p className="muted small">{t('One app on Slack, Discord or Microsoft Teams for all your bots: made once, and each new bot is reached through it.')}</p>}
           {missing.map(([k, label]) => (
             <details key={k} className="sb-how cn-new-one" data-platform={k} open={!list.length && k === 'slack'}>

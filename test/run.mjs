@@ -197,6 +197,9 @@ const SUITES = [
   // Overview and Settings (Basic and Advanced), a session's Thread and Live, against the server's
   // own sessions, checks and links (only what's hard to bring about stood in for in the page).
   { name: 'bots-ui', build: 'dist', browser: true, minutes: 12, covers: [/^src\/components\/bots\//, /^src\/components\/settings\/(Bots\.jsx|bots\.css)$/, /^src\/components\/(NeedsYou|Console|Rail)\.jsx$/, /^src\/(App|lazy)\.jsx$/, /^server\/(connections|connhub|conncheck|connector|slackbot|botsessions|sessionmcp|frontdesk|delegate|botwrite|bots|index)\.(js|mjs)$/, /^test\/stand-ins\/(slack\.mjs|helper-claude\.cjs)$/, /^test\/lib\/bots\.mjs$/] },
+  // One Slack app for all your bots, from every place a bot that isn't reached is looked at (the
+  // owner's case: a bot's own app beside specialists that aren't reached), on a computer and a phone.
+  { name: 'bots-one-app', build: 'dist', browser: true, covers: [/^src\/components\/bots\/(ConnectionCard|Connections|BotChat|bots)\.jsx?$/, /^src\/components\/settings\/Bots\.jsx$/, /^server\/(connections|connhub|bots|index)\.js$/, /^test\/stand-ins\/slack\.mjs$/, /^test\/lib\/bots\.mjs$/] },
   { name: 'bots-routing', build: 'dist', browser: true, minutes: 8, covers: [/^server\/(connections|connhub|bots|bottemplates|frontdesk|index)\.js$/, /^src\/components\/bots\//, /^src\/components\/settings\/(Bots\.jsx|bots\.css)$/, /^src\/App\.jsx$/, /^test\/stand-ins\/(slack|model)\.mjs$/, /^test\/stand-ins\/helper-claude\.cjs$/, /^test\/lib\/bots\.mjs$/] },
   // Files a bot makes: its run's outbox, sent with its answer (Slack's upload API, Discord's
   // attachments, Teams' reply saying it can't), what's refused, and its Activity's files with Open

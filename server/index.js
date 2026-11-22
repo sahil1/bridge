@@ -106,7 +106,7 @@ import { mcpRoutes, bridgeMcp } from './mcp.js'
 import { make as makeMcpTools } from './mcptools.js'
 import { make as makeOutside } from './outside.js'
 import { makeFrontDesk, SPACE as BOT_RUNS } from './frontdesk.js'
-import { manifest as slackManifest, connectionManifest, SCOPES as SLACK_SCOPES, SHARED_SCOPES, SCOPE_FOR as SLACK_SCOPE_FOR, commandOf as slackCommand, shortcutOf as slackShortcut } from './slackbot.js'
+import { manifest as slackManifest, connectionManifest, SCOPES as SLACK_SCOPES, SHARED_SCOPES, SCOPE_FOR as SLACK_SCOPE_FOR, commandOf as slackCommand, commandsOf as slackCommands, shortcutOf as slackShortcut } from './slackbot.js'
 import { PORT as TEAMS_PORT } from './teamsbot.js'
 import { combine, platformOf, PLATFORMS, makeConnector as connectorFor } from './connector.js'
 import { makeBotSessions } from './botsessions.js'
@@ -4649,7 +4649,10 @@ async function botView(b, { brief = false } = {}) {
     signIn: kind === 'claude' || kind === 'codex' ? await signInKind(kind) : null,
     manifest: via.slack?.shared ? connectionManifest(conns.get(via.slack.id), conns.botsOn(conns.get(via.slack.id), botsStore.live()), cfg.name) : slackManifest(b, cfg.name), scopesWanted: via.slack?.shared ? SHARED_SCOPES : SLACK_SCOPES, you: me || null,
     updateApp: { missing, needs: missing.map((x) => ({ scope: x, for: String(SLACK_SCOPE_FOR[x] || '').replace('<command>', slackCommand(via.slack?.shared ? via.slack.name : b.name).slice(1)) })) },
-    command: via.slack?.shared ? `${slackCommand(via.slack.name)} ${b.name.toLowerCase().split(/\s+/)[0]}` : slackCommand(b.name), shortcut: slackShortcut(via.slack?.shared ? via.slack.name : b.name), ownerGuess,
+    command: via.slack?.shared ? `${slackCommand(via.slack.name)} ${b.name.toLowerCase().split(/\s+/)[0]}` : slackCommand(b.name),
+    // (Its own slash command on the shared app, where there's one for each bot: unique among them.)
+    ownCommand: via.slack?.shared && conns.get(via.slack.id)?.perBot ? slackCommands(conns.botsOn(conns.get(via.slack.id), botsStore.live()), [slackCommand(via.slack.name)]).get(b.id) || null : null,
+    shortcut: slackShortcut(via.slack?.shared ? via.slack.name : b.name), ownerGuess,
     scheduled: (routinesNow.routines || []).filter((r) => r.to === 'bot' && r.bot === b.id).map((r) => ({ id: r.id, name: r.name, command: r.command, channel: r.channel || null, schedule: r.schedule || null, says: r.says || null, next: r.next || [], state: r.state, note: r.note || null, auto: !!r.auto, paused: !!r.paused, runs: (r.runs || []).slice(0, 5) })),
     routinesOn: featureOn('routines'),
   }
@@ -5337,7 +5340,7 @@ async function connView(c) {
   return {
     ownerGuess,
     id: c.id, name: c.name, platform: c.platform, shared: c.shared, own: c.bot ? { id: c.bot, name: botsStore.get(c.bot)?.name || c.bot } : null,
-    bots: on.map((b) => ({ id: b.id, name: b.name, description: b.description || '', paused: b.paused, command: slack && c.perBot ? slackCommand(b.name) : null })),
+    bots: on.map((b) => ({ id: b.id, name: b.name, description: b.description || '', paused: b.paused, command: slack && c.perBot ? slackCommands(on, [slackCommand(c.name)]).get(b.id) : null })),
     owner, ownerFrom: owner && !c.owner ? 'bot' : null, defaults: c.defaults, perBot: c.perBot, createdAt: c.createdAt || null,
     // (Its Chief, while that bot's on it; a code to link you waiting to be sent, until when; its last
     // Test this connection, conncheck.js.)
