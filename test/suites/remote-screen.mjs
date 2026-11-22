@@ -1583,6 +1583,9 @@ try {
     const line = st.p.locator('.rs-here')
     await line.waitFor({ timeout: 10000 })
     ok(/Laptop is controlling this screen|Laptop is viewing this screen/.test(await line.innerText()), 'Studio says it\'s being seen, and by which device', await line.innerText())
+    const sinceLine = await line.innerText()
+    const started = (await studio.api('/remote')).sessions[0]?.started
+    ok(!started || Date.now() - new Date(started).getTime() >= 55000 || (/It started just now\./.test(sinceLine) && !/for 1 min now/.test(sinceLine)), 'in its first minute, it says it started just now (not "for 1 min now")', sinceLine)
     await shot(st.p, `${tag}remote-screen-studio-seen`)
     // The desktop app's badge, the same page in a window of its own.
     const badge = await page(b, `${studio.url}/?remote=badge`, { width: 520, height: 58 })
@@ -1930,7 +1933,8 @@ try {
     const st = await page(b, studio.url, { before })
     errors.push(...st.errors)
     const line = st.p.locator('.rs-here')
-    ok(!!(await until(async () => /Phone is connecting to this screen, for \d+ min now\./.test(await line.innerText().catch(() => '')), 10000)) && await line.getByRole('button', { name: 'Stop' }).isVisible(), 'Studio\'s window: who is connecting, for how long, with Stop', await line.innerText().catch(() => ''))
+    // (Under a minute, "It started just now": not "for 1 min now" from its first second.)
+    ok(!!(await until(async () => /Phone is connecting to this screen(\. It started just now|, for \d+ min now)\./.test(await line.innerText().catch(() => '')), 10000)) && await line.getByRole('button', { name: 'Stop' }).isVisible(), 'Studio\'s window: who is connecting, for how long, with Stop', await line.innerText().catch(() => ''))
     const bd = await page(b, `${studio.url}/?remote=badge`, { width: 520, height: 58, before })
     await bd.p.locator('.rs-badge').waitFor({ timeout: 8000 })
     ok(!!(await until(async () => /Phone is connecting to this screen/.test(await bd.p.locator('.rs-badge').innerText()), 8000)) && await bd.p.getByRole('button', { name: 'Stop' }).isVisible(), 'and its badge, with Stop', await bd.p.locator('.rs-badge').innerText())
@@ -2023,7 +2027,7 @@ try {
     const card = p.locator('.rs-live .ask-row', { hasText: 'Phone' })
     await card.waitFor({ timeout: 10000 })
     const said = await card.innerText()
-    ok(/Studio's screen is being viewed from Phone \(phone\)/.test(said) && /· 1 min/.test(said) && await card.getByRole('button', { name: 'Stop', exact: true }).isVisible() && await card.getByRole('button', { name: 'Block This Device' }).isVisible(), 'Laptop\'s window: a card saying Studio\'s screen is being viewed from Phone, for how long, with Stop and Block This Device', said)
+    ok(/Studio's screen is being viewed from Phone \(phone\)/.test(said) && /· (just now|1 min)/.test(said) && await card.getByRole('button', { name: 'Stop', exact: true }).isVisible() && await card.getByRole('button', { name: 'Block This Device' }).isVisible(), 'Laptop\'s window: a card saying Studio\'s screen is being viewed from Phone, for how long, with Stop and Block This Device', said)
     ok(await card.getByRole('button', { name: 'Stop', exact: true }).evaluate((el) => getComputedStyle(el).color) === 'rgb(255, 255, 255)', 'its Stop in white on red, whatever else Bridge AI has loaded')
     await shot(p, `${tag}remote-screen-card`)
     // Studio's own window says it in its own line (with its Stop), not the card as well.
@@ -2456,6 +2460,64 @@ try {
     ok(!!(await until(async () => !(await p.locator('.rs-card').count()) && (await studio.api('/remote')).sessions.length === 1, 15000)) && !!(await picture(p)), 'View again, once the link is back: the screen again, in a session at Studio', await p.locator('.rs-view').innerText().catch(() => ''))
     await p.locator('.rs-bar').getByRole('button', { name: 'Stop viewing' }).click()
     await p.context().close()
+  })
+
+  // The agent's app in its Preview tab: on a phone through its relay page (drawn at Studio, shown as
+  // pictures), and on Laptop (at its own address, behind Studio's password); the link through Studio's
+  // relay dropping meanwhile: each says so, and why it may have, with View again, which shows it again.
+  await part('Preview, on a phone and on Laptop: the link dropping said, with View again', async () => {
+    const r = await relayPhone()
+    const { p, f } = r
+    await sendUntil(f, 'bridge-open-agent', { paneId: pane }, '[role="tab"][title="Preview"]')
+    await f.locator('[role="tab"][title="Preview"]').first().click()
+    const pages = f.locator('.pv-pages')
+    const phoneChip = f.locator('.preview-chip', { hasText: `:${dport}` })
+    await phoneChip.waitFor({ timeout: 20000 })
+    await phoneChip.click()
+    // (Shown: the picture in its place, nothing over it. The last one stays in the page meanwhile.)
+    const shows = async (where) => {
+      const live = async () => !(await where.locator('.viewer-empty, .rs-card').count()) && !!(await where.locator('img:not([hidden])').first().getAttribute('src').catch(() => ''))?.startsWith('blob:')
+      await until(async () => (await where.locator('.rs-card.c-password').count()) || await live(), 20000, 100)
+      if (await where.locator('.rs-card.c-password').count()) {
+        const box = where.locator('.rs-card.c-password input')
+        await until(async () => box.isEnabled(), 5000, 50)
+        await box.fill(PW)
+        await box.press('Enter')
+      }
+      return until(live, 20000, 100)
+    }
+    ok(!!(await shows(pages)), 'on the phone: Studio\'s app, as pictures drawn there', await pages.innerText().catch(() => ''))
+    // Laptop: the same app at its own address, past Studio's password (a session open while it shows).
+    const port = (await laptop.api('/machines')).machines.find((m) => m.id === S.id)?.port
+    const L = await page(b, `http://127.0.0.1:${port}/m/${S.id}/?window=${enc(pane)}`)
+    errors.push(...L.errors)
+    await L.p.getByRole('tab', { name: 'Preview' }).or(L.p.getByRole('button', { name: 'Preview' })).first().click()
+    const chip = L.p.locator('.preview-chip', { hasText: `:${dport}` })
+    await chip.waitFor({ timeout: 20000 })
+    await chip.click()
+    await enterPw(L.p)
+    const frame = L.p.locator('iframe.preview-frame')
+    ok(!!(await until(() => frame.count(), 20000)), 'on Laptop: the app, past Studio\'s password')
+    await ra.drop()
+    const DROPPED = /The connection to Studio dropped\. It may have gone to sleep or offline, or this device lost its connection\./
+    const said = await until(async () => { const x = await pages.innerText().catch(() => ''); return DROPPED.test(x) ? x : null }, 15000)
+    ok(!!said && await pages.getByRole('button', { name: 'View again' }).isVisible(), 'the phone\'s link dropping: the Preview tab says the connection to Studio dropped, and why it may have, with View again (not just that it isn\'t shown)', said || await pages.innerText().catch(() => ''))
+    await shot(p, `${tag}remote-screen-preview-phone-dropped`)
+    const body = L.p.locator('.preview-body')
+    const saidL = await until(async () => { const x = await body.innerText().catch(() => ''); return DROPPED.test(x) ? x : null }, 15000)
+    ok(!!saidL && await body.getByRole('button', { name: 'View again' }).isVisible(), 'and on Laptop the same, with View again', saidL || await body.innerText().catch(() => ''))
+    // The links back: View again shows each again.
+    await until(async () => (await f.evaluate(() => fetch('/api/version').then((x) => x.ok)).catch(() => false)), 30000, 300)
+    await pages.getByRole('button', { name: 'View again' }).click()
+    const again = await shows(pages)
+    ok(!!again, 'View again on the phone, once the link is back: the app again', again ? undefined : { shown: (await pages.innerText().catch(() => '')).replace(/\s+/g, ' '), sessions: (await studio.api('/remote')).sessions.map((x) => ({ kind: x.kind, waiting: x.waiting, via: x.via })) })
+    await until(async () => (await laptop.api('/machines')).machines.find((m) => m.id === S.id)?.online, 30000, 300)
+    await body.getByRole('button', { name: 'View again' }).click()
+    if (await L.p.locator('.rs-card.c-password').waitFor({ timeout: 8000 }).then(() => true, () => false)) await enterPw(L.p)
+    ok(!!(await until(async () => (await frame.count()) && !DROPPED.test(await body.innerText().catch(() => '')), 20000)), 'and on Laptop', await body.innerText().catch(() => ''))
+    ok(!r.errs.filter((e) => !/^Error: (Your computer|Reconnecting|Connection lost)/.test(e)).length, 'no page errors on the phone', r.errs.slice(0, 3))
+    await L.ctx.close()
+    await r.ctx.close()
   })
   ok(!errors.length, 'no page errors', errors.slice(0, 3))
   t1.stop()
