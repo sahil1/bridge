@@ -75,6 +75,9 @@ export async function windows({ app, step, ROOT }) {
   fs.writeFileSync(helper, `#!/bin/sh\nexec "${process.execPath}" "${path.join(ROOT, 'test', 'stand-ins', 'bridgesign.cjs')}" "$@"\n`, { mode: 0o755 })
   fs.writeFileSync(path.join(data, 'bridgesign.json'), JSON.stringify({ probe: { trackpad: false, touchID: true, auth: true, parent: true }, auth: { ok: true, how: 'touchid' } }))
   const env = { ...process.env, BRIDGE_HOME: data, BRIDGE_PORT: String(PORT), BRIDGE_FIX_DRYRUN: '1', BRIDGE_SIGNHELPER: helper, BRIDGESIGN_STATE: path.join(data, 'bridgesign.json'), BRIDGESIGN_LOG: path.join(data, 'bridgesign.log') }
+  // (SMOKE_APP_TMPDIR: the app's own temporary folder, when this run's is too deep for the terminal
+  // host's socket, as a socket's path can't be longer than 104 bytes.)
+  if (process.env.SMOKE_APP_TMPDIR) env.TMPDIR = process.env.SMOKE_APP_TMPDIR
   delete env.ELECTRON_RUN_AS_NODE
   const out = []
   let proc = null
@@ -162,6 +165,18 @@ export async function windows({ app, step, ROOT }) {
   const look = (p) => p.evaluate(() => ({ url: location.href, title: document.title, drawn: (document.getElementById('root')?.childElementCount || 0) > 0, app: !!window.bridgeApp })).catch((e) => ({ error: e.message }))
   const isApp = async (p) => { const l = await look(p); return l.drawn && l.app && /Bridge AI/.test(l.title) && l.url.startsWith(BASE) ? l : null }
   const main = (ms) => pageAt(`${BASE}/`, ms)
+  // A page left still: no load of its own for `ms` (after its server is back, the app may open the
+  // window's page again once it has the proof; a step after that starts on the page it then has).
+  async function still(p, ms = 2000, max = 20000) {
+    let last = Date.now()
+    const moved = (f) => { if (f === p.mainFrame()) last = Date.now() }
+    p.on('framenavigated', moved)
+    try {
+      const end = Date.now() + max
+      while (Date.now() < end && Date.now() - last < ms) await sleep(200)
+      return Date.now() - last >= ms
+    } finally { p.off('framenavigated', moved) }
+  }
   // How long a page was held back before its request went (the proof, for a page), from DevTools'
   // own timing: requestWillBeSent, then when the network stack took it (requestTime).
   async function held(p, go) {
@@ -287,6 +302,8 @@ export async function windows({ app, step, ROOT }) {
       await r
       const w = await until(async () => { const x = pages().find((q) => q.url() === `${BASE}/`); return x && await isApp(x) ? x : null }, 30000, 300)
       if (!w || seenNotOurs.length || serverPid() !== was || !alive(was)) throw new Error(`${w ? 'back' : 'not back'}; another program's page: ${seenNotOurs.length}; pid ${was} → ${serverPid()}`)
+      await still(w)
+      if (!(await isApp(w))) throw new Error(`after it: ${JSON.stringify(await look(w))}`)
       return `the reload finished ${Date.now() - t} ms after, on the same server (pid ${was})`
     })
 
@@ -294,6 +311,7 @@ export async function windows({ app, step, ROOT }) {
     let sw = null
     await only('a service worker: its requests go once the server is proven', async () => {
       const p = await main()
+      await still(p)
       // (What Chromium says of the worker as it goes, for a failure's message.)
       const swSession = await p.context().newCDPSession(p)
       const swSaid = []
@@ -333,7 +351,13 @@ export async function windows({ app, step, ROOT }) {
         setTimeout(() => res(`no answer: ${seen.slice(-200)}`), 30000)
       }), `ws://127.0.0.1:${PORT}/api/panes/${encodeURIComponent(pane)}/attach?cols=80&rows=24`)
       if (ran !== 'ran') throw new Error(ran)
-      return 'its WebSocket open, the command run, HOME set'
+      // (The terminal host that runs it started as the server is: lockdown.js first, SIGUSR1 opening
+      // nothing. What it says it was started with, in the data folder: its title hides it from ps.)
+      let host = null
+      try { host = JSON.parse(fs.readFileSync(path.join(data, 'host', 'host.json'), 'utf8')) } catch { /* none */ }
+      const line = (host?.execArgv || []).join(' ')
+      if (!/--disable-sigusr1/.test(line) || !/--import \S*\/server\/lockdown\.js/.test(line)) throw new Error(`the terminal host (pid ${host?.pid}) started with: ${line.slice(0, 300) || 'nothing said'}`)
+      return 'its WebSocket open, the command run, HOME set; the terminal host started with lockdown.js and SIGUSR1 opening nothing'
     })
     await only('its server stopped and another program at its address: nothing of the app\'s goes to it, nothing from it is shown or heard', async () => {
       const p = await main()

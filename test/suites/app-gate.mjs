@@ -170,11 +170,53 @@ const windowAuth = require(path.join(ROOT, 'desktop', 'windowauth.js'))
   const smoke = flags.serverEnv(given, { platform: 'darwin', smoke: true })
   const linux = flags.serverEnv({ ...given, http_proxy: 'http://p', DISPLAY: ':0' }, { platform: 'linux' })
   const win = flags.serverEnv({ SystemRoot: 'C:\\Windows', Path: 'C:\\x', APPDATA: 'C:\\a', NODE_PATH: 'C:\\np', BRIDGE_ROOT: 'C:\\c' }, { platform: 'win32' })
-  const keptMac = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'TMPDIR', 'TERM', 'SSH_AUTH_SOCK', 'HTTPS_PROXY', 'ELECTRON_RUN_AS_NODE', 'BRIDGE_WINDOW_FD', 'BRIDGE_HOME', 'BRIDGE_PORT', 'WS_NO_BUFFER_UTIL', 'WS_NO_UTF_8_VALIDATE']
+  const keptMac = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'TMPDIR', 'TERM', 'SSH_AUTH_SOCK', 'HTTPS_PROXY', 'ELECTRON_RUN_AS_NODE', 'BRIDGE_WINDOW_FD', 'BRIDGE_HOME', 'BRIDGE_PORT', 'WS_NO_BUFFER_UTIL', 'WS_NO_UTF_8_VALIDATE', 'NO_PROXY', 'no_proxy']
   ok(Object.keys(mac).sort().join() === keptMac.sort().join() && mac.WS_NO_BUFFER_UTIL === '1' && smoke.BRIDGE_FIX_DRYRUN === '1' && !smoke.NODE_PATH && !linux.http_proxy && !linux.HTTPS_PROXY && linux.DISPLAY === ':0' && win.SystemRoot && win.Path && win.APPDATA && !win.NODE_PATH && !win.BRIDGE_ROOT,
     'the built app\'s server gets only what it and what it starts need: where you are, your SSH agent and proxy, Windows\' and a Linux desktop\'s own, the app\'s pipe, data folder and port; never NODE_PATH, NODE_OPTIONS, another copy, the tests\' stand-ins or anything else (the smoke test\'s build passes its own on); ws\'s native parts off', { mac: Object.keys(mac), linux: Object.keys(linux), win: Object.keys(win) })
+  // This computer's own addresses never through a proxy, with what NO_PROXY said kept.
+  const noProxy = flags.serverEnv({ PATH: '/usr/bin', HTTPS_PROXY: 'http://p', NO_PROXY: 'corp.example, 10.0.0.0/8' }, { platform: 'darwin' })
+  const noProxyWin = flags.serverEnv({ Path: 'C:\\x' }, { platform: 'win32' })
+  ok(noProxy.NO_PROXY === 'corp.example,10.0.0.0/8,localhost,127.0.0.1,::1' && noProxy.no_proxy === noProxy.NO_PROXY && noProxyWin.NO_PROXY === 'localhost,127.0.0.1,::1', 'the server\'s NO_PROXY always has this computer\'s own addresses, with what it said kept', { mac: noProxy.NO_PROXY, win: noProxyWin.NO_PROXY })
   const args = flags.serverArgs('/Applications/Bridge AI.app/Contents/Resources/app-root')
   ok(args[0] === '--disable-sigusr1' && args[1] === '--import' && /\/server\/lockdown\.js$/.test(args[2]) && /\/server\/index\.js$/.test(args[3]), 'the server is started with lockdown.js loaded before anything of its own', args)
+
+  // The terminal host starts on the app's Node as the server does (its flags, lockdown.js first), and
+  // no process of the server's is forked or started with an empty execArgv in place of the server's
+  // own (it would lose lockdown.js).
+  const pathsJs = fs.readFileSync(path.join(ROOT, 'server', 'paths.js'), 'utf8')
+  const hostJs = fs.readFileSync(path.join(ROOT, 'server', 'runtime', 'hostlink.js'), 'utf8')
+  const serverFiles = (function list(d) { return fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? list(path.join(d, e.name)) : /\.[cm]?js$/.test(e.name) ? [path.join(d, e.name)] : [])) })(path.join(ROOT, 'server'))
+  const emptyArgv = serverFiles.filter((f) => /execArgv\s*:\s*\[\s*\]/.test(fs.readFileSync(f, 'utf8'))).map((f) => path.relative(ROOT, f))
+  ok(/export const OWN_NODE_FLAGS = IN_APP \? \['--disable-sigusr1', '--import', pathToFileURL\(path\.join\(ROOT, 'server', 'lockdown\.js'\)\)\.href\] : \[\]/.test(pathsJs) && /spawn\(NODE\.bin, \[\.\.\.OWN_NODE_FLAGS, HOST_JS, DIR, sock\]/.test(hostJs) && !emptyArgv.length, 'the terminal host starts with the server\'s own flags and lockdown.js, and nothing of the server\'s is started with an empty execArgv', { emptyArgv })
+
+  // The keys file sealed for its data folder: another folder's copy of it is taken as one that won't
+  // open (moved aside, no signatures' key); one from before takes this folder's.
+  const windowAuth = require(path.join(ROOT, 'desktop', 'windowauth.js'))
+  const kdir = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-keys-profile-'))
+  const store = { isEncryptionAvailable: () => true, encryptString: (t) => Buffer.from(`ENC:${t}`), decryptString: (b) => { const t = b.toString(); if (!t.startsWith('ENC:')) throw new Error('not ours'); return t.slice(4) } }
+  const mine = path.join(kdir, 'a', 'signing-keys')
+  const made = windowAuth.keysAt(mine, store, { profile: '/Users/me/.bridge-ai' })
+  const sealedFor = JSON.parse(fs.readFileSync(mine).toString().slice(4)).profile
+  const again = windowAuth.keysAt(mine, store, { profile: '/Users/me/.bridge-ai' })
+  const theirs = path.join(kdir, 'b', 'signing-keys')
+  fs.mkdirSync(path.dirname(theirs), { recursive: true })
+  fs.copyFileSync(mine, theirs)
+  const copied = windowAuth.keysAt(theirs, store, { profile: '/tmp/another' })
+  const older = path.join(kdir, 'c', 'signing-keys')
+  fs.mkdirSync(path.dirname(older), { recursive: true })
+  fs.writeFileSync(older, store.encryptString(JSON.stringify({ window: 'w'.repeat(43), key: Buffer.alloc(32).toString('base64'), launch: null, state: null })))
+  const old = windowAuth.keysAt(older, store, { profile: '/Users/me/.bridge-ai' })
+  const stamped = JSON.parse(fs.readFileSync(older).toString().slice(4)).profile
+  const facts = { sealedFor, again: again.window === made.window && !again.unreadable, copied: copied.unreadable && !fs.existsSync(theirs) && fs.existsSync(`${theirs}.unreadable`) && copied.window !== made.window, old: !old.unreadable && old.window === 'w'.repeat(43), stamped }
+  fs.rmSync(kdir, { recursive: true, force: true })
+  ok(facts.sealedFor === '/Users/me/.bridge-ai' && facts.again && facts.copied && facts.old && facts.stamped === '/Users/me/.bridge-ai', 'the app\'s keys are sealed for their data folder: opened there; a copy put in another folder taken as one that won\'t open (moved aside, no signatures\' key); one from before kept, and sealed for its folder as it\'s saved', facts)
+
+  // The signing helper: the running process, by its pid, held to the app's signature before it's told
+  // anything (auth, the trackpad); the app's requirement read from the app as it runs.
+  const signJs = fs.readFileSync(path.join(ROOT, 'server', 'signhelper.js'), 'utf8')
+  const mainSrc = fs.readFileSync(path.join(ROOT, 'desktop', 'main.js'), 'utf8')
+  ok(/if \(args\[0\] !== 'probe' && !\(await runningHolds\(child\)\)\) \{ await answer; return null \}\n\s+child\.stdin\.end\(/.test(signJs) && /runningHolds\(started\)\.then\(\(ok\) => \{\n\s+if \(!ok\) \{ end\(\{ cancel: 'none' \}\); return \}\n\s+try \{ started\.stdin\.write\(/.test(signJs) && /if \(await holds\(child\.pid, req\)\) return true/.test(signJs) && /codesig\.requirementOf\(String\(process\.pid\)\)/.test(mainSrc),
+    'the signing helper as it runs (its pid) is held to the app\'s signature before it\'s asked for Touch ID or the trackpad; the app\'s requirement is read from the app as it runs')
 
   // A package planted where Node would look for one the server's copy lacks (ws's bufferutil): in a
   // home folder, NODE_PATH and a parent folder of the copy, all scratch ones (never the real home).
