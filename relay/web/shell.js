@@ -357,7 +357,7 @@ function awayBanner(on = true) {
   if (!on) return
   bar(null)
   const relayDown = ws?.readyState !== 1 || !heardStatus
-  $('away-title').textContent = unchecked ? `Can't connect to ${thisComputer() === 'Your computer' ? 'your computer' : thisComputer()}: the answer through the relay couldn't be checked.` : silent ? `${thisComputer()} isn't answering.` : relayDown ? 'Can\'t reach your relay right now.' : `${thisComputer()} is offline${hostSeen ? ` since ${when(hostSeen)}` : ''}.`
+  $('away-title').textContent = unchecked ? `Can't connect to ${thisComputer() === 'Your computer' ? 'your computer' : thisComputer()}: the answer through the relay couldn't be checked.` : silent ? `${thisComputer()} isn't answering.` : relayDown ? 'Can\'t reach your relay right now.' : hostSeen ? `${thisComputer()} has been offline since ${when(hostSeen)}.` : `${thisComputer()} is offline.`
   $('away-text').textContent = `Showing what it last sent. Messages you send ${relayKeeps && !relayDown && !silent ? 'go out when it\'s back' : 'wait on this phone until it\'s back'}.`
   // The way to your other computers, Cloud Agents and the demo, in the apps.
   $('away-more').hidden = !others().length && !bundledUis.length
