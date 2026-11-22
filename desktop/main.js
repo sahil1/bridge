@@ -5,6 +5,13 @@
 //   from source (npm run desktop)     your clone, with `node scripts/start.js`
 const electron = require('electron')
 const { app, BrowserWindow, Menu, Tray, shell, globalShortcut, Notification, session, nativeTheme, ipcMain, powerMonitor, powerSaveBlocker, screen, nativeImage, systemPreferences, dialog, desktopCapturer } = electron
+// First of all: a built app given Chromium's or Node's debugging switches, or Chromium's stand-in for
+// the keychain, doesn't start (startgate.js), before any window, profile or key.
+require('./startgate.js').check({
+  app,
+  data: process.env.BRIDGE_HOME || require('node:path').join(require('node:os').homedir(), '.bridge-ai'),
+  pkg: (() => { try { return require('./package.json') } catch { return null } })(),
+})
 const dictation = require('./dictation.js')
 const contextMenu = require('./contextmenu.js')
 const permissions = require('./permissions.js')
