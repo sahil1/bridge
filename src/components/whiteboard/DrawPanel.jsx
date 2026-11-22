@@ -14,6 +14,7 @@ import { before, mark, markOne, keep as keepIt, discard as discardIt } from './s
 import { holderOf, contents } from './holders.js'
 import CopyButton from '../CopyButton.jsx'
 import { where } from '../settings/search.js'
+import { useEnter, EnterAt } from '../EnterHint.jsx'
 
 // "Draw this", "Change it" and "Ask" (about the shapes selected, answered here and changing
 // nothing): words (typed, or said with the dictation key) to a model, and back as shapes on the
@@ -451,6 +452,8 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
   }, [want?.n]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const go = (e) => { e?.preventDefault(); if (!busy) (mode === 'draw' ? draw() : mode === 'ask' ? ask() : change()) }
+  // Enter as Settings › You › Enter Key has it (src/enter.js); a phone's keyboard on the screen sends, as before.
+  const enter = useEnter(text, go)
   const noModel = m.loaded && !m.models.length
   const cur = run?.rounds[run.at]
   const was = past?.rounds[past.pick]
@@ -464,9 +467,11 @@ export default function DrawPanel({ board, start, want = null, onStarted, onClos
           <button type="button" role="tab" aria-selected={asking} className={asking ? 'on' : ''} onClick={() => setMode('ask')} disabled={!scene.n} title={sel ? t('Ask about the {n} selected', { n: sel }) : t('Ask about the board')}><Icon name="chat" size={12} /> {t('Ask')}</button>
         </div>
       </AssistHead>
-      <textarea ref={box} rows={compact ? 2 : 3} value={text} onChange={(e) => setText(e.target.value)} disabled={busy}
-        placeholder={mode === 'draw' ? t('A 3-tier web app on AWS, how a pull request gets merged, our office network, who reports to whom…') : asking ? (sel ? t('What to ask about the {n} selected: what\'s missing between these steps, what this part does…', { n: sel }) : t('What to ask about the board: what\'s missing, what a part does…')) : sel ? t('What to change in the {n} selected', { n: sel }) : t('What to change: rename a box, add a step, colour the risky parts red…')}
-        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) go(e) }} aria-label={mode === 'draw' ? t('What to draw') : asking ? t('What to ask') : t('What to change')} />
+      <EnterAt show={enter.mid}>
+        <textarea ref={box} rows={compact ? 2 : 3} value={text} onChange={(e) => { setText(e.target.value); enter.box.onSelect(e) }} disabled={busy}
+          placeholder={mode === 'draw' ? t('A 3-tier web app on AWS, how a pull request gets merged, our office network, who reports to whom…') : asking ? (sel ? t('What to ask about the {n} selected: what\'s missing between these steps, what this part does…', { n: sel }) : t('What to ask about the board: what\'s missing, what a part does…')) : sel ? t('What to change in the {n} selected', { n: sel }) : t('What to change: rename a box, add a step, colour the risky parts red…')}
+          onKeyDown={enter.onKeyDown} {...enter.box} aria-label={mode === 'draw' ? t('What to draw') : asking ? t('What to ask') : t('What to change')} />
+      </EnterAt>
       {mode === 'draw' && (
         <div className="wb-draw-opts">
           <div className="wb-kinds" role="radiogroup" aria-label={t('Kind of diagram')}>

@@ -62,6 +62,11 @@
 // Screen off). Open Bridge AI only with a Remote Access Password set, and not once you quit the app
 // here yourself, until it's opened here. The capture page comes in with a token given to the app
 // for it, once, and only from this computer.
+// A locked screen (the desktop app says when, on a Mac or Windows: desktop/remote.js): neither lets
+// an app take one. A device starting to view is told so before the password, and waits; unlocked,
+// the guardrails ask as ever. Locked in a session, it waits over its last picture with nothing
+// pressed, and the screen is taken again once it's unlocked, over the same connection. LOCKED_MS at
+// most, either way. Said only to a device that may connect, never to one kept out or locked out.
 import fs from 'node:fs'
 import { totalmem } from 'node:os'
 import path from 'node:path'
@@ -69,7 +74,7 @@ import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
 import { WebSocketServer } from 'ws'
 import { dataFile, ensureDir, writeFileAtomic } from './paths.js'
 import * as input from './remoteinput.js'
-import { cleanInput, iceServers, RATE, MAX_FRAME, PAUSE_MS, ACCESS, packFrame, plainName } from '../shared/remote.js'
+import { cleanInput, iceServers, RATE, MAX_FRAME, PAUSE_MS, ACCESS, LOCKED_WAIT_MINUTES, packFrame, plainName } from '../shared/remote.js'
 import { placeEn } from '../shared/places.js'
 
 const FILE = dataFile('remote.json')
@@ -113,6 +118,10 @@ const PENDING_MAX = 2 // sessions of one device waiting at the password or for A
 // Wrong passwords through another of your computers, for every device it speaks for together, before
 // all of them are locked out through it (each device has its own ACCESS.tries too).
 const HOP_TRIES = ACCESS.tries * 4
+// This computer's screen locked: a session waits this long for it, by the clock (looked at every
+// LOCK_LOOK_MS, so the tests' clock can move it on).
+const LOCKED_MS = LOCKED_WAIT_MINUTES * 60000
+const LOCK_LOOK_MS = 1000
 const clean = (s, n = 60) => plainName(s, n)
 
 const read = () => {
@@ -206,6 +215,11 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
   // Sessions past the guardrails, their screen not started yet (waiting on the capture page, or on
   // a fix): what ends sessions ends these too, and they're shown with Stop as the others are.
   const opening = new Set()
+  // This computer's screen locked, as the desktop app last said: true, false, or null where it isn't
+  // known (Linux, an app older than this, no app). Each word the app says is numbered (n, in that
+  // run of it: id), so an older one coming in late (with a capture page's list) doesn't undo a newer.
+  let lock = { locked: null, id: null, n: -1 }
+  const screenLocked = () => lock.locked === true
 
   // What waits on the capture page or the desktop app (until): each is looked at again on any change.
   const waits = new Set()
@@ -336,6 +350,8 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     const screen = screenStatus()
     // (Behind a guardrail, not even which screens: Which screen? comes in the session, past them.)
     if (device && screen.sources) screen.sources = guarded ? [] : screen.sources.map(forViewer)
+    // Whether it's locked: this computer itself only (a device is told in a session it may start).
+    if (!device) screen.locked = lock.locked
     if (os === 'mac' && !screen.permission && trialOn()) { const a = await screenAllowed().catch(() => null); if (a != null) screen.permission = a ? 'ok' : 'ask' }
     const base = {
       on: trialOn(), name: thisName(), os, ...(version ? { version } : {}),
@@ -461,6 +477,8 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
         c.p2p = m.p2p === true
         c.ready = true
         c.listed++
+        // (With the screen locked or not, as the app said when it listed them.)
+        if (m.lock && typeof m.lock === 'object') setLocked(m.lock)
         if (m.t === 'hello') idleLater()
         poke()
         onChange()
@@ -474,7 +492,19 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
       if (m.t === 'started') { s.size = { w: m.w | 0, h: m.h | 0 }; return tell(s.viewer, { t: 'size', w: s.size.w, h: s.size.h }) }
       if (m.t === 'input') return applyInput(s, m.evs)
       if (m.t === 'thumbs') return thumbsOut(s, m.list)
-      if (m.t === 'error') return end(s, 'error', clean(m.why, 300) || 'The screen couldn\'t be shared')
+      // Its screen not taken (or stopped) as it's locked: the session waits for it to be unlocked;
+      // unlocked already, by a newer word of the app's, taken again now.
+      if (m.t === 'locked') { setLocked(m.lock && typeof m.lock === 'object' ? m.lock : { locked: true }); return screenLocked() ? lockOn(s) : takeAgain(s) }
+      if (m.t === 'error') {
+        // (Locked meanwhile, as the app said: waited for, not ended.)
+        if (screenLocked()) return lockOn(s)
+        // Not taken, tried twice there: said plainly (and what the system said, as detail), and why
+        // in this computer's log.
+        if (m.code !== 'capture') return end(s, 'error', clean(m.why, 300) || 'The screen couldn\'t be shared')
+        const detail = clean(m.detail, 200)
+        if (mayNote(s)) note(s, `the screen couldn't be taken: ${detail || 'no reason given'}`)
+        return end(s, 'error', cantStart(), { code: 'capture', ...(detail ? { detail } : {}) })
+      }
     })
     ws.on('close', () => {
       if (capture !== c) return
@@ -498,7 +528,8 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
   // (a JPEG the desktop app made, or the stand-in's drawing) of a screen that's there.
   const THUMB = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/
   function askThumbs(s) {
-    if (Date.now() - (s.thumbsAt || 0) < 3000) return
+    // (Nor while it's locked: nothing of a locked screen is taken.)
+    if (Date.now() - (s.thumbsAt || 0) < 3000 || s.lockedAt || screenLocked()) return
     s.thumbsAt = Date.now()
     if (s.provider === 'capture') return tell(capture?.ws, { t: 'thumbs', session: s.id })
     for (const x of sourceList().filter((y) => y.kind === 'screen')) {
@@ -697,6 +728,84 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     if (ls.some((l, i) => l.fails >= most(i))) return { locked: lockNow(), now: true }
     return { wrong: true, left: ACCESS.tries - ls[0].fails }
   }
+  // ---------- a locked screen ----------
+  // What the desktop app says (as it changes, and asked as its feed connects: lock?), or its capture
+  // page (with its list of screens, or a screen it couldn't take). Locked: each session showing this
+  // screen waits (lockOn). Unlocked: each takes it again (lockOff), and a device waiting to start goes
+  // on to the password (untilUnlocked). (Linux: never; nothing waits there.)
+  function setLocked(r) {
+    const id = typeof r?.id === 'string' ? r.id.slice(0, 40) : null
+    const n = Number.isSafeInteger(r?.n) ? r.n : -1
+    if (id && id === lock.id && n < lock.n) return false
+    const locked = os === 'linux' ? null : r?.locked === true ? true : r?.locked === false ? false : null
+    const was = lock.locked
+    lock = { locked, id, n }
+    if (locked === was) return true
+    for (const s of watchers()) { if (locked) lockOn(s); else lockOff(s) }
+    poke()
+    onChange()
+    return true
+  }
+  const lockedLong = () => `${thisName()} stayed locked for ${LOCKED_WAIT_MINUTES} minutes, so this stopped. View it again once it's unlocked there.`
+  const cantStart = () => `Bridge AI couldn't start showing this screen. Try again; if it keeps happening, reopen Bridge AI on ${thisName()}.`
+  // A session's screen locked: it waits where it is, the viewer told (over its last picture), with
+  // no pictures and nothing pressed (keys held let go first); LOCKED_MS at most, then it ends.
+  function lockOn(s) {
+    if (s.lockedAt || !sessions.has(s.id)) return
+    s.lockedAt = Date.now()
+    if (s.may) sink?.releaseAll(s.source.bounds)
+    s.pending = null
+    tell(s.viewer, { t: 'locked', os, ms: LOCKED_MS })
+    clearInterval(s.lockTimer)
+    s.lockTimer = setInterval(() => { if (Date.now() - s.lockedAt >= LOCKED_MS) end(s, 'screenLocked', lockedLong()) }, LOCK_LOOK_MS)
+    s.lockTimer.unref?.()
+  }
+  function lockOff(s) {
+    if (!s.lockedAt) return
+    s.lockedAt = 0
+    clearInterval(s.lockTimer)
+    tell(s.viewer, { t: 'unlocked' })
+    takeAgain(s)
+  }
+  // Unlocked: its screen taken again by the capture page, over the same connection (the one it had,
+  // when it has it still); the same screen when it's still there, else the main one.
+  async function takeAgain(s) {
+    if (s.provider !== 'capture') return
+    await askSources(2000).catch(() => {})
+    if (!sessions.has(s.id) || s.lockedAt) return
+    const list = sourceList()
+    const main = list.length && !list.some((x) => x.id === s.source.id && x.kind === s.source.kind) && (list.find((x) => x.kind === 'screen' && x.primary) || list.find((x) => x.kind === 'screen'))
+    if (main) return switchTo(s, `screen:${main.id}`, { again: true })
+    tell(capture?.ws, resumeOf(s))
+  }
+  // (Peer-to-peer again only while the viewer hasn't gone over to pictures meanwhile.)
+  const resumeOf = (s) => ({ t: 'resume', session: s.id, source: s.source, p2p: s.via === 'relay' ? null : s.ice || null, rate: rate(s), max: MAX_FRAME })
+  // Before the guardrails, with this computer's screen locked: the viewer told (nobody types a
+  // password for nothing), and waited for; LOCKED_MS at most. True once it's unlocked; false when the
+  // viewer went, it's no longer let in, or it waited too long (said).
+  function untilUnlocked(s) {
+    const ws = s.viewer
+    const since = Date.now()
+    tell(ws, { t: 'locked', os, ms: LOCKED_MS })
+    return new Promise((resolve) => {
+      let tm = null
+      const done = (v) => { clearInterval(tm); waits.delete(look); ws.off('close', gone); resolve(v) }
+      const gone = () => done(false)
+      const look = () => {
+        // (Turned away meanwhile: unticked, the password changed, said already.)
+        if (ws.readyState !== 1 || s.over || !pending.has(s)) return done(false)
+        if (!trialOn()) { s.fail('Remote Screen and Preview was turned off on this computer.', 'off'); return done(false) }
+        if (!s.mayView()) { refuse(s, 'device'); s.fail(notAllowed(s), 'device'); return done(false) }
+        if (!screenLocked()) { tell(ws, { t: 'unlocked' }); return done(true) }
+        if (Date.now() - since >= LOCKED_MS) { s.fail(lockedLong(), 'screenLocked'); return done(false) }
+      }
+      tm = setInterval(look, LOCK_LOOK_MS)
+      waits.add(look)
+      ws.on('close', gone)
+      look()
+    })
+  }
+
   // Before anything is taken: a device locked out goes; the password, when one is set (ACCESS.tries
   // wrong, and that device is locked out); then Ask Here First, when it's on. True to go on, with
   // what was allowed (s.okControl: control may be taken without asking here again).
@@ -870,7 +979,12 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     s.mayView = mayView
     pending.add(s)
     let passed = false
-    try { passed = await gate(s, fail) } finally { pending.delete(s) }
+    try {
+      // This computer's screen locked: said before the password, and waited for (counted as waiting
+      // at it); unlocked, the guardrails as ever. (A device locked out is told that instead: gate.)
+      if (s.kind === 'screen' && screenLocked() && !lockedFor(s) && !(await untilUnlocked(s))) return
+      passed = await gate(s, fail)
+    } finally { pending.delete(s) }
     if (!passed || ws.readyState !== 1) return
     if (!mayView()) { refuse(s, 'device'); return fail(notAllowed(s), 'device') }
     if (s.kind === 'page') {
@@ -910,12 +1024,15 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     ws.on('message', (data, binary) => { if (!binary) { let m; try { m = JSON.parse(String(data)) } catch { return } fromViewer(s, m) } })
     ws.on('close', () => end(s, 'viewer'))
     const p2p = s.kind === 'screen' && s.provider === 'capture' && s.p2p && capture?.p2p
+    s.ice = p2p ? { ice: iceServers(process.env) } : null
     tell(ws, {
       t: 'hello', session: s.id, name: thisName(), os, source: { kind: s.source.kind, id: s.source.id, name: s.source.name, w: s.source.w, h: s.source.h, ...(s.port ? { port: s.port } : {}) },
       sources: s.kind === 'screen' ? sourceList().map(forViewer) : [],
-      p2p: p2p ? { ice: iceServers(process.env) } : null, rate: rate(s), control: controlInfo(s), ...(s.grant ? { grant: true } : {}),
+      p2p: s.ice, rate: rate(s), control: controlInfo(s), ...(s.grant ? { grant: true } : {}),
     })
-    if (s.provider === 'capture') tell(capture.ws, { t: 'start', session: s.id, source: s.source, p2p: p2p ? { ice: iceServers(process.env) } : null, rate: rate(s), max: MAX_FRAME })
+    // (Locked since it got past the password: it waits, and the screen is taken once it's unlocked.)
+    if (s.kind === 'screen' && screenLocked()) lockOn(s)
+    if (s.provider === 'capture') { if (!s.lockedAt) tell(capture.ws, { t: 'start', session: s.id, source: s.source, p2p: s.ice, rate: rate(s), max: MAX_FRAME }) }
     else if (s.provider === 'desktop') toDesktop({ t: 'page-start', session: s.id, port: s.source.port, w: s.page.w, h: s.page.h, rate: rate(s) })
     else if (s.provider === 'fake') fakeFrames(s)
     if (!p2p) via(s, 'relay')
@@ -944,17 +1061,18 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
   }
 
   // Another of its screens (or windows), in the same session: nothing to reconnect, nor to ask again.
-  function switchTo(s, want) {
+  // again: taken again once it's unlocked (its own screen gone meanwhile: this one instead).
+  function switchTo(s, want, { again = false } = {}) {
     const [kind, ...rest] = want.split(':')
     const sid = rest.join(':')
     const src = sourceList().find((x) => x.id === sid && x.kind === (kind === 'window' ? 'window' : 'screen'))
     if (!src) return tell(s.viewer, { t: 'error', code: 'source', why: 'That screen or window isn\'t there any more. Pick another.', keep: true })
-    if (src.id === s.source.id && src.kind === s.source.kind) return
+    if (src.id === s.source.id && src.kind === s.source.kind && !again) return
     if (s.may) sink?.releaseAll(s.source.bounds)
     s.source = { kind: src.kind, id: src.id, name: src.name, bounds: src.bounds, w: src.w, h: src.h }
     s.entry.also = [...new Set([...(s.entry.also || []), src.name])].filter((n) => n !== s.entry.source.name).slice(0, 10)
     save()
-    if (s.provider === 'capture') tell(capture?.ws, { t: 'switch', session: s.id, source: s.source, rate: rate(s), max: MAX_FRAME })
+    if (s.provider === 'capture') tell(capture?.ws, again ? resumeOf(s) : { t: 'switch', session: s.id, source: s.source, rate: rate(s), max: MAX_FRAME })
     else if (s.provider === 'fake') tell(s.viewer, { t: 'size', w: src.w, h: src.h })
     tell(s.viewer, { t: 'source', source: { kind: src.kind, id: src.id, name: src.name, w: src.w, h: src.h }, control: controlInfo(s) })
     if (ctl(s)) startSink()
@@ -1009,6 +1127,8 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
   // A picture for the viewer: sent once the last one was shown (ack), at most rate(s) a second; one
   // that comes meanwhile takes the place of one still waiting, so what's shown is never behind.
   function frameIn(s, data) {
+    // (Its screen locked: none, so the viewer keeps the last one, which was this screen's.)
+    if (s.lockedAt) return
     const b = Buffer.isBuffer(data) ? data : Buffer.from(data)
     if (b.byteLength > MAX_FRAME + 64) { tell(capture?.ws, { t: 'smaller', session: s.id }); return }
     s.pending = b
@@ -1042,7 +1162,7 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
       onLocal: () => {
         pausedUntil = Date.now() + PAUSE_MS
         sink?.releaseAll()
-        for (const s of controlling()) tell(s.viewer, { t: 'paused', ms: PAUSE_MS, why: 'local' })
+        for (const s of controlling()) if (!s.lockedAt) tell(s.viewer, { t: 'paused', ms: PAUSE_MS, why: 'local' })
         onChange()
       },
       onError: (e) => {
@@ -1056,8 +1176,11 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     sink.stop()
     sink = null
   }
+  // (Never to a locked screen: nothing pressed there until it's unlocked, whatever comes meanwhile.)
+  const onLockedScreen = (s) => s.kind === 'screen' && (!!s.lockedAt || screenLocked())
   function applyInput(s, evs) {
     if (!Array.isArray(evs) || !ctl(s)) return
+    if (onLockedScreen(s)) return
     if (s.kind === 'screen' && Date.now() < pausedUntil) return
     const list = evs.slice(0, 200).map(cleanInput).filter(Boolean)
     if (!list.length) return
@@ -1073,6 +1196,7 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
   }
   async function clip(s, m) {
     if (!ctl(s) || s.kind !== 'screen') return tell(s.viewer, { t: 'error', code: 'clipboard', why: controlWhy(s) || 'The clipboard goes along only while you control the computer.', keep: true })
+    if (onLockedScreen(s)) return tell(s.viewer, { t: 'error', code: 'clipboard', why: `${thisName()} is locked: the clipboard goes along again once it's unlocked there.`, keep: true })
     s.lastInput = Date.now()
     try {
       if (m.t === 'clip') { await input.writeClipboard(String(m.text ?? '')); tell(s.viewer, { t: 'clip-sent', n: String(m.text ?? '').length }) } else tell(s.viewer, { t: 'clip', text: (await input.readClipboard()).slice(0, 1_000_000) })
@@ -1080,12 +1204,14 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
   }
 
   // ---------- the end ----------
-  function end(s, why, error = null) {
+  // say: more for the viewer (a code of its own, the system's words as detail).
+  function end(s, why, error = null, say = {}) {
     if (!sessions.delete(s.id)) return
     clearTimeout(s.fakeTimer)
     clearTimeout(s.waitTimer)
     clearInterval(s.idleCheck)
-    if (error) tell(s.viewer, { t: 'error', why: error, code: why, ...(s.blockedAt ? { at: s.blockedAt } : {}) })
+    clearInterval(s.lockTimer)
+    if (error) tell(s.viewer, { t: 'error', why: error, code: why, ...say, ...(s.blockedAt ? { at: s.blockedAt } : {}) })
     if (why === 'here') tell(s.viewer, { t: 'ended', why: 'here', text: `Stopped on ${thisName()}.` })
     if (why === 'stopped') tell(s.viewer, { t: 'ended', why: 'stopped', by: s.stoppedBy, text: `Stopped from ${s.stoppedBy}.` })
     try { if (s.viewer.readyState <= 1) s.viewer.close(1000, why) } catch { /* closed */ }
@@ -1093,7 +1219,7 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     if (s.provider === 'desktop') toDesktop({ t: 'page-stop', session: s.id })
     if (s.kind === 'screen' && s.may) sink?.releaseAll(s.source.bounds)
     stopSinkIfIdle()
-    Object.assign(s.entry, { ended: new Date().toISOString(), seconds: Math.round((Date.now() - s.started) / 1000), end: why, ...(error && why !== 'blocked' ? { error: clean(error, 300) } : {}), ...(s.stoppedBy ? { stoppedBy: s.stoppedBy } : {}), controlled: s.controlled, via: s.via })
+    Object.assign(s.entry, { ended: new Date().toISOString(), seconds: Math.round((Date.now() - s.started) / 1000), end: why, ...(error && why !== 'blocked' && why !== 'screenLocked' ? { error: clean(error, 300) } : {}), ...(s.stoppedBy ? { stoppedBy: s.stoppedBy } : {}), controlled: s.controlled, via: s.via })
     save()
     idleLater()
     toBadge()
@@ -1456,6 +1582,8 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     takeQuitMark()
     fn({ t: 'control', on: controlOn() })
     fn({ t: 'sessions', list: badgeList(), asks: [...asks.values()].map(shownAsk) })
+    // Whether this computer's screen is locked (it says again each time that changes).
+    fn({ t: 'lock?' })
     // A start waiting on the app (it just started, or reopened): its capture page, asked for now.
     if (starting) fn(needs())
     quitSaid = 0
@@ -1469,6 +1597,8 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
       leaving.delete(fn)
       app.gone = Date.now()
       if (capture && !desktopOpen()) capture.old = true
+      // (No app to say whether the screen is locked: not known, so nothing waits on it.)
+      if (!desktopOpen()) setLocked({ locked: null })
       if (!desktopOpen() && app.gone - quitSaid < 15000) { quitSaid = 0; conf.quit = new Date().toISOString(); save() }
       poke()
       onChange()
@@ -1494,6 +1624,7 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     for (const s of [...sessions.values()]) end(s, 'off', 'Remote Screen and Preview was turned off on this computer.')
     for (const s of [...opening]) endWaiting(s, 'off', 'Remote Screen and Preview was turned off on this computer.')
     for (const a of [...asks.values()]) a.done('deny')
+    poke() // (a device waiting for this screen to be unlocked is told too)
   }
 
   // Whether a device of this computer's may go on through it to another of your computers (machines.js):
@@ -1531,7 +1662,7 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
     return { ok: true }
   }
 
-  return { status, setControl, setPassword, clearPassword, setAskFirst, setDevice, setNotify, unlock, answer, allows, admits, shutFor, outVia, viaList, turnedAway, waiting, mayPass, mayPreview, stop, stopAll, endFrom, live, seen, upgrade, isPath, onDesktop, pageFrame, trialChanged, desktopOpen, didntShow, appQuit, mayUpdate, throughNames, desktopSince: () => app.came, active: () => sessions.size }
+  return { status, setControl, setPassword, clearPassword, setAskFirst, setDevice, setNotify, unlock, answer, setLocked, allows, admits, shutFor, outVia, viaList, turnedAway, waiting, mayPass, mayPreview, stop, stopAll, endFrom, live, seen, upgrade, isPath, onDesktop, pageFrame, trialChanged, desktopOpen, didntShow, appQuit, mayUpdate, throughNames, desktopSince: () => app.came, active: () => sessions.size }
 }
 
 // The test stand-in's screens: its main one, one beside it, a 5K one at twice its points (as a

@@ -27,6 +27,7 @@ import { useBusy } from '../../busy.js'
 import { Threads, SAY, useAuthor } from '../studio/doccomments.jsx'
 import { useBoardThreads } from './boardcomments.jsx'
 import { where } from '../settings/search.js'
+import { useEnter, EnterAt } from '../EnterHint.jsx'
 import './whiteboard.css'
 
 // Whiteboards: the list (WhiteboardsHome), one board (WhiteboardPage), and a diagram file in an
@@ -650,13 +651,17 @@ export function WhiteboardsHome({ onOpen, tap = false, keys = null, focus = null
     } catch (e) { setErr(e.message) } finally { setBusy(false) }
   }
   const draw = (e) => { e?.preventDefault(); const p = text.trim(); if (p && !busy) create({ title: titleFor(p), prompt: p }).then(() => setText('')) }
+  // Enter as Settings › You › Enter Key has it (src/enter.js); a phone's keyboard on the screen draws, as before.
+  const enter = useEnter(text, draw)
   const n = boards.length
   return (
     <div className="wb-home in-studio">
       <form className="wb-ask" onSubmit={draw}>
         <h1>{t('What should we draw?')}</h1>
-        <textarea rows={3} value={text} onChange={(e) => setText(e.target.value)} placeholder={t('Describe a flowchart, an architecture or network, a sequence or an org chart. It comes out as shapes and icons you can move and edit.')}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) draw(e) }} aria-label={t('What to draw')} />
+        <EnterAt show={enter.mid}>
+          <textarea rows={3} value={text} onChange={(e) => { setText(e.target.value); enter.box.onSelect(e) }} placeholder={t('Describe a flowchart, an architecture or network, a sequence or an org chart. It comes out as shapes and icons you can move and edit.')}
+            onKeyDown={enter.onKeyDown} {...enter.box} aria-label={t('What to draw')} />
+        </EnterAt>
         <div className="wb-ask-row">
           <div className="wb-kinds" role="radiogroup" aria-label={t('Kind of diagram')}>
             {KINDS.map(([id, label]) => <button type="button" key={id} role="radio" aria-checked={kind === id} className={`chip${kind === id ? ' on' : ''}`} onClick={() => setKind(id)}>{t(label)}</button>)}

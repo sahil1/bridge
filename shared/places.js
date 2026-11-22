@@ -55,6 +55,7 @@ export const SETTINGS = {
   accounts: ['providers', 'Accounts'],
   cloud: ['providers', 'Cloud Agents'],
   'mcp-server': ['mcp', 'Bridge AI as an MCP Server'],
+  'enter-key': ['you', 'Enter Key'],
 }
 
 // Places outside Settings a message names, as names from the top: Bots' tabs (the sidebar's Bots,

@@ -16,7 +16,7 @@ import { useTrial } from '../../trials.js'
 import { t, locale } from '../../i18n/index.js'
 import { useRemote, remoteDo, viewing } from './remote.js'
 import { onFor } from '../Machines.jsx'
-import { plainName } from '../../../shared/remote.js'
+import { plainName, LOCKED_WAIT_MINUTES } from '../../../shared/remote.js'
 import './remote.css'
 
 // Who: a device, and the one it was for when it came through another of your computers. Names as
@@ -229,7 +229,8 @@ export function Sessions({ log, here }) {
   if (!log?.length) return <p className="muted small">{t('Nobody has viewed this computer\'s screen yet.')}</p>
   const how = (e) => (e.end === 'here' ? t('stopped here') : e.end === 'device' ? t('stopped: not allowed any more')
     : e.end === 'stopped' ? t('stopped from {device}', { device: e.stoppedBy || t('another of your devices') }) : e.end === 'blocked' ? t('blocked from {device}', { device: e.stoppedBy || t('another of your devices') })
-      : e.end === 'error' || e.end === 'lost' ? t('ended with an error') : null)
+      : e.end === 'error' || e.end === 'lost' ? t('ended with an error')
+        : e.end === 'screenLocked' ? t('ended: this screen stayed locked for {n} minutes', { n: LOCKED_WAIT_MINUTES }) : null)
   // The sessions, and apart from them a few of the latest turned away (each line counting repeats).
   const shown = [...log.filter((e) => !refused(e)).slice(0, 30), ...log.filter(refused).slice(0, 10)].sort((a, b) => log.indexOf(a) - log.indexOf(b))
   return (
