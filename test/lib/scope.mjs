@@ -90,15 +90,15 @@ export function pick({ suites, changed, core, app = [], runner, root, versionOnl
       p.suites.forEach((n) => also.add(n))
     }
   }
-  // src/styles.css: the files that show what its changed rules style (styleChange), or, for one
-  // that styles the whole page (body, :root's colours, a rule with no class), every test that opens
-  // the app.
+  // src/styles.css: the files that show what its changed rules style (styleChange) stand for it, as
+  // a server/index.js statement's files do; for a rule that styles the whole page (body, :root's
+  // colours, a rule with no class), every test that opens the app.
   let opensApp = changed.some(isApp)
   if (changed.includes('src/styles.css')) {
     const css = texts['src/styles.css']
     const r = css?.before != null && css.after != null && styleChange(css, srcTexts(root))
     if (!r) opensApp = true
-    else r.forEach((f) => own.add(f))
+    else { own.delete('src/styles.css'); r.forEach((f) => own.add(f)) }
   }
   const used = [...own, ...shell]
   const named = new Set(changed.filter((f) => /^test\/(suites|lib|stand-ins|fixtures)\//.test(f) && f !== 'test/lib/harness.mjs').flatMap((f) => [...tests.usersOf(f)]))
