@@ -26,7 +26,10 @@ let items = []
 const landedIds = new Set() // listed by your computer (landed below)
 const subs = new Set()
 const tell = () => { items = [...items]; for (const fn of subs) fn() }
-const put = (x) => { items = items.filter((y) => y.cid !== x.cid).concat(x); tell() }
+// In its place when it's there already (answered, or waiting for the connection): put at the end, the
+// first of two sent at once came after the second once it was answered, and the chat showed them so
+// until your computer listed them.
+const put = (x) => { const i = items.findIndex((y) => y.cid === x.cid); items = i < 0 ? [...items, x] : items.map((y, j) => (j === i ? x : y)); tell() }
 const drop = (cid) => { items = items.filter((y) => y.cid !== cid); tell() }
 const keep = (x) => store([...stored().filter((y) => y.cid !== x.cid), { cid: x.cid, pane: x.pane, way: x.way, text: x.text, at: x.at, ...(x.typed ? { typed: x.typed } : {}) }])
 const done = (cid) => store(stored().filter((y) => y.cid !== cid))
