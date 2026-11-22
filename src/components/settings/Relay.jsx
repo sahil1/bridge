@@ -253,7 +253,7 @@ export default function Relay({ way, setWay, onOffer }) {
           {/* A code pairs one device: once it has, its QR code goes, and another is a click away. */}
           {st.pairing ? <PairCode p={st.pairing} onStop={() => run('/relay/pair', { stop: true })} /> : (
             <div className="st-row">
-              {st.paired && <span className="st-chip good" role="status"><Icon name="check" size={11} /> {t('{name} paired', { name: st.paired.name })}</span>}
+              {st.paired && <span className="st-chip good wraps" role="status"><Icon name="check" size={11} /> {t('{name} paired', { name: st.paired.name })}</span>}
               <button type="button" className={st.paired ? 'btn' : 'btn primary'} disabled={!st.online} onClick={() => run('/relay/pair')}><Icon name={st.paired ? 'plus' : 'link'} size={14} /> {st.paired ? t('Add another device') : t('Pair a device')}</button>
               {!st.online && <span className="muted small">{t('Waiting for the relay to connect.')}</span>}
             </div>
@@ -263,7 +263,7 @@ export default function Relay({ way, setWay, onOffer }) {
             <ul className="ph-devices">
               {phones.map((d) => (
                 <li key={d.id}>
-                  <Icon name="phone" size={14} /><span>{d.name}</span>
+                  <span className="ph-dev-name"><Icon name="phone" size={14} /><span>{d.name}</span></span>
                   {d.fresh && <span className="st-chip">{t('New')}</span>}
                   {d.moving && <span className="st-chip">{t('Not moved yet')} <More>{t('It follows this computer here the next time it opens Bridge AI.')}</More></span>}
                   <span className="muted small">{d.connected ? t('connected now') : d.lastSeen ? t('last used {when}', { when: new Date(d.lastSeen).toLocaleString(locale(), { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) }) : ''}</span>
