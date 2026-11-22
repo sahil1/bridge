@@ -926,7 +926,11 @@ process.exit(1)`)
   await send(RR.id, Buffer.concat([pcm(6), pcm(2, true), pcm(1)]))
   await kit.api(`/meetings/${RR.id}/stop`, {})
   const r4 = await until(async () => { const m = await kit.api(`/meetings/${RR.id}`); return m.status === 'done' && !m.summarizing && !m.summaryStale && model.asked(/Write meeting notes in Markdown/).length > s0 && m }, 20000)
-  ok(!!r4 && r4.seconds === 33 && r4.transcript.filter((l) => l.t0 >= 29).length === 1, 'ended again, its summary is written again from all of it', r4 ? [r4.seconds, r4.summaryStale, r4.transcript.map((l) => [l.src, l.t0])] : (await kit.api(`/meetings/${RR.id}`)).summaryStale)
+  // It carried on from where it had got to: its 24 s, or past its last line to the second when a
+  // line was heard ending after that (the call's last words, read again, can end at 24.1 s); then
+  // the 9 s recorded since.
+  const from = Math.max(24, Math.ceil(Math.max(0, ...(r3?.transcript || []).map((l) => l.t1 || 0))))
+  ok(!!r4 && r4.resumedFrom === from && r4.seconds === from + 9 && r4.transcript.filter((l) => l.t0 >= from + 5).length === 1, 'ended again, its summary is written again from all of it', r4 ? [r4.seconds, r4.resumedFrom, from, r4.summaryStale, r4.transcript.map((l) => [l.src, l.t0, l.t1])] : (await kit.api(`/meetings/${RR.id}`)).summaryStale)
   await kit.api('/settings', { meetings: { autoSummary: false } }, 'PATCH')
 
   // ---------- Combined meetings ----------
