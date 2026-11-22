@@ -9,7 +9,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { checks, ROOT } from '../lib/harness.mjs'
-import { runnerChange, pick, cssRules, statements } from '../lib/scope.mjs'
+import { runnerChange, pick, cssRules, statements, styleChange, indexChange } from '../lib/scope.mjs'
 
 const { ok, done } = checks('test-scope')
 const list = (...a) => JSON.parse(execFileSync(process.execPath, [path.join(ROOT, 'test', 'run.mjs'), '--list', ...a], { cwd: ROOT, encoding: 'utf8' }))
@@ -75,6 +75,14 @@ const route = picked(['server/index.js'], lineAt('server/index.js', "app.get('/a
 ok(has(route, ['studio', 'studio-docs']) && none(route, botsOnes) && route.length < 40, 'a Studio route in server/index.js: the Studio tests, none of the bots\'', route)
 const botRoute = picked(['server/index.js'], lineAt('server/index.js', "app.get('/api/bots/:id/activity'"))
 ok(has(botRoute, ['bots-activity']) && none(botRoute, studios) && botRoute.length < 60, 'a bots route: the bots\' tests, none of Studio\'s', botRoute)
+// The same on a server/index.js made up here (each line a statement): an import, its file; a route,
+// what it calls and who asks for it; a function, what uses it; a value a file makes, that file; what
+// runs a function at start, what that calls; a package's import or middleware for every request,
+// every test.
+const server2 = "import express from 'express'\nimport * as studio from './studio.js'\nimport { makeDesk } from './frontdesk.js'\nimport * as bots from './bots.js'\nconst app = express()\napp.use(express.json())\nconst desk = makeDesk({ ask: () => 1 })\nfunction rootOf(id) { return id }\napp.get('/api/studio/open', (req, res) => res.json(studio.open(rootOf(req.query.id))))\napp.get('/api/bots/:id', (req, res) => res.json(desk.view(req.params.id)))\nfunction tick() { bots.tick() }\nsetInterval(tick, 1000)\n"
+const asked = (route) => ({ files: new Set(route === '/api/studio/open' ? ['src/components/studio/Studio.jsx'] : []), suites: new Set(route === '/api/bots/:id' ? ['bots-ui'] : []) })
+const stmt = (line) => { const r = indexChange({ before: server2, after: server2, diff: `@@ -${line} +${line} @@`, users: asked }); return r.every ? 'every' : [...r.files, ...r.suites].sort().join() }
+ok(stmt(2) === 'server/studio.js' && stmt(9) === 'server/studio.js,src/components/studio/Studio.jsx' && stmt(8) === 'server/studio.js,src/components/studio/Studio.jsx' && stmt(7) === 'server/frontdesk.js' && stmt(10) === 'bots-ui,server/bots.js,server/frontdesk.js' && stmt(11) === 'server/bots.js' && stmt(12) === 'server/bots.js' && stmt(1) === 'every' && stmt(6) === 'every' && stmt(5) === 'every', 'server/index.js\'s statements: an import, its file; a route, what it calls (a name in its address too: bots) and who asks for it; a function, what uses it; a value a file makes, that file; setInterval(tick), what tick calls; a package\'s import, middleware for every request and the app itself: every test', [1, 2, 5, 6, 7, 8, 9, 10, 11, 12].map(stmt))
 // What every request goes through, and a server/index.js that can't be compared: every test.
 ok(picked(['server/index.js'], lineAt('server/index.js', 'app.use(guard.http)')).length === names.length, 'server/index.js\'s middleware for every request: every test')
 ok(picked(['server/index.js']).length === names.length, 'server/index.js with nothing to compare it with: every test')
@@ -101,6 +109,13 @@ ok(has(pack, ['i18n-ui', 'float-card-window', 'update-channel', 'calendar']) && 
 const css = picked(['src/styles.css'], lineAt('src/styles.css', '.update-pop {'))
 ok(has(css, ['update-channel', 'updates']) && none(css, studios) && css.length < opensApp.length / 2, 'styles.css, the update card\'s rule: the tests of what shows it', css)
 ok(has(picked(['src/styles.css'], lineAt('src/styles.css', ':root {')), opensApp), 'styles.css, :root\'s colours: every test that opens the app')
+// The same on a sheet made up here: a rule, the files that show a class it needs; an @media's
+// condition, each rule in it; what needs no class, or a class no file shows, null (every test that
+// opens the app).
+const sheet2 = '/* a */\n.a .x { color: red }\n@media (width < 600px) {\n  .b { color: red }\n  .c:not(.z) { color: red }\n}\nbody { margin: 0 }\n.k-idea { color: red }\n.gone { color: red }\n'
+const shows = [['A.jsx', '<p className="a">'], ['B.jsx', 'el.classList.add(\'b\')'], ['C.jsx', '"c"'], ['K.jsx', 'className={`k-${kind}`}'], ['Z.jsx', '"z"']]
+const styled = (line) => { const r = styleChange({ before: sheet2, after: sheet2, diff: `@@ -${line} +${line} @@` }, shows); return r && [...r].sort().join() }
+ok(styled(2) === 'A.jsx' && styled(1) === 'A.jsx' && styled(4) === 'B.jsx' && styled(3) === 'B.jsx,C.jsx' && styled(5) === 'C.jsx' && styled(8) === 'K.jsx' && styled(7) === null && styled(9) === null, 'a rule: what shows a class it needs (its comment with it, `k-${kind}` for .k-idea, not :not(.z)\'s); an @media\'s condition: each rule in it; body, or a class nothing shows: every test that opens the app', [1, 2, 3, 4, 5, 7, 8, 9].map(styled))
 
 // Under test/: the suites that name a file, or call the harness's function it's in.
 const slack = picked(['test/stand-ins/slack.mjs'])

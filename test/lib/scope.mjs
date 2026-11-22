@@ -48,13 +48,14 @@ export function shareOf(suites, i, n) {
 //   changed: the files it changes, as git names them; core: patterns of the files whose change runs
 //   every test; app: of those whose change runs every test that opens the app (and what covers or
 //   uses them); runner: runnerChange's answer (null: every test); versionOnly(f): a package file
-//   with only its version changed; texts: server/index.js and test/lib/harness.mjs as they were and
-//   are, and git's diff of each ({ before, after, diff }), for the ones changed (one missing: every
-//   test, as which of its statements changed can't be said).
+//   with only its version changed; texts: server/index.js, test/lib/harness.mjs and src/styles.css
+//   as they were and are, and git's diff of each ({ before, after, diff }), for the ones changed
+//   (one missing: every test, or every test that opens the app, as what changed in it can't be said).
 // A suite runs for a change to a file it covers (its `covers`), to a file it uses (its `uses`, the
 // files it imports or reads itself, and every file those import), to its own test file, or to a
 // file under test/ it names; server/index.js and the harness by the statements changed in them
-// (indexChange, harnessChange), and a file in shared/ as the files that import it too.
+// (indexChange, harnessChange), styles.css by its rules (styleChange), and a file in shared/ as
+// the files that import it too.
 export function pick({ suites, changed, core, app = [], runner, root, versionOnly = () => false, texts = {} }) {
   if (runner === null || changed.some((f) => core.some((re) => re.test(f)) && !versionOnly(f))) return suites
   const isApp = (f) => app.some((re) => re.test(f))
@@ -154,12 +155,12 @@ export function cssRules(text) {
       continue
     }
     if (ch === '{') {
-      open.push({ prelude: buf.trim(), from: lead ?? from ?? line, rules: [] })
+      open.push({ prelude: buf.trim(), from: lead ?? from ?? line, head: line, rules: [] })
       buf = ''; from = null; lead = null
     } else if (ch === '}') {
       const b = open.pop()
       if (!b) return null
-      const rule = { from: b.from, to: line, selector: b.prelude, at: open.map((o) => o.prelude), inner: b.rules }
+      const rule = { from: b.from, head: b.head, to: line, selector: b.prelude, at: open.map((o) => o.prelude), inner: b.rules }
       rules.push(rule)
       for (const o of open) o.rules.push(rule)
       buf = ''; from = null; lead = null
@@ -208,16 +209,17 @@ export function styleChange({ before, after, diff }, src) {
   const sides = [cssRules(before), cssRules(after)]
   if (!sides[0] || !sides[1]) return null
   // Each hunk's rules on each side: the ones it's in, not the @media around them, unless it's in
-  // none of those (the @media's own line: then each rule in it).
+  // the @media's own lines too (its condition: then each rule in it).
   const touched = []
   for (const h of String(diff).matchAll(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/gm)) {
     const [a, b, c, d] = [Number(h[1]), h[2] == null ? 1 : Number(h[2]), Number(h[3]), h[4] == null ? 1 : Number(h[4])]
     for (const [list, from, n] of [[sides[0], a, b], [sides[1], c, d]]) {
       if (!n) continue
-      const at = list.filter((r) => r.to >= from && r.from <= from + n - 1)
+      const end = from + n - 1
+      const at = list.filter((r) => r.to >= from && r.from <= end)
       // (Lines after the last rule: comments, nothing styled.)
       if (!at.length && from <= (list.at(-1)?.to || 0)) return null
-      touched.push(...at.filter((r) => !r.inner.some((x) => at.includes(x))))
+      touched.push(...at.filter((r) => (r.from <= end && r.head >= from) || r.to <= end || !r.inner.some((x) => at.includes(x))))
     }
   }
   const files = new Set()
