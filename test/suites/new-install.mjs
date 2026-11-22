@@ -9,7 +9,8 @@
 // nothing to allow, never the developer tools; Node.js's progress on the Install of an agent that
 // waits for it, and in the top bar once setup is closed, until it's in), closing setup, Home with
 // nothing to talk to, New agent, a chat with any model once a key is in, and a key the provider
-// turns down.
+// turns down. Home as Bridge AI starts (on): a new install's first window, setup done, opens at Home
+// on a desktop and a phone, as there's nowhere to go back to.
 import fs from 'node:fs'
 import http from 'node:http'
 import os from 'node:os'
@@ -93,7 +94,7 @@ await new Promise((r) => nodeOrg.once('listening', r))
 
 // On Windows, without BRIDGE_PATH, so where it looks for programs is the app's own way there: the
 // kit's PATH (its stand-ins and Windows' own folders), plus Node.js once it's installed.
-const kit = await startKit('new-install', { env: { BRIDGE_NODE_DIST: `http://127.0.0.1:${nodeOrg.address().port}`, ...(IS_WIN ? { BRIDGE_PATH: '' } : {}) } })
+const kit = await startKit('new-install', { config: { home: undefined }, env: { BRIDGE_NODE_DIST: `http://127.0.0.1:${nodeOrg.address().port}`, ...(IS_WIN ? { BRIDGE_PATH: '' } : {}) } })
 const model = await startModel('new-install')
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
@@ -332,6 +333,8 @@ try {
   for (const phone of [false, true]) {
     const t = phone ? 'phone' : 'desktop'
     const { ctx, p, errors } = await open(LOOKS[1][1], { phone })
+    // The first window, with nowhere to go back to: Home.
+    ok(!!(await until(async () => (phone ? /Home/.test(await p.locator('.tabbar button[aria-current="true"]').innerText().catch(() => '')) : true) && await p.locator('.hm').first().isVisible().catch(() => false), 15000)), `${t}: a new install opens at Home, as there's nowhere to go back to`)
     await p.waitForTimeout(1500)
     if (phone) { await p.click('.tabbar button:has-text("Agents")'); await p.waitForTimeout(400); if (await p.$('.m-view-back')) { await p.click('.tabbar button:has-text("Agents")'); await p.waitForTimeout(400) } }
     await p.locator('[data-tour="new-agent"]:visible, button[aria-label="Start something new"]:visible').first().click()

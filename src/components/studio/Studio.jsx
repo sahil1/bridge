@@ -5,7 +5,7 @@ import { PaneHeader, useMedia, store } from '../layout.jsx'
 import { WhiteboardPage } from '../../lazy.jsx'
 import { Menu, fileOp } from '../FileExtras.jsx'
 import { t, tx, locale } from '../../i18n/index.js'
-import { openFile, bytesOf, loadFile, rawUrl, versionUrl, saveFile, changedSince, restoreVersion, base64, extOf } from './files.js'
+import { openFile, bytesOf, loadFile, rawUrl, slimUrl, versionUrl, saveFile, changedSince, restoreVersion, base64, extOf, movedTo, saveCopy, wholeFile, keepDraft, draftOf, draftBytes, dropDraft } from './files.js'
 import { MidName } from '../files/names.jsx'
 import { useDesignPacks, PacksSection, packFor } from './packs.jsx'
 import { lineDiff, textFor, comparable } from './diff.js'
@@ -404,6 +404,45 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
   const saveRef = useRef(null)
   const conflictRef = useRef(null)
   useEffect(() => { conflictRef.current = conflict }, [conflict])
+  // Moved or deleted while it was open (its save or a look at it found it gone): { looking, found:
+  // where it went ({ path, name }) or null, draft: kept, error }. What's in the editor stays, kept as
+  // a recovery draft on its computer (server/studio.js keepDraft) until it's saved somewhere or
+  // downloaded; opened again, gone, the draft opens.
+  const [gone, setGone] = useState(null)
+  const goneRef = useRef(null)
+  const setLost = (g) => { goneRef.current = g; setGone(g) }
+  const [copyWhere, setCopyWhere] = useState('') // Save a copy in: '' the folder it was in, or a folder's root
+  const draftAt = useRef(null)
+  // What's in the editor now, as the file's bytes (or text).
+  const current = async () => { let b = await handle.current.save(); if (b && typeof b === 'object' && Array.isArray(b.notKept)) b = b.bytes; return b }
+  // Its draft kept and let go one after another, so one on its way never lands after it's let go
+  // (what's in the editor taken at once, sent in turn).
+  const draftOps = useRef(Promise.resolve())
+  const inTurnDraft = (fn) => (draftOps.current = draftOps.current.then(fn, fn))
+  const keepNow = async () => {
+    const m = metaRef.current
+    if (!handle.current?.save || !m || READ_ONLY(m.kind, m)) return
+    try {
+      const b = await current()
+      await inTurnDraft(() => keepDraft(f, b, { kind: m.kind, inParts: !!m.parts }))
+      if (goneRef.current) setLost({ ...goneRef.current, draft: true, draftError: null })
+    } catch (e) { if (goneRef.current) setLost({ ...goneRef.current, draftError: e.message }) }
+  }
+  const letDraftGo = () => { clearTimeout(draftAt.current); return inTurnDraft(() => dropDraft(f).catch(() => {})) }
+  const keepRef = useRef(null)
+  keepRef.current = keepNow
+  const lost = async () => {
+    if (goneRef.current) return
+    clearTimeout(autoAt.current); autoAt.current = null
+    setConflict(null)
+    setLost({ looking: true, found: null, draft: false })
+    if (dirtyRef.current) keepNow()
+    const id = metaRef.current?.fileId
+    const r = id ? await movedTo(f, id).catch(() => null) : null
+    if (goneRef.current) setLost({ ...goneRef.current, looking: false, found: r?.path ? r : null })
+  }
+  const lostRef = useRef(null)
+  lostRef.current = lost
   const later = useCallback((ms = AUTO_MS) => {
     clearTimeout(autoAt.current)
     autoAt.current = setTimeout(() => { autoAt.current = null; saveRef.current?.({ auto: true }) }, ms)
@@ -412,12 +451,29 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
     setDirty(v)
     if (!v) return
     edits.current++
+    // Gone: kept as its draft a moment after you stop typing, not saved where it was.
+    if (goneRef.current) { clearTimeout(draftAt.current); draftAt.current = setTimeout(() => keepRef.current?.(), 1500); return }
     if (SAVES_ITSELF.has(metaRef.current?.kind) && !conflictRef.current) later()
   }, [later])
   const packs = useDesignPacks()
   const folders = useFolders()
   const load = useCallback(async () => {
-    const m = await openFile(f)
+    let m
+    try { m = await openFile(f) } catch (e) {
+      // Gone, with a draft kept of what was in it: the draft, to save somewhere.
+      const d = e?.code === 'gone' ? (await draftOf(f).catch(() => null))?.draft : null
+      if (!d) throw e
+      const buf = await draftBytes(f)
+      metaRef.current = { path: f.path, name: d.name, kind: d.kind, ext: d.ext, size: d.size, mtime: null, versions: [], fileId: null, inParts: false, saves: true, keep: 0, root: f.root, parts: null, url: null }
+      setMeta(metaRef.current)
+      setData(buf)
+      setGen((g) => g + 1)
+      setConflict(null)
+      dirtyRef.current = true
+      setDirty(true)
+      setLost({ looking: false, found: null, draft: true })
+      return metaRef.current
+    }
     // A big one in parts (files.js loadFile): only what's shown comes, as it's shown.
     const got = await loadFile(f, m)
     // Known at once, before it's drawn: the next look at the file goes from this.
@@ -427,6 +483,7 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
     setGen((g) => g + 1)
     setDirty(false)
     setConflict(null)
+    setLost(null)
     keepLast({ root: f.root, path: f.path, name: m.name })
     return m
   }, [f])
@@ -442,17 +499,23 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
   useEffect(() => {
     const look = async () => {
       const m = metaRef.current
-      if (!m || document.hidden || writing.current) return
+      if (!m || document.hidden || writing.current || goneRef.current) return
       if (Date.now() > quick.current && Date.now() - lastLook.current < 10_000) return
       lastLook.current = Date.now()
       const n = wrote.current
-      const r = await changedSince(f, m.mtime).catch(() => null)
+      // Not there any more (moved, renamed, deleted): said, and what's here kept (lost).
+      const r = await changedSince(f, m.mtime).catch((e) => { if (e?.code === 'gone' && !writing.current) lostRef.current?.(); return null })
       // Written here meanwhile: what this look saw may be that. The next one looks again from it.
       if (writing.current || wrote.current !== n) { lastLook.current = 0; return }
       if (!r?.changed) return
       if (r.by === 'agent') quick.current = Math.max(quick.current, Date.now() + 120_000)
+      // Saved by you in another window (or on your phone): said so, not as another app's change.
+      const mine = r.by === 'you' || r.by === 'restored'
       const who = r.by === 'agent' ? (r.name || t('An agent')) : t('Another app')
-      if (!dirtyRef.current) { await load().catch(() => {}); setNote({ text: t('{who} changed it: this is its new version.', { who }) }) } else { setMeta((x) => ({ ...x, versions: r.versions })); setConflict({ who, mtime: r.mtime }) }
+      if (!dirtyRef.current) {
+        try { await load() } catch (e) { setErr(e); return }
+        setNote({ text: mine ? t('You changed it in another window: this is its new version.') : t('{who} changed it: this is its new version.', { who }) })
+      } else { setMeta((x) => ({ ...x, versions: r.versions })); setConflict({ who, mine, mtime: r.mtime }) }
     }
     const back = () => { lastLook.current = 0; look() }
     const id = setInterval(look, 2500)
@@ -461,6 +524,8 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
   }, [f, load])
   const save = useCallback(async ({ force = false, ok = false, auto = false, leaving = false } = {}) => {
     if (!handle.current || !meta || READ_ONLY(meta.kind, meta)) return
+    // Gone: not saved where it was (its bar saves a copy, or where it went); ⌘S keeps its draft.
+    if (goneRef.current) { if (!leaving) keepRef.current?.(); return }
     // One at a time: asked while one's on its way, it's made after it. Leaving the file, what's in
     // it now is taken at once and saved after the one on its way.
     if (inFlight.current && !leaving) { queued.current = auto && queued.current !== 'you' ? 'auto' : 'you'; return }
@@ -476,6 +541,7 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
     inFlight.current = mine
     const n = edits.current
     const mtime = metaRef.current?.mtime ?? meta.mtime
+    let sent = null // what went to be saved, kept as a draft if the file's gone
     try {
       // An editor that can't keep everything in the file says what, before it's saved (a sheet).
       const taking = handle.current.save()
@@ -485,6 +551,7 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
         if (bytes.notKept.length && !ok) { setWarn({ text: t('Saving here can\'t keep {what}. Save anyway? The file as it is now stays in its versions.', { what: bytes.notKept.join('; ') }) }); return }
         bytes = bytes.bytes
       }
+      sent = bytes
       const r = await saveFile(f, bytes, { mtime: was ?? mtime, force, auto, inParts: !!meta.parts })
       finish(r.mtime)
       // The page went on to another file meanwhile: what it shows now isn't this one's.
@@ -498,9 +565,17 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
       if (auto) setNote((x) => (x?.error ? null : x))
       else setNote({ text: t('Saved.'), brief: true })
     } catch (e) {
+      // Moved or deleted meanwhile: what's here kept, and said (left by then: kept as its draft,
+      // and said all the same).
+      if (e.code === 'gone') {
+        if (shownFile.current === f) lostRef.current?.()
+        else if (sent != null) keepDraft(f, sent, { kind: meta.kind, inParts: !!meta.parts }).then(() => window.alert(t('{name} was moved or deleted while it was open. What you changed is kept: open it again in Studio to save a copy.', { name: meta.name })), (x) => window.alert(t("Couldn't save {name}: {error}", { name: meta.name, error: x.message })))
+        return
+      }
       // Left by then: said all the same, the page being gone.
       if (shownFile.current !== f) window.alert(e.conflict ? t('{name} changed elsewhere while you were editing it, so your last changes weren\'t saved over it. Open it to see.', { name: meta.name }) : t("Couldn't save {name}: {error}", { name: meta.name, error: e.message }))
-      else if (e.conflict) setConflict({ who: t('Something else'), mtime: null })
+      // (Who changed it, when that's known already, stays said.)
+      else if (e.conflict) setConflict((c) => c || { who: t('Something else'), mtime: null })
       else setNote({ text: t("Couldn't save it: {error}", { error: e.message }), error: true })
     } finally {
       finish(null)
@@ -513,8 +588,17 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
     }
   }, [f, meta, later])
   useEffect(() => { saveRef.current = save }, [save])
-  // Leaving the file (another opened here, or Studio's Files) with a save still waiting: made now.
-  useEffect(() => () => { if (autoAt.current) { clearTimeout(autoAt.current); autoAt.current = null; saveRef.current?.({ auto: true, leaving: true }) } }, [f])
+  // Leaving the file (another opened here, Studio's Files, another tab: the page goes) with a save
+  // still waiting: made now. So too a sheet, a deck or a page with unsaved changes (they don't save
+  // themselves), and a document whose last save didn't go: what's in it was lost without a word.
+  // What a save can't keep isn't asked about then (nobody's there to answer): the file as it was
+  // stays in its versions, and a save that fails is said all the same (save's catch).
+  useEffect(() => () => {
+    // Gone: what's in it kept as its draft (opened again, it opens).
+    if (goneRef.current) { clearTimeout(draftAt.current); if (dirtyRef.current) keepRef.current?.(); return }
+    if (autoAt.current) { clearTimeout(autoAt.current); autoAt.current = null; saveRef.current?.({ auto: true, leaving: true }); return }
+    if (dirtyRef.current && !conflictRef.current) saveRef.current?.({ leaving: true, ok: true })
+  }, [f])
   useEffect(() => {
     const key = (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); save() } }
     window.addEventListener('keydown', key)
@@ -545,9 +629,61 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
   }
   const restore = async (id) => {
     if (dirty && !window.confirm(t('Restore this version? Your unsaved changes here are lost (what\'s in the file now is kept as a version).'))) return
+    // One that can't be put back (gone from the list meanwhile, its computer away) says why; the
+    // file as it was, and the page with it. Put back and not read again: said as a file that didn't open.
     writing.current++
-    try { await restoreVersion(f, id); await load() } finally { writing.current--; wrote.current++ }
+    try {
+      try { await restoreVersion(f, id) } catch (e) { setNote({ text: t("Couldn't restore that version: {error}", { error: e.message }), bad: true }); return }
+      try { await load() } catch (e) { setErr(e); return }
+    } finally { writing.current--; wrote.current++ }
     setNote({ text: t('Restored. What was there is kept as a version too.') })
+  }
+
+  // ---------- Gone: its bar's ways out ----------
+  // Saved somewhere (where it went, or a copy): its draft goes, and that file opens in this tab.
+  const doneWith = async (to) => {
+    await letDraftGo()
+    dirtyRef.current = false
+    setDirty(false)
+    setLost(null)
+    if (to) onOpen?.(to, { replace: true })
+  }
+  // Keep editing it where it went: what's here saved there (only over it as it was, as any save).
+  const keepThere = async () => {
+    const g = goneRef.current
+    const m = metaRef.current
+    const to = { root: f.root, path: g.found.path }
+    setLost({ ...g, saving: true, error: null })
+    try {
+      if (dirtyRef.current && !READ_ONLY(m.kind, m)) await saveFile(to, await current(), { mtime: m.mtime, inParts: !!m.parts })
+      await doneWith(to)
+    } catch (e) { setLost({ ...goneRef.current, saving: false, error: e.conflict ? t('It changed there too, so yours wasn\'t saved over it. Save a copy instead.') : t("Couldn't save it there: {error}", { error: e.message }) }) }
+  }
+  // Save a copy: in the folder it was in, or another of yours, under its name.
+  const copyIt = async () => {
+    const m = metaRef.current
+    const dir = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : ''
+    setLost({ ...goneRef.current, saving: true, error: null })
+    try {
+      const r = await saveCopy(f, await current(), { to: copyWhere || root, dir: copyWhere ? '' : dir, name: m.name, inParts: !!m.parts })
+      await doneWith({ root: r.root, path: r.path })
+    } catch (e) { setLost({ ...goneRef.current, saving: false, error: t("Couldn't save a copy there: {error}", { error: e.message }) }) }
+  }
+  // Download: the file whole, to this device.
+  const downloadIt = async () => {
+    const m = metaRef.current
+    try {
+      const b = await wholeFile(f, await current(), { inParts: !!m.parts })
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(new Blob([b]))
+      a.download = m.name
+      document.body.appendChild(a); a.click(); a.remove()
+      setTimeout(() => URL.revokeObjectURL(a.href), 60_000)
+      await letDraftGo()
+      dirtyRef.current = false
+      setDirty(false)
+      setLost({ ...goneRef.current, draft: false, error: null, downloaded: true })
+    } catch (e) { setLost({ ...goneRef.current, error: t("Couldn't make the download: {error}", { error: e.message }) }) }
   }
 
   const name = meta?.name || rel.split('/').pop()
@@ -586,19 +722,21 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
   const assist = assists && ((cls, more) => <AiAssist items={() => handle.current?.assist?.() || []} className={cls} {...more} />)
   const opening = <div className="sd-empty sd-loading" role="status"><Icon name="refresh" size={16} className="spin" /><span className="muted">{t('Opening {name}…', { name })}</span></div>
   const versions = meta?.versions?.length || 0
-  const state = saving ? { text: t('Saving…'), cls: 'busy' } : note?.error ? { text: t("Couldn't save"), cls: 'bad' } : conflict ? { text: t('Changed elsewhere'), cls: 'bad' } : dirty ? { text: t('Unsaved changes'), cls: 'dirty' } : readOnly ? { text: t('Read-only'), cls: '' } : { text: t('Saved'), cls: 'ok' }
+  const state = saving ? { text: t('Saving…'), cls: 'busy' } : gone ? { text: t('Moved or deleted'), cls: 'bad' } : note?.error ? { text: t("Couldn't save"), cls: 'bad' } : conflict ? { text: t('Changed elsewhere'), cls: 'bad' } : dirty ? { text: t('Unsaved changes'), cls: 'dirty' } : readOnly ? { text: t('Read-only'), cls: '' } : { text: t('Saved'), cls: 'ok' }
   const openName = opener ? t('Open in {app}', { app: opener.name }) : t('Open in app')
   const openTip = !HERE ? t("It opens on the computer it's on") : opener ? t('Open it in {app} on this computer. Studio keeps watching it and shows what you save there.', { app: opener.name }) : t('Open it in its usual app on this computer. Studio keeps watching it and shows what you save there.')
-  const openBtn = (cls, size) => meta && (opener || usual) && <button type="button" className={cls} onClick={openIn} title={openTip} aria-label={opener ? openName : t('Open in its usual app')}><Icon name="external" size={size} /> <span className="sd-btn-label">{openName}</span></button>
+  const openBtn = (cls, size) => meta && !gone && (opener || usual) && <button type="button" className={cls} onClick={openIn} title={openTip} aria-label={opener ? openName : t('Open in its usual app')}><Icon name="external" size={size} /> <span className="sd-btn-label">{openName}</span></button>
   const leaveTip = t('Leave Focus (Esc or {key})', { key: keys('mod', '.') })
   const focusTip = withKeys(t('Focus: the page alone, in the whole window'), 'mod', 'alt', 'f')
   // Whether it's saved, said quietly in the header, as Google Docs does; Save itself only while
   // there's something to save that won't save itself (a document saves itself a moment after you
-  // stop typing, unless a save failed or a change from elsewhere waits for you), in the same place.
-  const needsSave = kind && !readOnly && dirty && !saving && (!SAVES_ITSELF.has(kind) || !!note?.error || !!conflict)
+  // stop typing, unless a save failed), in the same place. Not while a change from elsewhere waits
+  // for you to pick (the bar's Show theirs and Save mine over it): a Save then was turned down.
+  const needsSave = kind && !readOnly && dirty && !saving && !conflict && !gone && (!SAVES_ITSELF.has(kind) || !!note?.error)
   const saveSlot = kind && !readOnly && (needsSave
     ? <button type="button" className="btn small primary sd-head-btn sd-save-btn" onClick={() => save()} title={withKeys(t('Save'), 'mod', 's')} aria-label={t('Save')}><Icon name="check" size={12} /> <span className="sd-btn-label">{t('Save')}</span></button>
-    : <span className="sd-save-state" title={meta?.mtime && !dirty ? t('The file last changed {when}', { when: when(meta.mtime) }) : undefined}>{saving || dirty ? <Icon name="refresh" size={12} className="spin" /> : <Icon name="check" size={12} />}<span className="sd-btn-label">{saving || dirty ? t('Saving…') : t('Saved')}</span></span>)
+    : (conflict || gone) && !saving ? <span className="sd-save-state bad"><Icon name="alert" size={12} /><span className="sd-btn-label">{gone ? t('Moved or deleted') : t('Changed elsewhere')}</span></span>
+      : <span className="sd-save-state" title={meta?.mtime && !dirty ? t('The file last changed {when}', { when: when(meta.mtime) }) : undefined}>{saving || dirty ? <Icon name="refresh" size={12} className="spin" /> : <Icon name="check" size={12} />}<span className="sd-btn-label">{saving || dirty ? t('Saving…') : t('Saved')}</span></span>)
   return (
     <div className={`sd-file${focus.on ? ' focus sd-focus' : ''}`} data-esc={focus.on ? '' : undefined}>
       {/* In Focus, Studio's header folds away (on a Mac's desktop app, out of full screen, a strip
@@ -637,10 +775,32 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
           <span>{t('Read-only here: it\'s {size}, and Studio saves files up to {max}. To change it, open it on its computer in {app}, or ask an agent to.', { size: sizeOf(meta.size), max: limitOf(meta.limits?.save || 250e6), app: APP_FOR[meta.ext] || t('its own app') })}</span>
         </div>
       )}
+      {gone && (
+        <div className="sd-bar sd-conflict sd-gone" role="alert">
+          <span>
+            <b>{t('{name} was moved or deleted while it was open.', { name })}</b>{' '}
+            {gone.looking ? t('Looking for where it went…') : gone.found ? t('It\'s in {path} now.', { path: whereOf(folders, root, gone.found.path) ? `${whereOf(folders, root, gone.found.path).path}/${gone.found.name}` : gone.found.path }) : null}{' '}
+            {!readOnly && dirty && (gone.draftError ? <span className="error-text">{t("Couldn't keep a draft of your changes ({error}): save a copy or download them now.", { error: gone.draftError })}</span> : t('Your changes are still here, kept as a draft until you save a copy or download it.'))}
+            {gone.downloaded && !dirty && t('Downloaded.')}
+          </span>
+          {gone.found && <button type="button" className="btn small primary" disabled={gone.saving} onClick={keepThere}>{readOnly ? t('Open it there') : t('Keep editing it there')}</button>}
+          {!readOnly && <>
+            <label className="sd-gone-where"><span className="muted small">{t('Save a copy in')}</span>
+              <select value={copyWhere} onChange={(e) => setCopyWhere(e.target.value)}>
+                <option value="">{t('The folder it was in ({where})', { where: at?.path || (rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : t('Home')) })}</option>
+                {folders.filter((x) => x.root !== root).map((x) => <option key={x.root} value={x.root}>{x.label} · {home(x.path)}</option>)}
+              </select>
+            </label>
+            <button type="button" className="btn small" disabled={gone.saving} onClick={copyIt}>{t('Save a copy')}</button>
+            <button type="button" className="btn small" onClick={downloadIt}><Icon name="download" size={12} /> {t('Download')}</button>
+          </>}
+          {gone.error && <span className="error-text small sd-gone-err">{gone.error}</span>}
+        </div>
+      )}
       {conflict && (
         <div className="sd-bar sd-conflict" role="alert">
-          <span><b>{t('{who} changed this file', { who: conflict.who })}</b> {t('while you were editing it. Your changes aren\'t saved yet.')}</span>
-          <button type="button" className="btn small" onClick={() => { setConflict(null); load() }}>{t('Show theirs')}</button>
+          <span><b>{conflict.mine ? t('You changed this file in another window') : t('{who} changed this file', { who: conflict.who })}</b> {t('while you were editing it. Your changes aren\'t saved yet.')}</span>
+          <button type="button" className="btn small" onClick={() => { setConflict(null); load().catch((e) => setErr(e)) }}>{t('Show theirs')}</button>
           <button type="button" className="btn small" onClick={() => save({ force: true, ok: true })}>{t('Save mine over it')}</button>
         </div>
       )}
@@ -656,7 +816,7 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
           {!meta || !data ? opening
             : <Suspense fallback={opening}><Editor key={gen} file={{ ...meta, root, path: rel }} data={meta.url ? null : data} onDirty={edited} onStats={setStats} handle={handle} packs={packs.list} onOpen={onOpen} readOnly={readOnly} /></Suspense>}
         </div>
-        {panel === 'versions' && meta && <Versions f={f} ext={meta.ext} versions={meta.versions} keep={meta.keep} size={meta.size} name={name} onRestore={restore} onClose={() => setPanel(null)} />}
+        {panel === 'versions' && meta && <Versions f={f} ext={meta.ext} versions={meta.versions} keep={meta.keep} size={meta.size} slim={!!meta.parts} name={name} onRestore={restore} onClose={() => setPanel(null)} />}
       </div>
       {/* The status line: what the editor counts, what kind of file it is (tapped: what saving keeps),
           how many versions are kept, and whether it's saved. On a phone, Open in its app and Focus here
@@ -689,7 +849,8 @@ const BackBtn = ({ onBack, icon }) => <><button type="button" className="win-btn
 // keep: how many versions Studio keeps of this file (server/studio.js keepFor): fewer of a big one,
 // none of one too big to save; said at the top of the list.
 const KEEP_ALL = 60
-function Versions({ f, ext, versions, keep = KEEP_ALL, size = 0, onRestore, onClose }) {
+// slim: a big file opened in parts, compared by its words alone (its versions' XML, not their pictures).
+function Versions({ f, ext, versions, keep = KEEP_ALL, size = 0, slim = false, onRestore, onClose }) {
   const [compare, setCompare] = useState(null) // the version compared with the file as it is
   return (<>
     <aside className="sd-panel" aria-label={t('Versions')}>
@@ -708,21 +869,26 @@ function Versions({ f, ext, versions, keep = KEEP_ALL, size = 0, onRestore, onCl
         ))}
       </ol>
     </aside>
-    {compare && <Compare f={f} ext={ext} v={compare} onClose={() => setCompare(null)} />}
+    {compare && <Compare f={f} ext={ext} v={compare} slim={slim} onClose={() => setCompare(null)} />}
   </>)
 }
 
 // What changed from a version to the file as it is now, line by line (a Word file by its text):
-// what's gone in red, what's new in green, long stretches the same folded away.
-function Compare({ f, ext, v, onClose }) {
+// what's gone in red, what's new in green, long stretches the same folded away. A big Word or Excel
+// file (slim) is read without its pictures, so a phone gets its words, not the two files whole.
+function Compare({ f, ext, v, slim = false, onClose }) {
   const [rows, setRows] = useState(null)
   const [err, setErr] = useState(null)
+  // Esc closes it, as the other dialogs here; focus goes into it, so the keyboard is where it shows.
+  const closeRef = useRef(null)
+  useEffect(() => { closeRef.current?.focus() }, [])
+  useEffect(() => { const k = (e) => { if (e.key === 'Escape') onClose() }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k) }, [onClose])
   useEffect(() => {
     let on = true
-    Promise.all([bytesOf(versionUrl(f, v.id)), bytesOf(rawUrl(f))]).then(([a, b]) => Promise.all([textFor(ext, a), textFor(ext, b)]))
+    Promise.all(slim ? [bytesOf(slimUrl(f, { version: v.id })), bytesOf(slimUrl(f))] : [bytesOf(versionUrl(f, v.id)), bytesOf(rawUrl(f))]).then(([a, b]) => Promise.all([textFor(ext, a), textFor(ext, b)]))
       .then(([a, b]) => on && setRows(lineDiff(a, b)), (e) => on && setErr(e.message))
     return () => { on = false }
-  }, [f, ext, v.id])
+  }, [f, ext, v.id, slim])
   const shown = []
   if (rows) {
     for (let i = 0; i < rows.length; i++) {
@@ -739,7 +905,7 @@ function Compare({ f, ext, v, onClose }) {
   return (
     <div className="sd-modal" role="dialog" aria-label={t('Compare')} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div className="sd-compare">
-        <div className="sd-panel-head"><b>{t('From {when} to now', { when: when(v.at) })}</b><span className="muted small">{rows ? (changes ? t('{n} lines changed', { n: changes }) : t('No changes')) : ''}</span><span className="sd-grow" /><button type="button" className="win-btn" onClick={onClose} aria-label={t('Close')}><Icon name="x" size={13} /></button></div>
+        <div className="sd-panel-head"><b>{t('From {when} to now', { when: when(v.at) })}</b><span className="muted small">{rows ? (changes ? t('{n} lines changed', { n: changes }) : t('No changes')) : ''}</span><span className="sd-grow" /><button type="button" ref={closeRef} className="win-btn" onClick={onClose} aria-label={t('Close')}><Icon name="x" size={13} /></button></div>
         {err && <p className="error-text small sd-err">{err}</p>}
         {!rows && !err && <p className="muted small sd-loading">{t('Opening…')}</p>}
         {rows && <pre className="sd-diff">{shown.map((r, i) => (r.fold ? <span key={i} className="fold">{t('… {n} lines the same', { n: r.fold })}{'\n'}</span> : <span key={i} className={r.t === '-' ? 'del' : r.t === '+' ? 'add' : ''}>{r.t === ' ' ? '  ' : `${r.t} `}{r.line}{'\n'}</span>))}</pre>}
@@ -760,6 +926,7 @@ function AskAgent({ f, meta, selection, onClose, onSent }) {
   const [text, setText] = useState('')
   const [err, setErr] = useState(null)
   const [busy, setBusy] = useState(false)
+  useEffect(() => { const k = (e) => { if (e.key === 'Escape') onClose() }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k) }, [onClose])
   const send = async (e) => {
     e.preventDefault()
     if (!fleet || busy || !text.trim()) return // who's there hasn't come yet: not sent to a new agent by mistake

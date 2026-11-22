@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, refetch } from '../../api.js'
+import { api, refetch, usePoll } from '../../api.js'
 import { ANY } from '../dictations/shared.jsx'
 import Icon from '../Icon.jsx'
 import { useSettings, SaveNote } from './General.jsx'
@@ -7,9 +7,7 @@ import PermissionFix, { UpdateApp, OpenSettings } from '../PermissionFix.jsx'
 import { keyLabel, keyFromEvent } from '../../../shared/dictation/keys.js'
 import { pause, keysPlatform, dictationKey } from '../../dictation/controller.js'
 import { TidyNeeds } from '../../dictation/Tidy.jsx'
-import { useTrial } from '../../trials.js'
 import { Advanced, More, Needs } from './Advanced.jsx'
-import { BetaSwitch } from './Beta.jsx'
 import { where } from './search.js'
 import { t, tx } from '../../i18n/index.js'
 import '../../dictation/dictation.css'
@@ -34,11 +32,13 @@ import '../../dictation/dictation.css'
 // turn it on, then the model that rewrites the selection is picked here, said to keep the text on this
 // computer or to send it out; Accessibility, if it isn't on yet, asked then.
 //
-// Tidy what I say (a trial: dictation-cleanup, shown only while it's on, where the key works from
-// other apps): off until you turn it on, then what you say from another app is tidied by a model
-// before it's pasted; the model picked here (the local model built in by default), said to keep the
-// words here or send them out. With no model to tidy with, what's needed, on or off: the local
-// model in one click where it runs, else a model of your own (Tidy.jsx).
+// Tidy what I say (dictation.tidy, where the key works from other apps; greyed, with Turn On, while
+// dictation from other apps is off): on to start with where the local model fits this computer, off
+// where it doesn't (server/index.js FEATURES), then what you say from another app is tidied by a
+// model before it's pasted, and pasted as you said it when the model is slow; the model picked here
+// (the local model built in by default), said to keep the words here or send them out. With no model
+// to tidy with, what's needed, on or off: the local model in one click where it runs, else a model of
+// your own (Tidy.jsx).
 //
 // History: each dictation kept on this computer (Meetings › Dictations), on until you turn it
 // off, for always or less; the recordings only if you ask; Delete all, after asking.
@@ -57,7 +57,6 @@ export default function Dictation() {
   const [asking, setAsking] = useState(0) // "Where I'm typing" just picked: Accessibility asked for then
   const [askListen, setAskListen] = useState(0) // Fn or the right ⌥ just picked: Input Monitoring asked for then
   const [askEdit, setAskEdit] = useState(0) // Edit by voice just turned on: Accessibility asked for then
-  const tidyTrial = useTrial('dictation-cleanup')
   // Accessibility turned on: the desktop app's status again, so pasting is on.
   const refresh = useCallback(async () => {
     const st = await app?.dictateStatus?.().catch(() => null)
@@ -107,7 +106,6 @@ export default function Dictation() {
   }
   return (
     <div className="st-sections">
-    <BetaSwitch id="dictation-cleanup" />
     <section className="st-sec st-dictation" data-setting="dictation">
       <SaveNote note={note} />
       <label className="st-check"><input type="checkbox" checked={on} onChange={(e) => set({ on: e.target.checked })} />
@@ -183,19 +181,23 @@ export default function Dictation() {
         <h4>{t('Cleanup and Mentions')}</h4>
         <Needs what={t('Dictation')} on={on} onTurnOn={() => set({ on: true })}>
         <div className="st-dict-opts">
-        {mode && status?.edit?.can && (
+        {/* Edit by voice and Tidy what I say both work from other apps: greyed together under one
+            line saying so while that's off. */}
+        {mode && (
           <Needs what={t('dictation from other apps')} on={background || !on} onTurnOn={() => set({ background: true })}>
           <div className="st-dict-opts">
+            {status?.edit?.can && <>
             <label className="st-check dict-edit" data-setting="edit-by-voice"><input type="checkbox" checked={d.edit === true} onChange={async (e) => { const on = e.target.checked; await set({ edit: on }); if (on && !status.paste?.allowed) setAskEdit((n) => n + 1) }} />
               <span><b>{t('Edit by voice')}</b> <span className="muted small">{t('Select text in another app, hold {key} and say what to change.', { key: label })} <More>{t('With text selected in another app, hold {key} and say what to change ("make this shorter", "in Spanish"): the model you pick rewrites it, and it\'s put back in its place.', { key: label })}</More></span></span></label>
             {d.edit === true && <EditModel value={d.editModel || null} onPick={(m) => set({ editModel: m })} />}
             {d.edit === true && !needsAccess && status.edit.asks === 'accessibility' && !status.paste?.allowed && (
               <PermissionFix pane="accessibility" ask={askEdit} onCheck={refresh}><p className="small">{t('Reading what you selected, and putting the new text in its place, need Accessibility.')}</p></PermissionFix>
             )}
+            </>}
+            <Tidy d={d} set={set} />
           </div>
           </Needs>
         )}
-        {mode && background && tidyTrial && <Tidy d={d} set={set} />}
         <label className="st-check" data-setting="light-cleanup"><input type="checkbox" checked={d.cleanup !== false} onChange={(e) => set({ cleanup: e.target.checked })} />
           <span><b>{t('Light cleanup')}</b> <span className="muted small">{t('Drops "um" and words said twice, and spells your names right. No AI model, nothing sent anywhere.')} <More>{t('Drops "um" and "uh" and words said twice, starts with a capital and ends with a full stop, and spells the names of your agents, projects and branches, and the names in Memory, the way they\'re written. No AI model, nothing sent anywhere.')}</More></span></span></label>
         <label className="st-check" data-setting="mention-files"><input type="checkbox" checked={d.atFiles !== false} onChange={(e) => set({ atFiles: e.target.checked })} />
@@ -277,7 +279,9 @@ function Tidy({ d, set }) {
   const [st, setSt] = useState(null)
   const load = useCallback(() => api('/dictation/tidy').then(setSt, () => setSt(null)), [])
   useEffect(() => { load() }, [load, d.tidyModel])
-  const on = d.tidy === true
+  // As you set it, else as it is to start with on this computer (/config: on where the local model fits).
+  const conf = usePoll('/config', 10 * 60 * 1000).data
+  const on = typeof d.tidy === 'boolean' ? d.tidy : conf?.dictation?.tidy === true
   return (
     <div className="dict-tidy" data-setting="tidy">
       <label className="st-check"><input type="checkbox" checked={on} onChange={(e) => set({ tidy: e.target.checked })} />

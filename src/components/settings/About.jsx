@@ -249,9 +249,7 @@ function Trials() {
   const [mine, setMine] = useState({}) // as you set it, at once; saved behind it
   const on = (id) => mine[id] ?? s?.effective?.trials?.[id] === true
   const set = (id, v) => { setMine((m) => ({ ...m, [id]: v })); save({ trials: { [id]: v } }) }
-  // The ones that turned themselves on (Meeting Insights, once there were meetings to add up), when.
   const { data: conf } = usePoll('/config', 10 * 60 * 1000)
-  const auto = conf?.trialsAuto || {}
   return (
     <section className="st-sec" data-setting="beta">
       <h4>{t('Beta Features')}</h4>
@@ -259,7 +257,7 @@ function Trials() {
       {TRIALS.filter((x) => !x.mac || conf?.platform === 'darwin').map((x) => (
         <div key={x.id} className="ab-trial" data-beta={x.id}>
           <label className="st-check"><input type="checkbox" checked={on(x.id)} disabled={!s || (x.id === 'remote-screen' && !onThisComputer())} onChange={(e) => set(x.id, e.target.checked)} />
-            <span><b>{t(x.label)}</b> <span className="muted small">{t(x.short)}</span>{auto[x.id] && on(x.id) && <span className="muted small ab-auto-on"> {t('Turned on by itself on {date}, once there were meetings to add up.', { date: new Date(auto[x.id]).toLocaleDateString(locale(), { month: 'long', day: 'numeric' }) })}</span>} <More>{t(x.hint)}</More></span></label>
+            <span><b>{t(x.label)}</b> <span className="muted small">{t(x.short)}</span> <More>{t(x.hint)}</More></span></label>
           <button type="button" className="link-btn small ab-trial-at" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: x.setting } }))} aria-label={t('Open {name} in Settings', { name: t(x.label) })}>{placeOf(SETTINGS.find((y) => y.id === x.setting) || { section: 'about' })}<Icon name="chevron" size={11} /></button>
           {/* (Bots on: where to start, right there.) */}
           {x.id === 'slack-bot' && on(x.id) && <StartBots />}

@@ -1032,7 +1032,7 @@ button.mt-from-chip:hover { color: var(--ink); border-color: color-mix(in srgb, 
 .mt-talk .c4 { background: var(--series-5); }
 .mt-talk .c5 { background: var(--series-7); }
 
-/* ============ Insights and People (insights.jsx, people.jsx, a beta feature) ============
+/* ============ Insights and People (insights.jsx, people.jsx: Meeting Insights) ============
    Usage's tiles, cards, bars and heatmap (styles.css .us-*, .hm), with what each number is based on
    under it. Recurring is the first series color, one-off the second, as the legend says. */
 .mt-home:has(> .mi) { max-width: 1120px; }

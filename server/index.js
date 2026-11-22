@@ -62,7 +62,7 @@ import { AGENTS, installed, caps, adapter, readOnly, canChange, catalog as agent
 import * as nodejs from './nodejs.js'
 import { devTools } from './gitready.js'
 import { quoteCommand } from './runtime/spawn.js'
-import { loadConfig, ROOT, DATA, CACHE, expand, ensureDir, cacheFile, IS_MAC, brewInstall, writeFileAtomic } from './paths.js'
+import { loadConfig, outOfBeta, ROOT, DATA, CACHE, expand, ensureDir, cacheFile, IS_MAC, brewInstall, writeFileAtomic } from './paths.js'
 import { prepareChief } from './chief.js'
 import { makeTasks } from './chieftasks.js'
 import { makeThreads, isChiefName } from './threads.js'
@@ -158,6 +158,8 @@ ensureDir(DATA)
 // computer (the folder, so nothing in it can be reached).
 try { fs.chmodSync(DATA, 0o700) } catch { /* Windows, or a folder that isn't yours */ }
 ensureDir(CACHE)
+// Beta Features switches saved before 3.22.0 for the features out of beta: their settings now (paths.js outOfBeta).
+if (settings.settle().length) console.log('settings: the Beta Features switches for Home, Tidy What I Say, Meeting Insights, Scheduled Routines and the MCP server are their own settings now')
 const cfg = loadConfig()
 labs.configure(cfg) // more models (Qwen, DeepSeek, Kimi, GLM): hidden unless cfg.moreModels
 llm.configure(cfg) // the local model you picked in Settings › Model Providers (llmModel), if any
@@ -578,13 +580,32 @@ const rootOf = async (pane) => {
 }
 // ---------- Beta features ----------
 // Still being finished, so hidden until turned on in Settings › About & Updates › Beta Features
-// (trials: { home: true } in the config; src/trials.js). Their routes answer only then.
+// (trials: { 'meeting-board': true } in the config; src/trials.js). Their routes answer only then.
 // One that's no longer a beta stays in older configs, read by nothing: Memory, now a page for
 // everyone; Studio, Sign PDFs, Comments and @bridge, Make a Sheet, Back and Forward, Tab Groups,
 // Files (Folders, now Studio's home) and Recommended Settings, part of the app since 3.19.0.
-const TRIALS = ['home', 'dictation-cleanup', 'usage-everywhere', 'meeting-insights', 'routines', 'mcp-server', 'meeting-board', 'assist-answers', 'call-video', 'slack-bot', 'remote-screen', 'share-links']
+const TRIALS = ['usage-everywhere', 'meeting-board', 'assist-answers', 'call-video', 'slack-bot', 'remote-screen', 'share-links']
 const trialOn = (id) => cfg.trials?.[id] === true
 const trialOff = (id, label) => (req, res, next) => (trialOn(id) ? next() : res.status(404).json({ error: `${label} is a beta feature. Turn it on in ${placeEn('beta')}.`, trial: id }))
+
+// ---------- Out of beta (3.22.0) ----------
+// Ordinary settings now, each in its own place (shared/places.js), a Beta Features switch from before
+// read as the setting (paths.js outOfBeta). Never set: Home and Scheduled Routines are on (a routine
+// still runs by itself only once it has a time); Meeting Insights turns itself on once 5 meetings are
+// recorded here (insightsByItself); Tidy What I Say is on where the local model fits this computer
+// (llm.js fits), off where it doesn't, which Settings says; Bridge AI as an MCP Server stays off until
+// you turn it on, at this computer (mcpKept), as other apps on it can then read your boards and files.
+// /config says which are on (features), for every window and phone this computer serves.
+let tidyFits = false // (asked once, after the live feed below)
+const FEATURES = {
+  home: { on: () => cfg.home?.on !== false, label: 'Home', place: 'home' },
+  routines: { on: () => cfg.routines?.on !== false, label: 'Scheduled Routines', place: 'scheduled-routines' },
+  'meeting-insights': { on: () => cfg.meetings?.insights === true, label: 'Meeting Insights', place: 'meeting-insights' },
+  'dictation-cleanup': { on: () => (typeof cfg.dictation?.tidy === 'boolean' ? cfg.dictation.tidy : tidyFits), label: 'Tidy what I say', place: 'tidy' },
+  'mcp-server': { on: () => cfg.mcpServer?.on === true, label: 'Bridge AI as an MCP Server', place: 'mcp-server' },
+}
+const featureOn = (id) => FEATURES[id].on()
+const featureOff = (id) => (req, res, next) => (featureOn(id) ? next() : res.status(404).json({ error: `${FEATURES[id].label} is turned off. Turn it on in ${placeEn(FEATURES[id].place)}.`, off: id }))
 
 // ---------- Studio's home: your folders (explorer.js) ----------
 // Your folders as Finder shows them: its sidebar, a folder's listing, Get Info, a folder's size and a
@@ -673,10 +694,11 @@ app.put('/api/studio/file', express.raw({ type: () => true, limit: studio.SAVE_M
 // A big Word, Excel or PowerPoint file, opened in parts (studioparts.js): the file with its XML and
 // a marker for each picture or other big part, then each of those as it's shown (a picture at the
 // width it's drawn at, w). Through another computer's window or a phone, only what's shown goes.
+// version=<id>: one of its versions so, for Compare.
 app.get('/api/studio/slim', async (req, res) => {
   try {
     const q = sq(req)
-    const { bytes } = await studio.slimFile(await rootOf(q.root), q.path, req.query.mtime)
+    const { bytes } = await studio.slimFile(await rootOf(q.root), q.path, req.query.mtime, { version: req.query.version ? String(req.query.version) : null })
     res.set({ 'Content-Type': 'application/zip', 'Content-Length': String(bytes.length), 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' })
     res.end(bytes)
   } catch (e) { res.status(e.status === 409 ? 409 : e.status === 413 ? 413 : 404).json({ error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}), ...(e.data || {}) }) }
@@ -710,6 +732,30 @@ app.get('/api/studio/version', async (req, res) => {
   } catch (e) { res.status(e.status || 404).json({ error: e.message }) }
 })
 app.post('/api/studio/restore', wrap(async (req) => { const q = sq(req); return studio.restore(await rootOf(q.root), q.path, String(req.body?.id || '')) }))
+// A file moved or deleted while it was open (studio.js): where it went, if it was moved (id: its
+// fileId from open); a copy of what the page has, saved in a folder (dir) under a name; the file
+// whole for a download; and a recovery draft kept until one of those is done. parts=1: the page
+// opened it in parts, so the parts it never had come from its versions.
+app.get('/api/studio/moved', wrap(async (req) => { const q = sq(req); return studio.movedTo(await rootOf(q.root), q.path, String(req.query.id || '')) }))
+const studioRaw = express.raw({ type: () => true, limit: studio.SAVE_MAX })
+app.put('/api/studio/copy', studioRaw, wrap(async (req) => { const q = sq(req); const to = String(req.query.to || q.root); return { ...await studio.saveCopy(await rootOf(q.root), q.path, await rootOf(to), String(req.query.dir || ''), String(req.query.name || ''), req.body, { inParts: req.query.parts === '1' }), root: to } }))
+app.put('/api/studio/whole', studioRaw, async (req, res) => {
+  try {
+    const q = sq(req)
+    const bytes = await studio.wholeFile(await rootOf(q.root), q.path, req.body, req.query.parts === '1')
+    res.set({ 'Content-Type': 'application/octet-stream', 'Content-Length': String(bytes.length), 'Cache-Control': 'no-store' })
+    res.end(bytes)
+  } catch (e) { res.status(502).json({ error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}) }) }
+})
+app.put('/api/studio/draft', studioRaw, wrap(async (req) => { const q = sq(req); return studio.keepDraft(await rootOf(q.root), q.root, q.path, req.body, { kind: String(req.query.kind || '') || null, inParts: req.query.parts === '1' }) }))
+app.get('/api/studio/draft', wrap((req) => { const q = sq(req); return studio.draftOf(q.root, q.path) }))
+app.get('/api/studio/draft/file', (req, res) => {
+  const q = sq(req)
+  const file = studio.draftFile(q.root, q.path)
+  res.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Type': 'application/octet-stream' })
+  res.sendFile(file, { dotfiles: 'allow' }, (e) => { if (e && !res.headersSent) res.status(404).json({ error: 'No draft' }) })
+})
+app.delete('/api/studio/draft', wrap((req) => { const q = sq(req); return studio.dropDraft(q.root, q.path) }))
 app.post('/api/studio/new', wrap(async (req) => {
   const q = sq(req)
   return studio.create(await rootOf(q.root), String(req.body?.dir || ''), String(req.body?.name || ''), req.body?.data ? Buffer.from(String(req.body.data), 'base64') : Buffer.from(String(req.body?.text || '')))
@@ -1561,7 +1607,7 @@ app.post('/api/routines/:id/run', wrap(async (req) => {
     const out = await startRoutine(def)
     routines.noteLaunch(def.id, out.paneId)
     return out
-  } catch (e) { if (trialOn('routines')) routines.noteFailed(def.id, e.message); throw e }
+  } catch (e) { if (featureOn('routines')) routines.noteFailed(def.id, e.message); throw e }
 }))
 // A routine's run: a new agent in its folder, typed its command (the same agent, space and words
 // each time), or its command to the Chief of Staff, started first if it isn't running.
@@ -1597,8 +1643,8 @@ async function startRoutine(def) {
 // a notification saying so). BRIDGE_ROUTINE_TICK_MS: how often it looks (a test's few seconds).
 const ROUTINE_TICK = Number(process.env.BRIDGE_ROUTINE_TICK_MS) || 30_000
 const routineTold = (def, run) => notify.send({ kind: 'routine', title: run.missed ? `${def.name} didn't run` : `${def.name} couldn't start`, body: run.missed ? `Its ${new Date(run.slot).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} run was missed: ${run.why}.` : run.error, url: '/?card=repeat', tag: `routine-${def.id}` }).catch(() => {})
-const routineTick = () => routines.tick({ on: trialOn('routines'), start: startRoutine, live: (id) => lastFleet?.agents?.find((a) => a.paneId === id) || null, told: routineTold, slack: ROUTINE_TICK * 3 }).catch((e) => console.log(`routines: ${e.message}`))
-routines.scheduling(trialOn('routines'))
+const routineTick = () => routines.tick({ on: featureOn('routines'), start: startRoutine, live: (id) => lastFleet?.agents?.find((a) => a.paneId === id) || null, told: routineTold, slack: ROUTINE_TICK * 3 }).catch((e) => console.log(`routines: ${e.message}`))
+routines.scheduling(featureOn('routines'))
 setTimeout(routineTick, Math.min(ROUTINE_TICK, 15_000)).unref()
 setInterval(routineTick, ROUTINE_TICK).unref()
 
@@ -1607,11 +1653,11 @@ setInterval(routineTick, ROUTINE_TICK).unref()
 // other comes through the same routes without it, and isn't kept.
 cmdHistory.configure(cfg)
 function noteTyped(body, a) {
-  if (!body?.typed || !trialOn('routines')) return
+  if (!body?.typed || !featureOn('routines')) return
   const to = a ? { kind: a.kind, name: a.plainChat ? a.title : needsYou.nameOf(a), chief: !!a.chief, cwd: a.plainChat || a.chief ? '' : a.worktree?.repo || a.cwd, pane: a.paneId } : {}
   cmdHistory.add({ text: body.text, box: body.typed, to }).catch((e) => console.log(`command history: ${e.message}`))
 }
-app.use('/api/command-history', trialOff('routines', 'Scheduled Routines'))
+app.use('/api/command-history', featureOff('routines'))
 app.get('/api/command-history', wrap((req) => cmdHistory.list({ q: String(req.query.q || ''), before: req.query.before || null, limit: req.query.limit })))
 app.delete('/api/command-history', wrap(() => cmdHistory.clear()))
 // Asked on a schedule: a routine to suggest, filled in, unless it's one already (its folder as here).
@@ -1920,14 +1966,15 @@ app.post('/api/dictation/edit', wrap(async (req) => {
   const model = cfg.dictation?.editModel || await llm.current().catch(() => null)
   return dictation.edit({ text: req.body?.text, instruction: req.body?.instruction, model, reply: (id, msgs, o) => chatModels.reply(id, msgs, o) })
 }))
-// Tidy what I say (dictation.js tidy; a trial: dictation-cleanup): what you said from another app,
-// tidied before the dictation window pastes it, by the model picked for it. None picked: the local
-// model built in once it's downloaded, else a model of yours on this computer (Ollama, LM Studio),
-// never one that sends the words out unless you pick it. GET: which that is, or what's needed (the
-// local model, one click, where it can run here). warm: the local model started while you talk.
+// Tidy What I Say (dictation.js tidy; dictation.tidy, on to start with where the local model fits
+// this computer: FEATURES): what you said from another app, tidied before the dictation window pastes
+// it, by the model picked for it. None picked: the local model built in once it's downloaded, else a
+// model of yours on this computer (Ollama, LM Studio), never one that sends the words out unless you
+// pick it. GET, on or off: which that is, or what's needed (the local model, one click, where it can
+// run here). warm: the local model started while you talk. Tidying, and warming, only while it's on.
 // A slow answer, an error or one that isn't what you said comes back as an error with its code,
 // and the page pastes your words as you said them.
-app.use('/api/dictation/tidy', trialOff('dictation-cleanup', 'Tidy what I say'))
+app.post(['/api/dictation/tidy', '/api/dictation/tidy/warm'], featureOff('dictation-cleanup'))
 const tidyAuto = async () => (await llm.current().catch(() => null)) || (await chatModels.localModel(cfg.localModel).catch(() => null))?.id || null
 const tidyModel = async () => cfg.dictation?.tidyModel || tidyAuto()
 const tidyLabel = (id) => llm.labelOf(id) || String(id).split(':').slice(1).join(':') || String(id)
@@ -1938,7 +1985,8 @@ app.get('/api/dictation/tidy', wrap(async () => {
   const list = await chatModels.models().catch(() => [])
   const about = (id) => { if (!id) return null; const d = list.find((x) => x.id === id); return { id, label: d?.label || tidyLabel(id), provider: d?.provider || null, via: d?.via || null, missing: !d } }
   const auto = await tidyAuto()
-  return { model: about(cfg.dictation?.tidyModel || auto), auto: about(auto), local: await tidyLocal() }
+  // on: as it is now; mine: set by you (else it's the default for this computer).
+  return { on: featureOn('dictation-cleanup'), mine: typeof cfg.dictation?.tidy === 'boolean', model: about(cfg.dictation?.tidyModel || auto), auto: about(auto), local: await tidyLocal() }
 }))
 app.post('/api/dictation/tidy/warm', wrap(async () => {
   const model = await tidyModel()
@@ -2077,12 +2125,15 @@ function replyFor(job) {
       modelJobs.ran(job, { model: id, passed: before })
       reply.used = id
       return { ...r, model: id }
-    } catch (first) {
+    } catch (raw) {
+      // Said as what happened and what to do (its provider not reached, too slow, its key turned
+      // down: modellist.js explain), the same for every job; "fetch failed" was all AI Assist said.
+      const first = modelList.explain(id, raw, providerName)
       const rest = stopped(first) ? null : modelList.after(own, id)
       const failed = modelList.failed(id, first, ready)
       if (!rest?.length) { modelJobs.ran(job, { passed: [...before, failed], error: failed.why }); throw first }
       try {
-        const r = await modelList.inTurn(rest, (n) => chatModels.reply(n, msgs, { ...opts, instead: { of: id, why: first.message } }), { ready, stop: stopped, provider: providerName })
+        const r = await modelList.inTurn(rest, (n) => chatModels.reply(n, msgs, { ...opts, instead: { of: id, why: first.message } }).catch((e) => { throw modelList.explain(n, e, providerName) }), { ready, stop: stopped, provider: providerName })
         modelJobs.ran(job, { model: r.model, passed: [...before, failed, ...r.passed] })
         reply.used = r.model
         return { ...r, fellBack: id, why: first.message }
@@ -2149,7 +2200,7 @@ app.post('/api/speech/install', wrap(async (req) => {
 app.get('/api/meetings', wrap(() => {
   const list = meetings.list()
   insightsByItself(list)
-  const auto = trialOn('meeting-insights') && meetInsights.autoOn()
+  const auto = featureOn('meeting-insights') && meetInsights.autoOn()
   // mergeHint: the meeting one is the rest of (recorded during the same event, or just after), to
   // offer merging them.
   const hints = meetings.mergeHints(list)
@@ -2208,7 +2259,7 @@ app.post('/api/meetings/bulk', wrap(async (req) => {
 app.get('/api/meetings/voices', wrap(() => voices.status()))
 app.post('/api/meetings/voices/forget', wrap(() => voices.forget()))
 app.post('/api/meetings/voices/download', wrap(async () => { if (!(await voices.status()).offered) throw new Error((await voices.status()).why || 'Telling voices apart can\'t run on this computer'); speech.fetchModel(speech.VOICE.id); return voices.status() }))
-// Meeting Insights and the people you meet (meetinsights.js), a beta feature: your meetings added
+// Meeting Insights and the people you meet (meetinsights.js; meetings.insights): your meetings added
 // up by week and kind, and everyone you've met, with merging and splitting people by hand.
 meetInsights.configure(cfg)
 meetInsights.setHelpers({ calendar: (from, to) => calendar.range(from, to) })
@@ -2219,23 +2270,24 @@ meetPrep.setHelpers({ calendar: () => calendar.cached(), mail: IS_MAC ? () => ma
 meetPrep.start()
 app.post('/api/prep', wrap((req) => meetPrep.prep(req.body?.event || {})))
 app.post('/api/prep/suggest', wrap((req) => meetPrep.suggest(req.body?.event || {}, { again: !!req.body?.again })))
-app.use(['/api/meetings/insights', '/api/meetings/people'], trialOff('meeting-insights', 'Meeting Insights'))
-// On by itself once 5 meetings are recorded here and you haven't set it either way, asked as the
-// list of meetings is (so there's nothing more to read); Meetings says so once, with Turn off.
+app.use(['/api/meetings/insights', '/api/meetings/people'], featureOff('meeting-insights'))
+// On by itself once 5 meetings are recorded here and you haven't set it either way (nor its Beta
+// Features switch, before 3.22.0), asked as the list of meetings is (so there's nothing more to read);
+// Meetings says so once, with Turn off. Under 5 there's too little to add up.
 let insightsSet = false // set by you, or on by itself already
 function insightsByItself(list) {
   if (insightsSet) return
-  if (settings.readUser().trials?.['meeting-insights'] !== undefined || meetInsights.autoOn()) { insightsSet = true; return }
+  if (settings.readUser().meetings?.insights !== undefined || meetInsights.autoOn()) { insightsSet = true; return }
   const n = meetInsights.ready(list)
   if (!n) return
   insightsSet = true
   meetInsights.turnedOn(n)
-  afterChange(settings.patch({ trials: { 'meeting-insights': true } }))
+  afterChange(settings.patch({ meetings: { insights: true } }))
 }
 app.post('/api/meetings/auto-insights', wrap((req) => {
   meetInsights.said()
-  if (req.body?.off) afterChange(settings.patch({ trials: { 'meeting-insights': false } }))
-  return { ok: true, on: trialOn('meeting-insights') }
+  if (req.body?.off) afterChange(settings.patch({ meetings: { insights: false } }))
+  return { ok: true, on: featureOn('meeting-insights') }
 }))
 app.get('/api/meetings/insights', wrap((req) => meetInsights.insights({ days: req.query.days === 'all' ? 'all' : Number(req.query.days) || 90, kind: String(req.query.kind || 'all') })))
 app.get('/api/meetings/people', wrap(() => meetInsights.list()))
@@ -3169,6 +3221,9 @@ app.post('/api/remote/app-quit', (req, res) => {
     res.json(update && Date.now() - update < 10 * 60000 && remote.desktopSince() < update ? { ok: true, update: true } : remote.appQuit())
   } catch (e) { sayErr(res, e) }
 })
+// The desktop app here saying this computer's screen is locked, or unlocked (desktop/remote.js): a
+// device waits for it rather than trying a screen no app may take. Only from this computer.
+app.post('/api/remote/screen-lock', (req, res) => { try { remoteHere(req); res.json({ ok: remote.setLocked(req.body || {}) }) } catch (e) { sayErr(res, e) } })
 // Another computer's screen that didn't show here, or on a device of this one's (ScreenView.jsx): a
 // line in this log, with why, as that computer's own log has one.
 app.post('/api/remote/didnt-show', (req, res) => { const b = req.body || {}; res.json(remote.didntShow({ name: b.name, code: b.code, cause: b.cause, why: b.why, version: b.version }, atThisComputer(req) ? null : relay.deviceOf(req.headers['x-bridge-relay'])?.name || 'a device')) })
@@ -3229,7 +3284,7 @@ machines.useSummary(async ({ home: withHome = false } = {}) => {
   const quiet = needs.filter((i) => blocking(i) && isQuiet(i)).length
   return { runtime: rt.name, counts: { ...f.counts, quiet }, agents: await runs.agents(f, { cloudSaid: cloud.previews() }), needs, notifies: push.devices().length, ...(withHome ? { home: await homeList.items().catch(() => null) } : {}) }
 })
-machines.askHome(() => trialOn('home'))
+machines.askHome(() => featureOn('home'))
 // The agent map: every computer's agents, this one's from here and the others' from what each last
 // said (asked again while you're looking), and a computer that's offline with what it said last.
 app.get('/api/agent-map', wrap(async (req) => {
@@ -3285,14 +3340,14 @@ app.post('/api/needs-you/answer', wrap(async (req) => {
 }))
 app.post('/api/needs-you/clear', wrap((req) => waiting.clear(req.body?.id)))
 
-// ---------- Home (home.js), a beta feature ----------
+// ---------- Home (home.js; home.on: on unless you turn it off) ----------
 // What needs you, what's ready to look at and what's coming up, on this device and your others (from
 // what each last said, asked again while you're looking), each answered on its own device as in
 // Needs you. A device that sends only what needs you (an older Bridge AI, or Home's list not come
 // yet) says so (partial), so Home can say why its meetings and tasks aren't there. One row per
 // thing across them all (home.tidy): the same task on two of them is one.
 const homeList = home.make({ waiting, tasks: chiefTasks, meetings, unsent: (id) => meetWork.unsent(id), boards, chief: async () => mainChief(await fleetView())?.paneId || null, engaged })
-app.get('/api/home', trialOff('home', 'Home'), wrap(async (req) => {
+app.get('/api/home', featureOff('home'), wrap(async (req) => {
   await machines.fresh({ maxAge: req.query.live ? 2500 : 8000 })
   const name = relay.thisName()
   const mine = (await homeList.items()).map((i) => ({ ...i, machine: null, device: name, online: true }))
@@ -3315,10 +3370,10 @@ app.get('/api/home', trialOff('home', 'Home'), wrap(async (req) => {
   }
 }))
 // Pin one to the top of Home, or unpin it: kept here, for every page and phone this computer serves.
-app.post('/api/home-pins', trialOff('home', 'Home'), wrap((req) => homeList.pin(req.body?.id, req.body?.on !== false)))
+app.post('/api/home-pins', featureOff('home'), wrap((req) => homeList.pin(req.body?.id, req.body?.on !== false)))
 // How Home's sections are arranged (Edit Home), for this computer's window or for phones: kept here
 // as pins are. reset: back to the default.
-app.post('/api/home-layout', trialOff('home', 'Home'), wrap((req) => homeList.layout(req.body?.for, { order: req.body?.order, hidden: req.body?.hidden, reset: req.body?.reset === true })))
+app.post('/api/home-layout', featureOff('home'), wrap((req) => homeList.layout(req.body?.for, { order: req.body?.order, hidden: req.body?.hidden, reset: req.body?.reset === true })))
 app.post('/api/relay/deploy', wrap((req) => { onComputer(req); return relay.deploy({ method: req.body?.method, token: req.body?.token, account: req.body?.account }) }))
 app.post('/api/relay/update', wrap((req) => { onComputer(req); return relay.update() }))
 // review: the code for a computer set up for others to try (bridge-ai pair --review; relay.js).
@@ -3656,14 +3711,16 @@ app.get('/api/config', (req, res) => res.json({
   name: cfg.name || '', location: cfg.location?.label || null, hasMortgage: !!cfg.mortgage,
   runtime: { name: rt.name, ...rt.caps, attach: !!rt.attach, ...(rt.name === 'herdr' ? { session: herdrSession() } : { keep: cfg.keepAgents !== false }), ...(fellBack() ? { fellBack: fellBack() } : {}) }, platform: process.platform, mail: IS_MAC, calendar: IS_MAC, accounts: account.available(),
   defaultAgent: cfg.defaultAgent || 'claude', chiefKind: cfg.chief?.kind || 'claude', setupDone: !!cfg.setupDone, simple: !!cfg.simple,
-  // Settings › Voice & Meetings › Dictation; Tidy what I say only while its trial is on.
-  dictation: trialOn('dictation-cleanup') || !cfg.dictation?.tidy ? cfg.dictation || {} : { ...cfg.dictation, tidy: false },
+  // Settings › Meetings & Voice › Dictation, Tidy What I Say as it is here (its default where unset).
+  dictation: { ...(cfg.dictation || {}), tidy: featureOn('dictation-cleanup') },
   alertSounds: cfg.alertSounds !== false, // the speaker in the top bar
+  enterKey: ['always', 'mod'].includes(cfg.enterKey) ? cfg.enterKey : 'smart', // Settings › You › Enter Key (src/enter.js)
   meetingKey: MEETING_KEYS.includes(cfg.meetings?.mentionKey) ? cfg.meetings.mentionKey : '@', // Settings › Voice & Meetings
   trials: Object.fromEntries(TRIALS.map((id) => [id, trialOn(id)])), // Settings › About & Updates › Beta Features
+  features: Object.fromEntries(Object.keys(FEATURES).map((id) => [id, featureOn(id)])), // the ones out of beta, each in its own place
   // The effort each agent starts with (Settings › Agents), for a task's effort chip to say.
   efforts: Object.fromEntries(AGENTS.filter((a) => a.effort && isEffort(cfg.agents?.[a.kind]?.effort)).map((a) => [a.kind, cfg.agents[a.kind].effort])),
-  trialsAuto: trialOn('meeting-insights') && meetInsights.autoOn() ? { 'meeting-insights': meetInsights.autoOn().at } : {}, // the ones that turned themselves on, when
+  featuresAuto: featureOn('meeting-insights') && meetInsights.autoOn() ? { 'meeting-insights': meetInsights.autoOn().at } : {}, // the ones that turned themselves on, when
 }))
 // The speaker in the top bar: notifications (this computer's, a browser's, your phones') come with a
 // sound, or without one; they still come. Your other devices are told too, unless one of them is
@@ -3682,7 +3739,7 @@ function applyConfig() {
   for (const k of Object.keys(cfg)) if (!(k in fresh)) delete cfg[k]
   Object.assign(cfg, fresh)
   TZ = cfg.location?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone
-  routines.scheduling(trialOn('routines'))
+  routines.scheduling(featureOn('routines'))
   weather = makeWeather(cfg)
   prepareChief(cfg)
   desk.sync() // the bots connected while their beta feature is on, and not while it's off
@@ -3701,11 +3758,18 @@ const settingsView = () => ({
 // Settings that only apply at start, as they were when this server started: the top bar offers
 // Restart to apply while any differs (and stops if you change it back).
 const atStart = Object.fromEntries(settings.RESTART_KEYS.map((k) => [k, JSON.stringify(settings.readUser()[k])]))
+// Every open window looks at /config again now (the live feed), not at its next look, which can be
+// minutes away.
+const configChanged = () => { for (const c of clients) c.write('event: config\ndata: {}\n\n') }
+// Tidy What I Say's default, once it's known whether the local model fits here (FEATURES).
+llm.fits().then((v) => { tidyFits = v; if (v && cfg.dictation?.tidy === undefined) configChanged() }).catch(() => {})
+// The settings a window shows or hides things by: Beta Features, and the features out of beta.
+const SHOWN_BY = ['trials', 'home', 'routines', 'meetings', 'dictation', 'mcpServer']
 const afterChange = (changed) => {
   applyConfig()
-  // Beta Features on or off: every open window shows or hides them at once (the live feed), not at
-  // its next look at /config, which can be minutes away.
-  if (changed.includes('trials')) for (const c of clients) c.write('event: config\ndata: {}\n\n')
+  // One of those on or off, or the Enter Key changed: every open window (a phone's too) shows or
+  // hides it, or takes Enter the new way, at once (the live feed), not at its next look at /config.
+  if (changed.some((k) => SHOWN_BY.includes(k)) || changed.includes('enterKey')) configChanged()
   if (changed.includes('trials')) remote.trialChanged()
   syncCalls()
   rt.setKeep?.(cfg.keepAgents !== false) // applies right away
@@ -3720,6 +3784,9 @@ const afterChange = (changed) => {
 // What's compared is the setting as it would be saved, the very object written.
 const remoteTrialOf = (s) => JSON.stringify((s?.trials && typeof s.trials === 'object' && !Array.isArray(s.trials) ? s.trials['remote-screen'] : null) ?? null)
 const remoteTrialKept = (req, next) => { if (remoteTrialOf(next) !== remoteTrialOf(settings.readUser())) remoteHere(req) }
+// Bridge AI as an MCP Server lets other apps on this computer read your boards and files: turned on
+// at this computer only, by either way of changing the settings (turned off from anywhere).
+const mcpKept = (req, next) => { if (next?.mcpServer?.on === true && settings.readUser().mcpServer?.on !== true) remoteHere(req) }
 app.get('/api/settings', wrap(() => settingsView()))
 // Meeting notes' model as Meetings & Voice had it (meetings.model: saved before 3.22.0, sent by an
 // app that still has it, or typed into the file): first in Meeting notes' row in Models for Each
@@ -3744,6 +3811,7 @@ app.patch('/api/settings', async (req, res) => {
       const next = settings.merged(settings.readUser(), req.body)
       channelKept(req, next)
       remoteTrialKept(req, next)
+      mcpKept(req, next)
     }
     const changed = settings.patch(req.body || {})
     res.json(afterChange(plus(changed, await moveNotesModel())))
@@ -3752,7 +3820,7 @@ app.patch('/api/settings', async (req, res) => {
 app.put('/api/settings/raw', async (req, res) => {
   try {
     const text = String(req.body?.text ?? '')
-    try { const next = JSON.parse(text); channelKept(req, next); remoteTrialKept(req, next) } catch (e) { if (e.status) throw e }
+    try { const next = outOfBeta(JSON.parse(text)); channelKept(req, next); remoteTrialKept(req, next); mcpKept(req, next) } catch (e) { if (e.status) throw e }
     const changed = settings.replaceRaw(text)
     res.json(afterChange(plus(changed, await moveNotesModel())))
   } catch (e) { res.status(e.status || 502).json({ error: e.message }) }
@@ -4260,12 +4328,13 @@ app.delete('/api/llm', wrap(async (req) => {
 providerRoutes(app, { cfg, installed })
 mcpRoutes(app, { cfg, installed })
 
-// ---------- Bridge AI as an MCP server (a beta feature) ----------
+// ---------- Bridge AI as an MCP server (mcpServer.on: off until you turn it on) ----------
 // Other apps (Claude Code, Claude Desktop, Cursor, Codex) reach your boards, Studio files in your
 // Places and meeting summaries, through `bridge-ai mcp` (scripts/mcp.js), which asks here, or /mcp.
 // What they may do is decided here (mcptools.js); what they ask of you waits in Needs You
-// (outside.js). Sending to an agent only while you turn it on (mcpServer.sendToAgents).
-const mcpOn = () => trialOn('mcp-server')
+// (outside.js). Sending to an agent only while you turn it on (mcpServer.sendToAgents). Turned on
+// at this computer only (mcpKept), and kept out of a backup (backup.js), as each is this computer's say.
+const mcpOn = () => featureOn('mcp-server')
 const outside = makeOutside({ apply: (it) => mcpTools.apply(it) })
 const mcpTools = makeMcpTools({
   on: mcpOn, sendOn: () => cfg.mcpServer?.sendToAgents === true, boards, meetings, places, files, studio, doctext, tasks: chiefTasks, outside,
@@ -4582,7 +4651,7 @@ async function botView(b, { brief = false } = {}) {
     updateApp: { missing, needs: missing.map((x) => ({ scope: x, for: String(SLACK_SCOPE_FOR[x] || '').replace('<command>', slackCommand(via.slack?.shared ? via.slack.name : b.name).slice(1)) })) },
     command: via.slack?.shared ? `${slackCommand(via.slack.name)} ${b.name.toLowerCase().split(/\s+/)[0]}` : slackCommand(b.name), shortcut: slackShortcut(via.slack?.shared ? via.slack.name : b.name), ownerGuess,
     scheduled: (routinesNow.routines || []).filter((r) => r.to === 'bot' && r.bot === b.id).map((r) => ({ id: r.id, name: r.name, command: r.command, channel: r.channel || null, schedule: r.schedule || null, says: r.says || null, next: r.next || [], state: r.state, note: r.note || null, auto: !!r.auto, paused: !!r.paused, runs: (r.runs || []).slice(0, 5) })),
-    routinesOn: trialOn('routines'),
+    routinesOn: featureOn('routines'),
   }
 }
 const slackChannels = new Map() // bot id -> { at, n }
@@ -4721,7 +4790,7 @@ async function seeSteps(b, s, v) {
   const pend = { people: [], channels: [], posts: [], ...(s.pending || {}) }
   const ch = desk.channel(b.id)
   // Posts asked for before it could post: offered once it's connected, and Scheduled Routines is on.
-  if (!s.change && pend.posts.length && ch?.state().state === 'connected' && trialOn('routines')) {
+  if (!s.change && pend.posts.length && ch?.state().state === 'connected' && featureOn('routines')) {
     const was = proposalOf(b, { instructions: botsStore.readOwn(b.id), platform: at, ...whereOf(b, at) })
     const to = { ...was, posts: pend.posts }
     s.change = { id: randomUUID().slice(0, 8), at: new Date().toISOString(), lines: linesOf(was, to), proposal: to, found: true }
@@ -4829,7 +4898,7 @@ app.post('/api/bots/:id/assist/apply', botsGuard, wrapBot(async (req) => {
   for (const l of s.change.lines) { const k = SETTING_OF[l.key]; if (k && patch[k] !== undefined) x[k] = patch[k] }
   // Posts on a schedule (Scheduled Routines): each in a channel it's in, checked before anything's kept.
   const posts = s.change.lines.some((l) => l.key === 'posts') ? s.change.proposal.posts || [] : []
-  if (posts.length && !trialOn('routines')) throw new Error(`Scheduled posts need Scheduled Routines: turn it on in ${placeEn('beta')}`)
+  if (posts.length && !featureOn('routines')) throw new Error(`Scheduled posts need Scheduled Routines: turn it on in ${placeEn('scheduled-routines')}`)
   const where = posts.map((pp) => ({ pp, c: known.channels.find((c) => String(c.name || '').toLowerCase() === pp.channel) }))
   const notIn = where.filter((w) => !w.c).map((w) => `#${w.pp.channel}`)
   if (notIn.length) throw new Error(`${b.name} isn't in ${notIn.join(', ')}${known.channels.length ? '' : ' (it isn\'t connected yet)'}: invite it there first, then say it again`)

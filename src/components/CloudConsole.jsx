@@ -8,6 +8,7 @@ import { Menu } from './Rail.jsx'
 import { CloudMark, linkOf, stateLabel, whereOf } from './cloudBits.jsx'
 import { api, usePoll, fmtTime } from '../api.js'
 import { t } from '../i18n/index.js'
+import { useEnter, SendKeys } from './EnterHint.jsx'
 import './cloud.css'
 
 // Runs of tool steps fold into one line.
@@ -49,12 +50,14 @@ function CloudComposer({ placeholder, onSend, hint, disabled }) {
     setBusy(false)
     if (ok !== false) setText('')
   }
+  // Enter as Settings › You › Enter Key has it (src/enter.js); a phone's keyboard on the screen makes a new line.
+  const enter = useEnter(text, send, { onScreen: 'newline' })
   return (
     <div className="composer cloud-composer">
-      <textarea ref={ta} value={text} rows={1} placeholder={placeholder} disabled={disabled} onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && !window.matchMedia('(pointer: coarse)').matches) { e.preventDefault(); send() } }} />
+      <textarea ref={ta} value={text} rows={1} placeholder={placeholder} disabled={disabled} onChange={(e) => { setText(e.target.value); enter.box.onSelect(e) }}
+        onKeyDown={enter.onKeyDown} {...enter.box} />
       <div className="comp-tools">
-        <span className="comp-hint">{hint || <span className="hide-touch"><kbd>⏎</kbd> {t('send')} · <kbd>⇧⏎</kbd> {t('new line')}</span>}</span>
+        <span className="comp-hint">{hint || <span className="hide-touch"><SendKeys enter={enter} /></span>}</span>
         <button className="send" onClick={send} disabled={!text.trim() || busy || disabled} aria-label={t('Send')} title={t('Send')}><Icon name="send" size={15} /></button>
       </div>
     </div>

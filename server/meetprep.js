@@ -68,10 +68,10 @@ const nameKey = (s) => [...partsOf(s)].sort().join(' ')
 const isMe = (name) => !!me() && (meetings.sameName(name, me()) || (String(name).includes('@') && meetings.sameName(String(name).split('@')[0], me())))
 // The people Meeting Insights knows, asked at most once a minute (it reads every meeting once, then
 // only those that changed). null when it can't say.
-// Meeting Insights is a beta feature: while it's off, nobody is said to be met before or new.
+// While Meeting Insights is off, nobody is said to be met before or new.
 let known = { at: 0, list: null }
 async function people() {
-  if (cfg.trials?.['meeting-insights'] !== true) return null
+  if (cfg.meetings?.insights !== true) return null
   if (known.list && Date.now() - known.at < 60e3) return known.list
   try {
     const r = await within(insights.list(), 8000, 'Meeting Insights')

@@ -1,4 +1,5 @@
-// Routines, and with Scheduled Routines on (a beta feature) their schedules, their runs and Command
+// Routines, and with Scheduled Routines on (out of Beta Features: on unless you turn it off, and a
+// routine runs by itself only once you give it a time) their schedules, their runs and Command
 // History, without a browser (routines-ui has the app).
 //   Schedules (shared/schedule.js): what's said in plain words read into a schedule (every weekday
 //   at 9, mondays and thursdays at 2pm, every other tuesday, every month on day 1, the last day,
@@ -19,9 +20,10 @@
 //   none for "yes", for one asked five times in a day, at times hours apart, a pattern that stopped,
 //   or one that's a routine already; one dismissed never again. Kept 30 days, the rest taken off the
 //   disk; deleted from the disk; with the history off, nothing kept.
-//   A server, with a stand-in Claude Code: routines as before with the beta feature off (an older
-//   routines.json listed and run, no schedule taken, Command History's routes not there, nothing
-//   kept); on, a routine made with a schedule (its next runs, what it says), one refused; what's
+//   A server, with a stand-in Claude Code, its Beta Features switch for it turned off before 3.22.0
+//   (still off, saved as its own setting): routines as before (an older routines.json listed and
+//   run, no schedule taken, Command History's routes not there, saying where to turn it on, nothing
+//   kept); turned on, a routine made with a schedule (its next runs, what it says), one refused; what's
 //   typed in the app's boxes kept (a message, a new agent's first one, a task, an answer queued for
 //   a busy agent with a file attached) and what agents send each other not; search, delete, off,
 //   Delete all; a suggestion over the route, dismissed for good (after a restart too); the Chief of
@@ -155,7 +157,7 @@ try {
     l = (await R.list(true)).routines.find((r) => r.id === d.id)
     ok(runsOf(d.id)[0].error === 'Claude Code isn\'t installed' && l.state === 'error' && /^Didn't run Thu/.test(l.note) && told.some(([, r]) => r.error), 'one that can\'t start: why, listed as didn\'t run, and told', l.note)
     setNow(2026, 11, 20, 9, 0, 5); await tick({ on: false })
-    ok(started.length === 3 && /Scheduled Routines was off/.test(runsOf(d.id)[0].why), 'with Scheduled Routines off, its time is written down as skipped, saying why', runsOf(d.id)[0])
+    ok(started.length === 3 && /Scheduled Routines was turned off/.test(runsOf(d.id)[0].why), 'with Scheduled Routines off, its time is written down as skipped, saying why', runsOf(d.id)[0])
     setNow(2026, 11, 20, 10, 0)
     const e = await R.add({ name: 'Inbox sweep', command: 'Sweep the inbox', cwd: path.join(home, 'project'), schedule: 'every day at 9' })
     await tick()
@@ -175,7 +177,7 @@ try {
     R.scheduling(false)
     try { await R.add({ name: 'x', command: 'y', schedule: 'every day at 9' }) } catch (x) { refusedBeta = x.message }
     R.scheduling(true)
-    ok(/beta feature/.test(refusedBeta || ''), 'with Scheduled Routines off, a schedule isn\'t taken, saying how to turn it on', refusedBeta)
+    ok(/Scheduled Routines is turned off\. Turn it on in Settings › Agents & Models › Agents › Scheduled Routines\./.test(refusedBeta || ''), 'with Scheduled Routines off, a schedule isn\'t taken, saying where to turn it on', refusedBeta)
 
     // ---------- Command History's suggestions, in this process ----------
     H.configure({})
@@ -228,7 +230,7 @@ try {
     ok(off.kept === false && !disk().includes('Nothing should keep this') && (await H.list()).history === false, 'with the history off, nothing is kept, and the list says it\'s off')
   } finally { globalThis.Date = RealDate }
 
-  // ---------- A server, Scheduled Routines off and then on ----------
+  // ---------- A server, Scheduled Routines turned off before (a Beta Feature then), and then on ----------
   const project = (k, name) => { const dir = path.join(k.home, 'code', name); fs.mkdirSync(dir, { recursive: true }); return dir }
   const aNow = new clock.Date()
   const seedDay = (back, h, mi) => { const d = new clock.Date(aNow); d.setDate(d.getDate() - back); d.setHours(h, mi, 0, 0); return d }
@@ -236,6 +238,7 @@ try {
   const weekdays = []
   for (let back = 1; weekdays.length < 4; back++) { const d = seedDay(back, 9, 0); if (d.getDay() >= 1 && d.getDay() <= 5) weekdays.unshift(d) }
   kitA = await startKit('routines', {
+    config: { trials: { routines: false } },
     env: ({ data, home: h }) => {
       // An older routines.json, from before schedules.
       fs.mkdirSync(path.join(h, 'code', 'shop'), { recursive: true })
@@ -251,22 +254,24 @@ try {
   await A.api('/setup', { name: 'Tester' })
   await A.api('/agents/catalog')
   const stop = listen(A.url)
+  const savedA = JSON.parse(fs.readFileSync(path.join(A.data, 'config.json'), 'utf8'))
+  ok((await A.api('/config')).features?.routines === false && savedA.routines?.on === false && !savedA.trials, 'its Beta Features switch turned off before 3.22.0: off, saved as its own setting', savedA)
   let list = await A.api('/routines?refresh=1')
   const legacy = list.routines.find((r) => r.id === 'weekly-dependency-check')
   ok(legacy && !legacy.when && list.computer, 'off: an older routines.json listed as it was, with this computer\'s name', legacy)
   let e1 = null
   try { await A.api('/routines', { name: 'Scheduled', command: 'Do it', cwd: '~/code/shop', schedule: 'every day at 9' }) } catch (x) { e1 = x }
-  ok(e1 && /beta feature/.test(e1.message), 'off: a schedule isn\'t taken, saying how to turn it on', e1?.message)
+  ok(e1 && /Scheduled Routines is turned off\. Turn it on in Settings › Agents & Models › Agents › Scheduled Routines\./.test(e1.message), 'off: a schedule isn\'t taken, saying where to turn it on', e1?.message)
   let e2 = null
   try { await A.api('/command-history') } catch (x) { e2 = x }
-  ok(e2?.status === 404 && /Scheduled Routines is a beta feature/.test(e2.message), 'off: Command History\'s routes aren\'t there, saying how to turn it on', e2?.message)
+  ok(e2?.status === 404 && /Scheduled Routines is turned off\. Turn it on in Settings › Agents & Models › Agents › Scheduled Routines\./.test(e2.message), 'off: Command History\'s routes aren\'t there, saying where to turn it on', e2?.message)
   const ran = await A.api('/routines/weekly-dependency-check/run', {})
   const legacyAgent = await until(async () => (await A.api('/fleet')).agents.find((a) => a.paneId === ran.paneId), 30000, 500)
   ok(legacyAgent && legacyAgent.workspace === 'Maintenance', 'off: Run starts it as before, in its space', legacyAgent?.workspace)
   await A.api(`/agents/${encodeURIComponent(ran.paneId)}/prompt`, { text: 'Typed while it was off', typed: 'message' }).catch(() => {})
   ok(!fs.existsSync(path.join(A.data, 'commands', `${new clock.Date().toISOString().slice(0, 7)}.jsonl`)) || !fs.readFileSync(path.join(A.data, 'commands', `${new clock.Date().toISOString().slice(0, 7)}.jsonl`), 'utf8').includes('Typed while it was off'), 'off: nothing typed is kept')
 
-  await A.api('/settings', { trials: { routines: true } }, 'PATCH')
+  await A.api('/settings', { routines: { on: true } }, 'PATCH')
   const shop = project(A, 'shop')
   const made = await A.api('/routines', { name: 'Standup notes', command: 'busy 1', cwd: '~/code/shop', schedule: 'every weekday at 9', kind: 'claude' })
   list = await A.api('/routines?refresh=1')
@@ -333,8 +338,8 @@ try {
   const T = Math.ceil((fireReal + clock.offset) / 60000) * 60000
   const offset = T - fireReal
   const ago = (ms) => new RealDate(T - ms)
+  // (Scheduled Routines never set: on, as it is for everyone.)
   kitB = await startKit('routines-clock', {
-    config: { trials: { routines: true } },
     env: ({ data, home: h, bin }) => {
       standIn(bin)
       fs.mkdirSync(path.join(h, 'code', 'shop'), { recursive: true })

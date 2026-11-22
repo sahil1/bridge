@@ -418,7 +418,7 @@ function Tidy({ list: these, byId, act }) {
 }
 
 // People: the ones you meet that memory doesn't have (Meeting Insights), the most met first, each
-// one click from memory. With Meeting Insights off (a beta feature), nothing of it shows.
+// one click from memory. With Meeting Insights off, nothing of it shows.
 function Met({ people, insights, act }) {
   const [all, setAll] = useState(false)
   if (!insights || !people.length) return null

@@ -3,25 +3,26 @@ import Icon from '../Icon.jsx'
 import { useMeetings } from '../meetings/recording.jsx'
 import { useScreenAccess, useAllowCall, allowSteps } from '../meetings/allowcall.jsx'
 import { api, usePoll } from '../../api.js'
-import { useSettings, SaveNote } from './General.jsx'
-import { useTrial } from '../../trials.js'
+import { useSettings, useSwitch, SaveNote } from './General.jsx'
+import { useTrial, useFeature } from '../../trials.js'
 import { openMemory } from '../meetings/tools.jsx'
 import { where } from './search.js'
-import { t, tx, currentLang } from '../../i18n/index.js'
+import { t, tx, currentLang, locale } from '../../i18n/index.js'
 import { MEETING_KEYS } from '../../../shared/mentions.js'
 import { Advanced, Line, More, Needs } from './Advanced.jsx'
 import { Betas } from './Beta.jsx'
 import '../meetings/meetings.css'
 
 // Settings › Meetings & Voice › Meetings: its beta features' switches first (Live Meeting Board,
-// Answers in AI Assist, Meeting Insights, Speakers From the Call's Video on a Mac); which engine turns speech into text (on this computer, or a service you have
+// Answers in AI Assist, Speakers From the Call's Video on a Mac); which engine turns speech into text (on this computer, or a service you have
 // a key for), the language, names and terms, the model that writes the notes and what it does by
 // itself (the summary, cleaning up, naming who spoke, preparing: on unless turned off, and what each
 // reads goes to that model, so which and where it runs is said there), AI Assist's live board (a
 // beta feature: on for every meeting, and what it sends where), Answers in AI Assist (a beta
 // feature: what it answers from, and what goes where, the web too), calls and their sound (and, in
-// the desktop app, the floating card's reminder before a meeting), cropping pictures of a call, and
-// saving them as Markdown. Under Advanced: the other speech services, suggesting what to ask, who
+// the desktop app, the floating card's reminder before a meeting), cropping pictures of a call,
+// Meeting Insights (meetings.insights: on by itself once 5 meetings are recorded here, unless you
+// set it) and saving them as Markdown. Under Advanced: the other speech services, suggesting what to ask, who
 // spoke, the key that mentions a meeting in a message, the floating card, and where and how notes
 // are saved. Server: speech.js, meetings.js.
 const LANGS = [['auto', 'Detect it'], ['en', 'English'], ['es', 'Spanish'], ['fr', 'French'], ['de', 'German'], ['it', 'Italian'], ['pt', 'Portuguese'], ['nl', 'Dutch'], ['hi', 'Hindi'], ['zh', 'Chinese'], ['ja', 'Japanese'], ['ko', 'Korean'], ['ar', 'Arabic'], ['ru', 'Russian'], ['pl', 'Polish'], ['tr', 'Turkish'], ['sv', 'Swedish'], ['uk', 'Ukrainian']]
@@ -167,10 +168,11 @@ export default function Meetings({ onOpenAgent }) {
   // Preparing for meetings needs the calendar: only where there's one (a Mac).
   const conf = usePoll('/config', 10 * 60 * 1000).data
   const calendar = conf?.calendar === true
-  const home = useTrial('home') // Home, a beta feature: named only when it's there
+  const home = useFeature('home') // Home: named only when it's there
   const liveBoard = useTrial('meeting-board') // AI Assist's live board, a beta feature
   const answers = useTrial('assist-answers') // Answers in AI Assist, a beta feature
   const [web, setWeb] = useState(null) // the route that looks things up on the web (consult.js: Perplexity), once asked
+  const [insightsOn, setInsights] = useSwitch(s?.effective?.meetings?.insights === true, (insights) => save({ meetings: { insights } }))
   useEffect(() => { if (answers) api('/consult').then((l) => setWeb((Array.isArray(l) ? l : []).find((x) => x.id === 'perplexity') || { available: false }), () => setWeb({ available: false })) }, [answers])
   useEffect(() => { api('/chat/models').then((r) => { setModels(r.models || []); setAuto(r.automatic || null); setShort(r.short || null) }).catch(() => setModels([])) }, [])
   const m = s?.effective?.meetings || {}
@@ -209,7 +211,7 @@ export default function Meetings({ onOpenAgent }) {
     <div className="st-sections st-meet">
       <SaveNote note={note} />
       {/* The beta features of meetings, each switch marked Beta, at the top of the tab. */}
-      <Betas ids={['meeting-board', 'assist-answers', 'meeting-insights', 'call-video']} mac={conf?.platform === 'darwin'} />
+      <Betas ids={['meeting-board', 'assist-answers', 'call-video']} mac={conf?.platform === 'darwin'} />
 
       <section className="st-sec" data-setting="transcribe">
         <h4>{t('Transcribe with')}</h4>
@@ -359,6 +361,14 @@ export default function Meetings({ onOpenAgent }) {
           <span><b>{t("Crop pictures of a call to what's shared")}</b> <span className="muted small">{m.cropShots !== false
             ? t("The slide or page, without the people and the call's buttons. Whole screen on a picture puts it back.")
             : t('Pictures stay whole. Crop on a picture of a call crops that one.')} <More>{t("When a watched screen shows a call, its pictures keep the slide or page being shared, and leave out the people beside it, the call's buttons and its window. Only when the picture plainly shows a call, and never into what's shared. Worked out on this computer; the picture as it was taken is kept too.")}</More></span></span>
+        </label>
+      </section>
+
+      {/* Meeting Insights: on by itself once there are meetings to add up, unless you set it (server/index.js insightsByItself). */}
+      <section className="st-sec" data-setting="meeting-insights">
+        <label className="st-check">
+          <input type="checkbox" checked={insightsOn} onChange={(e) => setInsights(e.target.checked)} />
+          <span><b>{t('Meeting Insights')}</b> <span className="muted small">{t('Your meetings added up, and the people you meet.')}{conf?.featuresAuto?.['meeting-insights'] && insightsOn ? ` ${t('Turned on by itself on {date}, once there were meetings to add up.', { date: new Date(conf.featuresAuto['meeting-insights']).toLocaleDateString(locale(), { month: 'long', day: 'numeric' }) })}` : ''} <More>{t('Your meetings added up (how much time, when in the week, which series, your share of the talk) and the people you meet, worked out on this computer. It turns on by itself once 5 meetings are recorded here, unless you turn it off.')}</More></span></span>
         </label>
       </section>
 

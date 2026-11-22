@@ -822,14 +822,14 @@ process.exit(1)`)
   await sec.locator('.st-check', { hasText: 'Tell voices apart in a room' }).locator('.st-more').click({ timeout: 3000 }).catch(() => {})
   const sectionShown = !!(await until(() => sec.isVisible(), 8000)) && /Tell voices apart in a room/.test(await sec.innerText()) && /Remember voices you name/.test(await sec.innerText()) && /ERes2Net, 26 MB, Apache-2\.0/.test(await sec.innerText())
   ok(sectionShown, 'Settings › Meetings & Voice: Voices in a room, with the model it uses and remembering voices', await sec.innerText().catch(() => ''))
-  // Prepare for each meeting (where there's a calendar, a Mac) says where to ask for it, never naming Home, a beta
-  // feature that's off here.
+  // Prepare for each meeting (where there's a calendar, a Mac) says where to ask for it, never naming
+  // Home while it's off (as it is here).
   if (IS_MAC) {
     // (In a line; all of it under More.)
     const prepRow = p.locator('.st-check', { hasText: 'Prepare for each meeting' })
     await prepRow.locator('.st-more').click({ timeout: 3000 }).catch(() => {})
     const prep = await prepRow.locator('.st-more-text').innerText({ timeout: 3000 }).catch(() => '')
-    ok(/with AI Assist on the meeting in Calendar\./.test(prep) && !/Home/.test(prep) && !(await kit.api('/config')).trials.home, 'Settings › Meetings & Voice: Prepare for each meeting says AI Assist does it from the meeting in Calendar, and names no Home while Home is off', prep)
+    ok(/with AI Assist on the meeting in Calendar\./.test(prep) && !/Home/.test(prep) && (await kit.api('/config')).features.home === false, 'Settings › Meetings & Voice: Prepare for each meeting says AI Assist does it from the meeting in Calendar, and names no Home while Home is off', prep)
   }
   await sec.scrollIntoViewIfNeeded().catch(() => {})
   await shot(p, `${tag}settings-room-voices`)
