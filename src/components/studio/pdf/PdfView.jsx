@@ -37,6 +37,7 @@ export default function PdfView({ file, data, onStats, handle, onOpen }) {
     hashed.current = { data, sha }
     return sha
   }, [data])
+  const [tries, setTries] = useState(0) // Try again, after a part of a big one didn't come
   const [pages, setPages] = useState(0)
   const [page, setPage] = useState(1)
   const [pageText, setPageText] = useState('1')
@@ -77,7 +78,9 @@ export default function PdfView({ file, data, onStats, handle, onOpen }) {
     ;(async () => {
       const { lib, viewer: V } = await loadPdfjs()
       if (gone) return
-      task = openPdf(lib, data, { url: file.url || null, size: file.size || 0, onPassword: (retry, wrong) => { if (!gone) { passwordRef.current = retry; setState({ phase: 'password', wrong }) } } })
+      // A part of a big one that didn't come: said, with Try again (pdf.js would wait for it for ever).
+      const onFail = (e) => { if (!gone) setState({ phase: 'error', again: true, error: e.offline ? t('Part of it didn\'t come from the computer it\'s on: the connection dropped. Check that it\'s on and connected, then try again.') : t('Part of it couldn\'t be read from the computer it\'s on: {error}', { error: e.message }) }) }
+      task = openPdf(lib, data, { url: file.url || null, size: file.size || 0, onFail, onPassword: (retry, wrong) => { if (!gone) { passwordRef.current = retry; setState({ phase: 'password', wrong }) } } })
       const doc = await task.promise
       if (gone) return
       const bus = new V.EventBus()
@@ -135,7 +138,7 @@ export default function PdfView({ file, data, onStats, handle, onOpen }) {
       if (first) Promise.race([first, new Promise((r) => setTimeout(r, 3000))]).then(end, end)
       else end()
     }
-  }, [data, file.url])
+  }, [data, file.url, tries])
 
   // The width it fits to follows the pane.
   useEffect(() => {
@@ -288,7 +291,7 @@ export default function PdfView({ file, data, onStats, handle, onOpen }) {
               <Icon name="alert" size={20} />
               <b>{t("Couldn't show this PDF")}</b>
               <span className="muted small">{state.error}</span>
-              <span className="sd-empty-acts"><a className="btn small" href={rawUrl(file)} target="_blank" rel="noreferrer"><Icon name="external" size={12} /> {t('Open it on its own')}</a><a className="btn small" href={rawUrl(file)} download={file.name}><Icon name="download" size={12} /> {t('Download')}</a></span>
+              <span className="sd-empty-acts">{state.again && <button type="button" className="btn small" onClick={() => { setState({ phase: 'loading' }); setTries((n) => n + 1) }}><Icon name="refresh" size={12} /> {t('Try again')}</button>}<a className="btn small" href={rawUrl(file)} target="_blank" rel="noreferrer"><Icon name="external" size={12} /> {t('Open it on its own')}</a><a className="btn small" href={rawUrl(file)} download={file.name}><Icon name="download" size={12} /> {t('Download')}</a></span>
             </div>
           )}
           {state.phase === 'password' && (

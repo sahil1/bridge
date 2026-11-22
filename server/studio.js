@@ -72,11 +72,16 @@ function tooBig(ext, size, max, whole) {
   return Object.assign(new Error(msg), { code: 'too-big', status: 413, data: { size, max, whole: !!whole, app } })
 }
 
+// A file that isn't where it was (moved, renamed or deleted, maybe while it was open here): said as
+// that (code gone), so the page keeps what's in it and offers to save it elsewhere.
+const goneErr = (rel) => Object.assign(new Error(`${path.basename(String(rel || ''))} isn't where it was any more: it was moved or deleted`), { code: 'gone', status: 404 })
+const orGone = (rel) => (e) => { throw e?.message === 'Not found' && !e.code ? goneErr(rel) : e?.code === 'ENOENT' ? goneErr(rel) : e }
+
 // A file Studio may open: inside the root Files gave (an agent's folder, a place), a kind it knows,
 // not Office's lock file beside one, and not too big for it.
 async function locate(root, rel) {
-  const { real, rel: r } = await safePath(root, rel)
-  const st = await fsp.stat(real)
+  const { real, rel: r } = await safePath(root, rel).catch(orGone(rel))
+  const st = await fsp.stat(real).catch(orGone(rel))
   if (!st.isFile()) throw new Error('Not a file')
   if (isLockFile(real)) throw Object.assign(new Error("This is Office's lock file, kept beside a document while it's open in Word, Excel or PowerPoint (it says who has it open). It isn't a document: open the one without ~$ in its name."), { code: 'lock-file' })
   if (!opens(real)) throw new Error("Studio doesn't open this kind of file")
@@ -448,8 +453,11 @@ export async function open(root, rel, { rootId = null, label = null } = {}) {
     partsOf = await parts.index(real, st).catch(() => null)
     if (!partsOf && st.size > WHOLE_MAX) throw new Error(`Studio can't read the parts of this ${APP[ext] || 'Office'} file: it isn't in the newer Office format, or it's damaged or locked with a password. Open it on its computer in ${APP[ext] || 'its own app'}.`)
   }
+  // Which file it is, whatever it's called (its disk's and its own number), to find it again if it's
+  // moved while it's open (movedTo).
+  const big = await fsp.stat(real, { bigint: true }).catch(() => null)
   return {
-    path: r, name: path.basename(real), kind, ext, size: st.size, mtime: st.mtimeMs, versions: await shownChecked(await versionsOf(real), real), signings: await signingsOf(real),
+    path: r, name: path.basename(real), kind, ext, size: st.size, mtime: st.mtimeMs, versions: await shownChecked(await versionsOf(real), real), signings: await signingsOf(real), fileId: big ? `${big.dev}:${big.ino}` : null,
     inParts: inParts(ext, st.size) && (ext === '.pdf' || !!partsOf), ...(partsOf ? { left: partsOf.left, model: partsOf.model } : {}),
     saves: st.size <= SAVE_MAX, keep: keepFor(st.size), limits: { open: OPEN_MAX, save: SAVE_MAX, whole: WHOLE_MAX },
     // A PDF one could sign (80 MB at most): its SHA-256 as it's opened, which signing then has to find
@@ -460,8 +468,10 @@ export async function open(root, rel, { rootId = null, label = null } = {}) {
 
 // A file opened in parts, as the page gets it (studioparts.slim): its XML, a marker in each big
 // part's place. Only of the file as it was opened (mtime): changed since, the page opens it again.
-export async function slimFile(root, rel, mtime) {
+// version: one of its versions so (Compare reads a big one's words, not its pictures).
+export async function slimFile(root, rel, mtime, { version = null } = {}) {
   const { real, st } = await locate(root, rel)
+  if (version) return { bytes: await parts.slim((await versionFile(root, rel, version)).file), mtime: st.mtimeMs }
   if (mtime != null && mtime !== '' && Math.abs(st.mtimeMs - Number(mtime)) > 1) throw Object.assign(new Error('The file changed since it was opened. Open it again.'), { status: 409, code: 'changed' })
   return { bytes: await parts.slim(real), mtime: st.mtimeMs }
 }
@@ -540,6 +550,91 @@ export async function restore(root, rel, id) {
     const st = await fsp.stat(real)
     return { mtime: st.mtimeMs, size: st.size, versions: shown(await versionsOf(real)) }
   })
+}
+
+// ---------- Moved or deleted while open ----------
+// Where a file that was open went, when it was moved (or renamed) and not deleted: the file with the
+// same number on the same disk (fileId, from open), in the same root. Its old folder first, then the
+// whole root a folder at a time, nearest first, for a few seconds at most; never into hidden folders
+// or node_modules. Its path in the root, or null.
+const SKIP_DIRS = new Set(['node_modules', '.git', 'Library'])
+export async function movedTo(root, rel, fileId) {
+  const [dev, ino] = String(fileId || '').split(':')
+  if (!dev || !ino) return { path: null }
+  const { realRoot } = await safePath(root, '')
+  const was = path.dirname(path.resolve(realRoot, String(rel || '').replace(/^\/+/, '')))
+  const queue = [...(was.startsWith(realRoot) && was !== realRoot ? [was] : []), realRoot]
+  const seen = new Set()
+  const until = Date.now() + 4000
+  for (let looked = 0; queue.length && looked < 6000 && Date.now() < until;) {
+    const dir = queue.shift()
+    if (seen.has(dir)) continue
+    seen.add(dir)
+    looked++
+    const ents = await fsp.readdir(dir, { withFileTypes: true }).catch(() => [])
+    for (const e of ents) {
+      if (e.name.startsWith('.') || isLockFile(e.name)) continue
+      const full = path.join(dir, e.name)
+      if (e.isDirectory()) { if (!SKIP_DIRS.has(e.name)) queue.push(full); continue }
+      if (!e.isFile() || !opens(e.name)) continue
+      const st = await fsp.stat(full, { bigint: true }).catch(() => null)
+      if (st && String(st.dev) === dev && String(st.ino) === ino) return { path: path.relative(realRoot, full).split(path.sep).join('/'), name: e.name }
+    }
+  }
+  return { path: null }
+}
+// The real path a file had (it may not be there now): its versions are kept under it.
+// Where a file that's gone was, inside its root: never a path that steps out of it.
+const realOf = async (root, rel) => {
+  const { realRoot } = await safePath(root, '')
+  const real = path.resolve(realRoot, String(rel || '').replace(/^\/+/, ''))
+  if (real !== realRoot && !real.startsWith(realRoot + path.sep)) throw new Error('Not found')
+  return real
+}
+// What the page has of a file that's gone, whole: as it is (buf), or, opened in parts, with the parts
+// the page never had put back from that file's versions (studioparts.merge).
+async function wholeOf(root, from, buf, fromParts) {
+  if (!fromParts) return buf
+  const real = await realOf(root, from)
+  return (await parts.merge(buf, await copiesOf(real))).bytes
+}
+// Save a copy of it (root, from: where it was): in a folder (dirRel in toRoot, its old one or another
+// of yours), under its name (" 2" when that's taken, never over another file).
+export async function saveCopy(root, from, toRoot, dirRel, name, buf, { inParts: fromParts = false } = {}) {
+  if (!Buffer.isBuffer(buf)) throw new Error('Expected the file')
+  const whole = await wholeOf(root, from, buf, fromParts)
+  const { real: dir } = await safePath(toRoot, dirRel || '').catch((e) => { throw e?.message === 'Not found' ? Object.assign(new Error('That folder isn\'t there any more'), { code: 'gone' }) : e })
+  if (!(await fsp.stat(dir)).isDirectory()) throw new Error('Not a folder')
+  return create(toRoot, dirRel, name, whole)
+}
+// Its download: the file whole, as it is in the page.
+export const wholeFile = (root, from, buf, fromParts) => wholeOf(root, from, buf, !!fromParts)
+
+// A recovery draft of a file that went while it was open, with changes not saved anywhere yet: kept
+// in Studio's folder until it's saved somewhere (Save a copy, Keep editing it there) or downloaded,
+// so a reload or a crash doesn't lose it. Opening the file again (it's gone) opens its draft.
+const DRAFTS = path.join(DIR, 'drafts')
+const draftKey = (rootId, rel) => crypto.createHash('sha1').update(`${rootId}\n${String(rel || '').replace(/\\/g, '/')}`).digest('hex').slice(0, 24)
+export async function keepDraft(root, rootId, rel, buf, { kind = null, inParts: fromParts = false } = {}) {
+  if (!Buffer.isBuffer(buf) || !buf.length) throw new Error('Expected the file')
+  const bytes = await wholeOf(root, rel, buf, fromParts)
+  if (bytes.length > SAVE_MAX) throw Object.assign(new Error(`It's ${mb(bytes.length)}, too big to keep as a draft (${mb(SAVE_MAX)} at most). Download it.`), { code: 'too-big-to-save' })
+  await fsp.mkdir(DRAFTS, { recursive: true })
+  const key = draftKey(rootId, rel)
+  await fsp.writeFile(path.join(DRAFTS, `${key}.part`), bytes)
+  await fsp.rename(path.join(DRAFTS, `${key}.part`), path.join(DRAFTS, `${key}.bin`))
+  const meta = { root: String(rootId), path: String(rel), name: path.basename(String(rel)), ext: path.extname(String(rel)).toLowerCase(), kind: kind || kindOf(rel), size: bytes.length, at: new Date().toISOString() }
+  writeFileAtomic(path.join(DRAFTS, `${key}.json`), JSON.stringify(meta, null, 1))
+  return { draft: meta }
+}
+export async function draftOf(rootId, rel) {
+  return { draft: await readJSON(path.join(DRAFTS, `${draftKey(rootId, rel)}.json`), null) }
+}
+export const draftFile = (rootId, rel) => path.join(DRAFTS, `${draftKey(rootId, rel)}.bin`)
+export async function dropDraft(rootId, rel) {
+  const key = draftKey(rootId, rel)
+  for (const x of ['json', 'bin', 'part']) await fsp.rm(path.join(DRAFTS, `${key}.${x}`), { force: true }).catch(() => {})
+  return { draft: null }
 }
 
 // A new file in a folder (relative to root), from the start the page made for it (buf), or empty
