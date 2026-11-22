@@ -97,49 +97,97 @@ try {
     const FuseState = { DISABLE: 48, ENABLE: 49 } // ('0' and '1' in the wire: @electron/fuses' constants)
     const bundle = process.platform === 'darwin' ? path.dirname(path.dirname(path.dirname(app.exe))) : app.exe
     const wire = await getCurrentFuseWire(bundle)
-    const want = { [FuseV1Options.RunAsNode]: FuseState.ENABLE, [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: FuseState.DISABLE, [FuseV1Options.EnableNodeCliInspectArguments]: FuseState.DISABLE }
+    const want = {
+      [FuseV1Options.RunAsNode]: FuseState.ENABLE,
+      [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: FuseState.DISABLE,
+      [FuseV1Options.EnableNodeCliInspectArguments]: FuseState.DISABLE,
+      // The app's own archive checked against what was built, and nothing loaded from outside it.
+      [FuseV1Options.EnableEmbeddedAsarIntegrityValidation]: FuseState.ENABLE,
+      [FuseV1Options.OnlyLoadAppFromAsar]: FuseState.ENABLE,
+    }
     const off = Object.entries(want).filter(([k, v]) => wire[k] !== v).map(([k]) => FuseV1Options[k])
     if (off.length) throw new Error(`not as set: ${off.join(', ')}`)
-    return 'RunAsNode on, NODE_OPTIONS and --inspect off'
+    return 'RunAsNode on, NODE_OPTIONS and --inspect off, its archive checked and the only place it loads from'
   })
-  // A release build doesn't start with DevTools' or Node's debugging switches or Chromium's stand-in
-  // for the keychain (desktop/startgate.js); only a build made for the smoke test of the app's windows
-  // carries the mark that lets it (bridgeSmokeBuild, in its archive's package.json).
+  // A release build doesn't start with any switch, or with Electron's logging or Node's proxy asked
+  // for in the environment (desktop/startgate.js); only a Mac build made for the smoke test of the
+  // app's windows is let, by its own bundle id (dev.bridge-ai.smoke), which its signature covers.
   const startGate = createRequire(import.meta.url)('../desktop/startgate.js')
-  const asar = path.join(path.dirname(app.root), 'app.asar')
-  marked = SOURCE ? null : (() => { try { return startGate.smokeBuild(JSON.parse(createRequire(path.join(ROOT, 'desktop', 'package.json'))('@electron/asar').extractFile(asar, 'package.json').toString('utf8'))) } catch { return null } })()
-  await built('a release build: no smoke test\'s mark', async () => {
-    if (marked == null) throw new Error(`couldn't read the package.json in ${asar}`)
-    if (marked && process.env.SMOKE_WINDOWS !== '1') throw new Error('this build carries the smoke test\'s mark (bridgeSmokeBuild): a release never may')
-    return marked ? 'marked: the smoke test\'s own build (SMOKE_WINDOWS)' : 'none'
+  const id = SOURCE ? null : startGate.bundleId({ resources: path.dirname(app.root) })
+  marked = SOURCE ? null : startGate.smokeBuild(id)
+  await built('a release build: not the smoke test\'s', async () => {
+    if (marked && process.env.SMOKE_WINDOWS !== '1') throw new Error(`its bundle id is the smoke test's (${id}): a release never is`)
+    return marked ? `the smoke test's own build (${id}, SMOKE_WINDOWS)` : `${id || 'no bundle id here'}`
   })
-  if (marked === false && (process.platform !== 'linux' || process.env.DISPLAY)) await built('it doesn\'t start with DevTools\' or Node\'s debugging switches, or the stand-in keychain', async () => {
-    const values = { '--remote-debugging-port': '=0', '--remote-allow-origins': '=*', '--inspect-port': '=0', '--inspect-publish-uid': '=stderr' }
-    const tries = [...startGate.REFUSED.map((s) => `--${s}`), '-remote-debugging-port=0']
+  // Each launch in a folder of its own, with a profile and a port of its own, and the stand-in keychain
+  // too, so even one that started would reach no keychain and nothing of a copy installed here. code:
+  // what it ended with; said: the reason in logs/desktop.log; opened: a window profile or a server.
+  const launchOnce = async (exe, args, extraEnv = {}, { wait = 20000, until = null } = {}) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-smoke-start-'))
+    const env = { ...process.env, BRIDGE_HOME: dir, BRIDGE_PORT: String(PORT + 3), ...extraEnv }
+    delete env.ELECTRON_RUN_AS_NODE
+    const child = spawn(exe, args, { env, stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] })
+    const said = () => { try { return fs.readFileSync(path.join(dir, 'logs', 'desktop.log'), 'utf8') } catch { return '' } }
+    const code = await new Promise((resolve) => {
+      const t = setTimeout(() => resolve('still running'), wait)
+      const look = until && setInterval(() => { if (until(said())) { clearTimeout(t); clearInterval(look); resolve('still running') } }, 200)
+      child.on('exit', (c, sig) => { clearTimeout(t); if (look) clearInterval(look); resolve(c ?? sig) })
+    })
+    const opened = { profile: fs.existsSync(path.join(dir, 'desktop')), keys: fs.existsSync(path.join(dir, 'desktop', 'signing-keys')), server: fs.existsSync(path.join(dir, 'cache', 'server.pid')) }
+    if (child.exitCode == null && child.signalCode == null) {
+      // (Its server too, if it got that far: only as a child of the one started here.)
+      try { const pid = Number(fs.readFileSync(path.join(dir, 'cache', 'server.pid'), 'utf8')); if (Number(spawnSync('ps', ['-o', 'ppid=', '-p', String(pid)], { encoding: 'utf8' }).stdout.trim()) === child.pid) process.kill(pid, 'SIGTERM') } catch { /* none */ }
+      child.kill('SIGTERM')
+      await new Promise((r) => { const t = setTimeout(() => { child.kill('SIGKILL'); r() }, 8000); child.on('exit', () => { clearTimeout(t); r() }) })
+    }
+    const log = said()
+    try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* Windows may still hold files */ }
+    return { code, log, opened }
+  }
+  const gui = process.platform !== 'linux' || !!process.env.DISPLAY
+  if (marked === false && gui) await built('it doesn\'t start with any switch, nor with Electron\'s logging or Node\'s proxy asked for', async () => {
+    const tries = [
+      '--remote-debugging-port=0', '-remote-debugging-port=0', '--remote-debugging-pipe', '--remote-allow-origins=*', '--use-mock-keychain', '--inspect', '--inspect-brk', '--inspect-port=0',
+      '--proxy-server=http://127.0.0.1:9', '--proxy-bypass-list=<-loopback>', '--proxy-pac-url=http://127.0.0.1:9/p.pac', `--log-net-log=${path.join(os.tmpdir(), 'bridge-smoke-net.json')}`, '--net-log-capture-mode=Everything',
+      '--host-resolver-rules=MAP * 127.0.0.1', `--user-data-dir=${path.join(os.tmpdir(), 'bridge-smoke-profile')}`, '--a-switch-nobody-has-heard-of',
+    ]
     const results = []
     for (const t of tries) {
-      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-smoke-refused-'))
-      const name = t.replace(/^-+/, '').replace(/=.*/, '')
-      // (Each with the stand-in keychain and a profile and port of its own as well, so even one that
-      // started would reach no keychain and nothing of a copy installed here.)
-      const args = [`--user-data-dir=${path.join(dir, 'profile')}`, ...(name === 'use-mock-keychain' ? [] : ['--use-mock-keychain']), t.includes('=') ? t : `${t}${values[t] || ''}`]
-      const env = { ...process.env, BRIDGE_HOME: dir, BRIDGE_PORT: String(PORT + 3) }
-      delete env.ELECTRON_RUN_AS_NODE
-      const child = spawn(app.exe, args, { env, stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] })
-      const code = await new Promise((resolve) => { const t = setTimeout(() => resolve('still running'), 20000); child.on('exit', (c, s) => { clearTimeout(t); resolve(c ?? s) }) })
-      if (code === 'still running') {
-        // (Its server too, if it got that far: only as a child of this one.)
-        try { const pid = Number(fs.readFileSync(path.join(dir, 'cache', 'server.pid'), 'utf8')); if (Number(spawnSync('ps', ['-o', 'ppid=', '-p', String(pid)], { encoding: 'utf8' }).stdout.trim()) === child.pid) process.kill(pid, 'SIGTERM') } catch { /* none */ }
-        child.kill('SIGKILL')
-      }
-      let said = ''
-      try { said = fs.readFileSync(path.join(dir, 'logs', 'desktop.log'), 'utf8') } catch { /* none */ }
-      results.push({ t, code, said: said.includes(`--${name}`), opened: fs.existsSync(path.join(dir, 'desktop')) || fs.existsSync(path.join(dir, 'cache', 'server.pid')) })
-      try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* Windows may still hold files */ }
+      const name = t.replace(/=.*/s, '')
+      const r = await launchOnce(app.exe, [...(t === '--use-mock-keychain' ? [] : ['--use-mock-keychain']), t])
+      results.push({ t, code: r.code, said: r.log.includes(name), opened: r.opened.profile || r.opened.server })
+    }
+    for (const k of startGate.ENV) {
+      const r = await launchOnce(app.exe, ['--use-mock-keychain'], { [k]: k === 'ELECTRON_LOG_FILE' ? path.join(os.tmpdir(), 'bridge-smoke-electron.log') : '1' })
+      results.push({ t: k, code: r.code, said: r.log.includes(k), opened: r.opened.profile || r.opened.server })
     }
     const bad = results.filter((r) => r.code !== 1 || !r.said || r.opened)
     if (bad.length) throw new Error(JSON.stringify(bad))
-    return `each refused at once (exit 1, the reason in logs/desktop.log, no window profile or server): ${tries.join(' ')}`
+    return `each refused at once (exit 1, the reason in logs/desktop.log, no window profile or server): ${results.map((r) => r.t.replace(/=.*/s, '')).join(' ')}`
+  })
+  // Its own copy of Bridge AI changed by one byte (in a copy of the whole app): it starts no server
+  // and opens no keys, and says so (desktop/rootlist.js). With the stand-in keychain, so only in the
+  // smoke test's own build or on CI's throwaway machines.
+  if (!SOURCE && gui && (marked || process.env.CI)) await step('a copy of it with a byte changed in its server starts no server and opens no keys', async () => {
+    const top = process.platform === 'darwin' ? path.dirname(path.dirname(path.dirname(app.exe))) : path.dirname(app.exe)
+    const copyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-smoke-changed-'))
+    const copy = path.join(copyDir, path.basename(top))
+    fs.cpSync(top, copy, { recursive: true, verbatimSymlinks: true })
+    const rel = path.relative(top, app.exe)
+    const file = path.join(copy, path.relative(top, app.root), 'server', 'index.js')
+    const bytes = fs.readFileSync(file)
+    const at = bytes.indexOf('// ') + 3
+    bytes[at] = bytes[at] === 0x78 ? 0x79 : 0x78
+    fs.writeFileSync(file, bytes)
+    try {
+      const r = await launchOnce(path.join(copy, rel), marked ? ['--use-mock-keychain'] : [], {}, { wait: 30000, until: (log) => /own files aren't as they were built/.test(log) })
+      const named = /server\/index\.js/.test(r.log)
+      if (!/own files aren't as they were built/.test(r.log) || !named || r.opened.server || r.opened.keys) throw new Error(JSON.stringify({ code: r.code, log: r.log.slice(-300), opened: r.opened }))
+      return 'it said its own files aren\'t as built (server/index.js), and started no server and opened no keys'
+    } finally {
+      if (process.platform === 'darwin') spawnSync('/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister', ['-u', copy])
+      fs.rmSync(copyDir, { recursive: true, force: true })
+    }
   })
   // Studio's signing (server/signhelper.js): on a Mac its helper (native/bridgesign) is in the app and
   // says what this Mac has, asking nothing.
@@ -265,7 +313,7 @@ try {
   // Asked for (SMOKE_WINDOWS=1), as it opens the app's windows on the screen; a built Mac app's only.
   if (process.env.SMOKE_WINDOWS === '1') {
     if (SOURCE || process.platform !== 'darwin') console.log('--   the app\'s windows: a built Mac app\'s only')
-    else if (!marked) console.log('--   the app\'s windows: only in a build made for it (electron-builder ... -c.extraMetadata.bridgeSmokeBuild=true), as a release build refuses DevTools and the stand-in keychain')
+    else if (!marked) console.log('--   the app\'s windows: only in a Mac build made for it (electron-builder ... -c.appId=dev.bridge-ai.smoke), as a release build refuses DevTools and the stand-in keychain')
     else await (await import('./smokewindows.js')).windows({ app, step, ROOT })
   }
 } finally {

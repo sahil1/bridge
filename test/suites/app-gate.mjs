@@ -68,27 +68,81 @@ const windowAuth = require(path.join(ROOT, 'desktop', 'windowauth.js'))
   ok(v.down === 'down' && v.slow === 'slow' && v.wrong === 'wrong', 'the proof says which: nothing there, no answer in time, or an answer without the secret', v)
 }
 
-// ---------- Started only as it was built (desktop/startgate.js) ----------
+// ---------- Started only as it was built (desktop/startgate.js, desktop/rootlist.js) ----------
 {
   const startGate = require(path.join(ROOT, 'desktop', 'startgate.js'))
-  const refused = [
-    [['--remote-debugging-port=9222'], 'remote-debugging-port'], [['-remote-debugging-port=0'], 'remote-debugging-port'], [['--remote-debugging-pipe'], 'remote-debugging-pipe'],
-    [['--remote-allow-origins=*'], 'remote-allow-origins'], [['--use-mock-keychain'], 'use-mock-keychain'], [['--inspect'], 'inspect'], [['--inspect-brk=9229'], 'inspect-brk'],
-    [['--INSPECT-PORT=0'], 'inspect-port'],
-  ]
-  const fine = [['--lang=en'], ['/remote-debugging-port=1'], ['-psn_0_12345'], ['/Users/me/inspect'], []]
-  const saw = refused.map(([a]) => startGate.given({ argv: a, platform: 'darwin' }))
-  const win = startGate.given({ argv: ['/remote-debugging-port=1'], platform: 'win32' })
-  const viaChromium = startGate.given({ argv: [], hasSwitch: (s) => s === 'use-mock-keychain' })
-  ok(refused.every(([, want], i) => saw[i].includes(want)) && fine.every((a) => !startGate.given({ argv: a, platform: 'darwin' }).length) && win.includes('remote-debugging-port') && viaChromium.includes('use-mock-keychain'), 'the switches a built app refuses: DevTools\' (a port, a pipe, which origins), Node\'s inspector and the stand-in keychain, however they\'re written (and /x on Windows); nothing else', { saw, win, viaChromium })
-  ok(startGate.smokeBuild({ bridgeSmokeBuild: true }) && startGate.smokeBuild({ bridgeSmokeBuild: 'true' }) && !startGate.smokeBuild({}) && !startGate.smokeBuild(null) && !startGate.smokeBuild({ bridgeSmokeBuild: 'yes' }), 'only a build marked for the smoke test is let start with them')
-  // main.js checks first of all, before anything else it loads; the packaged app has startgate.js;
-  // no release workflow sets the mark.
+  // Every switch is refused but what macOS adds itself: DevTools', a proxy, a proxy script, a log of
+  // what's sent, other name lookups, another profile, the stand-in keychain, Node's inspector, one
+  // nobody has heard of; written --x, -x, and /x on Windows.
+  const refused = ['--remote-debugging-port=9222', '-remote-debugging-port=0', '--remote-debugging-pipe', '--remote-allow-origins=*', '--use-mock-keychain', '--inspect', '--INSPECT-PORT=0',
+    '--proxy-server=http://127.0.0.1:9', '--proxy-bypass-list=<-loopback>', '--proxy-pac-url=file:///p.pac', '--log-net-log=/tmp/n.json', '--net-log-capture-mode=Everything', '--host-resolver-rules=MAP * 1.2.3.4', '--user-data-dir=/tmp/p', '--no-sandbox', '--a-new-one']
+  const fine = [['-psn_0_12345'], ['-NSDocumentRevisionsDebugMode', 'YES'], ['-AppleLanguages', '(en)'], ['/Users/me/a file.txt'], ['bridge-ai://open'], []]
+  const each = refused.map((a) => startGate.given({ argv: [a], platform: 'darwin' }).length === 1)
+  const winSlash = startGate.given({ argv: ['/remote-debugging-port=1'], platform: 'win32' })
+  const winPsn = startGate.given({ argv: ['-psn_0_1'], platform: 'win32' })
+  const env = startGate.envGiven({ ELECTRON_ENABLE_LOGGING: '1', ELECTRON_LOG_FILE: '/tmp/e.log', NODE_USE_ENV_PROXY: '1', BRIDGE_HOME: '/tmp/x' })
+  ok(each.every(Boolean) && fine.every((a) => !startGate.given({ argv: a, platform: 'darwin' }).length) && winSlash.length === 1 && winPsn.length === 1 && env.join() === 'ELECTRON_ENABLE_LOGGING,ELECTRON_LOG_FILE,NODE_USE_ENV_PROXY' && !startGate.envGiven({ ELECTRON_ENABLE_LOGGING: '' }).length, 'a built app refuses every switch (a proxy, a net log, other name lookups, another profile, DevTools, the stand-in keychain, Node\'s inspector, one nobody has heard of) but what macOS adds, and Electron\'s logging or Node\'s proxy from the environment', { each, winSlash, winPsn, env })
+  // Only the smoke test's own Mac build (its bundle id, in its signed Info.plist) is let through.
+  const res = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-gate-plist-'))
+  fs.mkdirSync(path.join(res, 'Resources'))
+  const plist = (id) => fs.writeFileSync(path.join(res, 'Info.plist'), `<?xml version="1.0"?><plist><dict><key>CFBundleIdentifier</key>\n<string>${id}</string></dict></plist>`)
+  plist('dev.bridge-ai.smoke')
+  const smokeId = startGate.bundleId({ resources: path.join(res, 'Resources'), platform: 'darwin' })
+  plist('dev.bridge-ai.app')
+  const appId = startGate.bundleId({ resources: path.join(res, 'Resources'), platform: 'darwin' })
+  fs.rmSync(res, { recursive: true, force: true })
+  ok(startGate.smokeBuild(smokeId) && !startGate.smokeBuild(appId) && !startGate.smokeBuild(null) && startGate.bundleId({ resources: res, platform: 'win32' }) === null, 'only the smoke test\'s own Mac build (dev.bridge-ai.smoke) is let start with switches', { smokeId, appId })
+
+  // The app's own copy, as built (rootlist.js): changed, added or taken away is caught; the other
+  // chip's packages and dot files may be missing; Finder's .DS_Store files are ignored; programs are
+  // listed, not hashed.
+  const rootlist = require(path.join(ROOT, 'desktop', 'rootlist.js'))
+  const r = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-root-'))
+  const put = (rel, body) => { fs.mkdirSync(path.dirname(path.join(r, rel)), { recursive: true }); fs.writeFileSync(path.join(r, rel), body) }
+  put('server/index.js', 'export const x = 1\n')
+  put('node_modules/a/index.js', 'module.exports = 1\n')
+  put('node_modules/a/.gitkeep', '')
+  put('node_modules/tool-darwin-x64/package.json', JSON.stringify({ name: 'tool-darwin-x64', os: ['darwin'], cpu: ['x64'] }))
+  put('node_modules/tool-darwin-x64/bin', 'x64 bits')
+  put('native/bin/helper', Buffer.from([0xcf, 0xfa, 0xed, 0xfe, 1, 2, 3]))
+  fs.symlinkSync('../a/index.js', path.join(r, 'node_modules', 'a', 'link.js'))
+  const list = await rootlist.make(r)
+  const as = async (fn) => { fn?.(); return rootlist.verify(r, list, { arch: 'arm64' }) }
+  const same = await as()
+  const otherChipGone = await as(() => { fs.rmSync(path.join(r, 'node_modules', 'tool-darwin-x64'), { recursive: true }); fs.rmSync(path.join(r, 'node_modules', 'a', '.gitkeep')); put('server/.DS_Store', 'finder') })
+  const signed = await as(() => put('native/bin/helper', Buffer.from([0xcf, 0xfa, 0xed, 0xfe, 9, 9, 9, 9])))
+  const changed = await as(() => put('server/index.js', 'export const x = 2\n'))
+  put('server/index.js', 'export const x = 1\n')
+  const added = await as(() => put('server/index', 'shadow'))
+  fs.rmSync(path.join(r, 'server', 'index'))
+  const missing = await as(() => fs.rmSync(path.join(r, 'node_modules', 'a', 'index.js')))
+  put('node_modules/a/index.js', 'module.exports = 1\n')
+  const notProgram = await as(() => put('native/bin/helper', '#!/bin/sh\necho hi\n'))
+  const thisChip = await rootlist.verify(r, list, { arch: 'x64' })
+  fs.rmSync(r, { recursive: true, force: true })
+  ok(same.ok && otherChipGone.ok && signed.ok && !changed.ok && changed.changed.includes('server/index.js') && !added.ok && added.added.includes('server/index') && !missing.ok && missing.missing.includes('node_modules/a/index.js') && !notProgram.ok && notProgram.changed.includes('native/bin/helper') && !thisChip.ok && thisChip.missing.some((f) => f.startsWith('node_modules/tool-darwin-x64/')),
+    'the app\'s own copy as built: a file changed, one added beside it (that would be loaded first) or one taken away is caught, and a program replaced by a script; the other chip\'s package, a dot file and Finder\'s .DS_Store aren\'t; a signed program\'s bytes aren\'t hashed; this chip\'s package taken away is', { same: same.ok, otherChipGone, signed: signed.ok, changed: changed.changed, added: added.added, missing: missing.missing, notProgram: notProgram.changed, thisChip: thisChip.missing })
+
+  // main.js checks the switches first of all; the keys never open and no server starts while the
+  // copy isn't as built; the archive is checked by Electron and the only place the app loads from;
+  // the list goes in the archive; DevTools aren't in a built app's menu; no release is the smoke
+  // test's build.
   const mainJs = fs.readFileSync(path.join(ROOT, 'desktop', 'main.js'), 'utf8')
   const firstRequire = /require\('\.\/([\w]+)\.js'\)/.exec(mainJs)?.[1]
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'desktop', 'package.json'), 'utf8'))
   const workflows = fs.readdirSync(path.join(ROOT, '.github', 'workflows')).map((f) => fs.readFileSync(path.join(ROOT, '.github', 'workflows', f), 'utf8')).join('\n')
-  ok(firstRequire === 'startgate' && /require\('\.\/startgate\.js'\)\.check\(\{\n\s+app,/.test(mainJs) && pkg.build.files.includes('startgate.js') && !pkg.bridgeSmokeBuild && !/bridgeSmokeBuild/.test(workflows), 'main.js checks before anything else, the app is built with it, and no release carries the mark', { firstRequire })
+  const stage = fs.readFileSync(path.join(ROOT, 'desktop', 'stage.js'), 'utf8')
+  const wired = {
+    first: firstRequire === 'startgate' && /require\('\.\/startgate\.js'\)\.check\(\{\n\s+app,/.test(mainJs),
+    keys: /const appKeys = \(\) => \{\n\s+if \(!rootOk\) throw/.test(mainJs) && /let rootOk = !BUNDLED/.test(mainJs),
+    server: /async function startServer\(\) \{\n\s+if \(BUNDLED && \(!rootOk \|\| Date\.now\(\) - rootAt > 10000\) && !\(await checkRoot\(\)\)\) \{/.test(mainJs),
+    connect: /async function connect\(\) \{\n[^]*?if \(BUNDLED && !rootOk && !\(await checkRoot\(\)\)\) return win\.loadURL\(splash\(CHANGED\(\)\)\)\n[^]*?replaceStale/.test(mainJs),
+    fuses: pkg.build.electronFuses.enableEmbeddedAsarIntegrityValidation === true && pkg.build.electronFuses.onlyLoadAppFromAsar === true,
+    packed: ['startgate.js', 'rootlist.js', 'app-root.list'].every((f) => pkg.build.files.includes(f)) && /require\('\.\/rootlist\.js'\)\.make\(OUT\)/.test(stage),
+    devTools: /\.\.\.\(app\.isPackaged \? \[\] : \[\{ role: 'toggleDevTools' \}\]\)/.test(mainJs) && (mainJs.match(/toggleDevTools|openDevTools/g) || []).length === 1,
+    release: pkg.build.appId === 'dev.bridge-ai.app' && !/dev\.bridge-ai\.smoke/.test(workflows),
+  }
+  ok(Object.values(wired).every(Boolean), 'main.js refuses switches first of all and opens no keys and starts no server unless its copy is as built; the archive is checked and the only place it loads from; DevTools only from source; no release is the smoke test\'s build', wired)
 }
 
 // ---------- In Electron ----------

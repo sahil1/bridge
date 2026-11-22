@@ -5,8 +5,8 @@
 // Chromium's own stand-in for the keychain (--use-mock-keychain: nothing in or from the Keychain) and
 // the tests' stand-in for the signing helper (test/stand-ins/bridgesign.cjs: no Touch ID asked), and
 // is driven through Chromium's DevTools port (as Playwright does, connectOverCDP). Those two switches
-// work only in a build made for it (desktop/startgate.js: electron-builder ...
-// -c.extraMetadata.bridgeSmokeBuild=true); a release build doesn't start with them (smoke.js checks
+// work only in a Mac build made for it, by its bundle id (desktop/startgate.js: electron-builder ...
+// -c.appId=dev.bridge-ai.smoke); a release build doesn't start with any switch (smoke.js checks
 // that). Signals go only to the app it started and that app's own children (its server, a window's
 // renderer), never to a process found by name. Checked:
 //   - it opens on Bridge AI, not the page saying another program answers; a reload (what ⌘R does),
@@ -57,7 +57,10 @@ export async function windows({ app, step, ROOT }) {
   const only = (name, fn) => {
     const go = !pick || first || pick.test(name)
     first = false
-    return go ? step(name, fn) : console.log(`--   ${name}: not asked for (SMOKE_ONLY)`)
+    // (Each step given two minutes at most, so one that hangs fails by itself and the app is still
+    // quit and its folder removed at the end.)
+    const bounded = () => Promise.race([fn(), new Promise((_, no) => setTimeout(() => no(new Error('no answer in 2 minutes')), 120000))])
+    return go ? step(name, bounded) : console.log(`--   ${name}: not asked for (SMOKE_ONLY)`)
   }
   const need = createRequire(path.join(ROOT, 'package.json'))
   const { chromium } = need('playwright-core')
@@ -288,7 +291,11 @@ export async function windows({ app, step, ROOT }) {
     let sw = null
     await only('a service worker: its requests go once the server is proven', async () => {
       const p = await main()
-      await p.evaluate(() => navigator.serviceWorker.register('/sw.js').then(() => navigator.serviceWorker.ready))
+      const reg = await p.evaluate(() => Promise.race([
+        navigator.serviceWorker.register('/sw.js').then(() => navigator.serviceWorker.ready).then(() => 'ready', (e) => `refused: ${e.message}`),
+        new Promise((r) => setTimeout(() => r('not ready in 15 s'), 15000)),
+      ]))
+      if (reg !== 'ready') throw new Error(`registering /sw.js: ${reg}`)
       await p.reload({ waitUntil: 'load' })
       const c = await until(() => p.evaluate(() => (navigator.serviceWorker.controller ? navigator.serviceWorker.controller.scriptURL : null)), 15000)
       const viaWorker = await p.evaluate(() => performance.getEntriesByType('resource').filter((e) => /\/assets\//.test(e.name) && e.workerStart > 0).length)

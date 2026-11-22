@@ -721,7 +721,9 @@ try {
     // Its parent check, with two throwaway certificates (made here, in a keychain file of the test's
     // own that's never on the keychain list, then deleted): the helper and one small parent signed
     // with one, another parent with the other. Same certificate: Bridge AI. The other: refused.
-    const t = parentCheck(nb, kit.dir)
+    // (Only on CI's throwaway machines: making a keychain, even one never put on the list, isn't
+    // done on a computer someone uses.)
+    const t = process.env.CI ? parentCheck(nb, kit.dir) : { skip: 'only on CI (it makes a keychain file, which isn\'t done on a computer someone uses)' }
     if (t.skip) skip('the helper\'s parent check with throwaway certificates', t.skip)
     else ok(/"parent":true/.test(t.same) && /"auth":true/.test(t.same) && /"parent":false/.test(t.other) && /"auth":false/.test(t.other) && /"code":"parent"/.test(t.otherAuth), 'the helper\'s parent check: a parent signed with its own certificate is Bridge AI; one signed with another certificate is refused', t)
   }
