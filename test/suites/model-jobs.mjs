@@ -48,6 +48,21 @@ r = jobs.fromList({ job: 'notes', own: ['groq:llama-3.3-70b-versatile'], models:
 ok(r.error?.code === 'not_ready' && /^Meeting notes can't run: llama-3\.3-70b-versatile isn't set up here: no Groq key for it in Model Providers\./.test(r.error.message), 'none that can run: an error saying why, not a model elsewhere', r.error?.message)
 r = jobs.fromList({ job: 'live', own: ['lmstudio:gemma3'], models: reached })
 ok(r.error && !r.id, 'a model on this computer that isn\'t running, alone in the list: no cloud model instead', r)
+// A call that failed, said as what happened and what to do (modellist.js explain, every job's reply
+// in server/index.js): "fetch failed" was all AI Assist said.
+const named2 = (route) => ({ openai: 'OpenAI', ollama: 'Ollama', anthropic: 'Anthropic' }[route] || route)
+const unreached = Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:9'), { code: 'ECONNREFUSED' }) })
+let x = list.explain('openai:gpt-5', unreached, named2)
+ok(x.code === 'unreachable' && x.message === 'Couldn\'t reach OpenAI. Check this computer\'s connection, or pick another model in Settings › Agents & Models › Which Model Does What.', 'not reached: "Couldn\'t reach OpenAI. Check this computer\'s connection, or pick another model in Settings › Agents & Models › Which Model Does What."', x.message)
+x = list.explain('ollama:gemma3:4b', unreached, named2)
+ok(x.code === 'unreachable' && /^Couldn't reach Ollama on this computer: start it, or pick another model in Settings › Agents & Models › Which Model Does What\.$/.test(x.message), 'one on this computer not reached: start it', x.message)
+x = list.explain('openai:gpt-5', new DOMException('The operation was aborted due to timeout', 'TimeoutError'), named2)
+ok(x.code === 'timeout' && /^OpenAI took too long to answer, so Bridge AI stopped waiting\. Try again, or pick a faster model in Settings › Agents & Models › Which Model Does What\.$/.test(x.message), 'too slow: its own words', x.message)
+x = list.explain('anthropic:claude-opus-5-5', Object.assign(new Error('Anthropic turned the key down (invalid x-api-key).'), { status: 401, body: { error: { message: 'invalid x-api-key' } } }), named2)
+ok(x.code === 'key_refused' && x.status === 401 && x.message === 'Anthropic refused the key ("invalid x-api-key"). Check it, or paste a new one, in Settings › Agents & Models › Model Providers.', 'the key turned down: "Anthropic refused the key", and where to fix it', x.message)
+const limit = Object.assign(new Error('OpenAI says you\'re over your limit for now'), { status: 429 })
+const aborted = Object.assign(new Error('The user aborted a request.'), { name: 'AbortError' })
+ok(list.explain('openai:gpt-5', limit, named2) === limit && list.explain('openai:gpt-5', aborted, named2) === aborted && list.explain('cli:claude', unreached, named2) === unreached, 'anything else as it was: a rate limit, a stop asked for, a sign-in\'s own')
 
 // ---------- The server ----------
 // Anthropic's API here: an answer, or over its limit (busy).
@@ -57,6 +72,9 @@ const anthSrv = http.createServer((req, res) => {
   req.on('data', (c) => { body += c })
   req.on('end', () => {
     anth.asked++
+    // Down (the connection cut, as a provider not reached is), or turning the key down.
+    if (anth.down) return req.socket.destroy()
+    if (anth.reject) { res.writeHead(401, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } })) }
     res.writeHead(anth.busy ? 429 : 200, { 'content-type': 'application/json' })
     res.end(JSON.stringify(anth.busy ? { type: 'error', error: { type: 'rate_limit_error', message: 'Rate limited' } } : { content: [{ type: 'text', text: '## Summary\n- Written by the Anthropic stand-in.' }], usage: { input_tokens: 10, output_tokens: 5 } }))
   })
@@ -133,6 +151,18 @@ try {
   await own('assist', [GROQ, 'openai:gpt-5'])
   const deck = await kit.api('/studio/deck/ai', { mode: 'deck', prompt: 'Shipping on Friday' })
   ok(deck.model === 'openai:gpt-5' && (await jobOf('assist')).last?.passed?.[0]?.id === GROQ, 'AI Assist the same: its deck by the next in its list', { model: deck.model, last: (await jobOf('assist')).last })
+  // Its only model's provider not reached, then turning the key down: said as such, through the
+  // same reply every job's calls go through (it said "fetch failed").
+  await own('assist', ['anthropic:claude-opus-5-5'])
+  anth.down = true
+  let said = await kit.api('/studio/deck/ai', { mode: 'deck', prompt: 'Shipping on Friday' }).then(() => null, (e) => e.message)
+  ok(said === 'Couldn\'t reach Anthropic. Check this computer\'s connection, or pick another model in Settings › Agents & Models › Which Model Does What.', 'AI Assist, its provider not reached: "Couldn\'t reach Anthropic…", with where to pick another', said)
+  ok(/couldn't answer: Couldn't reach Anthropic\./.test((await jobOf('assist')).last?.error || ''), 'and its last run says the same', (await jobOf('assist')).last)
+  anth.down = false
+  anth.reject = true
+  said = await kit.api('/studio/deck/ai', { mode: 'deck', prompt: 'Shipping on Friday' }).then(() => null, (e) => e.message)
+  ok(said === 'Anthropic refused the key ("invalid x-api-key"). Check it, or paste a new one, in Settings › Agents & Models › Model Providers.', 'its key turned down: "Anthropic refused the key", and where to fix it', said)
+  anth.reject = false
 
   // Its only model has no key: it can't run, says why, and nothing else writes it.
   await own('notes', [GROQ])
