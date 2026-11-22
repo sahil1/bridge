@@ -440,7 +440,9 @@ export function routes(app, { wrap, rootOf, sq, window: fromWindow, phone: phone
     if (!a.here) throw Object.assign(new Error('Start Over is done in the Bridge AI app on this computer.'), { status: 403, code: 'not-here' })
     if (!store.startOverOffered()) throw Object.assign(new Error('There\'s nothing to start over.'), { status: 409, code: 'nothing' })
     if (!auth.use(req.body?.grant, { purpose: 'start-over', ...a })) throw Object.assign(new Error('Confirm it\'s you first.'), { status: 403, code: 'ask' })
-    tellApp('sign-start-over', { at: new Date().toISOString() })
+    // (Told once this answer has gone: the app then stops this server to start it again with its new
+    // keys, which would cut the answer off, and the window would say it failed.)
+    setTimeout(() => tellApp('sign-start-over', { at: new Date().toISOString() }), 250)
     return { ok: true }
   }))
 
