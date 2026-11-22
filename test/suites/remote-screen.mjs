@@ -2507,7 +2507,9 @@ try {
     const saidL = await until(async () => { const x = await body.innerText().catch(() => ''); return DROPPED.test(x) ? x : null }, 15000)
     ok(!!saidL && await body.getByRole('button', { name: 'View again' }).isVisible(), 'and on Laptop the same, with View again', saidL || await body.innerText().catch(() => ''))
     // The links back: View again shows each again.
-    await until(async () => (await f.evaluate(() => fetch('/api/version').then((x) => x.ok)).catch(() => false)), 30000, 300)
+    // (The phone page's own link back: its bar saying it's reconnecting gone. A request alone can be
+    // answered from what the phone kept, link or no link.)
+    await until(async () => p.evaluate(() => document.getElementById('bar').hidden && document.getElementById('away').hidden).catch(() => false), 30000, 200)
     await pages.getByRole('button', { name: 'View again' }).click()
     const again = await shows(pages)
     ok(!!again, 'View again on the phone, once the link is back: the app again', again ? undefined : { shown: (await pages.innerText().catch(() => '')).replace(/\s+/g, ' '), sessions: (await studio.api('/remote')).sessions.map((x) => ({ kind: x.kind, waiting: x.waiting, via: x.via })) })
