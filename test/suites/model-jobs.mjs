@@ -123,6 +123,14 @@ try {
   await until(() => usage().some((l) => l.feature === 'board' && l.model === 'gpt-5' && l.instead === 'anthropic:claude-opus-5-5'), 5000, 200)
   const line = usage().find((l) => l.feature === 'board' && l.instead === 'anthropic:claude-opus-5-5')
   ok(!!line && /over your limit/.test(line.why), 'and the usage log: the answer that stood in, for which, and why', line)
+  // Meeting notes on Anthropic alone, over its limit: the meeting and the row say why, in words for
+  // them (not the chat agent's "/model", which means nothing on a meeting's page).
+  await own('notes', ['anthropic:claude-opus-5-5'])
+  m = await notes('Over its limit')
+  last = (await jobOf('notes')).last
+  ok(/over your limit for now \(Rate limited\)\. Try again later, or pick another model\.$/.test(m.summaryError || '') && !/\/model/.test(`${m.summaryError} ${last?.error} ${last?.passed?.[0]?.why}`), 'notes over its limit: the meeting and the row say why, and no "/model"', { error: m.summaryError, last })
+  await kit.api(`/meetings/${m.id}`, null, 'DELETE') // (its summary isn't tried again)
+  await own('notes', ['ollama:gemma3:4b'])
   anth.busy = false
   // One whose provider has no key: passed over before it's tried.
   await own('diagrams', [GROQ, 'openai:gpt-5'])
