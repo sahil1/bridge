@@ -994,7 +994,7 @@ process.exit(1)`)
   ok((asked.match(/"Offsite"/g) || []).length === 2 && /Roadmap themes agreed/.test(asked) && /zebra hiring/.test(asked) && !/zebra roadmap across the day/.test(asked), 'a question about your meetings reads its meetings, not it as well', asked.slice(0, 600))
   await kit.api(`/meetings/${W2.id}/ask`, { question: 'What was the afternoon about?' })
   ok(/# Meeting 2 of 2: "Offsite"[^\n]*\n\n\[0:01\] You: Afternoon: zebra hiring/.test(model.asked(/Answer from the meeting only/).at(-1) || ''), 'a question on the combined meeting reads its meetings\' transcripts')
-  await kit.api('/settings', { trials: { 'meeting-insights': true } }, 'PATCH')
+  await kit.api('/settings', { meetings: { insights: true } }, 'PATCH')
   const ins = await tryApi('/meetings/insights?days=all')
   const listed = (await kit.api('/meetings')).meetings.filter((x) => !x.archived && !x.parts && !['recording', 'paused'].includes(x.status)).length
   ok(ins.total === listed, 'Meeting Insights counts its meetings, not it on top', { listed, total: ins.total, error: ins.error })

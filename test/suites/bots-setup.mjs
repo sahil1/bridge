@@ -56,7 +56,7 @@ const MCP = path.join(TEST, 'stand-ins', 'mcp-server.mjs')
 const ollama = await startLocalModel('bots-setup', 'ollama', [])
 let home = null
 const kit = await startKit('bots-setup', {
-  config: { name: 'Tester', trials: { 'slack-bot': true, routines: true } },
+  config: { name: 'Tester', trials: { 'slack-bot': true } },
   env: (x) => {
     home = x.home
     for (const f of ['code/pricing', 'docs']) fs.mkdirSync(path.join(x.home, f), { recursive: true })

@@ -1,5 +1,5 @@
-// Tidy what I say (a trial: dictation-cleanup): what's said in another app, tidied by a model before
-// the dictation window pastes it. The local model built in is a stand-in llama-server
+// Tidy what I say (dictation.tidy, out of Beta Features): what's said in another app, tidied by a
+// model before the dictation window pastes it. The local model built in is a stand-in llama-server
 // (stand-ins/llama-server.mjs: it tidies as a model that keeps to its instructions would), a
 // provider is the stand-in model (stand-ins/model.mjs: one that falls for what it's told, so "write
 // a poem" gets a poem), and a small fake model is served from this computer for the download.
@@ -9,22 +9,24 @@
 //   last); what counts as what was said (a poem,
 //   an answer and a summary turned down; fillers, false starts, contractions and numbers in figures
 //   let through); the time it has.
-//   The server: the trial off (its routes say how to turn it on, /config says it's off), on: the
-//   model (the local one, by itself, on this computer), tidied by it with thinking off, an
+//   The server: on to start with where the local model fits the computer (16 and 8 GB here), off
+//   where it doesn't (4 GB), and no Beta Feature; turned off, tidying says where to turn it on and
+//   /config says it's off; on: the model (the local one, by itself, on this computer), tidied by it with thinking off, an
 //   instruction in what was said tidied like any sentence, meeting memory's names said told to it
 //   with who each is (and not the others), the words fenced, too slow (an answer
 //   within the budget saying so), an error, a provider that fell for an instruction (turned down),
 //   the model started while you talk; no model: what's needed, and on a 4 GB computer, a model of
 //   your own. Nothing is downloaded until asked.
-//   In the app, the desktop app simulated: Beta Features lists it; Settings › Meetings & Voice › Dictation has
-//   its switch first, marked Beta, and Tidy what I say under Advanced only with the trial on (off to start with), the model it uses and whether the
-//   words leave the computer, picked in a field like Settings' others; with no model, the download
+//   In the app, the desktop app simulated: Settings › Meetings & Voice › Dictation has Tidy what I
+//   say under Advanced, on to start with (no Beta switch, and not in Beta Features), greyed with Turn
+//   On while dictation from other apps is off, and not there where the key can't be heard from
+//   other apps; the model it uses and whether the words leave the computer, picked in a field like Settings' others; with no model, the download
 //   in one click and its progress; on 4 GB, where to add one, with the way there, and turned on
 //   without one, a warning that your words go as you said them. The dictation window: Tidying…, then tidied and pasted; off, as before; too
 //   slow, an error, a provider that fell for it: pasted as said, saying why; no model yet: pasted
 //   as said, with the download offered there; the card's Use what I said; light and dark, the pill
 //   whole once it's grown. Dictations: which were tidied, in the list; the tidied text and what was
-//   said, Paste again with either. The trial off: nothing shows, nothing's tidied.
+//   said, Paste again with either. Turned off with the window open: nothing's tidied, nothing said.
 import fs from 'node:fs'
 import path from 'node:path'
 import http from 'node:http'
@@ -87,9 +89,9 @@ fs.mkdirSync(path.dirname(catalog), { recursive: true })
 fs.writeFileSync(catalog, JSON.stringify({ 'gemma-4-e2b': { files: [{ name: NAME, bytes: MODEL.length, sha256: crypto.createHash('sha256').update(MODEL).digest('hex') }] } }))
 // A server of its own: 16 GB unless said, the stand-in llama-server (its log in the kit's folder),
 // the local model there already (have) or not, let go after 1.5 s idle; the dictation window's
-// settings (the key from other apps, pasted where you're typing) and the trial on unless said.
-const kitOf = (name, { have = true, memGB = 16, trial = true } = {}) => startKit(name, {
-  config: { ...(trial ? { trials: { 'dictation-cleanup': true } } : {}), dictation: { background: true, to: 'paste' } },
+// settings (the key from other apps, pasted where you're typing); Tidy what I say as it starts.
+const kitOf = (name, { have = true, memGB = 16 } = {}) => startKit(name, {
+  config: { dictation: { background: true, to: 'paste' } },
   env: ({ bin, data }) => {
     if (have) { fs.mkdirSync(path.join(data, 'models', 'llm', 'gemma-4-e2b'), { recursive: true }); fs.writeFileSync(path.join(data, 'models', 'llm', 'gemma-4-e2b', NAME), MODEL) }
     return { BRIDGE_MACHINE: JSON.stringify({ memGB }), BRIDGE_MODELS_URL: `http://127.0.0.1:${filesPort}`, BRIDGE_LLM_MODELS: catalog, BRIDGE_LLAMA_SERVER: STAND_IN, BRIDGE_LLAMA_LOG: path.join(path.dirname(bin), 'llama.log'), BRIDGE_LLM_IDLE_MS: '1500' }
@@ -118,15 +120,19 @@ try {
   await kit.api('/providers/openai', { values: { OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: `${cloud.url}/v1` } }, 'PUT')
 
   // ---------- The server ----------
-  // The trial off: its routes say how to turn it on, and /config says it's off whatever was set.
-  await kit.api('/settings', { trials: { 'dictation-cleanup': false }, dictation: { tidy: true } }, 'PATCH')
+  // Never set: on where the local model fits the computer (16 GB, and 8 GB), off where it doesn't
+  // (4 GB), and no Beta Feature.
+  const tidyNow = async (k) => (await k.api('/config')).dictation?.tidy
+  ok(!!(await until(async () => (await tidyNow(kit)) === true && (await tidyNow(bare)) === true, 8000, 200)) && (await tidyNow(small)) === false && (await kit.api('/config')).features?.['dictation-cleanup'] === true && !('dictation-cleanup' in ((await kit.api('/config')).trials || {})) && (await kit.api('/settings')).user.dictation?.tidy === undefined,
+    'on to start with where the local model fits (16 GB, 8 GB), off where it doesn\'t (4 GB), and no Beta Feature', { kit: await tidyNow(kit), bare: await tidyNow(bare), small: await tidyNow(small) })
+  // Turned off: tidying isn't done, and says where to turn it on; /config says it's off.
+  await kit.api('/settings', { dictation: { tidy: false } }, 'PATCH')
   let r = await tidy(kit, 'so you know we ship it')
   const conf = await kit.api('/config')
-  ok(r.status === 404 && r.j.trial === 'dictation-cleanup' && /beta feature\. Turn it on in Settings › About & Updates › Beta Features/.test(r.j.error || ''), 'the trial off: tidying isn\'t there, and says how to turn it on', r)
-  ok(conf.trials?.['dictation-cleanup'] === false && conf.dictation?.tidy === false && !chats(kit).length, 'and /config says tidying is off, though it was turned on (nothing was asked of a model)', conf.dictation)
-  await kit.api('/settings', { trials: { 'dictation-cleanup': true }, dictation: { tidy: null } }, 'PATCH')
-  const fresh = await kit.api('/config')
-  ok(fresh.trials?.['dictation-cleanup'] === true && !fresh.dictation?.tidy, 'turned on: the trial is on, and tidying itself still off until you turn it on', fresh.dictation)
+  ok(r.status === 404 && r.j.off === 'dictation-cleanup' && /Tidy what I say is turned off\. Turn it on in Settings › Meetings & Voice › Dictation › Tidy what I say\./.test(r.j.error || ''), 'turned off: tidying isn\'t done, and says where to turn it on', r)
+  ok(conf.dictation?.tidy === false && conf.features?.['dictation-cleanup'] === false && !chats(kit).length && (await kit.api('/dictation/tidy')).on === false, 'and /config says it\'s off (nothing was asked of a model), while which model it would use is still said', conf.dictation)
+  await kit.api('/settings', { dictation: { tidy: null } }, 'PATCH')
+  ok((await tidyNow(kit)) === true && (await kit.api('/dictation/tidy')).mine === false, 'set back to the default: on again')
 
   // The model: the local one built in, by itself.
   let st = await kit.api('/dictation/tidy')
@@ -197,6 +203,8 @@ try {
 
   // ---------- In the app, the desktop app simulated ----------
   const STATUS = { mode: 'hold', via: 'bridgekeys', key: 'Alt+Space', active: true, background: true, paste: { can: true, via: 'bridgekeys', asks: 'accessibility', allowed: true }, edit: { can: false } }
+  // (noKey: a desktop app that can't hear the key from other apps on this computer.)
+  let noKey = false
   const said = []
   const asApp = async (c) => {
     await noServiceWorker(c)
@@ -220,7 +228,7 @@ try {
         dictateRepaste: async (o) => { window.__hud.repaste.push(o); return { pasted: true } },
         pasteAccess: async () => 'ok',
       }
-    }, STATUS)
+    }, noKey ? { ...STATUS, mode: null, background: false, paste: { can: false } } : STATUS)
   }
   const voice = async (k) => {
     const w = await page(b, k.url, { before: asApp })
@@ -237,32 +245,22 @@ try {
   }
   const tidyBox = (s) => s.locator('.dict-tidy')
 
-  // Beta Features lists it; with the trial off, Settings › Meetings & Voice › Dictation has only its switch.
-  await kit.api('/settings', { trials: { 'dictation-cleanup': false } }, 'PATCH')
-  {
-    const { ctx, p, s } = await voice(kit)
-    ok(await tidyBox(s).count() === 0 && !/Tidy what I say/.test(await s.innerText()), 'the trial off: Dictation\'s Advanced has no Tidy what I say', await s.innerText())
-    const top = p.locator('.modal.settings [data-setting="beta-dictation-cleanup"]')
-    ok(await top.isVisible() && await top.locator('.st-chip.beta').count() === 1 && !(await top.locator('input[role="switch"]').isChecked()) && await top.evaluate((e) => !e.closest('.st-adv')), 'but its switch is first in the Dictation tab, marked Beta, off', await top.innerText().catch(() => ''))
-    await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'about' } })))
-    const trial = p.locator('.st-check', { hasText: 'Tidy what I say' })
-    ok(!!(await until(() => trial.isVisible(), 10000, 200)) && /tidied by a model before it's pasted/.test(await trial.innerText()) && !(await trial.locator('input').isChecked()), 'Settings › About & Updates › Beta Features: Tidy what I say, off', await trial.innerText().catch(() => ''))
-    await until(async () => !(await trial.locator('input').isDisabled()), 10000)
-    await trial.locator('input').check()
-    ok(!!(await until(async () => (await kit.api('/config')).trials?.['dictation-cleanup'] === true, 5000, 200)), 'turned on there: kept')
-    await ctx.close()
-  }
+  // Out of Beta Features: no Beta switch in the Dictation tab, nor in Beta Features. Tidy what I say
+  // is under Advanced, on to start with here (the local model fits), the model it tidies with shown.
   {
     const { ctx, p, s, errors } = await voice(kit)
-    ok(await p.locator('.modal.settings [data-setting="beta-dictation-cleanup"] input[role="switch"]').isChecked(), 'the trial on: its switch in the Dictation tab says so')
+    ok(!(await p.locator('.modal.settings [data-setting="beta-dictation-cleanup"]').count()) && !(await p.locator('.modal.settings .st-beta').count()), 'no Beta switch in the Dictation tab')
     const box = tidyBox(s).locator('input[type=checkbox]')
     // (What it doesn't do, in full, is under its More.)
     await tidyBox(s).locator('.st-more').first().click({ timeout: 5000 }).catch(() => {})
-    ok(await box.count() === 1 && !(await box.isChecked()) && /Tidy what I say/.test(await tidyBox(s).innerText()) && /never answers them or adds to them/.test(await tidyBox(s).innerText()), 'the trial on: Tidy what I say, off to start with, saying what it does and doesn\'t', await tidyBox(s).innerText().catch(() => ''))
-    ok(await s.locator('.dict-tidy-model').count() === 0, 'off: no model to pick yet')
-    await box.click()
+    const said = await tidyBox(s).innerText().catch(() => '')
+    ok(await box.count() === 1 && await box.isChecked() && /Tidy what I say/.test(said) && /never answers them or adds to them/.test(said) && /If it takes more than a few seconds, or anything goes wrong, your words go as you said them/.test(said), 'Tidy what I say under Advanced, on to start with where the local model fits, saying what it does and doesn\'t, and that a slow model means your words as you said them', said)
     const sel = s.locator('.dict-tidy-model select')
-    ok(!!(await until(() => sel.isVisible(), 5000, 100)) && (await kit.api('/settings')).effective?.dictation?.tidy === true, 'turned on: kept, and the model it tidies with shown')
+    ok(!!(await until(() => sel.isVisible(), 5000, 100)), 'on: the model it tidies with shown')
+    await box.click()
+    ok(!!(await until(async () => (await kit.api('/settings')).effective?.dictation?.tidy === false && !(await s.locator('.dict-tidy-model').count()), 5000, 100)), 'turned off: kept, and no model to pick')
+    await box.click()
+    ok(!!(await until(() => sel.isVisible(), 5000, 100)) && (await kit.api('/settings')).effective?.dictation?.tidy === true, 'turned on again: kept, and the model it tidies with shown')
     ok(/Gemma 4 E2B, on this computer \(the default\)/.test(await sel.innerText()) && /Tidied on this computer\. Nothing is sent anywhere/.test(await tidyBox(s).innerText()), 'the local model by default, on this computer', await tidyBox(s).innerText())
     ok(/gpt-5 · text leaves this computer/.test(await sel.innerText()) && !/sign-in/.test(await sel.innerText()), 'a provider offered, said to send the words out', await sel.innerText())
     ok(await sel.evaluate((e) => e.classList.contains('st-input') && e.getBoundingClientRect().height >= 34), 'the model picked in a field like the rest of Settings\' (not a bare one)')
@@ -272,21 +270,43 @@ try {
     await shot(p, `${tag}dictation-cleanup-settings`)
     await sel.selectOption('')
     await until(async () => (await kit.api('/settings')).effective?.dictation?.tidyModel == null, 5000, 100)
+    await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'about' } })))
+    const beta = p.locator('.modal.settings [data-setting="beta"]')
+    await beta.waitFor({ timeout: 10000 })
+    ok(!(await beta.locator('[data-beta="dictation-cleanup"]').count()) && !/Tidy what I say/.test(await beta.innerText()), 'and Settings › About & Updates › Beta Features no longer lists it', await beta.innerText())
     ok(!errors.length, 'no page errors', errors)
     await ctx.close()
   }
+  // Dictation from other apps off: there, greyed, with Turn On. Where the key can't be heard from
+  // other apps on this computer (the desktop app says it can't): not there at all.
+  await kit.api('/settings', { dictation: { background: false } }, 'PATCH')
+  {
+    const { ctx, p, s } = await voice(kit)
+    const greyed = s.locator('.st-needs').filter({ has: p.locator('.dict-tidy') })
+    ok(!!(await until(() => greyed.isVisible(), 5000, 100)) && /Needs dictation from other apps on/.test(await greyed.innerText()) && await greyed.locator('button', { hasText: 'Turn On' }).count() === 1, 'dictation from other apps off: Tidy what I say greyed, with what it needs and Turn On', await greyed.innerText().catch(() => ''))
+    await ctx.close()
+  }
+  await kit.api('/settings', { dictation: { background: true } }, 'PATCH')
+  noKey = true
+  {
+    const { ctx, s } = await voice(kit)
+    await sleep(500)
+    ok(!(await tidyBox(s).count()) && !/Tidy what I say/.test(await s.innerText()), 'the key not heard from other apps here: no Tidy what I say', await s.innerText())
+    await ctx.close()
+  }
+  noKey = false
   // No model: what's needed, on or off, and the download in one click.
   {
     const { ctx, p, s } = await voice(bare)
     const needs = tidyBox(s).locator('.tidy-needs')
-    ok(!!(await until(() => needs.isVisible(), 8000, 100)) && /Tidying needs a model\. The local model runs on this computer/.test(await needs.innerText()) && await needs.locator('button', { hasText: 'Download the local model (2.8 GB)' }).count() === 1, 'no model: off, and still saying what it needs, with the local model one click away', await tidyBox(s).innerText().catch(() => ''))
+    ok(!!(await until(() => needs.isVisible(), 8000, 100)) && /Tidying needs a model\. The local model runs on this computer, so what you say stays here\. Until then, what you say goes as you said it\./.test(await needs.innerText()) && await needs.locator('button', { hasText: 'Download the local model (2.8 GB)' }).count() === 1 && await tidyBox(s).locator('input[type=checkbox]').isChecked(), 'no model yet on 8 GB, where it fits: on, saying what it needs and that your words go as you said them until then, with the local model one click away', await tidyBox(s).innerText().catch(() => ''))
     await tidyBox(s).scrollIntoViewIfNeeded()
     await shot(p, `${tag}dictation-cleanup-needs-model`)
     await ctx.close()
   }
   {
     const { ctx, p, s } = await voice(small)
-    ok(!!(await until(async () => /Tidying needs a model: add one in Settings › Agents & Models › Model Providers \(Ollama, LM Studio or a key\)/.test(await tidyBox(s).innerText().catch(() => '')), 8000, 100)) && await tidyBox(s).locator('button', { hasText: /Download/ }).count() === 0, 'a computer with 4 GB: no download offered, but where to add a model of your own', await tidyBox(s).innerText().catch(() => ''))
+    ok(!!(await until(async () => /Tidying needs a model: add one in Settings › Agents & Models › Model Providers \(Ollama, LM Studio or a key\)/.test(await tidyBox(s).innerText().catch(() => '')), 8000, 100)) && await tidyBox(s).locator('button', { hasText: /Download/ }).count() === 0 && !(await tidyBox(s).locator('input[type=checkbox]').isChecked()), 'a computer with 4 GB, where the local model doesn\'t fit: off to start with, no download offered, but where to add a model of your own', await tidyBox(s).innerText().catch(() => ''))
     ok(!(await tidyBox(s).locator('.tidy-needs.warn').count()) && !/Until then/.test(await tidyBox(s).innerText()), 'tidying off: said as a note, not a warning')
     await tidyBox(s).locator('input[type=checkbox]').click()
     const warn = tidyBox(s).locator('.tidy-needs.warn')
@@ -384,17 +404,20 @@ try {
     ok(!!(await until(() => p.evaluate(() => window.__hud.copied.at(-1) === 'So you know we should we should ship it on Friday.'), 3000, 100)), 'and Copy copies those')
     await ctx.close()
   }
-  // The trial turned off: nothing tidied, nothing said about it, though tidying was left on.
-  await kit.api('/settings', { trials: { 'dictation-cleanup': false }, dictation: { to: 'paste' } }, 'PATCH')
+  // Turned off while the window still has it on (it hasn't heard yet: its settings held as they were):
+  // the computer says it's off, and your words go as before, nothing said about tidying.
+  await kit.api('/settings', { dictation: { tidy: false, to: 'paste' } }, 'PATCH')
   {
-    const { ctx, p } = await hud(kit)
+    const stale = async (c) => { await asApp(c); await c.route(/\/api\/config(\?|$)/, async (r) => { const res = await r.fetch(); const j = await res.json(); await r.fulfill({ json: { ...j, dictation: { ...j.dictation, tidy: true } } }) }) }
+    const { ctx, p } = await page(b, `${kit.url}/?dictate=1`, { before: stale })
+    await p.waitForSelector('.hud', { timeout: 15000 })
     const m0 = askedOf(/we should we should/)
     await talk(p, 'so you know we should we should ship it on Friday')
     const got = await pastedNow(p, 0)
-    ok(got === 'So you know we should we should ship it on Friday.' && askedOf(/we should we should/) === m0 && !/tidied/i.test(await hudText(p)), 'the trial off: pasted as before, no model asked, nothing about tidying', { got, text: await hudText(p) })
+    ok(got === 'So you know we should we should ship it on Friday.' && askedOf(/we should we should/) === m0 && !/tidied/i.test(await hudText(p)), 'turned off while the window had it on: pasted as before, no model asked, nothing about tidying', { got, text: await hudText(p) })
     await ctx.close()
   }
-  await kit.api('/settings', { trials: { 'dictation-cleanup': true } }, 'PATCH')
+  await kit.api('/settings', { dictation: { tidy: true } }, 'PATCH')
 
   // No model yet: the first use pastes your words as you said them and offers the local model there,
   // in one click; once it's in, what you say is tidied.

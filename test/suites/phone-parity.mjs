@@ -20,8 +20,9 @@
 // is there: Your Features, with the sections down the left.
 //
 // A path is what's tapped, from the tab bar: a tab (Chief, Agents, Meetings, Today, More), then the
-// buttons in it by name. A beta feature's paths (trial: its id) are followed with it on; with Home
-// on, Home is the first tab and Today is in More, which is checked then too. One marked mac (Mail,
+// buttons in it by name. A beta feature's paths (trial: its id) are followed with it on, and Home's
+// (trial: 'home', on unless it's turned off) with it on: then Home is the first tab and Today is in
+// More, which is checked then too. The rest are followed with Home turned off. One marked mac (Mail,
 // its ⌘K actions and Settings › Mail & Calendar) is only there, and followed, on a Mac. "Search › x" types x in the top bar's search, which must offer it (for
 // actions rather than places); "Settings › x" is the top bar's Settings, then its section x.
 import fs from 'node:fs'
@@ -159,7 +160,9 @@ for (const [what, ids] of [['view', views], ['⌘K action', actions], ['Settings
   ok(!missing(ids).length, `every desktop ${what} has a way in on a phone, or says why not (add it to PATHS here)`, missing(ids))
 }
 
-const kit = await startKit('phone-parity', { config: { trials: { 'meeting-insights': true, routines: true } } }) // the beta features on: their ways in are checked too
+// Meeting Insights on (as it is by itself after 5 meetings) and Scheduled Routines on, as it starts:
+// their ways in are checked too. Home turned off until its own part below.
+const kit = await startKit('phone-parity', { config: { meetings: { insights: true }, home: { on: false } } })
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 try {
@@ -374,10 +377,10 @@ try {
     await ph.ctx.close()
   }
 
-  // ---------- Home, a beta feature, on ----------
+  // ---------- Home on, as it is unless turned off ----------
   // Home is the first tab and where the phone opens, and Today is in More: each of Home's paths, and
   // Today's from More.
-  await kit.api('/settings', { trials: { home: true } }, 'PATCH')
+  await kit.api('/settings', { home: { on: true } }, 'PATCH')
   {
     const HOME_TABS = ['Home', 'Chief', 'Agents', 'Meetings', 'More']
     const ph = await page(b, kit.url, { phone: true })
@@ -430,7 +433,7 @@ try {
     ok(!ph.errors.filter((e) => !/\/api\/\S+ due to access control checks|^TypeError: Importing a module script failed\.$/.test(e)).length, 'Home on: no page errors', ph.errors)
     await ph.ctx.close()
   }
-  await kit.api('/settings', { trials: { home: false } }, 'PATCH')
+  await kit.api('/settings', { home: { on: false } }, 'PATCH')
 
   // A phone that had the Terminals tab open (before More): Terminals, in More.
   const old = await page(b, kit.url, { phone: true, store: { 'cc-mtab': 'herdr' } })
