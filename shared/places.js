@@ -58,6 +58,7 @@ export const SETTINGS = {
   'mcp-server': ['mcp', 'Bridge AI as an MCP Server'],
   signatures: ['studio', 'Your Signatures'],
   'ask-before-signing': ['studio', 'Ask Before Signing'],
+  'enter-key': ['you', 'Enter Key'],
 }
 
 // Places outside Settings a message names, as names from the top: Bots' tabs (the sidebar's Bots,

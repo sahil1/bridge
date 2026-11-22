@@ -9,10 +9,11 @@
 // recommendation and Use these applies it; what it starts with is changed there; Home's box and New
 // have an effort chip suggested from what's typed, changed from its menu, which is what the agent
 // starts with; the agent's model menu says it; a switch for it saved off from before changes
-// nothing. Light, dark and a phone.
+// nothing. Home's Enter (src/enter.js): the caret back in the words a new line, the hint beside
+// Start saying ⌘⏎ sends; from the end Enter starts it, and ⌘⏎ from anywhere. Light, dark and a phone.
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, checks, until, browser, page, shot, solid, TEST } from '../lib/harness.mjs'
+import { startKit, checks, until, sleep, browser, page, shot, solid, TEST } from '../lib/harness.mjs'
 import { suggestEffort, filesIn } from '../../src/recommended.js'
 
 const { ok, done } = checks('recommended-settings')
@@ -221,7 +222,20 @@ try {
     await menu.locator('[role="menuitemradio"]', { hasText: 'Low' }).click()
     ok(/Low effort: you picked it/.test(await words(chip)), `${t}: picked: Low, and it says you picked it`, await words(chip))
     const before = started().length
-    await p.locator('.home-box textarea').press('Enter')
+    // Enter, Smart (src/enter.js): with the caret back in the words, a new line there (nothing starts)
+    // and the hint beside Start says ⌘⏎ sends.
+    const homeBox = p.locator('.home-box textarea')
+    await homeBox.evaluate((el) => { el.focus(); el.setSelectionRange(el.value.length, el.value.length) })
+    for (let i = 0; i < 8; i++) await homeBox.press('ArrowLeft')
+    await homeBox.press('Enter')
+    const hinted = await until(async () => /^(⌘|Ctrl)⏎ to send$/.test((await p.locator('.home-box .enter-hint').innerText().catch(() => '')).trim()), 4000, 100)
+    await sleep(800)
+    ok((await homeBox.inputValue()) === 'Refactor the billing module across all the files that\n call it' && started().length === before && !!hinted, `${t}: Home, the caret back in the words: Enter is a new line, nothing starts, and the hint says ⌘⏎ sends`, { box: await homeBox.inputValue(), hint: await p.locator('.home-box .enter-hint').innerText().catch(() => '') })
+    await shot(p, `${tag}smart-enter-home-${t}`, { clip: await p.locator('.home-box').boundingBox().then((r) => ({ x: r.x - 16, y: r.y - 16, width: r.width + 32, height: r.height + 32 })) })
+    await homeBox.press('Backspace')
+    // Then from there with ⌘⏎ (dark), or Enter from the end (light).
+    if (t === 'dark') await homeBox.press('ControlOrMeta+Enter')
+    else { await homeBox.evaluate((el) => el.setSelectionRange(el.value.length, el.value.length)); await homeBox.press('Enter') }
     const got = await until(() => started()[before], 30000, 250)
     ok(flag(got, '--effort') === 'low', `${t}: the agent starts with --effort low`, got)
     ok(errors.length === 0, `${t}: Home: no page errors`, errors)

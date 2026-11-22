@@ -6,6 +6,7 @@ import { TryResult } from '../settings/Bots.jsx'
 import { usePolled, SESSION_STATE, WAITING, stateOf, placeOf, sinceOf, noteTitle } from './sessions.js'
 import { FILTER_KEY, openSession, refreshBots } from './bots.js'
 import { t } from '../../i18n/index.js'
+import { useEnter, EnterAt } from '../EnterHint.jsx'
 import './bots-home.css'
 
 // Bots › Sessions: every conversation your bots are having, each a session (a live Claude Code in
@@ -123,6 +124,8 @@ export function StartTest({ bots, bot = null, askers = [], owner = null, onClose
     }
     setBusy(false)
   }
+  // Enter as Settings › You › Enter Key has it (src/enter.js); a phone's keyboard on the screen starts it, as before.
+  const enter = useEnter(text, go)
   const one = bots.length === 1 ? bots[0] : null
   return (
     <form className="bh-test-sess" onSubmit={go} data-setting="test-session">
@@ -141,7 +144,7 @@ export function StartTest({ bots, bot = null, askers = [], owner = null, onClose
           </select>
         </label>
       )}
-      <textarea className="st-input" rows={2} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) go(e) }} placeholder={t('A question, as it would be asked in Slack')} aria-label={t('The question')} />
+      <EnterAt show={enter.mid}><textarea className="st-input" rows={2} value={text} onChange={(e) => { setText(e.target.value); enter.box.onSelect(e) }} onKeyDown={enter.onKeyDown} {...enter.box} placeholder={t('A question, as it would be asked in Slack')} aria-label={t('The question')} /></EnterAt>
       <div className="st-row">
         <button type="submit" className="btn small primary" disabled={busy || !text.trim() || !id}><Icon name="play" size={12} /> {busy ? t('Starting…') : t('Start')}</button>
         {onClose && <button type="button" className="ghost-btn" onClick={onClose}>{t('Cancel')}</button>}

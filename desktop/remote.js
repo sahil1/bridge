@@ -16,6 +16,9 @@
 //   reopen / allow-screen        chosen by a device that can't see this screen: the app reopens (as
 //                                macOS's Quit & Reopen does), or System Settings opens at Screen &
 //                                System Audio Recording, with the tile, for someone here
+//   lock?                        whether this screen is locked (macOS and Windows let no app take a
+//                                locked screen): said then, and each time it changes, so a device
+//                                waits for it to be unlocked
 // And on the computer looking: another computer's screen in a window of its own (view, ?remote=view),
 // opened inside the work area of the display it opens on, in that screen's shape (fit, once the page
 // knows it), at the size you left it for that computer when you've sized it yourself.
@@ -26,6 +29,9 @@ const MAX_FRAME = 180 * 1024
 const LIST_MS = 8000
 // The page's own window titles, left out of the windows it can show.
 const OWN_TITLES = /^Bridge AI (screen sharing|is being viewed)$/
+// A lock or unlock heard from the system: what it says when asked is taken over it only this long
+// after (it may not have caught up yet).
+const LOCK_HEARD_MS = 5000
 
 // A window for a picture w x h, with chrome (the toolbar, a frame) around it, as big as fits in
 // most of area (a display's work area, { x, y, width, height }), its shape kept, centred there.
@@ -70,14 +76,41 @@ function displayFor(screens, displays, primary) {
 // by a device macOS doesn't let see this screen. power: Electron's powerSaveBlocker (none in tests);
 // wake(): the display woken if it's asleep (main.js), as someone starts viewing it. taken(): someone
 // views this screen, so the capture page takes it (main.js: macOS's picker for Watch a screen isn't
-// used after that, until the app restarts).
-function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, session, nativeTheme, URL_BASE, preload, fetch, platform = process.platform, keyFor, sizes = null, restart = () => {}, allowScreen = () => {}, power = null, wake = () => {}, taken = () => {}, listMs = LIST_MS }) {
+// used after that, until the app restarts). powerMonitor: Electron's, for whether the screen is
+// locked (none in tests: then it isn't known, as on Linux).
+function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, session, nativeTheme, URL_BASE, preload, fetch, platform = process.platform, keyFor, sizes = null, restart = () => {}, allowScreen = () => {}, power = null, wake = () => {}, taken = () => {}, powerMonitor = null, listMs = LIST_MS }) {
   const MAC = platform === 'darwin'
   let capture = null
   let badge = null
   let control = false
   const pages = new Map() // session -> { win, w, h, timer, latest, sent }
   const views = new Map() // another computer's screen: machine ('' for this one's own) -> BrowserWindow
+
+  // ---------- a locked screen ----------
+  // macOS and Windows say when the screen is locked (powerMonitor), and neither lets an app take it
+  // then (a capture asked for fails, or stops). The server is told when it asks (lock?) and each time
+  // it changes, and the capture page says so with its list of screens: { locked, id, n }, n counting
+  // each change in this run of the app (id), so a word that comes in late can't undo a newer one.
+  // Linux, or a system that doesn't say ('unknown'): nothing is said, and nothing waits on it.
+  const LOCKS = MAC || platform === 'win32'
+  const lockNow = () => {
+    if (!LOCKS || typeof powerMonitor?.getSystemIdleState !== 'function') return null
+    try { const s = powerMonitor.getSystemIdleState(1); return s === 'locked' ? true : s === 'unknown' ? null : false } catch { return null }
+  }
+  const lock = { locked: lockNow(), id: Math.random().toString(36).slice(2, 10), n: 0 }
+  const lockWord = () => (LOCKS && (lock.locked != null || lock.n > 0) ? { ...lock } : null)
+  const tellLock = () => {
+    const word = lockWord()
+    if (!word) return
+    try { Promise.resolve(fetch(`${URL_BASE}/api/remote/screen-lock`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(word) })).catch(() => {}) } catch { /* said next time */ }
+  }
+  const lockIs = (v) => { if (v === lock.locked) return; lock.locked = v; lock.n++; displayAwake(); tellLock() }
+  // Looked at again (a lock or unlock not heard of): only a while after the last one heard, which the
+  // system may not have caught up with yet.
+  let heardAt = 0
+  const lookAgain = () => { if (Date.now() - heardAt > LOCK_HEARD_MS) lockIs(lockNow()) }
+  const heard = (v) => { heardAt = Date.now(); lockIs(v) }
+  if (LOCKS && typeof powerMonitor?.on === 'function') { powerMonitor.on('lock-screen', () => heard(true)); powerMonitor.on('unlock-screen', () => heard(false)) }
 
   // ---------- what can be seen ----------
   // macOS's word on Screen Recording, without asking: 'ok', 'ask' or 'denied'. (macOS says denied
@@ -135,7 +168,10 @@ function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, ses
     }
     const now = permission()
     const none = screens.length ? null : MAC && now === 'ok' && startedWith !== 'ok' ? 'reopen' : 'none'
-    return { sources: out.slice(0, 40), permission: now, ...(none ? { none, ...(problem ? { problem } : {}) } : {}) }
+    // (Whether it's locked, looked at again now: a capture that fails or stops is told apart by it.)
+    lookAgain()
+    const word = lockWord()
+    return { sources: out.slice(0, 40), permission: now, ...(none ? { none, ...(problem ? { problem } : {}) } : {}), ...(word ? { lock: word } : {}) }
   }
   // A small still of each screen, for the viewer's Which screen? (asked only during a session, once
   // the guardrails let it in: server/remote.js): JPEG, inside 320 x 320, its shape kept.
@@ -189,13 +225,20 @@ function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, ses
   function captureIdle() { if (capture && !capture.isDestroyed()) capture.destroy(); capture = null; keepUp(false) }
 
   // ---------- the badge ----------
-  // Someone viewing: the display woken when it's asleep (they'd see nothing, or the screen locked
-  // as it is), and kept awake while they do.
+  // Someone viewing: the display woken when it's asleep (they'd see nothing), and kept awake while
+  // they do. Not while the screen is locked (that would only light the lock screen): once it's
+  // unlocked, if they still are.
   let awake = null
+  let seen = false
+  function displayAwake() {
+    const want = seen && lock.locked !== true
+    if (want && awake == null) { try { wake() } catch { /* not here */ } awake = power ? power.start('prevent-display-sleep') : -1 }
+    else if (!want && awake != null) { if (awake >= 0) try { power.stop(awake) } catch { /* stopped */ } awake = null }
+  }
   function viewing(on) {
     if (on) { try { taken() } catch { /* only said */ } }
-    if (on && awake == null) { try { wake() } catch { /* not here */ } awake = power ? power.start('prevent-display-sleep') : -1 }
-    else if (!on && awake != null) { if (awake >= 0) try { power.stop(awake) } catch { /* stopped */ } awake = null }
+    seen = on
+    displayAwake()
   }
   // While anyone sees this screen, or asks to (Ask Here First, answered on it).
   function sessions(list, asks) {
@@ -342,8 +385,9 @@ function create({ BrowserWindow, desktopCapturer, screen, systemPreferences, ses
     else if (ev.t === 'page-resize') pageResize(ev)
     else if (ev.t === 'page-go') pageGo(ev)
     else if (ev.t === 'page-stop') pageStop(ev)
+    else if (ev.t === 'lock?') { const n = lock.n; lookAgain(); if (lock.n === n) tellLock() }
   }
-  return { onEvent, sources, thumbs, permission, view, fit, isView: (w) => [...views.values()].includes(w), controlOn: () => control, setControl: (on) => { control = !!on }, windows: () => [capture, badge, ...views.values()].filter(Boolean) }
+  return { onEvent, sources, thumbs, permission, view, fit, isView: (w) => [...views.values()].includes(w), controlOn: () => control, setControl: (on) => { control = !!on }, windows: () => [capture, badge, ...views.values()].filter(Boolean), locked: () => lock.locked }
 }
 
 module.exports = { create, fitWindow, displayFor }

@@ -15,7 +15,8 @@
 // turned off and sends what it reads off the computer is never under Advanced: Meetings' cleanup,
 // naming who spoke and preparing (with which model writes the notes and where it runs said there:
 // none yet, then a key's), Mail's learning again, the Agents tab's picking up unfinished work.
-// Nothing was lost: every setting there was (each control by its name) is still in its place,
+// You's Enter Key (src/enter.js): Smart, Always Sends or ⌘Enter Sends, Smart until another is picked,
+// each kept, and Smart again taken out of your settings. Nothing was lost: every setting there was (each control by its name) is still in its place,
 // Advanced opened. Each beta feature's switch is at the top of its own place, marked Beta; About &
 // Updates › Beta Features lists only what's still in beta, each with the way to its place. A setting
 // that needs another one on shows greyed with Turn On (Dictation's extras), and Which Devices May
@@ -68,7 +69,7 @@ const TABBED = {
 const SECTIONS = ['Your Features', 'You', 'Agents & Models', 'Meetings & Voice', ...(IS_MAC ? ['Mail & Calendar'] : []), 'Studio', 'Bots', 'Devices & Access', 'Notifications', 'Back Up & Move', 'About & Updates']
 const FIRST = {
   'Your Features': ['Meetings', 'Dictation', 'Chief of Staff', 'Phone', 'Share Links', 'Notifications', 'Beta', 'Bots', 'Remote Screen and Preview', 'Bridge AI as an MCP Server', 'Set up'],
-  You: ['Home', 'Your name', 'Location', 'Layout', 'Color Mode', 'Theme', 'Text Size', 'Language'],
+  You: ['Home', 'Your name', 'Location', 'Layout', 'Enter Key', 'Color Mode', 'Theme', 'Text Size', 'Language'],
   Agents: ['Scheduled Routines', 'Default agent', 'Pick up unfinished work', 'Chief of Staff', 'Runs on', 'Helpers at once', 'Your Agents'],
   'Model Providers': ['Usage Across Every Provider', /model labs/i, /run locally/i],
   'Which Model Does What': ['Agents and the Chief of Staff', 'New agents and chats', 'Models for Each Task', 'Speech and Dictation', 'Speech to text'],
@@ -92,7 +93,7 @@ const FIRST = {
 // its place with Advanced opened. Platform's own: Mail only on a Mac, Prepare for each meeting only
 // with a calendar (a Mac).
 const ALL = {
-  You: ['input|Your name', 'button|Simple', 'button|Everything', 'button|Use my location', 'input|Search for a city', 'button|Light', 'button|Dark', 'button|Sync with system', 'button|Midnight', 'button|Custom', 'button|Copy', 'input|Paste a theme', 'button|Use', 'button|Small', 'button|Large', 'button|Comfortable', 'button|Compact', 'button|Geist', 'button|Rounded', 'input|Weather', 'input|Clock', 'input|Usage', 'input|Updates', 'input|Restart to apply', 'input|Setup', 'input|Notification sounds', 'select|Language', 'button|Reset appearance', 'input|Home'],
+  You: ['input|Your name', 'button|Simple', 'button|Everything', 'button|Smart', 'button|Always Sends', 'button|Enter Sends', 'button|Use my location', 'input|Search for a city', 'button|Light', 'button|Dark', 'button|Sync with system', 'button|Midnight', 'button|Custom', 'button|Copy', 'input|Paste a theme', 'button|Use', 'button|Small', 'button|Large', 'button|Comfortable', 'button|Compact', 'button|Geist', 'button|Rounded', 'input|Weather', 'input|Clock', 'input|Usage', 'input|Updates', 'input|Restart to apply', 'input|Setup', 'input|Notification sounds', 'select|Language', 'button|Reset appearance', 'input|Home'],
   Agents: ['input|Scheduled Routines', 'button|More agents', 'button|Refresh', 'button|Install', 'button|Copy the command', 'select|Chief of Staff runs on', 'select|Helpers at once', 'button|Off', 'button|On', 'select|Terminal app', 'button|Built in', 'button|herdr', 'input|Keep agents running when Bridge AI quits', 'input|Pick up unfinished work after an update, a crash or a restart'],
   'Model Providers': ['input|Usage Across Every Provider', 'input|Show more models (Qwen Code, DeepSeek, Kimi, GLM)', 'button|Anthropic', 'button|OpenAI', 'button|Azure OpenAI', 'button|AWS Bedrock', 'button|OpenRouter', 'button|Groq', 'button|Ollama', 'button|LM Studio', 'button|Deepgram', 'button|AssemblyAI', 'button|Another speech service', 'button|Cursor', 'button|GitHub Copilot', 'button|Jules'],
   'Which Model Does What': ['button|Model for Meeting notes', 'button|Model for Diagrams', 'button|Change'],
@@ -240,6 +241,19 @@ try {
         ok(!lost.length, `${name}: every setting there was is still here`, { lost, got })
       }
       for (const id of await unknownSettings(p)) if (!known(id)) strays.add(`${name}: ${id}`)
+      if (name === 'You') {
+        // Enter Key (src/enter.js): Smart until another is picked; each pick kept, Smart by taking it out.
+        const opts = p.locator('.modal.settings [data-setting="enter-key"] [role="radio"]')
+        const said = (await opts.allInnerTexts()).map((x) => x.trim())
+        ok(said.length === 3 && said[0] === 'Smart' && said[1] === 'Always Sends' && /^(⌘Enter|Ctrl\+Enter) Sends$/.test(said[2]) && (await opts.first().getAttribute('aria-checked')) === 'true', 'You: Enter Key, Smart, Always Sends or ⌘Enter Sends (Ctrl+Enter off a Mac), Smart picked', said)
+        const kept = (v) => until(async () => (await kit.api('/settings')).user.enterKey === v && (await kit.api('/config')).enterKey === (v || 'smart'), 5000, 100)
+        await opts.nth(2).click()
+        ok(!!(await kept('mod')) && (await opts.nth(2).getAttribute('aria-checked')) === 'true', 'You: ⌘Enter Sends picked is kept', (await kit.api('/settings')).user.enterKey)
+        await opts.nth(1).click()
+        ok(!!(await kept('always')), 'You: Always Sends picked is kept', (await kit.api('/settings')).user.enterKey)
+        await opts.nth(0).click()
+        ok(!!(await kept(undefined)), 'You: Smart again takes it out of your settings (the default)', (await kit.api('/settings')).user)
+      }
       if (name === 'About & Updates') {
         const betas = (await p.locator('[data-setting="beta"] .ab-trial .st-check b').allInnerTexts()).map((x) => x.trim())
         ok(JSON.stringify(betas) === JSON.stringify(BETAS), 'About & Updates › Beta Features lists only the features still in beta', betas)

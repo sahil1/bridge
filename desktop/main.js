@@ -1302,6 +1302,8 @@ app.whenReady().then(async () => {
     power: powerSaveBlocker,
     wake: () => { if (IS_MAC) execFile('/usr/bin/caffeinate', ['-u', '-t', '2'], { timeout: 5000 }, () => {}) },
     taken: () => noPicker('remote'),
+    // Whether the screen is locked (a device waits for it to be unlocked: no app may take it then).
+    powerMonitor,
   })
   watchFleet()
   watchCalls()
