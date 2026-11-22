@@ -451,8 +451,13 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
       if (writing.current || wrote.current !== n) { lastLook.current = 0; return }
       if (!r?.changed) return
       if (r.by === 'agent') quick.current = Math.max(quick.current, Date.now() + 120_000)
+      // Saved by you in another window (or on your phone): said so, not as another app's change.
+      const mine = r.by === 'you' || r.by === 'restored'
       const who = r.by === 'agent' ? (r.name || t('An agent')) : t('Another app')
-      if (!dirtyRef.current) { await load().catch(() => {}); setNote({ text: t('{who} changed it: this is its new version.', { who }) }) } else { setMeta((x) => ({ ...x, versions: r.versions })); setConflict({ who, mtime: r.mtime }) }
+      if (!dirtyRef.current) {
+        try { await load() } catch (e) { setErr(e); return }
+        setNote({ text: mine ? t('You changed it in another window: this is its new version.') : t('{who} changed it: this is its new version.', { who }) })
+      } else { setMeta((x) => ({ ...x, versions: r.versions })); setConflict({ who, mine, mtime: r.mtime }) }
     }
     const back = () => { lastLook.current = 0; look() }
     const id = setInterval(look, 2500)
@@ -500,7 +505,8 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
     } catch (e) {
       // Left by then: said all the same, the page being gone.
       if (shownFile.current !== f) window.alert(e.conflict ? t('{name} changed elsewhere while you were editing it, so your last changes weren\'t saved over it. Open it to see.', { name: meta.name }) : t("Couldn't save {name}: {error}", { name: meta.name, error: e.message }))
-      else if (e.conflict) setConflict({ who: t('Something else'), mtime: null })
+      // (Who changed it, when that's known already, stays said.)
+      else if (e.conflict) setConflict((c) => c || { who: t('Something else'), mtime: null })
       else setNote({ text: t("Couldn't save it: {error}", { error: e.message }), error: true })
     } finally {
       finish(null)
@@ -513,8 +519,15 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
     }
   }, [f, meta, later])
   useEffect(() => { saveRef.current = save }, [save])
-  // Leaving the file (another opened here, or Studio's Files) with a save still waiting: made now.
-  useEffect(() => () => { if (autoAt.current) { clearTimeout(autoAt.current); autoAt.current = null; saveRef.current?.({ auto: true, leaving: true }) } }, [f])
+  // Leaving the file (another opened here, Studio's Files, another tab: the page goes) with a save
+  // still waiting: made now. So too a sheet, a deck or a page with unsaved changes (they don't save
+  // themselves), and a document whose last save didn't go: what's in it was lost without a word.
+  // What a save can't keep isn't asked about then (nobody's there to answer): the file as it was
+  // stays in its versions, and a save that fails is said all the same (save's catch).
+  useEffect(() => () => {
+    if (autoAt.current) { clearTimeout(autoAt.current); autoAt.current = null; saveRef.current?.({ auto: true, leaving: true }); return }
+    if (dirtyRef.current && !conflictRef.current) saveRef.current?.({ leaving: true, ok: true })
+  }, [f])
   useEffect(() => {
     const key = (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); save() } }
     window.addEventListener('keydown', key)
@@ -599,11 +612,13 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
   const focusTip = withKeys(t('Focus: the page alone, in the whole window'), 'mod', 'alt', 'f')
   // Whether it's saved, said quietly in the header, as Google Docs does; Save itself only while
   // there's something to save that won't save itself (a document saves itself a moment after you
-  // stop typing, unless a save failed or a change from elsewhere waits for you), in the same place.
-  const needsSave = kind && !readOnly && dirty && !saving && (!SAVES_ITSELF.has(kind) || !!note?.error || !!conflict)
+  // stop typing, unless a save failed), in the same place. Not while a change from elsewhere waits
+  // for you to pick (the bar's Show theirs and Save mine over it): a Save then was turned down.
+  const needsSave = kind && !readOnly && dirty && !saving && !conflict && (!SAVES_ITSELF.has(kind) || !!note?.error)
   const saveSlot = kind && !readOnly && (needsSave
     ? <button type="button" className="btn small primary sd-head-btn sd-save-btn" onClick={() => save()} title={withKeys(t('Save'), 'mod', 's')} aria-label={t('Save')}><Icon name="check" size={12} /> <span className="sd-btn-label">{t('Save')}</span></button>
-    : <span className="sd-save-state" title={meta?.mtime && !dirty ? t('The file last changed {when}', { when: when(meta.mtime) }) : undefined}>{saving || dirty ? <Icon name="refresh" size={12} className="spin" /> : <Icon name="check" size={12} />}<span className="sd-btn-label">{saving || dirty ? t('Saving…') : t('Saved')}</span></span>)
+    : conflict && !saving ? <span className="sd-save-state bad"><Icon name="alert" size={12} /><span className="sd-btn-label">{t('Changed elsewhere')}</span></span>
+      : <span className="sd-save-state" title={meta?.mtime && !dirty ? t('The file last changed {when}', { when: when(meta.mtime) }) : undefined}>{saving || dirty ? <Icon name="refresh" size={12} className="spin" /> : <Icon name="check" size={12} />}<span className="sd-btn-label">{saving || dirty ? t('Saving…') : t('Saved')}</span></span>)
   return (
     <div className={`sd-file${focus.on ? ' focus sd-focus' : ''}`} data-esc={focus.on ? '' : undefined}>
       {/* In Focus, Studio's header folds away (on a Mac's desktop app, out of full screen, a strip
@@ -644,8 +659,8 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
       )}
       {conflict && (
         <div className="sd-bar sd-conflict" role="alert">
-          <span><b>{t('{who} changed this file', { who: conflict.who })}</b> {t('while you were editing it. Your changes aren\'t saved yet.')}</span>
-          <button type="button" className="btn small" onClick={() => { setConflict(null); load() }}>{t('Show theirs')}</button>
+          <span><b>{conflict.mine ? t('You changed this file in another window') : t('{who} changed this file', { who: conflict.who })}</b> {t('while you were editing it. Your changes aren\'t saved yet.')}</span>
+          <button type="button" className="btn small" onClick={() => { setConflict(null); load().catch((e) => setErr(e)) }}>{t('Show theirs')}</button>
           <button type="button" className="btn small" onClick={() => save({ force: true, ok: true })}>{t('Save mine over it')}</button>
         </div>
       )}
@@ -724,6 +739,10 @@ function Versions({ f, ext, versions, keep = KEEP_ALL, size = 0, slim = false, o
 function Compare({ f, ext, v, slim = false, onClose }) {
   const [rows, setRows] = useState(null)
   const [err, setErr] = useState(null)
+  // Esc closes it, as the other dialogs here; focus goes into it, so the keyboard is where it shows.
+  const closeRef = useRef(null)
+  useEffect(() => { closeRef.current?.focus() }, [])
+  useEffect(() => { const k = (e) => { if (e.key === 'Escape') onClose() }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k) }, [onClose])
   useEffect(() => {
     let on = true
     Promise.all(slim ? [bytesOf(slimUrl(f, { version: v.id })), bytesOf(slimUrl(f))] : [bytesOf(versionUrl(f, v.id)), bytesOf(rawUrl(f))]).then(([a, b]) => Promise.all([textFor(ext, a), textFor(ext, b)]))
@@ -746,7 +765,7 @@ function Compare({ f, ext, v, slim = false, onClose }) {
   return (
     <div className="sd-modal" role="dialog" aria-label={t('Compare')} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div className="sd-compare">
-        <div className="sd-panel-head"><b>{t('From {when} to now', { when: when(v.at) })}</b><span className="muted small">{rows ? (changes ? t('{n} lines changed', { n: changes }) : t('No changes')) : ''}</span><span className="sd-grow" /><button type="button" className="win-btn" onClick={onClose} aria-label={t('Close')}><Icon name="x" size={13} /></button></div>
+        <div className="sd-panel-head"><b>{t('From {when} to now', { when: when(v.at) })}</b><span className="muted small">{rows ? (changes ? t('{n} lines changed', { n: changes }) : t('No changes')) : ''}</span><span className="sd-grow" /><button type="button" ref={closeRef} className="win-btn" onClick={onClose} aria-label={t('Close')}><Icon name="x" size={13} /></button></div>
         {err && <p className="error-text small sd-err">{err}</p>}
         {!rows && !err && <p className="muted small sd-loading">{t('Opening…')}</p>}
         {rows && <pre className="sd-diff">{shown.map((r, i) => (r.fold ? <span key={i} className="fold">{t('… {n} lines the same', { n: r.fold })}{'\n'}</span> : <span key={i} className={r.t === '-' ? 'del' : r.t === '+' ? 'add' : ''}>{r.t === ' ' ? '  ' : `${r.t} `}{r.line}{'\n'}</span>))}</pre>}
@@ -767,6 +786,7 @@ function AskAgent({ f, meta, selection, onClose, onSent }) {
   const [text, setText] = useState('')
   const [err, setErr] = useState(null)
   const [busy, setBusy] = useState(false)
+  useEffect(() => { const k = (e) => { if (e.key === 'Escape') onClose() }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k) }, [onClose])
   const send = async (e) => {
     e.preventDefault()
     if (!fleet || busy || !text.trim()) return // who's there hasn't come yet: not sent to a new agent by mistake
