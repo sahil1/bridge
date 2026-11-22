@@ -181,9 +181,31 @@ with Chromium's.
 | `account-ui` | Settings › Account & Devices › Account, with the accounts service stood in for (`stand-ins/accounts.mjs`) and two Bridge AIs, Studio and Desk, linked through relays of their own; light, dark and at phone width. No accounts service: no Account tab, and the section is Devices with Phone, Computers and Notifications. With accounts, Account and Devices are one section, Account & Devices, with Account, Phone, Computers and Notifications, and every way in that went to either (`account`, `devices`, `phone`, `relay`, `tailscale`, `machines`, `link-device`, `notifications`, `notify`, `notify-more`, and the Account tab's `bold-bridge`, `hosted-relay` and `delete-account`) lands on its tab, on a desktop and a phone (the four tabs across the top, each a whole 40 px target; one row for it in the phone's list, opening at Account); ⌘K's Delete account is under Settings › Account & Devices and opens there with Advanced open. Signing in on Studio: a throwaway address refused naming the domain, the code step saying where it went, a wrong code with the tries left, one that ran out (the service's clock moved on) with Send a new code right there, signed in. The email, this computer among the account's devices, Early Access and Bridge AI's relay each to ask for. Linked computers follow: Also sign in Desk?, Sign it in, and Desk signed in without the email, saying Studio did it; Sign this computer out there, and Studio's list says Desk said no and offers it no more. Requests: Requested, in the admin view; approved, On, the relay's 8-hour window and week shown as the usage chip shows a plan's, with the counts. Five devices: a sixth (Desk) lists them, Remove it and sign in here; Remove from Studio. On a phone, signed in and signing in: nothing past the edge, whole 40 px targets, fields iOS doesn't zoom into. Sign out (off the account's devices), and Delete account (off until the email is typed), leaving nothing of it on the service |
 | `privacy-hosts` | Every outside host in `server/`, `desktop/` and `shared/` (comments left out) is in PRIVACY.md, by name or by a category it states (the weather, markets and news, Hugging Face, GitHub for updates, installs, the model provider and speech service you pick, cloud agents, your own relay, links that open in your browser, Claude Code's insights report, the STUN server a screen seen peer-to-peer asks); each category's words are checked in PRIVACY.md too, and an address made from what someone set is allowed by its file's category, never by name. No host is listed that the code no longer has. The check itself: one made-up host in a file fails, naming both; the same in a comment passes; an address made at run time in a file with no category fails |
 
-A change to a file a test covers (listed in `run.mjs`) runs that test. A change to `test/lib`,
-`test/stand-ins` or `package.json` runs them all; to `run.mjs`, the tests whose entry in its list
-changed, or all of them when more of it did (`lib/scope.mjs`).
+A change runs the tests for what it changes (`lib/scope.mjs`, `pick`; `test-scope` checks each rule):
+
+- A file a test covers (its `covers` in `run.mjs`), or one it uses: the files in its `uses` (a test
+  that opens much of the app: `app-ui`, `dead-clicks`, `dead-clicks-settings`, `i18n-ui`, `perf`),
+  the files its own file imports or reads by name, and every file those import. A `uses` file
+  that isn't there any more stands for its folder.
+- Under `test/`: a suite's own file; a helper, stand-in or fixture, the tests that name it (or name
+  a file that does); the harness, by the function changed in it (`startSlack`: the tests that
+  start Slack), and every test for what it does as it loads.
+- `server/index.js`, by the statements changed in it: an import, the file it's from; a route, the
+  server files it calls and the app's files and tests that ask for its address; a function or
+  value, what it calls and what the statements using it pick; middleware every request goes
+  through, or a statement that calls nothing of its own, every test.
+- `src/styles.css`, by the rules changed in it: the app's files that show a class each rule needs;
+  a rule that needs none (`body`, `:root`'s colours, a `button`), every test that opens the app.
+- A file in `shared/`: as a change to the files that import it too.
+- A language pack alone (`src/i18n/*.json`): `i18n-ui` and the tests that show other languages
+  (`calendar`, `float-card-window`, `update-channel`).
+- The core files: the packages (unless only the version changed) and `lib/scope.mjs`, every test;
+  `src/App.jsx`, `main.jsx`, `lazy.jsx`, `api.js`, `i18n/index.js`, `index.html` and
+  `vite.config.js`, every test that opens the app (built, or in a browser).
+- `run.mjs`: the tests whose entry in its list changed, or all of them when more of it did.
+
+What can't be read so (a line that starts no statement, a file git can't compare) runs every test.
+The nightly runs what changed since the last one, and Friday night's run and a release every test.
 
 ## Not covered here
 

@@ -3,12 +3,13 @@
 // request's or a push's tests are only those for the files it changes (none for a change no test
 // covers, and then no machine is set up for them), a nightly's those for what changed since the last
 // nightly, and a release's tag, Friday night's run and a run by hand every test. The iPhone and
-// Android builds go with every test, or a change to mobile/.
+// Android builds go with every test, or a change to mobile/. Which tests a change picks
+// (lib/scope.mjs pick): a change made up here for each rule.
 import fs from 'node:fs'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { checks, ROOT } from '../lib/harness.mjs'
-import { runnerChange } from '../lib/scope.mjs'
+import { runnerChange, pick, cssRules, statements } from '../lib/scope.mjs'
 
 const { ok, done } = checks('test-scope')
 const list = (...a) => JSON.parse(execFileSync(process.execPath, [path.join(ROOT, 'test', 'run.mjs'), '--list', ...a], { cwd: ROOT, encoding: 'utf8' }))
@@ -42,6 +43,80 @@ ok(!inBoth.length && shares[0].names.length + shares[1].names.length === browser
 ok(Math.abs(minutes(shares[0].names) - minutes(shares[1].names)) <= 12, 'and the two about as long (by each suite\'s time limit)', shares.map((s) => minutes(s.names)))
 ok(JSON.stringify(list('--all', '--browser-only', '--shard', '1/2')) === JSON.stringify(shares[0]), 'the same share every time')
 ok(JSON.stringify(list('model-names', '--shard', '2/2').names) === '[]' && JSON.stringify(list('model-names', '--shard', '1/2').names) === '["model-names"]', 'one suite in two shares: the first has it, the second none')
+
+// ---------- what a change picks ----------
+// The runner's list and core files as run.mjs has them, and a change made up for each rule: files,
+// or one line of server/index.js, the harness or styles.css (as git's diff of it says, the file as
+// it is on both sides).
+const literal = (name) => { const at = runner.indexOf(`const ${name} = [`); return new Function(`return ${runner.slice(at + `const ${name} = `.length, runner.indexOf(name === 'SUITES' ? '\n]\n' : '\n', at) + (name === 'SUITES' ? 2 : 0))}`)() }
+const SUITES = literal('SUITES')
+const core = literal('EVERYTHING')
+const app = literal('THE_APP')
+const picked = (changed, texts = {}, suites = SUITES) => pick({ suites, changed, core, app, runner: [], root: ROOT, texts }).map((s) => s.name)
+const lineAt = (f, start) => {
+  const text = fs.readFileSync(path.join(ROOT, f), 'utf8')
+  const n = text.replace(/\r\n/g, '\n').split('\n').findIndex((l) => l.startsWith(start)) + 1
+  ok(n > 0, `(${f} has ${start.slice(0, 50)})`)
+  return { [f]: { before: text, after: text, diff: `@@ -${n} +${n} @@` } }
+}
+const names = SUITES.map((s) => s.name)
+const studios = names.filter((n) => /^studio/.test(n))
+const botsOnes = names.filter((n) => /^bots-/.test(n))
+const opensApp = SUITES.filter((s) => s.build || s.browser).map((s) => s.name)
+const has = (got, want) => want.every((n) => got.includes(n))
+const none = (got, of) => !of.some((n) => got.includes(n))
+ok(!!statements(fs.readFileSync(path.join(ROOT, 'server', 'index.js'), 'utf8')) && !!statements(fs.readFileSync(path.join(ROOT, 'test', 'lib', 'harness.mjs'), 'utf8')) && !!cssRules(fs.readFileSync(path.join(ROOT, 'src', 'styles.css'), 'utf8')), 'server/index.js, the harness and styles.css read as statements and rules (or every change to them would run every test)')
+
+// Studio: its tests, not the bots'; a Studio route in server/index.js the same, not the 92 that
+// list server/index.js.
+const studio = picked(['src/components/studio/Studio.jsx', 'server/studio.js'])
+ok(has(studio, ['studio', 'studio-docs', 'studio-pdf', 'studio-big', 'studio-gone', 'files-ui', 'dead-clicks']) && none(studio, botsOnes) && studio.length < 40, 'a change to Studio alone: the Studio tests and the ones opening it, none of the bots\'', studio)
+const route = picked(['server/index.js'], lineAt('server/index.js', "app.get('/api/studio/recent'"))
+ok(has(route, ['studio', 'studio-docs']) && none(route, botsOnes) && route.length < 40, 'a Studio route in server/index.js: the Studio tests, none of the bots\'', route)
+const botRoute = picked(['server/index.js'], lineAt('server/index.js', "app.get('/api/bots/:id/activity'"))
+ok(has(botRoute, ['bots-activity']) && none(botRoute, studios) && botRoute.length < 60, 'a bots route: the bots\' tests, none of Studio\'s', botRoute)
+// What every request goes through, and a server/index.js that can't be compared: every test.
+ok(picked(['server/index.js'], lineAt('server/index.js', 'app.use(guard.http)')).length === names.length, 'server/index.js\'s middleware for every request: every test')
+ok(picked(['server/index.js']).length === names.length, 'server/index.js with nothing to compare it with: every test')
+// A view the sentinels don't open: only the tests for it.
+const sheet = picked(['src/components/studio/editors/SheetEditor.jsx'])
+ok(has(sheet, ['studio-sheets', 'studio-comments']) && none(sheet, ['dead-clicks', 'app-ui', 'i18n-ui', 'perf']), 'Studio\'s sheet editor (a part no test of the whole app opens): its tests, not those', sheet)
+// What every page draws (the sidebar): the tests of the whole app too.
+const rail = picked(['src/components/Rail.jsx'])
+ok(has(rail, ['app-ui', 'dead-clicks', 'i18n-ui', 'perf', 'rail-ui']), 'the sidebar (on every page): the tests of the whole app, and its own', rail)
+
+// The core files: every test; the app's, every test that opens the app, not the server's alone.
+ok(picked(['package-lock.json']).length === names.length && picked(['test/lib/scope.mjs']).length === names.length, 'a package or lib/scope.mjs: every test')
+const appCore = picked(['src/App.jsx'])
+ok(has(appCore, opensApp) && !appCore.includes('bots-sessions') && !appCore.includes('server'), 'src/App.jsx: every test that opens the app, not the server\'s own', { picked: appCore.length, opensApp: opensApp.length })
+ok(picked(['src/api.js']).length === appCore.length, 'and src/api.js the same')
+
+// A language pack: the tests that show other languages (and the few that read every file in src/:
+// class-names, smart-enter, usage-counts), not the whole app's.
+const pack = picked(['src/i18n/de.json'])
+ok(has(pack, ['i18n-ui', 'float-card-window', 'update-channel', 'calendar']) && none(pack, ['app-ui', 'dead-clicks', 'dead-clicks-settings', 'perf']) && pack.length <= 8, 'a language pack alone: i18n-ui and the few in other languages', pack)
+
+// styles.css by its rules: one for a part, the tests of what shows it; :root's colours, every test
+// that opens the app.
+const css = picked(['src/styles.css'], lineAt('src/styles.css', '.update-pop {'))
+ok(has(css, ['update-channel', 'updates']) && none(css, studios) && css.length < opensApp.length / 2, 'styles.css, the update card\'s rule: the tests of what shows it', css)
+ok(has(picked(['src/styles.css'], lineAt('src/styles.css', ':root {')), opensApp), 'styles.css, :root\'s colours: every test that opens the app')
+
+// Under test/: the suites that name a file, or call the harness's function it's in.
+const slack = picked(['test/stand-ins/slack.mjs'])
+ok(has(slack, ['slack-bot', 'bots-activity', 'bots-approvals']) && none(slack, studios), 'the Slack stand-in: the tests that use it', slack)
+ok(picked(['test/stand-ins/clock.mjs']).length === names.length, 'a stand-in the harness loads: every test')
+ok(has(picked(['test/suites/dead-clicks.mjs']), ['dead-clicks', 'dead-clicks-settings']), 'a test file another runs (dead-clicks-settings runs dead-clicks.mjs): both')
+const harnessText = fs.readFileSync(path.join(ROOT, 'test', 'lib', 'harness.mjs'), 'utf8')
+const slackAt = harnessText.replace(/\r\n/g, '\n').split('\n').findIndex((l) => l.startsWith('export async function startSlack')) + 2
+const inSlack = picked(['test/lib/harness.mjs'], { 'test/lib/harness.mjs': { before: harnessText, after: harnessText, diff: `@@ -${slackAt} +${slackAt} @@` } })
+ok(has(inSlack, ['slack-bot', 'bots-activity']) && none(inSlack, studios), 'the harness\'s startSlack: the tests that start Slack', inSlack)
+ok(picked(['test/lib/harness.mjs'], lineAt('test/lib/harness.mjs', 'globalThis.fetch = ')).length === names.length, 'what the harness does as it loads: every test')
+
+// shared/: as the files that import it too; a `uses` file that's gone: its folder.
+ok(has(picked(['shared/signmarks.js']), ['studio-pdf', 'server']), 'a file in shared/: the tests of what imports it')
+const gone = [{ name: 'x-gone', build: null, covers: [], uses: ['src/components/nowhere/Gone.jsx'] }]
+ok(JSON.stringify(picked(['src/components/nowhere/Other.jsx'], {}, gone)) === '["x-gone"]', 'a file in uses that isn\'t there: its folder, so a move never leaves its test out')
 
 // ---------- the workflows ----------
 // With \n between lines on Windows too, where git checks them out with \r\n.

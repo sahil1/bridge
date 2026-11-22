@@ -19,10 +19,12 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { ROOT, OUT, stopTree } from './lib/harness.mjs'
-import { runnerChange, shareOf } from './lib/scope.mjs'
+import { runnerChange, shareOf, pick as pickFor } from './lib/scope.mjs'
 
 // Each test, what it needs built, and the files it covers (a change to one of them runs it).
-// alone: it measures how quick things are, so it runs with no other test beside it.
+// uses: for a test that opens much of the app, the files it opens; it covers them and every file
+// they import (as the build bundles them), not all of src/. alone: it measures how quick things
+// are, so it runs with no other test beside it.
 const SUITES = [
   { name: 'server', build: null, covers: [/^server\//, /^shared\//, /^scripts\/(start|cli)\.js$/] },
   // The release's smoke test of each built app (scripts/smoke.js), against this checkout's server.
@@ -41,9 +43,9 @@ const SUITES = [
   { name: 'studio-gone', build: 'dist', browser: true, covers: [/^server\/(studio|studioparts|files|index)\.js$/, /^src\/components\/studio\/(Studio\.jsx|files\.js|studio\.css)$/, /^test\/lib\/bigdeck\.mjs$/] },
   { name: 'studio-deck-looks', build: 'dist', browser: true, covers: [/^src\/components\/studio\/(deck\.js|deck\.css|pptx\.js|pptxdoc\.js|pptxdraw\.js|Studio\.jsx)$/, /^src\/components\/studio\/editors\/(Deck|Slides)/, /^test\/lib\/bgdecks\.mjs$/] },
   { name: 'meetings-limit', build: null, covers: [/^server\/(meetings|consult|accounts|chatmodels)\.js$/, /^test\/stand-ins\/claude\.cjs$/] },
-  { name: 'perf', build: 'dist', browser: true, alone: true, covers: [/^src\//, /^server\//, /^desktop\//] },
+  { name: 'perf', build: 'dist', browser: true, alone: true, covers: [/^server\//], uses: ['src/main.jsx', 'src/components/Terminal.jsx', 'src/components/Terminals.jsx', 'src/components/ShellTab.jsx'] },
   { name: 'call-event', build: 'dist', browser: true, covers: [/^server\/(callevent|calls|calendar|meetings|index)\.js$/, /^src\/components\/(Console|Agenda|CalendarView)\.jsx$/, /^src\/components\/meetings\/(Meetings|recording|FloatCard)\.jsx$/, /^server\/runtime\/builtin\.js$/, /^native\/callwatch\.swift$/, /^test\/stand-ins\/claude\.cjs$/] },
-  { name: 'calendar', build: 'dist', browser: true, covers: [/^server\/(calendar|meetprep|meetwork|meetinsights|mail|home|chieftasks|openin|index)\.js$/, /^src\/components\/(CalendarView|Agenda|NeedsHome|Dock)\.jsx$/, /^src\/components\/openin\.js$/, /^test\/stand-ins\/mailbox\.mjs$/, /^src\/components\/meetings\/(prep|FloatCard|invite)\.(jsx|css)$/, /^src\/components\/memory\/open\.js$/, /^src\/styles\.css$/, /^native\/bridgecal\.swift$/, /^test\/stand-ins\/model\.mjs$/] },
+  { name: 'calendar', build: 'dist', browser: true, covers: [/^server\/(calendar|meetprep|meetwork|meetinsights|mail|home|chieftasks|openin|index)\.js$/, /^src\/components\/(CalendarView|Agenda|NeedsHome|Dock)\.jsx$/, /^src\/components\/openin\.js$/, /^test\/stand-ins\/mailbox\.mjs$/, /^src\/components\/meetings\/(prep|FloatCard|invite)\.(jsx|css)$/, /^src\/components\/memory\/open\.js$/, /^src\/styles\.css$/, /^src\/i18n\/[\w-]+\.json$/, /^native\/bridgecal\.swift$/, /^test\/stand-ins\/model\.mjs$/] },
   { name: 'memory', build: 'dist', browser: true, covers: [/^server\/(meetmemory|memoryview|meetings|meetinsights|dictations|dictation|chief|index)\.js$/, /^src\/components\/memory\//, /^src\/components\/meetings\/(tools|Meetings)\.jsx$/, /^src\/components\/dictations\/(Dictations|shared)\.jsx$/, /^src\/components\/dictations\/dictations\.css$/, /^src\/components\/settings\/Meetings\.jsx$/, /^src\/components\/(Rail|Settings)\.jsx$/, /^src\/(trials|App|lazy)\.jsx?$/, /^chief\/INSTRUCTIONS\.md$/, /^test\/stand-ins\/model\.mjs$/] },
   { name: 'meeting-insights', build: 'dist', browser: true, covers: [/^server\/(meetinsights|meetings|meetwork|meetmemory|voices|calendar|index)\.js$/, /^src\/components\/meetings\/(insights|people|tools|Meetings)\.jsx$/, /^native\/bridgecal\.swift$/, /^src\/components\/settings\/About\.jsx$/, /^src\/components\/meetings\/meetings\.css$/, /^src\/(trials|App)\.jsx?$/] },
   { name: 'meetings-ui', build: 'dist', browser: true, covers: [/^src\/components\/meetings\//, /^src\/components\/(Rail|Icon|FileExtras|layout)\.jsx$/, /^src\/(api|App|appearance)\.jsx?$/, /^server\/(meetings|meetwork|calendar|calls|index)\.js$/] },
@@ -51,13 +53,14 @@ const SUITES = [
   { name: 'scroll-ui', build: 'dist', browser: true, covers: [/^src\/styles\.css$/, /^src\/scrolling\.js$/, /^src\/main\.jsx$/, /^src\/components\/meetings\/meetings\.css$/] },
   { name: 'rail-ui', build: 'dist', browser: true, covers: [/^src\/components\/(Rail|Palette|Tour|Console)\.jsx$/, /^src\/components\/meetings\/(RailMeetings|bulk)\.jsx$/, /^src\/App\.jsx$/, /^src\/styles\.css$/, /^server\/(meetings|threads)\.js$/] },
   { name: 'settings-ui', build: 'dist', browser: true, covers: [/^src\/enter\.js$/, /^src\/components\/EnterHint\.jsx$/, /^src\/components\/settings\//, /^src\/components\/(Settings|Appearance|Palette|Machines)\.jsx$/, /^src\/(dictation|voice)\/[\w.]+\.css$/, /^src\/styles\.css$/] },
-  { name: 'app-ui', build: 'dist', browser: true, covers: [/^src\//, /^index\.html$/, /^public\//, /^vite\.config\.js$/, /^server\/(index|attach|terminal|settings)\.js$/, /^server\/runtime\//] },
+  { name: 'app-ui', build: 'dist', browser: true, covers: [/^index\.html$/, /^public\//, /^vite\.config\.js$/, /^server\/(index|attach|terminal|settings)\.js$/, /^server\/runtime\//], uses: ['src/main.jsx', 'src/components/Settings.jsx', 'src/components/Terminal.jsx', 'src/components/Terminals.jsx', 'src/components/ShellTab.jsx', 'src/components/meetings/Meetings.jsx'] },
   // Every button and link you can see on the main views (Home, an agent's Chat, Terminal and Files,
   // Studio at a list and at a folder, Meetings, Calendar, the top bar and its menus, the sidebar, the tabs and the
   // board), and in Settings' sections (a test of their own), pressed in the desktop app and in a
   // browser: each has to do something.
-  { name: 'dead-clicks', build: 'dist', browser: true, minutes: 8, covers: [/^src\//, /^desktop\/(senders|preload|main)\.js$/, /^server\/(index|explorer|files)\.js$/] },
-  { name: 'dead-clicks-settings', build: 'dist', browser: true, minutes: 8, covers: [/^src\//, /^desktop\/(senders|preload|main)\.js$/, /^server\/(index|explorer|files)\.js$/, /^test\/suites\/dead-clicks\.mjs$/] },
+  { name: 'dead-clicks', build: 'dist', browser: true, minutes: 8, covers: [/^desktop\/(senders|preload|main)\.js$/, /^server\/(index|explorer|files)\.js$/], uses: ['src/main.jsx', 'src/components/Terminal.jsx', 'src/components/Terminals.jsx', 'src/components/ShellTab.jsx', 'src/components/Files.jsx', 'src/components/studio/Studio.jsx', 'src/components/meetings/Meetings.jsx', 'src/components/bots/BotPage.jsx', 'src/components/CalendarView.jsx'] },
+  // (It presses what's in Settings' sections only, .modal.settings .st-body: the rest of the page is dead-clicks'.)
+  { name: 'dead-clicks-settings', build: 'dist', browser: true, minutes: 8, covers: [/^desktop\/(senders|preload|main)\.js$/, /^server\/(index|explorer|files)\.js$/, /^test\/suites\/dead-clicks\.mjs$/], uses: ['src/components/Settings.jsx'] },
   { name: 'back-forward', build: 'dist', browser: true, covers: [/^src\/backForward\.js$/, /^src\/components\/(BackForward|Console|Settings|files\/Explorer|meetings\/Meetings)\.jsx$/, /^src\/components\/backforward\.css$/, /^src\/(App\.jsx|pwa\.js|trials\.js)$/, /^server\/(index|paths)\.js$/, /^config\.example\.json$/, /^desktop\/main\.js$/] },
   { name: 'tab-strip', build: 'dist', browser: true, covers: [/^src\/components\/(TabStrip|Rail|Icon|NewAgent)\.jsx$/, /^src\/components\/tabstrip\.css$/, /^src\/(App\.jsx|styles\.css|trials\.js)$/, /^test\/stand-ins\/claude\.cjs$/] },
   { name: 'recommended-settings', build: 'dist', browser: true, covers: [/^src\/enter\.js$/, /^src\/components\/EnterHint\.jsx$/, /^src\/recommended\.js$/, /^src\/components\/(Recommended|Home|NewAgent|ModelChip|Onboarding)\.jsx$/, /^src\/components\/settings\/Agents\.jsx$/, /^src\/components\/recommended\.css$/, /^server\/(index|accounts|agents)\.js$/, /^server\/runtime\/(builtin|herdr)\.js$/, /^chief\/bin\/bridge$/, /^src\/trials\.js$/, /^test\/stand-ins\/claude\.cjs$/] },
@@ -73,18 +76,18 @@ const SUITES = [
   { name: 'terminal-app', build: 'dist', browser: true, covers: [/^server\/(terminal|attach)\.js$/, /^scripts\/cli\.js$/, /^src\/components\/(Console|settings\/General)\.jsx$/, /^test\/stand-ins\/long-output\.cjs$/] },
   { name: 'terminal-scroll', build: 'dist', browser: true, covers: [/^src\/components\/(Terminal|LiveShell)\.jsx$/, /^src\/termTouch\.js$/, /^server\/runtime\/(builtin|screen|ptyhost)\.js$/, /^test\/stand-ins\/long-output\.cjs$/] },
   { name: 'ship', build: null, covers: [/^scripts\/(ship|nightly|release)\.js$/, /^\.github\/workflows\/release\.yml$/] },
-  { name: 'test-scope', build: null, covers: [/^\.github\/workflows\/(test|release|nightly)\.yml$/, /^scripts\/nightly\.js$/] },
+  { name: 'test-scope', build: null, covers: [/^\.github\/workflows\/(test|release|nightly)\.yml$/, /^scripts\/nightly\.js$/, /^test\/run\.mjs$/] },
   // Releases started and moved on from GitHub itself (the admin view's buttons only start these).
   { name: 'release-controls', build: null, covers: [/^\.github\/workflows\/(rollout|release-start|release|docker|fresh-install|test)\.yml$/, /^scripts\/(release|rollout)\.js$/, /^shared\/rollout\.js$/] },
   { name: 'nightly', build: 'dist', browser: true, covers: [/^scripts\/nightly\.js$/, /^shared\/(version|autoupdate)\.js$/, /^server\/updates\.js$/, /^src\/components\/settings\/About\.jsx$/, /^counts\/worker\.js$/, /^\.github\/workflows\/(nightly|release)\.yml$/, /^test\/fixtures\/nightly-(commits|pulls)\.json$/] },
   // With the update card in the top bar (UpdateChip.jsx), made from each channel's notes.
-  { name: 'update-channel', build: 'dist', browser: true, covers: [/^server\/(updates|earlyaccess|settings)\.js$/, /^src\/components\/settings\/(About|search)\.jsx?$/, /^src\/earlyLink\.js$/, /^scripts\/(cli|nightly|release)\.js$/, /^src\/components\/(UpdateChip|TopNotes)\.jsx$/, /^src\/components\/status\.css$/, /^src\/styles\.css$/, /^test\/fixtures\/nightly-commits\.json$/] },
+  { name: 'update-channel', build: 'dist', browser: true, covers: [/^server\/(updates|earlyaccess|settings)\.js$/, /^src\/components\/settings\/(About|search)\.jsx?$/, /^src\/earlyLink\.js$/, /^scripts\/(cli|nightly|release)\.js$/, /^src\/components\/(UpdateChip|TopNotes)\.jsx$/, /^src\/components\/status\.css$/, /^src\/styles\.css$/, /^src\/i18n\/[\w-]+\.json$/, /^test\/fixtures\/nightly-commits\.json$/] },
   { name: 'model-names', build: null, covers: [/^server\/(models|transcripts)\.js$/, /^src\/components\/ModelChip\.jsx$/] },
   { name: 'chat-account', build: 'dist', browser: true, covers: [/^src\/components\/(ModelChip|AccountMenu|Console|Handoff|Composer|History)\.jsx$/, /^src\/App\.jsx$/, /^server\/(accounts|models|handoff|index|transcripts|queue|archive)\.js$/, /^test\/stand-ins\/codex\.cjs$/] },
   { name: 'usage-accounts', build: 'dist', browser: true, covers: [/^server\/(usagesplit|usage|usagestats|insights|accounts|consult|logread|prices)\.js$/, /^server\/runtime\/(builtin|herdr)\.js$/, /^src\/components\/(Usage|UsageStats|AccountMenu|StatusMenu|NewAgent|Routines)\.jsx$/, /^src\/components\/settings\/Providers\.jsx$/, /^src\/components\/needshome\.css$/, /^src\/styles\.css$/] },
   { name: 'usage-everywhere', build: 'dist', browser: true, covers: [/^server\/(usagelog|usageall|agenttokens|prices|otherlogs|usagestats|chatmodels|consult|meetings|boards|dictation|insights|pr|chatagent|llm)\.js$/, /^src\/components\/(UsageEverywhere|UsageStats|Usage|Trackers)\.jsx$/, /^src\/trials\.js$/, /^test\/stand-ins\/(claude\.cjs|local-model\.mjs|llama-server\.mjs)$/] },
   { name: 'accounts-ui', build: 'dist', browser: true, covers: [/^src\/components\/(AccountMenu|Usage|UsageStats|Trackers|Dock|ModelChip|AddAccount)\.jsx$/, /^src\/components\/settings\/(Providers\.jsx|providers\.css)$/, /^src\/App\.jsx$/, /^src\/styles\.css$/, /^server\/(accounts|feeds)\.js$/] },
-  { name: 'i18n-ui', build: 'dist', browser: true, covers: [/^src\//, /^scripts\/i18n\.js$/] },
+  { name: 'i18n-ui', build: 'dist', browser: true, covers: [/^src\/i18n\//, /^scripts\/i18n\.js$/], uses: ['src/main.jsx', 'src/components/Settings.jsx'] },
   { name: 'needs-you', build: 'dist', browser: true, covers: [/^server\/(needsyou|notify|machines|index|engaged)\.js$/, /^shared\/focus\.js$/, /^src\/components\/(NeedsYou|Question|Machines)\.jsx$/, /^src\/components\/(needsyou\.css|questionParse\.js)$/, /^src\/(App\.jsx|pwa\.js)$/, /^test\/stand-ins\/claude\.cjs$/] },
   { name: 'home', build: 'dist', browser: true, covers: [/^server\/(home|needsyou|chieftasks|machines|boards|meetwork|index|engaged)\.js$/, /^shared\/(focus|homelayout)\.js$/, /^src\/components\/(NeedsHome|NeedsYou|Rail|AgentMap)\.jsx$/, /^src\/components\/needshome\.css$/, /^src\/(App\.jsx|trials\.js)$/, /^test\/stand-ins\/(claude\.cjs|relay\.mjs)$/] },
   { name: 'agent-map', build: 'dist', browser: true, covers: [/^server\/(agentmap|machines|needsyou|subagents|index)\.js$/, /^shared\/cloud\/follow\.js$/, /^src\/components\/(AgentMap|Machines|Board)\.jsx$/, /^src\/components\/agentmap\.css$/, /^src\/App\.jsx$/, /^test\/stand-ins\/claude\.cjs$/] },
@@ -224,10 +227,21 @@ const SUITES = [
   { name: 'account-ui', build: 'dist', browser: true, covers: [/^account\/worker\.js$/, /^server\/(account|machines|relay|updates|earlyaccess|index)\.js$/, /^src\/components\/settings\/(Account|Relay|About)\.jsx$/, /^src\/components\/settings\/account\.css$/, /^src\/components\/(Settings|Usage)\.jsx$/, /^test\/stand-ins\/(accounts|relay)\.mjs$/] },
   { name: 'privacy-hosts', build: null, covers: [/^server\//, /^desktop\//, /^shared\//, /^PRIVACY\.md$/] },
 ]
-// A change to these runs everything; to the package files, unless it's only the version (a release's).
-// A change to this file runs the suites whose entry above changed, or everything when more did
-// (lib/scope.mjs).
-const EVERYTHING = [/^test\/(lib|stand-ins)\//, /^package(-lock)?\.json$/]
+// The core files. A change to one of these runs everything: the packages (unless it's only the
+// version, a release's) and what picks the tests (lib/scope.mjs).
+const EVERYTHING = [/^package(-lock)?\.json$/, /^test\/lib\/scope\.mjs$/]
+// A change to one of these runs every test that opens the app (one built, or in a browser), and
+// what covers or uses it: what every page of the app loads first and every view goes through, and
+// what the app is built from.
+const THE_APP = [/^src\/(App|main|lazy)\.jsx$/, /^src\/(api|i18n\/index)\.js$/, /^index\.html$/, /^vite\.config\.js$/]
+// Three more are core in their shared parts only (lib/scope.mjs), each by what a change touches in
+// it: server/index.js and the harness (test/lib/harness.mjs) by their statements, so a change to one
+// route or one helper runs the tests for that and one to what every request or every test goes
+// through runs everything; src/styles.css by its rules, so a rule for .update-pop runs the tests of
+// the files that show it and one for body or :root's colours every test that opens the app.
+// A change to this file runs the suites whose entry above changed, or everything when more did. The
+// rest of what a change picks is in lib/scope.mjs (pick): each test's covers and uses, and the tests
+// that name a file under test/.
 
 const args = process.argv.slice(2)
 const flag = (n) => args.includes(n)
@@ -256,7 +270,18 @@ else if (named.length) {
     const was = from ? (() => { try { return execFileSync('git', ['show', `${from}:test/run.mjs`], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }) } catch { return null } })() : null
     return was == null ? null : runnerChange(was, fs.readFileSync(path.join(ROOT, 'test', 'run.mjs'), 'utf8'))
   })()
-  pick = runner === null || changed.some((f) => EVERYTHING.some((re) => re.test(f)) && !versionOnly(f)) ? SUITES : SUITES.filter((s) => runner.includes(s.name) || changed.some((f) => s.covers.some((re) => re.test(f))) || changed.includes(`test/suites/${s.name}.mjs`))
+  // server/index.js, the harness and styles.css as they were there and are now, and git's diff of
+  // each (lib/scope.mjs reads which of their statements or rules changed; one not there, or git
+  // can't say: every test, or every test that opens the app).
+  const texts = {}
+  for (const f of ['server/index.js', 'test/lib/harness.mjs', 'src/styles.css']) {
+    const now = (() => { try { return fs.readFileSync(path.join(ROOT, f), 'utf8') } catch { return null } })()
+    texts[f] = { after: now }
+    if (!changed.includes(f) || !from) continue
+    try { texts[f].before = execFileSync('git', ['show', `${from}:${f}`], { cwd: ROOT, encoding: 'utf8', maxBuffer: 1 << 26, stdio: ['ignore', 'pipe', 'ignore'] }) } catch { texts[f].before = null }
+    texts[f].diff = git('diff', '-U0', from, '--', f).join('\n')
+  }
+  pick = pickFor({ suites: SUITES, changed, core: EVERYTHING, app: THE_APP, runner, root: ROOT, versionOnly, texts })
   if (!flag('--list')) {
     console.log(changed.length ? `Changed: ${changed.length} file${changed.length === 1 ? '' : 's'}` : 'Nothing changed since the last commit.')
     if (!pick.length) { console.log('No test covers these changes. node test/run.mjs --all runs every test.'); process.exit(0) }
