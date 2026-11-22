@@ -3,7 +3,7 @@ import Icon from '../Icon.jsx'
 import { AssistHead } from '../AiAssist.jsx'
 import { Guide, Connect, Owner, DiscordSetup, TeamsSetup, NewBot, AnswererList, PLATFORMS, platName } from '../settings/Bots.jsx'
 import { BotReach } from './Connections.jsx'
-import { ConnectionCard } from './ConnectionCard.jsx'
+import { ConnectionCard, UseForAll } from './ConnectionCard.jsx'
 import { api } from '../../api.js'
 import { t } from '../../i18n/index.js'
 import { where } from '../settings/search.js'
@@ -294,7 +294,7 @@ function ConnectCard({ d, save, reload, again, platform }) {
       <div className="seg" role="tablist" aria-label={t('Where It Answers')}>
         {PLATFORMS.map(([k, label]) => <button key={k} type="button" role="tab" aria-selected={at === k} className={at === k ? 'on' : ''} onClick={() => setAt(k)}>{label}</button>)}
       </div>
-      <BotReach key={`reach-${at}`} d={d} platform={at} reload={reload} />
+      <BotReach key={`reach-${at}`} d={d} platform={at} reload={reload} offer={!via && <OwnForAll key={`own-${at}`} platform={at} reload={reload} />} />
       {via?.shared
         ? <SharedSteps key={via.id} id={via.id} d={d} platform={at} />
         : (
@@ -311,17 +311,34 @@ function ConnectCard({ d, save, reload, again, platform }) {
 }
 // The shared connection's own card (its app's steps, tokens and you there) until it's connected
 // with you there, made once for every bot on it; then this bot's own checklist, which ticks itself.
+// (With every connection beside it, so one never set up offers a bot's own app that's connected
+// instead, as on Connections, before the steps to make a second app.)
 function SharedSteps({ id, d, platform }) {
-  const [c, setC] = useState(null)
-  const load = () => api(`/connections/${id}`).then(setC, () => {})
+  const [all, setAll] = useState(null)
+  const load = () => api('/connections').then((x) => setAll(x.connections || []), () => {})
   useEffect(() => {
     load()
     const every = setInterval(() => { if (!document.hidden) load() }, 4000)
     return () => clearInterval(every)
   }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
+  const c = (all || []).find((x) => x.id === id) || null
   if (!c) return null
-  if (c.state !== 'connected' || !c.owner) return <ConnectionCard c={c} reload={load} open where="chat" />
+  if (c.state !== 'connected' || !c.owner) return <ConnectionCard c={c} reload={load} open where="chat" all={all} />
   return <Guide key={platform} d={d} platform={platform} where="chat" />
+}
+
+// No connection on a platform yet, where another bot's own app there is connected: that app for all
+// your bots, in one step (Use it for all your bots, as its card on Connections offers), before making
+// a second app for what the first does already.
+function OwnForAll({ platform, reload }) {
+  const [list, setList] = useState(null)
+  const [done, setDone] = useState(null)
+  const load = () => api('/connections').then((x) => setList(x.connections || []), () => {})
+  useEffect(() => { load() }, [platform]) // eslint-disable-line react-hooks/exhaustive-deps
+  if (done) return <p className="st-note ok" role="status" data-setting="connection-done"><Icon name="check" size={13} /><span>{done}</span></p>
+  const own = (list || []).find((c) => c.platform === platform && !c.shared && c.state === 'connected' && !c.paused)
+  if (!own) return null
+  return <UseForAll own={own} shared={null} reload={() => { load(); reload?.() }} onDone={(text) => setDone(text)} />
 }
 
 const EXAMPLES = () => [
