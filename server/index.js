@@ -2080,12 +2080,15 @@ function replyFor(job) {
       modelJobs.ran(job, { model: id, passed: before })
       reply.used = id
       return { ...r, model: id }
-    } catch (first) {
+    } catch (raw) {
+      // Said as what happened and what to do (its provider not reached, too slow, its key turned
+      // down: modellist.js explain), the same for every job; "fetch failed" was all AI Assist said.
+      const first = modelList.explain(id, raw, providerName)
       const rest = stopped(first) ? null : modelList.after(own, id)
       const failed = modelList.failed(id, first, ready)
       if (!rest?.length) { modelJobs.ran(job, { passed: [...before, failed], error: failed.why }); throw first }
       try {
-        const r = await modelList.inTurn(rest, (n) => chatModels.reply(n, msgs, { ...opts, instead: { of: id, why: first.message } }), { ready, stop: stopped, provider: providerName })
+        const r = await modelList.inTurn(rest, (n) => chatModels.reply(n, msgs, { ...opts, instead: { of: id, why: first.message } }).catch((e) => { throw modelList.explain(n, e, providerName) }), { ready, stop: stopped, provider: providerName })
         modelJobs.ran(job, { model: r.model, passed: [...before, failed, ...r.passed] })
         reply.used = r.model
         return { ...r, fellBack: id, why: first.message }
