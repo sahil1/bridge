@@ -582,16 +582,17 @@ async function handoff(r) {
 // ---------- Routes ----------
 // x: { here(req): asked from this computer, machineOf(req): the linked computer asking, or null;
 // viaMachine(req), kept(req): not a device paired a moment ago that hasn't been kept yet, deviceOf,
-// notify(o) }. Each answers with why it couldn't, and its status and code.
+// notify(o) }. Each answers with why it couldn't, and its status and code (not-kept: with this
+// computer's name, for the device to say where it's kept).
 const wrap = (fn) => async (req, res) => {
-  try { res.json(await fn(req, res)) } catch (e) { res.status(e.status >= 400 && e.status < 600 ? e.status : 502).json({ error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}) }) }
+  try { res.json(await fn(req, res)) } catch (e) { res.status(e.status >= 400 && e.status < 600 ? e.status : 502).json({ error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}), ...(e.computer ? { computer: e.computer } : {}) }) }
 }
 export function routes(app, x) {
   const hereOnly = (req, what) => { if (!x.here(req)) throw fail(`${what} on this computer itself`, 403, 'here') }
   // (From this computer, or a phone paired with it and kept there: never another computer's link.)
   const mine = (req) => {
     if (x.viaMachine(req)) throw fail('Another computer can\'t do that here', 403, 'machine')
-    if (!x.kept(req)) throw fail(`Keep ${x.deviceOf?.(req) || 'that device'} in Bridge AI on ${h.computer?.() || 'this computer'} first`, 403, 'not-kept')
+    if (!x.kept(req)) throw Object.assign(fail(`Keep ${x.deviceOf?.(req) || 'that device'} in Bridge AI on ${h.computer?.() || 'this computer'} first`, 403, 'not-kept'), { computer: h.computer?.() || null })
   }
   const fromMachine = (req) => { const m = x.machineOf(req); if (!m) throw fail('Only another of your computers sends this', 403); return m }
   const pausedNow = () => conns.list().filter((c) => c.paused).map((c) => {

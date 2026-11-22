@@ -65,6 +65,9 @@ async function deviceKey(m) {
   }
 }
 
+// A relay's address as it's said to you: its host (nothing-here.example), or what was given.
+const hostOf = (u) => { try { return new URL(u).host || String(u) } catch { return String(u || '') } }
+
 // ---------- one device ----------
 class Link {
   constructor(m) {
@@ -82,6 +85,7 @@ class Link {
     this.stopped = false
     this.hostOnline = false
     this.error = null
+    this.unreachable = null // { text, host, detail }: its relay not reached, while that's what error says
   }
 
   start() { this.stopped = false; this.connect() }
@@ -138,7 +142,16 @@ class Link {
     // Its address isn't there any more (Bridge AI's relay removed it, or the Worker went): it moved,
     // or stopped using that relay. It says where it is now the next time it connects to this one.
     ws.on('unexpected-response', (req, res) => { if (res.statusCode === 403 || res.statusCode === 404) this.gone = true; res.resume() })
-    ws.on('error', (e) => { this.error = this.gone ? `${this.m.name} isn't at its relay's address any more: it moved to another relay, or stopped using one. It tells this computer where it is as soon as both are online; or link it again with a code from ${this.m.name}.` : `Can't reach its relay: ${e.message}` })
+    // Its relay not reached at all (a mistyped address, no network here, the relay down): said in
+    // plain words, with what to check; the system's own words (getaddrinfo ENOTFOUND…) go in the log
+    // and come along as detail (unreachable), for the app to say in its language.
+    ws.on('error', (e) => {
+      if (this.gone) { this.error = `${this.m.name} isn't at its relay's address any more: it moved to another relay, or stopped using one. It tells this computer where it is as soon as both are online; or link it again with a code from ${this.m.name}.`; return }
+      const host = hostOf(this.m.relay)
+      this.error = `Can't reach ${host}${this.m.state === 'linked' ? `, the relay ${this.m.name} uses` : ''}. Check the address, this computer's network, or that the relay is up.`
+      if (this.unreachable?.detail !== e.message) console.log(`machines: ${this.m.relay} can't be reached: ${e.message}`)
+      this.unreachable = { text: this.error, host, detail: String(e.message || '').slice(0, 200) }
+    })
     ws.on('upgrade', () => { this.gone = false })
     ws.on('close', (code) => {
       if (this.ws !== ws) return
@@ -485,6 +498,8 @@ export function list({ for: forId = null } = {}) {
       notLetIn: shut.has(m.id) || hidden.has(m.id), // it hasn't let this computer (or that device) in
       code: m.state === 'asking' ? m.ask?.code || null : null,
       error: m.state === 'linked' && l?.session ? null : m.norelay ? `${m.name} stopped using its relay, so this computer can't reach it until it has one again. It can still reach this one, and says where it is once it does.` : l?.error || null,
+      // Its relay not reached: for the app to say in its own words, with the system's as detail.
+      ...(!(m.state === 'linked' && l?.session) && !m.norelay && l?.error && l.error === l.unreachable?.text ? { unreachable: { host: l.unreachable.host, detail: l.unreachable.detail } } : {}),
       counts: s?.counts || {}, agents: s?.agents || [],
       // What waits on you there (null from a Bridge AI too old to say), and when it last said.
       needs: s?.needs || null, at: s?.at ? new Date(s.at).toISOString() : null,
@@ -590,6 +605,7 @@ export async function add({ link, name, via = 'you' }) {
   l.start()
   try { await l.ready(30000) } catch (e) {
     if (m.state !== 'linked') { l.stop(); links.delete(m.id); conf.machines = conf.machines.filter((x) => x !== m); save() }
+    if (l.unreachable && e.message === l.unreachable.text) throw Object.assign(e, { code: 'relayUnreachable', data: { host: l.unreachable.host, detail: l.unreachable.detail } })
     throw e
   }
   await refresh(m).catch(() => {}) // its name and agents, for the answer
@@ -637,7 +653,8 @@ export async function check(id) {
   }
   const reach = await fetch(`${m.relay}/_relay/health`, { signal: AbortSignal.timeout(6000) })
     .then((r) => (r.ok ? null : `it answered ${r.status}`), (e) => e.cause?.code || e.message)
-  say('relay', !reach, !reach ? `${name}'s relay (${host}) answers.` : `Can't reach ${name}'s relay (${host}): ${reach}. Check this device is online. If ${name} was set up again with a new relay, link again from there.`)
+  if (reach) console.log(`machines: ${m.relay} can't be reached (Fix): ${reach}`) // (the system's own words, here rather than on screen)
+  say('relay', !reach, !reach ? `${name}'s relay (${host}) answers.` : `Can't reach ${name}'s relay (${host}). Check this device is online. If ${name} was set up again with a new relay, link again from there.`)
   if (reach) return end()
   if (m.state === 'removed') { say('link', false, `${name} unlinked this device, or forgot it. Link again: it asks there, and you allow it after checking both show the same six digits.`); return end() }
   if (m.state === 'changed') { say('link', false, `${name} doesn't have the key it was linked with. Link again to check it's really ${name}.`); return end() }

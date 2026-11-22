@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from 'react'
 import Icon from './Icon.jsx'
 import { usePersisted } from './layout.jsx'
 import { api, hostApi, usePoll, viaRelay, machineId, BASE } from '../api.js'
-import PageView from './remote/PageView.jsx'
+import PageView, { dropped } from './remote/PageView.jsx'
 import Gate, { gateOf } from './remote/Gate.jsx'
 import { connect } from './remote/remote.js'
 import { t, tn } from '../i18n/index.js'
@@ -205,22 +205,24 @@ function Granted({ port, name, onOpen, children }) {
   const [st, setSt] = useState({ phase: 'connecting' })
   const [run, setRun] = useState(0)
   useEffect(() => {
+    let mine = true // (one closed since, for another, is closed once that one has started)
     setSt({ phase: 'connecting' })
     const c = connect({
       base: BASE, source: `preview:${port}`, page: { w: 390, h: 800 },
       on: {
         hello: () => { setSt({ phase: 'open' }); onOpen() },
         message: (m) => { if (m.t === 'error') setSt({ phase: 'error', why: m.why }); else if (gateOf(m)) setSt({ phase: 'gate', gate: gateOf(m) }) },
-        closed: () => setSt((x) => (x.phase === 'error' ? x : { phase: 'ended' })),
+        // Closed with nothing said: the link to that computer dropped.
+        closed: () => { if (mine) setSt((x) => (x.phase === 'error' || x.phase === 'ended' ? x : { phase: 'ended', why: dropped(name) })) },
       },
     })
     conn.current = c
-    return () => { c.close(); conn.current = null }
+    return () => { mine = false; c.close(); conn.current = null }
   }, [port, run]) // eslint-disable-line react-hooks/exhaustive-deps
   if (st.phase === 'open') return children
   if (st.phase === 'gate') return <div className="viewer-empty"><Gate gate={st.gate} name={name} onPassword={(p) => conn.current?.send({ t: 'password', p })} onCancel={() => { conn.current?.close(); setSt({ phase: 'ended' }) }} /></div>
   if (st.phase === 'connecting') return <div className="viewer-empty"><Icon name="refresh" size={20} className="spin" /><p>{t('Asking {name} for the app…', { name })}</p></div>
-  return <div className="viewer-empty"><Icon name="alert" size={22} /><p>{st.why || t('Not showing the app any more.')}</p><button type="button" className="btn small" onClick={() => setRun((n) => n + 1)}>{t('Try again')}</button></div>
+  return <div className="viewer-empty"><Icon name="alert" size={22} /><p>{st.why || t('Not showing the app any more.')}</p><button type="button" className="btn small" onClick={() => setRun((n) => n + 1)}>{st.phase === 'ended' ? t('View again') : t('Try again')}</button></div>
 }
 
 function Frame({ src, title }) {

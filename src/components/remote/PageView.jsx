@@ -10,6 +10,9 @@ import { connect, pointOn } from './remote.js'
 import Gate, { gateOf } from './Gate.jsx'
 import './remote.css'
 
+// The link to that computer dropped mid-way (ScreenView says the same of a screen).
+export const dropped = (name) => t('The connection to {name} dropped. It may have gone to sleep or offline, or this device lost its connection.', { name })
+
 export default function PageView({ base, port, path = '/', name }) {
   const stage = useRef(null)
   const img = useRef(null)
@@ -22,6 +25,7 @@ export default function PageView({ base, port, path = '/', name }) {
     const el = stage.current
     const r = el?.getBoundingClientRect() || { width: 390, height: 700 }
     const page = { w: Math.max(320, Math.round(r.width)), h: Math.max(320, Math.round(r.height)) }
+    let mine = true // (one closed since, for another, is closed once that one has started)
     setState({ phase: 'connecting' })
     const c = connect({
       base, source: `page:${port}`, page,
@@ -41,11 +45,12 @@ export default function PageView({ base, port, path = '/', name }) {
           else if (gateOf(m)) setState({ phase: 'gate', gate: gateOf(m) })
           else if (m.t === 'size' && m.w) setSize({ w: m.w, h: m.h })
         },
-        closed: () => setState((x) => (x.phase === 'error' ? x : { phase: 'ended' })),
+        // Closed with nothing said (that computer says why it ends one): the link to it dropped.
+        closed: () => { if (mine) setState((x) => (x.phase === 'error' || x.phase === 'ended' ? x : { phase: 'ended', why: dropped(name) })) },
       },
     })
     conn.current = c
-    return () => { c.close(); conn.current = null; if (lastUrl.current) { URL.revokeObjectURL(lastUrl.current); lastUrl.current = null } }
+    return () => { mine = false; c.close(); conn.current = null; if (lastUrl.current) { URL.revokeObjectURL(lastUrl.current); lastUrl.current = null } }
   }, [base, port, run])
   useEffect(() => { if (state.phase === 'live' && path) conn.current?.send({ t: 'go', path }) }, [path, state.phase])
 
@@ -82,7 +87,7 @@ export default function PageView({ base, port, path = '/', name }) {
           <div className="viewer-empty">
             <Icon name={state.phase === 'connecting' ? 'refresh' : 'alert'} size={20} className={state.phase === 'connecting' ? 'spin' : undefined} />
             <p>{state.phase === 'connecting' ? t('Asking {name} for the app…', { name }) : state.why || t('Not showing the app any more.')}</p>
-            {state.phase !== 'connecting' && <button type="button" className="btn small" onClick={() => setRun((n) => n + 1)}>{t('Try again')}</button>}
+            {state.phase !== 'connecting' && <button type="button" className="btn small" onClick={() => setRun((n) => n + 1)}>{state.phase === 'ended' ? t('View again') : t('Try again')}</button>}
           </div>
         )}
       </div>

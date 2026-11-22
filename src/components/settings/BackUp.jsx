@@ -155,9 +155,15 @@ export default function BackUp() {
   const [opened, setOpened] = useState(null) // { id, plan, kind, from }
   const [applied, setApplied] = useState(null)
   const fileIn = useRef(null)
-  const load = () => api('/backup').then((x) => { setS(x); setTo((v) => v || x.linked.find((m) => m.online)?.id || '') }, (e) => setErr(e.message))
+  const load = () => api('/backup').then((x) => { setS(x); setErr((v) => (v?.kept !== undefined ? null : v)); setTo((v) => v || x.linked.find((m) => m.online)?.id || '') }, (e) => setErr(e.code === 'not-kept' ? { kept: e.data?.computer || null } : e.message))
   useEffect(() => { load(); const id = setInterval(() => { if (!document.hidden) load() }, 5000); return () => clearInterval(id) }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const run = async (what, fn) => { setBusy(what); setErr(null); try { await fn() } catch (e) { setErr(e.message) } setBusy(null); load() }
+  // A phone paired a moment ago, not kept on the computer yet (its banner there: Keep or Remove):
+  // what to do, there; this opens by itself once it's kept.
+  if (err?.kept !== undefined) {
+    const there = err.kept || t('the computer')
+    return <div className="bk"><p className="st-note small" role="status" data-kept="no"><Icon name="lock" size={13} /><span>{t('Back Up & Move works from this device once {computer} keeps it. On {computer}, choose Keep where it says this device paired with it.', { computer: there })}</span></p></div>
+  }
   if (!s) return err ? <p className="error-text small">{err}</p> : <div className="skeleton-rows"><div /><div /></div>
 
   const backUp = () => run('file', async () => {

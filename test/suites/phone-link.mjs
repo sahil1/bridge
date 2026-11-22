@@ -238,7 +238,7 @@ try {
   const noted = await until(banner, 30000, 100)
   const notedIn = noted ? Date.now() - t0 : null
   say(`the computer off the network: the phone says so in ${notedIn} ms: ${noted}`)
-  ok(notedIn != null && notedIn < 20000 && /isn't answering|is offline/.test(noted), `the computer drops off the network without a word: the phone says it isn't answering in ${s(notedIn)} (limit 20 s), rather than waiting on it`, noted)
+  ok(notedIn != null && notedIn < 20000 && /isn't answering|is offline|has been offline/.test(noted), `the computer drops off the network without a word: the phone says it isn't answering in ${s(notedIn)} (limit 20 s), rather than waiting on it`, noted)
   // What Bridge AI asks meanwhile settles at once (what it last sent, or that it isn't there).
   const settles = await app()?.evaluate(async () => {
     const t = performance.now()
@@ -246,7 +246,7 @@ try {
     return Math.round(performance.now() - t)
   }).catch(() => null)
   ok(settles != null && settles < 3000, `and what Bridge AI asks of it meanwhile settles in ${settles} ms (limit 3 s), not left waiting`, settles)
-  const offline = await until(async () => /is offline since/.test((await banner()) || ''), 70000, 500)
+  const offline = await until(async () => /has been offline since/.test((await banner()) || ''), 70000, 500)
   ok(offline, 'once its relay has heard nothing from it for 40 s, the phone says it\'s offline, and since when', await banner())
   await test('back')
   const backOn = await backIn(30000)
