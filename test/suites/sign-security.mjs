@@ -481,7 +481,7 @@ try {
   else {
     const bare = await usr1([]), flagged = await usr1(SERVER_NODE_FLAGS)
     const mainSrc = fs.readFileSync(path.join(ROOT, 'desktop', 'main.js'), 'utf8')
-    ok(bare.inspector && !flagged.inspector && flagged.alive && /require\('\.\/serverflags\.js'\)\.SERVER_NODE_FLAGS, path\.join\(ROOT, 'server', 'index\.js'\)/.test(mainSrc), 'the app\'s server: SIGUSR1 opens no inspector (without its flags, it does), and it carries on', { bare, flagged })
+    ok(bare.inspector && !flagged.inspector && flagged.alive && /\[NODE_BIN, serverFlags\.serverArgs\(ROOT\)\]/.test(mainSrc) && /const serverArgs = \(root\) => \[\.\.\.SERVER_NODE_FLAGS, /.test(fs.readFileSync(path.join(ROOT, 'desktop', 'serverflags.js'), 'utf8')), 'the app\'s server: SIGUSR1 opens no inspector (without its flags, it does), and it carries on', { bare, flagged })
   }
 
   // ---------- Bodies the server didn't hash ----------

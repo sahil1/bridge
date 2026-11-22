@@ -319,14 +319,21 @@ export async function windows({ app, step, ROOT }) {
 
     // ---------- Its server stopped, another program at its address ----------
     let pane = null
-    await only('a terminal\'s WebSocket opens from the window', async () => {
+    await only('a terminal opens from the window and runs a command, with only the environment the app gives its server', async () => {
       const r = await api('POST', '/agents/launch', { kind: 'shell', cwd: os.homedir(), label: 'smoke' })
       pane = r.j?.paneId
       if (!pane) throw new Error(`a terminal: ${JSON.stringify(r)}`)
       const p = await main()
-      const open = await p.evaluate((u) => new Promise((res) => { const s = new WebSocket(u); s.onopen = () => { s.close(); res('open') }; s.onerror = () => res('refused'); setTimeout(() => res('no answer'), 5000) }), `ws://127.0.0.1:${PORT}/api/panes/${encodeURIComponent(pane)}/attach?cols=80&rows=24`)
-      if (open !== 'open') throw new Error(open)
-      return 'open'
+      const ran = await p.evaluate((u) => new Promise((res) => {
+        let seen = ''
+        const s = new WebSocket(u)
+        s.onopen = () => setTimeout(() => s.send('echo bridge-$((6*7))-ok $HOME\r'), 1500)
+        s.onmessage = async (e) => { seen += typeof e.data === 'string' ? e.data : await e.data.text(); if (/bridge-42-ok \//.test(seen)) { s.close(); res('ran') } }
+        s.onerror = () => res('refused')
+        setTimeout(() => res(`no answer: ${seen.slice(-200)}`), 30000)
+      }), `ws://127.0.0.1:${PORT}/api/panes/${encodeURIComponent(pane)}/attach?cols=80&rows=24`)
+      if (ran !== 'ran') throw new Error(ran)
+      return 'its WebSocket open, the command run, HOME set'
     })
     await only('its server stopped and another program at its address: nothing of the app\'s goes to it, nothing from it is shown or heard', async () => {
       const p = await main()

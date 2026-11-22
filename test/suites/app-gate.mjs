@@ -13,6 +13,8 @@ import path from 'node:path'
 import http from 'node:http'
 import net from 'node:net'
 import { createRequire } from 'node:module'
+import { spawnSync } from 'node:child_process'
+import { pathToFileURL } from 'node:url'
 import { checks, electronBin, until, sleep, ROOT, TEST } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('app-gate')
@@ -81,6 +83,10 @@ const windowAuth = require(path.join(ROOT, 'desktop', 'windowauth.js'))
   const winSlash = startGate.given({ argv: ['/remote-debugging-port=1'], platform: 'win32' })
   const winPsn = startGate.given({ argv: ['-psn_0_1'], platform: 'win32' })
   const env = startGate.envGiven({ ELECTRON_ENABLE_LOGGING: '1', ELECTRON_LOG_FILE: '/tmp/e.log', NODE_USE_ENV_PROXY: '1', BRIDGE_HOME: '/tmp/x' })
+  const bridge = startGate.envGiven({ BRIDGE_HOME: '/tmp/x', BRIDGE_PORT: '7999', BRIDGE_ROOT: '/tmp/clone', BRIDGE_DEV: '1', BRIDGE_FIX_DRYRUN: '1', BRIDGE_SIGNHELPER: '/bin/echo', BRIDGE_KEYS: '/bin/echo', BRIDGE_CALLWATCH: '/bin/echo', BRIDGE_SHERPA: '/x' }, 'darwin')
+  const linuxProxy = startGate.envGiven({ http_proxy: 'http://p', HTTPS_PROXY: 'http://p', No_Proxy: 'x', ALL_PROXY: 'socks5://p' }, 'linux')
+  const macProxy = startGate.envGiven({ HTTPS_PROXY: 'http://p', no_proxy: 'x' }, 'darwin')
+  ok(bridge.join() === 'BRIDGE_CALLWATCH,BRIDGE_DEV,BRIDGE_FIX_DRYRUN,BRIDGE_KEYS,BRIDGE_ROOT,BRIDGE_SHERPA,BRIDGE_SIGNHELPER' && linuxProxy.length === 4 && !macProxy.length, 'every BRIDGE_ setting is refused but BRIDGE_HOME and BRIDGE_PORT (another copy, development mode, the tests\' stand-ins, other helpers); on Linux a proxy from the environment too, written any way', { bridge, linuxProxy, macProxy })
   ok(each.every(Boolean) && fine.every((a) => !startGate.given({ argv: a, platform: 'darwin' }).length) && winSlash.length === 1 && winPsn.length === 1 && env.join() === 'ELECTRON_ENABLE_LOGGING,ELECTRON_LOG_FILE,NODE_USE_ENV_PROXY' && !startGate.envGiven({ ELECTRON_ENABLE_LOGGING: '' }).length, 'a built app refuses every switch (a proxy, a net log, other name lookups, another profile, DevTools, the stand-in keychain, Node\'s inspector, one nobody has heard of) but what macOS adds, and Electron\'s logging or Node\'s proxy from the environment', { each, winSlash, winPsn, env })
   // Only the smoke test's own Mac build (its bundle id, in its signed Info.plist) is let through.
   const res = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-gate-plist-'))
@@ -109,7 +115,11 @@ const windowAuth = require(path.join(ROOT, 'desktop', 'windowauth.js'))
   const list = await rootlist.make(r)
   const as = async (fn) => { fn?.(); return rootlist.verify(r, list, { arch: 'arm64' }) }
   const same = await as()
-  const otherChipGone = await as(() => { fs.rmSync(path.join(r, 'node_modules', 'tool-darwin-x64'), { recursive: true }); fs.rmSync(path.join(r, 'node_modules', 'a', '.gitkeep')); put('server/.DS_Store', 'finder') })
+  const otherChipGone = await as(() => { fs.rmSync(path.join(r, 'node_modules', 'tool-darwin-x64'), { recursive: true }); put('server/.DS_Store', 'finder') })
+  const dotGone = await as(() => fs.rmSync(path.join(r, 'node_modules', 'a', '.gitkeep')))
+  put('node_modules/a/.gitkeep', '')
+  let asked = null
+  const unsigned = await rootlist.verify(r, list, { arch: 'arm64', programs: async (rels) => { asked = rels; return rels } })
   const signed = await as(() => put('native/bin/helper', Buffer.from([0xcf, 0xfa, 0xed, 0xfe, 9, 9, 9, 9])))
   const changed = await as(() => put('server/index.js', 'export const x = 2\n'))
   put('server/index.js', 'export const x = 1\n')
@@ -120,8 +130,8 @@ const windowAuth = require(path.join(ROOT, 'desktop', 'windowauth.js'))
   const notProgram = await as(() => put('native/bin/helper', '#!/bin/sh\necho hi\n'))
   const thisChip = await rootlist.verify(r, list, { arch: 'x64' })
   fs.rmSync(r, { recursive: true, force: true })
-  ok(same.ok && otherChipGone.ok && signed.ok && !changed.ok && changed.changed.includes('server/index.js') && !added.ok && added.added.includes('server/index') && !missing.ok && missing.missing.includes('node_modules/a/index.js') && !notProgram.ok && notProgram.changed.includes('native/bin/helper') && !thisChip.ok && thisChip.missing.some((f) => f.startsWith('node_modules/tool-darwin-x64/')),
-    'the app\'s own copy as built: a file changed, one added beside it (that would be loaded first) or one taken away is caught, and a program replaced by a script; the other chip\'s package, a dot file and Finder\'s .DS_Store aren\'t; a signed program\'s bytes aren\'t hashed; this chip\'s package taken away is', { same: same.ok, otherChipGone, signed: signed.ok, changed: changed.changed, added: added.added, missing: missing.missing, notProgram: notProgram.changed, thisChip: thisChip.missing })
+  ok(same.ok && otherChipGone.ok && !dotGone.ok && dotGone.missing.includes('node_modules/a/.gitkeep') && !unsigned.ok && unsigned.changed.includes('native/bin/helper') && asked?.join() === 'native/bin/helper' && signed.ok && !changed.ok && changed.changed.includes('server/index.js') && !added.ok && added.added.includes('server/index') && !missing.ok && missing.missing.includes('node_modules/a/index.js') && !notProgram.ok && notProgram.changed.includes('native/bin/helper') && !thisChip.ok && thisChip.missing.some((f) => f.startsWith('node_modules/tool-darwin-x64/')),
+    'the app\'s own copy as built: a file changed, one added beside it (that would be loaded first) or one taken away (a dot file too) is caught, a program replaced by a script, or one not signed as the app is; the other chip\'s package and Finder\'s .DS_Store aren\'t; a signed program\'s bytes aren\'t hashed; this chip\'s package taken away is', { same: same.ok, otherChipGone, dotGone: dotGone.missing, unsigned: unsigned.changed, signed: signed.ok, changed: changed.changed, added: added.added, missing: missing.missing, notProgram: notProgram.changed, thisChip: thisChip.missing })
 
   // main.js checks the switches first of all; the keys never open and no server starts while the
   // copy isn't as built; the archive is checked by Electron and the only place the app loads from;
@@ -142,8 +152,67 @@ const windowAuth = require(path.join(ROOT, 'desktop', 'windowauth.js'))
     packed: ['startgate.js', 'rootlist.js', 'app-root.list'].every((f) => pkg.build.files.includes(f)) && /require\('\.\/rootlist\.js'\)\.make\(OUT\)/.test(stage),
     devTools: /\.\.\.\(app\.isPackaged \? \[\] : \[\{ role: 'toggleDevTools' \}\]\)/.test(mainJs) && (mainJs.match(/toggleDevTools|openDevTools/g) || []).length === 1,
     release: pkg.build.appId === 'dev.bridge-ai.app' && !/dev\.bridge-ai\.smoke/.test(workflows),
+    builtAlone: /const BUNDLED = app\.isPackaged\n/.test(mainJs) && /const ROOT = app\.isPackaged \? path\.join\(process\.resourcesPath, 'app-root'\)/.test(mainJs) && /const DEV = !app\.isPackaged && /.test(mainJs),
+    serverStart: /BUNDLED \? serverFlags\.serverEnv\(process\.env, \{ smoke: SMOKE_BUILD \}\)/.test(mainJs) && /\[NODE_BIN, serverFlags\.serverArgs\(ROOT\)\]/.test(mainJs) && /appKeys\(\)\.forStart\(\{ code: codeReq\(\) \}\)/.test(mainJs),
+    rootCode: (mainJs.match(/import\(require\('node:url'\)\.pathToFileURL\(path\.join\(ROOT/g) || []).length === 1 && /const rootImport = \(rel\) => \(rootOk \?/.test(mainJs) && (mainJs.match(/rootImport\(path\.join\('shared'/g) || []).length === 3 && /if \(rootOk\) \{\n\s+dictation\.start\(/.test(mainJs) && /bin: \(\) => \(!rootOk \? null/.test(mainJs),
+    programs: /const programs = req \? \(rels\) => codesig\.failing\(/.test(mainJs),
+    serverSide: /^import '\.\/lockdown\.js'\nimport \{ appKeys \} from '\.\/appkeys\.js'/m.test(fs.readFileSync(path.join(ROOT, 'server', 'index.js'), 'utf8')) && /const bin = await trusted\(\)/.test(fs.readFileSync(path.join(ROOT, 'server', 'signhelper.js'), 'utf8')) && /trusted\(\)\.then\(\(bin\) =>/.test(fs.readFileSync(path.join(ROOT, 'server', 'signhelper.js'), 'utf8')) && /    code: typeof j\?\.code === 'string'/.test(fs.readFileSync(path.join(ROOT, 'server', 'appkeys.js'), 'utf8')),
   }
   ok(Object.values(wired).every(Boolean), 'main.js refuses switches first of all and opens no keys and starts no server unless its copy is as built; the archive is checked and the only place it loads from; DevTools only from source; no release is the smoke test\'s build', wired)
+}
+
+// ---------- The server's environment, and only its own code (desktop/serverflags.js, server/lockdown.js) ----------
+{
+  const flags = require(path.join(ROOT, 'desktop', 'serverflags.js'))
+  const given = { PATH: '/usr/bin', HOME: '/Users/me', USER: 'me', LOGNAME: 'me', SHELL: '/bin/zsh', LANG: 'en_GB.UTF-8', LC_ALL: 'en_GB.UTF-8', TMPDIR: '/tmp/x', TERM: 'xterm', SSH_AUTH_SOCK: '/tmp/ssh', HTTPS_PROXY: 'http://p',
+    ELECTRON_RUN_AS_NODE: '1', BRIDGE_WINDOW_FD: '3', BRIDGE_HOME: '/tmp/h', BRIDGE_PORT: '7999', BRIDGE_ROOT: '/tmp/clone', BRIDGE_FIX_DRYRUN: '1', BRIDGE_SIGNHELPER: '/bin/echo', BRIDGE_SHERPA: '/x', NODE_PATH: '/tmp/np', NODE_OPTIONS: '--require x', DYLD_INSERT_LIBRARIES: '/x.dylib', ELECTRON_ENABLE_LOGGING: '1', SOMETHING: 'else' }
+  const mac = flags.serverEnv(given, { platform: 'darwin' })
+  const smoke = flags.serverEnv(given, { platform: 'darwin', smoke: true })
+  const linux = flags.serverEnv({ ...given, http_proxy: 'http://p', DISPLAY: ':0' }, { platform: 'linux' })
+  const win = flags.serverEnv({ SystemRoot: 'C:\\Windows', Path: 'C:\\x', APPDATA: 'C:\\a', NODE_PATH: 'C:\\np', BRIDGE_ROOT: 'C:\\c' }, { platform: 'win32' })
+  const keptMac = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'TMPDIR', 'TERM', 'SSH_AUTH_SOCK', 'HTTPS_PROXY', 'ELECTRON_RUN_AS_NODE', 'BRIDGE_WINDOW_FD', 'BRIDGE_HOME', 'BRIDGE_PORT', 'WS_NO_BUFFER_UTIL', 'WS_NO_UTF_8_VALIDATE']
+  ok(Object.keys(mac).sort().join() === keptMac.sort().join() && mac.WS_NO_BUFFER_UTIL === '1' && smoke.BRIDGE_FIX_DRYRUN === '1' && !smoke.NODE_PATH && !linux.http_proxy && !linux.HTTPS_PROXY && linux.DISPLAY === ':0' && win.SystemRoot && win.Path && win.APPDATA && !win.NODE_PATH && !win.BRIDGE_ROOT,
+    'the built app\'s server gets only what it and what it starts need: where you are, your SSH agent and proxy, Windows\' and a Linux desktop\'s own, the app\'s pipe, data folder and port; never NODE_PATH, NODE_OPTIONS, another copy, the tests\' stand-ins or anything else (the smoke test\'s build passes its own on); ws\'s native parts off', { mac: Object.keys(mac), linux: Object.keys(linux), win: Object.keys(win) })
+  const args = flags.serverArgs('/Applications/Bridge AI.app/Contents/Resources/app-root')
+  ok(args[0] === '--disable-sigusr1' && args[1] === '--import' && /\/server\/lockdown\.js$/.test(args[2]) && /\/server\/index\.js$/.test(args[3]), 'the server is started with lockdown.js loaded before anything of its own', args)
+
+  // A package planted where Node would look for one the server's copy lacks (ws's bufferutil): in a
+  // home folder, NODE_PATH and a parent folder of the copy, all scratch ones (never the real home).
+  // On Electron's Node, as the built app runs the server: without lockdown.js each runs; with it, none.
+  const electron = electronBin()
+  if (!electron) skip('another program\'s package where the server would look for one', 'Electron isn\'t installed (npm install in desktop/)')
+  else {
+    const t = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-lockdown-'))
+    const home = path.join(t, 'home')
+    const mark = path.join(t, 'ran.txt')
+    const trap = (dir, where) => { fs.mkdirSync(path.join(dir, 'bufferutil'), { recursive: true }); fs.writeFileSync(path.join(dir, 'bufferutil', 'index.js'), `require('fs').appendFileSync(${JSON.stringify(mark)}, ${JSON.stringify(`${where}\n`)}); module.exports = {}`) }
+    trap(path.join(home, '.node_modules'), 'home')
+    trap(path.join(t, 'np'), 'NODE_PATH')
+    trap(path.join(t, 'node_modules'), 'parent folder')
+    const copy = path.join(t, 'app-root')
+    fs.mkdirSync(path.join(copy, 'server'), { recursive: true })
+    fs.copyFileSync(path.join(ROOT, 'server', 'lockdown.js'), path.join(copy, 'server', 'lockdown.js'))
+    fs.writeFileSync(path.join(copy, 'package.json'), '{"type":"module"}')
+    fs.cpSync(path.join(ROOT, 'node_modules', 'ws'), path.join(copy, 'node_modules', 'ws'), { recursive: true })
+    fs.writeFileSync(path.join(copy, 'server', 'probe.cjs'), `let direct = 'loaded'
+try { require('bufferutil') } catch (e) { direct = e.code || e.message }
+const ws = require('ws')
+process.stdout.write(JSON.stringify({ direct, ws: typeof ws.WebSocketServer }))`)
+    const run = (lock, extraEnv = {}) => {
+      fs.rmSync(mark, { force: true })
+      const env = { PATH: process.env.PATH, HOME: home, NODE_PATH: path.join(t, 'np'), ELECTRON_RUN_AS_NODE: '1', ...extraEnv }
+      const r = spawnSync(electron, [...(lock ? ['--import', pathToFileURL(path.join(copy, 'server', 'lockdown.js')).href] : []), path.join(copy, 'server', 'probe.cjs')], { env, encoding: 'utf8', cwd: path.join(copy, 'server'), timeout: 30000 })
+      let out = null
+      try { out = JSON.parse(r.stdout) } catch { out = { error: r.stderr.slice(-300) } }
+      return { out, ran: fs.existsSync(mark) ? fs.readFileSync(mark, 'utf8').trim().split('\n') : [] }
+    }
+    const open = run(false)
+    const locked = run(true)
+    const lockedWs = run(true, { WS_NO_BUFFER_UTIL: '1', WS_NO_UTF_8_VALIDATE: '1' })
+    fs.rmSync(t, { recursive: true, force: true })
+    ok(open.ran.length > 0 && !locked.ran.length && locked.out?.direct === 'ERR_BRIDGE_OUTSIDE' && locked.out?.ws === 'function' && !lockedWs.ran.length && lockedWs.out?.ws === 'function',
+      'another program\'s package where Node would look for one the server lacks (a home folder\'s .node_modules, NODE_PATH, a parent folder): run without lockdown.js; with it, none runs, asking for it is refused, and ws still loads', { open, locked, lockedWs })
+  }
 }
 
 // ---------- In Electron ----------

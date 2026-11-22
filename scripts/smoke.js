@@ -44,11 +44,13 @@ const home = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-smoke-'))
 // Terminals still run in the terminal host, but end with the server here, so nothing is left behind.
 fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ keepAgents: false }))
 const log = []
-// (Started as the app starts it: desktop/serverflags.js.)
-const { SERVER_NODE_FLAGS } = createRequire(import.meta.url)('../desktop/serverflags.js')
-const server = spawn(app.exe, [...SERVER_NODE_FLAGS, path.join(app.root, 'server', 'index.js')], {
+// (Started as the app starts it, its flags, lockdown.js first and only the environment the app gives
+// it: desktop/serverflags.js. From source: this checkout's server on this Node, as before.)
+const serverFlags = createRequire(import.meta.url)('../desktop/serverflags.js')
+const { SERVER_NODE_FLAGS } = serverFlags
+const server = spawn(app.exe, SOURCE ? [...SERVER_NODE_FLAGS, path.join(app.root, 'server', 'index.js')] : serverFlags.serverArgs(app.root), {
   cwd: app.root,
-  env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', BRIDGE_HOME: home, BRIDGE_PORT: String(PORT) },
+  env: SOURCE ? { ...process.env, ELECTRON_RUN_AS_NODE: '1', BRIDGE_HOME: home, BRIDGE_PORT: String(PORT) } : serverFlags.serverEnv({ ...process.env, ELECTRON_RUN_AS_NODE: '1', BRIDGE_HOME: home, BRIDGE_PORT: String(PORT) }),
   stdio: ['ignore', 'pipe', 'pipe'],
 })
 server.stdout.on('data', (d) => log.push(String(d)))
@@ -157,8 +159,13 @@ try {
       const r = await launchOnce(app.exe, [...(t === '--use-mock-keychain' ? [] : ['--use-mock-keychain']), t])
       results.push({ t, code: r.code, said: r.log.includes(name), opened: r.opened.profile || r.opened.server })
     }
-    for (const k of startGate.ENV) {
-      const r = await launchOnce(app.exe, ['--use-mock-keychain'], { [k]: k === 'ELECTRON_LOG_FILE' ? path.join(os.tmpdir(), 'bridge-smoke-electron.log') : '1' })
+    // (And BRIDGE_ settings but BRIDGE_HOME and BRIDGE_PORT, which a copy run from source takes: another
+    // copy of the code, development mode, the tests' stand-in helper and dry runs, other helpers; on
+    // Linux a proxy from the environment.)
+    const envs = [...startGate.ENV, 'BRIDGE_ROOT', 'BRIDGE_DEV', 'BRIDGE_FIX_DRYRUN', 'BRIDGE_SIGNHELPER', 'BRIDGE_KEYS', ...(process.platform === 'linux' ? ['http_proxy', 'HTTPS_PROXY', 'no_proxy'] : [])]
+    const values = { ELECTRON_LOG_FILE: path.join(os.tmpdir(), 'bridge-smoke-electron.log'), BRIDGE_ROOT: ROOT, BRIDGE_SIGNHELPER: '/bin/echo', BRIDGE_KEYS: '/bin/echo', http_proxy: 'http://127.0.0.1:9', HTTPS_PROXY: 'http://127.0.0.1:9', no_proxy: '<-loopback>' }
+    for (const k of envs) {
+      const r = await launchOnce(app.exe, ['--use-mock-keychain'], { [k]: values[k] || '1' })
       results.push({ t: k, code: r.code, said: r.log.includes(k), opened: r.opened.profile || r.opened.server })
     }
     const bad = results.filter((r) => r.code !== 1 || !r.said || r.opened)
@@ -168,27 +175,36 @@ try {
   // Its own copy of Bridge AI changed by one byte (in a copy of the whole app): it starts no server
   // and opens no keys, and says so (desktop/rootlist.js). With the stand-in keychain, so only in the
   // smoke test's own build or on CI's throwaway machines.
-  if (!SOURCE && gui && (marked || process.env.CI)) await step('a copy of it with a byte changed in its server starts no server and opens no keys', async () => {
+  const changedCopy = async (change, named) => {
     const top = process.platform === 'darwin' ? path.dirname(path.dirname(path.dirname(app.exe))) : path.dirname(app.exe)
     const copyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-smoke-changed-'))
     const copy = path.join(copyDir, path.basename(top))
     fs.cpSync(top, copy, { recursive: true, verbatimSymlinks: true })
-    const rel = path.relative(top, app.exe)
-    const file = path.join(copy, path.relative(top, app.root), 'server', 'index.js')
-    const bytes = fs.readFileSync(file)
-    const at = bytes.indexOf('// ') + 3
-    bytes[at] = bytes[at] === 0x78 ? 0x79 : 0x78
-    fs.writeFileSync(file, bytes)
+    change(path.join(copy, path.relative(top, app.root)))
     try {
-      const r = await launchOnce(path.join(copy, rel), marked ? ['--use-mock-keychain'] : [], {}, { wait: 30000, until: (log) => /own files aren't as they were built/.test(log) })
-      const named = /server\/index\.js/.test(r.log)
-      if (!/own files aren't as they were built/.test(r.log) || !named || r.opened.server || r.opened.keys) throw new Error(JSON.stringify({ code: r.code, log: r.log.slice(-300), opened: r.opened }))
-      return 'it said its own files aren\'t as built (server/index.js), and started no server and opened no keys'
+      const r = await launchOnce(path.join(copy, path.relative(top, app.exe)), marked ? ['--use-mock-keychain'] : [], {}, { wait: 30000, until: (log) => /own files aren't as they were built/.test(log) })
+      if (!/own files aren't as they were built/.test(r.log) || !r.log.includes(named) || r.opened.server || r.opened.keys) throw new Error(JSON.stringify({ code: r.code, log: r.log.slice(-300), opened: r.opened }))
+      return `it said its own files aren't as built (${named}), and started no server and opened no keys`
     } finally {
       if (process.platform === 'darwin') spawnSync('/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister', ['-u', copy])
       fs.rmSync(copyDir, { recursive: true, force: true })
     }
-  })
+  }
+  if (!SOURCE && gui && (marked || process.env.CI)) await step('a copy of it with a byte changed in its server starts no server and opens no keys', () => changedCopy((root) => {
+    const file = path.join(root, 'server', 'index.js')
+    const bytes = fs.readFileSync(file)
+    const at = bytes.indexOf('// ') + 3
+    bytes[at] = bytes[at] === 0x78 ? 0x79 : 0x78
+    fs.writeFileSync(file, bytes)
+  }, 'server/index.js'))
+  // ...and one with its signing helper swapped for another program (signed ad hoc, as anyone can):
+  // it isn't signed as the app is (desktop/codesig.js). Only where the app is signed with a certificate.
+  const signedBy = process.platform === 'darwin' && !SOURCE ? /Authority=/.test(spawnSync('codesign', ['-d', '-vv', path.dirname(path.dirname(path.dirname(app.exe)))], { encoding: 'utf8' }).stderr) : false
+  if (signedBy && gui && (marked || process.env.CI)) await step('a copy of it with its signing helper swapped for another program starts no server and opens no keys', () => changedCopy((root) => {
+    const helper = path.join(root, 'native', 'bin', 'bridgesign')
+    fs.copyFileSync('/bin/echo', helper)
+    spawnSync('codesign', ['--force', '--sign', '-', helper], { encoding: 'utf8' })
+  }, 'native/bin/bridgesign'))
   // Studio's signing (server/signhelper.js): on a Mac its helper (native/bridgesign) is in the app and
   // says what this Mac has, asking nothing.
   if (process.platform === 'darwin') {
