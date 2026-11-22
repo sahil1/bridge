@@ -24,6 +24,9 @@ export const MAX_FRAME = 180 * 1024
 export const INPUT_PER_SECOND = { hosted: 6, own: 30 }
 // Someone at the computer moving its mouse or pressing a key: remote input waits this long.
 export const PAUSE_MS = 3000
+// The computer's screen locked (neither macOS nor Windows lets an app show a locked screen): a device
+// waits this long for it to be unlocked, before the password or in a session, then it stops.
+export const LOCKED_WAIT_MINUTES = 15
 
 // ---------- the guardrails (server/remote.js) ----------
 // The Remote Access Password: this many wrong tries lock a device out for lockMinutes; Ask Here
