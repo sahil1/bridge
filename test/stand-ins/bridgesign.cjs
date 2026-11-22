@@ -3,11 +3,12 @@
 // over the screen, no pointer hidden and no Touch ID or password asked for. It reads what to do
 // from $BRIDGESIGN_STATE, a JSON file the test rewrites as it goes, each time it's started:
 //   { "probe": { "trackpad": true, "touchID": true, "auth": true },
+//     ("probe": "fail": no answer at all)
 //     "auth": { "ok": true, "how": "touchid" } | { "ok": false, "code": "cancel", "error": "…" },
 //     "trackpad": [ { "d": [x, y, p] }, { "m": [x, y, p] }, …, { "u": 1 }, { "done": true } ],
 //     "gap": 15,                      ms between the trackpad's lines (a finger moving)
 //     "key": "<base64 of 32 bytes>" | { "error": "…" } }   the Keychain's key (one of its own when unset)
-// and notes each start (its arguments) in $BRIDGESIGN_LOG.
+// and notes each start (its arguments, and what it was told on stdin) in $BRIDGESIGN_LOG.
 //   probe                  what this "Mac" has
 //   key                    the "Keychain's" key for the saved signatures
 //   auth --reason <text>   answers as auth says, a moment later (as a person would)
@@ -18,23 +19,37 @@ const fs = require('node:fs')
 const [cmd, ...rest] = process.argv.slice(2)
 const say = (o) => process.stdout.write(`${JSON.stringify(o)}\n`)
 const state = (() => { try { return JSON.parse(fs.readFileSync(process.env.BRIDGESIGN_STATE, 'utf8')) } catch { return {} } })()
-if (process.env.BRIDGESIGN_LOG) fs.appendFileSync(process.env.BRIDGESIGN_LOG, `${JSON.stringify({ args: [cmd, ...rest] })}\n`)
+const note = (said) => { if (process.env.BRIDGESIGN_LOG) fs.appendFileSync(process.env.BRIDGESIGN_LOG, `${JSON.stringify({ args: [cmd, ...rest], said })}\n`) }
+// The first line on stdin (auth's reason, the trackpad's hint), as the helper reads it.
+const firstLine = (then) => {
+  let buf = ''
+  let done = false
+  const go = () => { if (done) return; done = true; const i = buf.indexOf('\n'); let j = null; try { j = JSON.parse(i >= 0 ? buf.slice(0, i) : buf) } catch { /* none */ } note(j); then(j, i >= 0 ? buf.slice(i + 1) : '') }
+  process.stdin.on('data', (d) => { buf += d; if (buf.includes('\n')) go() })
+  process.stdin.on('end', go)
+}
+if (cmd !== 'auth' && cmd !== 'trackpad') note(null)
 
 if (cmd === 'probe') {
+  // (probe: "fail": it says nothing, as one killed before it answers.)
+  if (state.probe === 'fail') process.exit(1)
   say({ trackpad: true, touchID: true, auth: true, ...(state.probe || {}) })
 } else if (cmd === 'key') {
   const k = state.key ?? Buffer.alloc(32, 7).toString('base64')
   if (typeof k === 'object') { say({ error: k.error || 'locked', status: -25308 }); process.exit(1) }
   say({ key: k })
 } else if (cmd === 'auth') {
-  setTimeout(() => say(state.auth || { ok: true, how: 'touchid' }), 150)
+  firstLine(() => setTimeout(() => say(state.auth || { ok: true, how: 'touchid' }), 150))
 } else if (cmd === 'trackpad') {
   let over = false
   const end = (o) => { if (over) return; over = true; say(o); setTimeout(() => process.exit(0), 20) }
-  let buf = ''
-  process.stdin.on('data', (d) => {
-    buf += d
+  firstLine((said, rest0) => {
+    let buf = rest0
     if (/(^|\n)stop\s*(\n|$)/.test(buf)) end({ cancel: 'stop' })
+    process.stdin.on('data', (d) => {
+      buf += d
+      if (/(^|\n)stop\s*(\n|$)/.test(buf)) end({ cancel: 'stop' })
+    })
   })
   process.stdin.on('end', () => end({ cancel: 'stop' }))
   say({ ready: true, w: 160, h: 100 })

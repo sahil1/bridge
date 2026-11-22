@@ -60,6 +60,8 @@ function png(w = 240, h = 80) {
 const IS_WIN = process.platform === 'win32'
 const relay = await startRelay('studio-pdf')
 let signState = null, signLog = null, pushLog = null
+// The app's window secret for this kit (given to its server at start, as the app gives it on a pipe).
+const WINDOW = crypto.randomBytes(32).toString('base64url')
 const kit = await startKit('studio-pdf', {
   env: ({ bin, data }) => {
     fs.writeFileSync(path.join(data, 'relay.json'), JSON.stringify(relay.relayFile))
@@ -70,7 +72,8 @@ const kit = await startKit('studio-pdf', {
     signState = path.join(bin, 'bridgesign.json')
     signLog = path.join(bin, 'bridgesign.log')
     pushLog = path.join(bin, 'push.jsonl')
-    const env = { OLLAMA_HOST: 'http://127.0.0.1:9', LM_STUDIO_BASE_URL: 'http://127.0.0.1:9/v1', BRIDGE_COMPUTER_NAME: 'Studio Mac', BRIDGE_TEST_PUSH: pushLog, BRIDGE_SIGN_PHONE_MS: '15000' }
+    fs.writeFileSync(path.join(bin, 'window-secret'), WINDOW)
+    const env = { OLLAMA_HOST: 'http://127.0.0.1:9', LM_STUDIO_BASE_URL: 'http://127.0.0.1:9/v1', BRIDGE_COMPUTER_NAME: 'Studio Mac', BRIDGE_TEST_PUSH: pushLog, BRIDGE_SIGN_PHONE_MS: '15000', BRIDGE_TEST_WINDOW_FILE: path.join(bin, 'window-secret') }
     if (!IS_WIN) {
       fs.writeFileSync(path.join(bin, 'bridgesign'), `#!/bin/sh\nexec "${process.execPath}" "${path.join(ROOT, 'test', 'stand-ins', 'bridgesign.cjs')}" "$@"\n`, { mode: 0o755 })
       Object.assign(env, { BRIDGE_SIGNHELPER: path.join(bin, 'bridgesign'), BRIDGESIGN_STATE: signState, BRIDGESIGN_LOG: signLog })
@@ -79,13 +82,24 @@ const kit = await startKit('studio-pdf', {
   },
 })
 const sign = (o) => fs.writeFileSync(signState, JSON.stringify(o))
-const signed1 = () => { try { return fs.readFileSync(signLog, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l).args) } catch { return [] } }
+// Each start of the helper: its arguments, and what it was told on stdin (said).
+const signed1 = () => { try { return fs.readFileSync(signLog, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) } catch { return [] } }
 const pushes = () => { try { return fs.readFileSync(pushLog, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) } catch { return [] } }
 const model = await startModel('studio-pdf')
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 const api = kit.api
 const err = (p, body, method) => api(p, body, method).then(() => null, (e) => e)
+// As the app's own window asks (its secret, X-Bridge-Window: server/windowkey.js; the key is added
+// by the harness): what signing takes. A page of the app's gets the same (pageOf below).
+const win = async (p, body, method) => {
+  const r = await fetch(`${kit.url}/api${p}`, { method: method || (body ? 'POST' : 'GET'), headers: { 'content-type': 'application/json', 'x-bridge-window': WINDOW }, body: body ? JSON.stringify(body) : undefined })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) throw Object.assign(new Error(j.error || `HTTP ${r.status}`), { status: r.status, j })
+  return j
+}
+const werr = (p, body, method) => win(p, body, method).then(() => null, (e) => e)
+const asWindow = async (ctx) => ctx.setExtraHTTPHeaders({ 'x-bridge-window': WINDOW })
 const q = (f) => `root=${encodeURIComponent(f.root)}&path=${encodeURIComponent(f.path)}`
 const pages = []
 const links = [] // the phones, through the relay
@@ -178,26 +192,26 @@ try {
   ok(!('signature-assist' in ((await api('/config')).trials || {})), 'Sign PDFs isn\'t a Beta Feature', (await api('/config')).trials)
   // A signature kept open before 3.22: sealed the first time it's read, the open one gone.
   const sigDir = path.join(kit.data, 'studio', 'signatures')
-  const old = await api('/studio/sign/setup')
+  const old = await win('/studio/sign/setup')
   const oldOne = old.list?.find((x) => x.kind === 'signature')
   ok(!!oldOne && oldOne.width === 200 && oldOne.height === 60 && oldOne.default && !fs.existsSync(path.join(sigDir, 'signature.png')) && !fs.existsSync(path.join(sigDir, 'index.json')) && fs.existsSync(path.join(sigDir, `${oldOne.id}.bin`)), 'a signature kept open before: sealed the first time it\'s read, and the open picture gone', { list: old.list, files: fs.readdirSync(sigDir) })
   ok(old.sealed === (IS_WIN ? 'file' : 'keychain') && (IS_WIN || !fs.existsSync(path.join(sigDir, 'key'))), `sealed with a key ${IS_WIN ? 'in a file of its own (no Windows Hello here)' : 'from the Keychain (the stand-in\'s), none in the data folder'}`, { sealed: old.sealed, files: fs.readdirSync(sigDir) })
-  await api(`/studio/signatures/${oldOne.id}`, null, 'DELETE')
+  await win(`/studio/signatures/${oldOne.id}`, null, 'DELETE')
   // No model yet: it says so, and where to add one, rather than nothing.
-  const none = await api('/studio/sign/setup')
-  const noModel = await err('/studio/sign/explain', { ...F('agreement.pdf'), pages: [{ n: 1, text: 'Terms' }] })
+  const none = await win('/studio/sign/setup')
+  const noModel = await werr('/studio/sign/explain', { ...F('agreement.pdf'), pages: [{ n: 1, text: 'Terms' }] })
   ok(none.model === null && /No model to read it with.*Settings › Agents & Models › Model Providers/.test(noModel?.message || ''), 'no model to read with yet: said, with where to add one', { model: none.model, said: noModel?.message })
   await api('/providers/openai', { values: { OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: `${model.url}/v1` } }, 'PUT')
   await api('/settings', { meetings: { model: 'openai:gpt-5' } }, 'PATCH')
-  let setup = await api('/studio/sign/setup')
+  let setup = await win('/studio/sign/setup')
   ok(setup.signature === null && setup.initials === null && setup.model?.id === 'openai:gpt-5' && /gpt-5/.test(setup.model.label), 'turned on: nothing drawn yet, and the model it reads with is the one meeting notes use, by name', setup)
-  ok(/Expected a drawing/.test((await err('/studio/signature/signature', { png: 'data:image/png;base64,AAAA' }, 'PUT'))?.message || '') && !!(await err('/studio/signature/stamp', { png: png() }, 'PUT')), 'what isn\'t a PNG drawing, or isn\'t a signature or initials, isn\'t kept')
-  setup = await api('/studio/signature/signature', { png: png() }, 'PUT')
+  ok(/Expected a drawing/.test((await werr('/studio/signature/signature', { png: 'data:image/png;base64,AAAA' }, 'PUT'))?.message || '') && !!(await werr('/studio/signature/stamp', { png: png() }, 'PUT')), 'what isn\'t a PNG drawing, or isn\'t a signature or initials, isn\'t kept')
+  setup = await win('/studio/signature/signature', { png: png() }, 'PUT')
   const sigFile = path.join(sigDir, `${setup.signature?.id}.bin`)
   ok(setup.signature?.width === 240 && setup.signature?.height === 80 && fs.existsSync(sigFile) && (IS_WIN || (fs.statSync(sigFile).mode & 0o777) === 0o600), 'a signature kept in Bridge AI\'s data folder, sealed, for you alone to read', { setup, mode: fs.existsSync(sigFile) && (fs.statSync(sigFile).mode & 0o777).toString(8) })
-  await api('/studio/signature/initials', { png: png(90, 60) }, 'PUT')
-  const iniId = (await api('/studio/sign/setup')).initials?.id
-  setup = await api('/studio/signature/initials', null, 'DELETE')
+  await win('/studio/signature/initials', { png: png(90, 60) }, 'PUT')
+  const iniId = (await win('/studio/sign/setup')).initials?.id
+  setup = await win('/studio/signature/initials', null, 'DELETE')
   ok(setup.initials === null && !fs.existsSync(path.join(sigDir, `${iniId}.bin`)) && !!setup.signature, 'initials removed: gone from the computer, the signature kept')
   // Sealed: no picture anywhere in the data folder, not as a PNG nor as the text the page sent; the
   // list sealed too (no name in the open).
@@ -205,102 +219,124 @@ try {
   const everything = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? everything(path.join(d, e.name)) : [path.join(d, e.name)]))
   const showing = everything(kit.data).filter((f) => { const b = fs.readFileSync(f); return b.includes(plain.subarray(0, 64)) || b.includes(Buffer.from(png().split(',')[1].slice(40, 140))) || (f.startsWith(sigDir) && (b.includes(Buffer.from([0x89, 0x50, 0x4e, 0x47])) || b.includes(Buffer.from('Signature')))) })
   ok(!showing.length && fs.readFileSync(path.join(sigDir, 'store.bin')).subarray(0, 5).toString() === 'BSIG1', 'no signature in the open anywhere in the data folder: each picture and the list sealed (BSIG1)', showing)
-  // The picture: to your own windows (a page's cookie), never to the key alone (a program here, MCP).
+  // The picture: to the app's own windows (their secret), never to the key alone (a program here,
+  // MCP), nor the windows' cookie, which can be made from the key.
   const byKey = await fetch(`${kit.url}/api/studio/signature/${setup.signature.id}`)
-  const byPage = await rawFetch(`${kit.url}/api/studio/signature/${setup.signature.id}`, { headers: { cookie: `${kit.cookie.name}=${kit.cookie.value}` } })
-  ok(byKey.status === 403 && byPage.status === 200 && Buffer.from(await byPage.arrayBuffer()).equals(plain), 'its picture only to your own windows: refused to a program with the key alone', { byKey: byKey.status, byPage: byPage.status })
+  const byCookie = await rawFetch(`${kit.url}/api/studio/signature/${setup.signature.id}`, { headers: { cookie: `${kit.cookie.name}=${kit.cookie.value}` } })
+  const byWindow = await fetch(`${kit.url}/api/studio/signature/${setup.signature.id}`, { headers: { 'x-bridge-window': WINDOW } })
+  const wrongWindow = await fetch(`${kit.url}/api/studio/signature/${setup.signature.id}`, { headers: { 'x-bridge-window': crypto.randomBytes(32).toString('base64url') } })
+  ok(byKey.status === 403 && byCookie.status === 403 && wrongWindow.status === 403 && byWindow.status === 200 && Buffer.from(await byWindow.arrayBuffer()).equals(plain), 'its picture only to the app\'s own windows: refused to the key alone, the windows\' cookie and a wrong window secret', { byKey: byKey.status, byCookie: byCookie.status, wrongWindow: wrongWindow.status, byWindow: byWindow.status })
   // What you're signing: the text the page read, to the model.
-  const said = await api('/studio/sign/explain', { ...F('agreement.pdf'), pages: [{ n: 1, text: lines.join('\n') }, { n: 2, text: 'Signed for Contoso Ltd' }], total: 2, lang: 'en' })
+  const said = await win('/studio/sign/explain', { ...F('agreement.pdf'), pages: [{ n: 1, text: lines.join('\n') }, { n: 2, text: 'Signed for Contoso Ltd' }], total: 2, lang: 'en' })
   const asked = model.asked(/^Explain this document, which I have been asked to sign/).at(-1) || ''
   ok(said.model?.id === 'openai:gpt-5' && said.explained?.kind === 'Mutual NDA' && said.explained.parties.length === 2 && said.explained.watch[0]?.page === 1 && said.pagesRead === 2 && said.pagesAll === 2, 'explained by the model picked: what it is, who, and what to look at, with its page', said)
   ok(/--- Page 1 ---/.test(asked) && /renews automatically/.test(asked) && /--- Page 2 ---/.test(asked) && !/sk-test/.test(asked), "the model was sent the document's text, page by page", asked.slice(0, 400))
-  const scanSaid = await err('/studio/sign/explain', { ...F('scan.pdf'), pages: [{ n: 1, text: '' }] })
+  const scanSaid = await werr('/studio/sign/explain', { ...F('scan.pdf'), pages: [{ n: 1, text: '' }] })
   if (setup.readsScans) skip('a scan with no text says so', 'this computer reads scans')
   else ok(/pictures of pages, with no text in it to read\. Bridge AI reads those on a Mac/.test(scanSaid?.message || ''), 'a PDF with no text in it: said, and that a Mac reads those', scanSaid?.message)
   // The signed copy, from the API.
   const letterBefore = sha(path.join(dir, 'letter.pdf'))
-  const signed = await api('/studio/sign', { ...F('letter.pdf'), marks: [{ kind: 'signature', page: 1, x: 150, y: 199, w: 150, h: 46, align: 'left' }, { kind: 'date', page: 1, x: 375, y: 199, w: 80, h: 18, text: 'November 6, 2026' }] })
+  const signed = await win('/studio/sign', { ...F('letter.pdf'), marks: [{ kind: 'signature', page: 1, x: 150, y: 199, w: 150, h: 46, align: 'left' }, { kind: 'date', page: 1, x: 375, y: 199, w: 80, h: 18, text: 'November 6, 2026' }] })
   const out1 = path.join(dir, '_signed', 'letter (signed).pdf')
   const ops = fs.existsSync(out1) ? await drawn(out1, 1) : ''
   // 240 by 80 in a 150 by 46 box: 138 by 46, on the left.
   ok(signed.path === '_signed/letter (signed).pdf' && fs.existsSync(out1) && sha(path.join(dir, 'letter.pdf')) === letterBefore, 'signed: a new PDF in _signed beside it, named (signed), the original untouched', signed)
   const hex = Buffer.from('November 6, 2026', 'latin1').toString('hex').toUpperCase()
   ok(await images(out1, 1) === 1 && /1 0 0 1 150 199 cm\n1 0 0 1 0 0 cm\n138 0 0 46 0 0 cm\n1 0 0 1 0 0 cm\n\/\S+ Do/.test(ops) && ops.includes(`<${hex}> Tj`), 'its signature drawn where it was put, as large as fits, and the date written', ops.slice(-600))
-  const signed2 = await api('/studio/sign', { ...F('letter.pdf'), marks: [{ kind: 'signature', page: 1, x: 150, y: 199, w: 150, h: 46 }] })
+  const signed2 = await win('/studio/sign', { ...F('letter.pdf'), marks: [{ kind: 'signature', page: 1, x: 150, y: 199, w: 150, h: 46 }] })
   ok(signed2.name === 'letter (signed 2).pdf' && fs.existsSync(path.join(dir, '_signed', 'letter (signed 2).pdf')), 'signed again: (signed 2), never over the copy that\'s there', signed2)
-  ok(/no page 3/.test((await err('/studio/sign', { ...F('letter.pdf'), marks: [{ kind: 'signature', page: 3, x: 1, y: 1, w: 50, h: 20 }] }))?.message || '') && /Draw your initials first/.test((await err('/studio/sign', { ...F('letter.pdf'), marks: [{ kind: 'initials', page: 1, x: 1, y: 1, w: 50, h: 20 }] }))?.message || ''), 'a place on a page it hasn\'t, or initials not drawn yet, refused with why')
-  ok(/letters the PDF's own font can't write/.test((await err('/studio/sign', { ...F('letter.pdf'), marks: [{ kind: 'date', page: 1, x: 300, y: 100, w: 120, h: 18, text: '2026年11月6日' }] }))?.message || ''), 'a date its font can\'t write is refused, saying to use digits')
-  const check = await api(`/studio/sign/check?${q(F('locked.pdf'))}`)
-  const locked = await err('/studio/sign', { ...F('locked.pdf'), marks: [{ kind: 'signature', page: 1, x: 100, y: 100, w: 100, h: 40 }] })
+  ok(/no page 3/.test((await werr('/studio/sign', { ...F('letter.pdf'), marks: [{ kind: 'signature', page: 3, x: 1, y: 1, w: 50, h: 20 }] }))?.message || '') && /Draw your initials first/.test((await werr('/studio/sign', { ...F('letter.pdf'), marks: [{ kind: 'initials', page: 1, x: 1, y: 1, w: 50, h: 20 }] }))?.message || ''), 'a place on a page it hasn\'t, or initials not drawn yet, refused with why')
+  ok(/letters the PDF's own font can't write/.test((await werr('/studio/sign', { ...F('letter.pdf'), marks: [{ kind: 'date', page: 1, x: 300, y: 100, w: 120, h: 18, text: '2026年11月6日' }] }))?.message || ''), 'a date its font can\'t write is refused, saying to use digits')
+  const check = await win(`/studio/sign/check?${q(F('locked.pdf'))}`)
+  const locked = await werr('/studio/sign', { ...F('locked.pdf'), marks: [{ kind: 'signature', page: 1, x: 100, y: 100, w: 100, h: 40 }] })
   ok(check.encrypted === true && /locked against changes/.test(locked?.message || '') && !fs.existsSync(path.join(dir, '_signed', 'locked (signed).pdf')), 'a locked PDF: known before, and signing it says why it can\'t', { check, locked: locked?.message })
 
   // ---------- Several signatures and initials ----------
-  const formal = await api('/studio/signatures', { kind: 'signature', name: 'Formal', png: png(300, 70) })
-  const short = await api('/studio/signatures', { kind: 'signature', png: png(160, 50) })
-  const ini1 = await api('/studio/signatures', { kind: 'initials', name: 'SM', png: png(80, 50) })
-  const ini2 = await api('/studio/signatures', { kind: 'initials', png: png(70, 40) })
-  let all = (await api('/studio/sign/setup')).list
+  const formal = await win('/studio/signatures', { kind: 'signature', name: 'Formal', png: png(300, 70) })
+  const short = await win('/studio/signatures', { kind: 'signature', png: png(160, 50) })
+  const ini1 = await win('/studio/signatures', { kind: 'initials', name: 'SM', png: png(80, 50) })
+  const ini2 = await win('/studio/signatures', { kind: 'initials', png: png(70, 40) })
+  let all = (await win('/studio/sign/setup')).list
   const named = (id) => all.find((x) => x.id === id)
   ok(all.filter((x) => x.kind === 'signature').length === 3 && all.filter((x) => x.kind === 'initials').length === 2 && named(formal.id)?.name === 'Formal' && named(short.id)?.name === 'Signature 3' && named(ini2.id)?.name === 'Initials 2' && named(setup.signature.id)?.default && named(ini1.id)?.default, 'several signatures and initials kept, each named (a name of its own, or the next number), the first of each the default', all)
-  await api(`/studio/signatures/${formal.id}`, { default: true, name: 'Formal one' }, 'PATCH')
-  all = (await api('/studio/sign/setup')).list
-  ok(named(formal.id)?.default && named(formal.id)?.name === 'Formal one' && !named(setup.signature.id)?.default && (await api('/studio/sign/setup')).signature?.id === formal.id, 'renamed, and made the default: the one new places get', all)
+  await win(`/studio/signatures/${formal.id}`, { default: true, name: 'Formal one' }, 'PATCH')
+  all = (await win('/studio/sign/setup')).list
+  ok(named(formal.id)?.default && named(formal.id)?.name === 'Formal one' && !named(setup.signature.id)?.default && (await win('/studio/sign/setup')).signature?.id === formal.id, 'renamed, and made the default: the one new places get', all)
   // Each place with the one it was given; one not given any, the default.
-  const many = await api('/studio/sign', { ...F('letter.pdf'), marks: [{ kind: 'signature', page: 1, x: 100, y: 300, w: 150, h: 46, sig: short.id }, { kind: 'signature', page: 1, x: 100, y: 400, w: 150, h: 46 }, { kind: 'initials', page: 1, x: 400, y: 500, w: 60, h: 34, sig: ini2.id }, { kind: 'initials', page: 1, x: 400, y: 600, w: 60, h: 34 }, { kind: 'signature', page: 1, x: 300, y: 300, w: 150, h: 46, sig: short.id }] })
+  const many = await win('/studio/sign', { ...F('letter.pdf'), marks: [{ kind: 'signature', page: 1, x: 100, y: 300, w: 150, h: 46, sig: short.id }, { kind: 'signature', page: 1, x: 100, y: 400, w: 150, h: 46 }, { kind: 'initials', page: 1, x: 400, y: 500, w: 60, h: 34, sig: ini2.id }, { kind: 'initials', page: 1, x: 400, y: 600, w: 60, h: 34 }, { kind: 'signature', page: 1, x: 300, y: 300, w: 150, h: 46, sig: short.id }] })
   const manyFile = path.join(dir, many.path)
   ok(await pictures(manyFile, 1) === 4 && await images(manyFile, 1) === 5 && many.marks === 5, 'five places, each with its own: four different pictures on the page (one used twice)', { pictures: await pictures(manyFile, 1), many })
-  ok(!!(await err('/studio/signatures', { kind: 'stamp', png: png() })) && !!(await err('/studio/signatures/zzzzzzzzzz', { name: 'x' }, 'PATCH')), 'not a signature or initials, or no such one: refused')
+  ok(!!(await werr('/studio/signatures', { kind: 'stamp', png: png() })) && !!(await werr('/studio/signatures/zzzzzzzzzz', { name: 'x' }, 'PATCH')), 'not a signature or initials, or no such one: refused')
 
   // ---------- Ask Before Signing ----------
   // (The stand-in for native/bridgesign: Touch ID that answers as bridgesign.json says.)
   if (IS_WIN) skip('Ask Before Signing with Touch ID', 'a Mac\'s, stood in for off Windows')
   else {
     sign({ auth: { ok: true, how: 'touchid' } })
-    let st = await api('/studio/sign/ask')
+    let st = await win('/studio/sign/ask')
     ok(st.on === false && st.way === 'device' && st.touchID === true && st.pin === false, 'Ask Before Signing: off until you turn it on; on this Mac it would ask for Touch ID', st)
-    st = await api('/studio/sign/ask/setting', { on: true })
+    st = await win('/studio/sign/ask/setting', { on: true })
     ok(st.on === true, 'turned on')
-    const noGrant = await err('/studio/sign', { ...F('letter.pdf'), marks: [{ kind: 'signature', page: 1, x: 150, y: 199, w: 150, h: 46 }] })
+    const noGrant = await werr('/studio/sign', { ...F('letter.pdf'), marks: [{ kind: 'signature', page: 1, x: 150, y: 199, w: 150, h: 46 }] })
     ok(noGrant?.status === 403 && noGrant.j?.code === 'ask', 'on: signing without asking first is refused, even straight to the API', { status: noGrant?.status, j: noGrant?.j })
     const beforeAsk = signed1().length
-    const g = await api('/studio/sign/ask', { ...F('letter.pdf') })
+    const g = await win('/studio/sign/ask', { ...F('letter.pdf') })
     const asked = signed1().slice(beforeAsk)
-    ok(g.needed && g.how === 'touchid' && typeof g.grant === 'string' && g.grant.length > 30 && asked.some((a) => a[0] === 'auth' && a.includes('--reason') && /sign letter\.pdf/.test(a.join(' '))), 'asked: Touch ID on this Mac, for this document by name, and a grant for it', { g: { ...g, grant: !!g.grant }, asked })
-    const withG = await api('/studio/sign', { ...F('letter.pdf'), grant: g.grant, marks: [{ kind: 'signature', page: 1, x: 150, y: 199, w: 150, h: 46 }, { kind: 'initials', page: 1, x: 420, y: 100, w: 60, h: 34 }, { kind: 'date', page: 1, x: 375, y: 199, w: 80, h: 18, text: 'November 6, 2026' }] })
+    ok(g.needed && g.how === 'touchid' && typeof g.grant === 'string' && g.grant.length > 30 && asked.some((a) => a.args[0] === 'auth' && /^sign "letter\.pdf"$/.test(a.said?.reason || '') && !/letter/.test(a.args.join(' '))), 'asked: Touch ID on this Mac, for this document by name, and a grant for it', { g: { ...g, grant: !!g.grant }, asked })
+    const withG = await win('/studio/sign', { ...F('letter.pdf'), grant: g.grant, marks: [{ kind: 'signature', page: 1, x: 150, y: 199, w: 150, h: 46 }, { kind: 'initials', page: 1, x: 420, y: 100, w: 60, h: 34 }, { kind: 'date', page: 1, x: 375, y: 199, w: 80, h: 18, text: 'November 6, 2026' }] })
     ok(fs.existsSync(path.join(dir, withG.path)) && withG.record?.how === 'touchid' && withG.record?.on === 'Studio Mac' && withG.record.places.length === 3, 'with it: signed, every place at once, the record saying how', withG.record)
-    const again = await err('/studio/sign', { ...F('letter.pdf'), grant: g.grant, marks: [{ kind: 'signature', page: 1, x: 150, y: 199, w: 150, h: 46 }] })
+    const again = await werr('/studio/sign', { ...F('letter.pdf'), grant: g.grant, marks: [{ kind: 'signature', page: 1, x: 150, y: 199, w: 150, h: 46 }] })
     ok(again?.status === 403, 'its grant used once: the same again is refused', again?.status)
-    const g2 = await api('/studio/sign/ask', { ...F('agreement.pdf') })
-    const other = await err('/studio/sign', { ...F('letter.pdf'), grant: g2.grant, marks: [{ kind: 'signature', page: 1, x: 150, y: 199, w: 150, h: 46 }] })
+    const g2 = await win('/studio/sign/ask', { ...F('agreement.pdf') })
+    const other = await werr('/studio/sign', { ...F('letter.pdf'), grant: g2.grant, marks: [{ kind: 'signature', page: 1, x: 150, y: 199, w: 150, h: 46 }] })
     ok(other?.status === 403, 'a grant for another document is refused', other?.status)
     sign({ auth: { ok: false, code: 'cancel', error: 'Canceled by user.' } })
-    const no = await err('/studio/sign/ask', { ...F('letter.pdf') })
+    const no = await werr('/studio/sign/ask', { ...F('letter.pdf') })
     ok(no?.status === 401 && no.j?.code === 'cancelled', 'Touch ID cancelled: no grant, and it says so', { status: no?.status, j: no?.j })
-    const offNo = await err('/studio/sign/ask/setting', { on: false })
-    ok(offNo?.status === 403 && (await api('/studio/sign/ask')).on === true, 'turning it off without asking first is refused: it stays on', offNo?.j)
+    const offNo = await werr('/studio/sign/ask/setting', { on: false })
+    ok(offNo?.status === 403 && (await win('/studio/sign/ask')).on === true, 'turning it off without asking first is refused: it stays on', offNo?.j)
     sign({ auth: { ok: true, how: 'password' } })
     // A PIN, for your phone: set once it's asked (here, the Mac's password).
-    const pinG = await api('/studio/sign/ask', { purpose: 'settings' })
-    st = await api('/studio/sign/ask/setting', { pin: '2468', grant: pinG.grant })
+    const pinG = await win('/studio/sign/ask', { purpose: 'settings' })
+    st = await win('/studio/sign/ask/setting', { pin: '2468', grant: pinG.grant })
     ok(st.pin === true && pinG.how === 'password', 'a signing PIN set, once the Mac\'s password was asked')
     // Here, with Touch ID to ask, the PIN isn't taken in its place.
-    const pinHere = await err('/studio/sign/ask', { ...F('letter.pdf'), pin: '2468' })
+    const pinHere = await werr('/studio/sign/ask', { ...F('letter.pdf'), pin: '2468' })
     ok(pinHere?.status === 400 && pinHere.j?.code === 'use-device', 'the PIN isn\'t taken where Touch ID is the way', pinHere?.j)
     // The record, in both files' versions.
-    const vOrig = await api(`/studio/versions?${q(F('letter.pdf'))}`)
-    const vCopy = await api(`/studio/versions?${q(F(withG.path))}`)
+    const vOrig = await win(`/studio/versions?${q(F('letter.pdf'))}`)
+    const vCopy = await win(`/studio/versions?${q(F(withG.path))}`)
     ok(vOrig.signings?.[0]?.how === 'touchid' && vOrig.signings[0].on === 'Studio Mac' && vOrig.signings[0].copy === withG.path && vOrig.signings[0].places.length === 3 && !!Date.parse(vOrig.signings[0].at), 'the original\'s versions: signed by you on Studio Mac with Touch ID, its places, the time and the copy', vOrig.signings?.[0])
     ok(vCopy.versions?.[0]?.by === 'signed' && vCopy.versions[0].signed?.how === 'touchid' && vCopy.versions[0].signed.places.length === 3, 'the copy\'s first version: signed, and how', vCopy.versions?.[0])
+    const copySha = sha(path.join(dir, withG.path))
+    ok(vOrig.signings[0].verified === true && vOrig.signings[0].via === 'window' && vOrig.signings[0].sha256 === copySha && vCopy.versions[0].signed.verified === true && vCopy.versions[0].kept === false, 'the record: which way it was signed (the app\'s window), the copy\'s sha256, its MAC checked; the copy\'s version a line, not a copy', { orig: vOrig.signings[0], copy: vCopy.versions[0] })
+    // The record changed by hand in the versions' index: it says it can't be trusted.
+    const idxFile = (await fs.promises.readdir(path.join(kit.data, 'studio', 'versions'), { recursive: true })).map((f) => path.join(kit.data, 'studio', 'versions', f)).find((f) => f.endsWith('index.json') && /"signed": \[/.test(fs.readFileSync(f, 'utf8')))
+    const was = fs.readFileSync(idxFile, 'utf8')
+    fs.writeFileSync(idxFile, was.replace('"how": "touchid"', '"how": "pin"'))
+    const tampered = await win(`/studio/versions?${q(F('letter.pdf'))}`)
+    fs.writeFileSync(idxFile, was)
+    ok(tampered.signings[0].verified === false, 'a record changed outside Bridge AI: said not to be trusted', tampered.signings[0])
   }
+  // No signed copy kept in Bridge AI's data folder (a signed copy's versions are lines, not copies).
+  const signedHashes = new Set(fs.readdirSync(path.join(dir, '_signed')).map((f) => sha(path.join(dir, '_signed', f))))
+  const keptCopies = everything(kit.data).filter((f) => signedHashes.has(sha(f)))
+  ok(!keptCopies.length, 'no signed copy, byte for byte, anywhere in Bridge AI\'s data folder', keptCopies)
 
   // ---------- The trackpad (the stand-in's finger) ----------
   if (IS_WIN) skip('the trackpad streamed', 'a Mac\'s')
   else {
     sign({ trackpad: [{ d: [0.2, 0.5, 0] }, { m: [0.3, 0.4, 0] }, { m: [0.4, 0.6, 0.3] }, { u: 1 }, { done: true }], gap: 10 })
-    const r = await fetch(`${kit.url}/api/studio/sign/trackpad?hint=x`)
+    // Only for the app's window; its hint is the server's own (in the page's language), whatever the
+    // request says, and it goes to the helper on stdin, not in its arguments.
+    const byKeyTp = await fetch(`${kit.url}/api/studio/sign/trackpad?hint=x`)
+    const starts = signed1().filter((a) => a.args[0] === 'trackpad').length
+    const r = await fetch(`${kit.url}/api/studio/sign/trackpad?lang=de&hint=${encodeURIComponent('Something else')}`, { headers: { 'x-bridge-window': WINDOW } })
     const text = r.ok ? await r.text() : ''
+    const tpRun = signed1().filter((a) => a.args[0] === 'trackpad')
+    ok(byKeyTp.status === 403 && tpRun.length === starts + 1 && /^Zeichne mit einem Finger auf dem Trackpad/.test(tpRun.at(-1)?.said?.hint || '') && tpRun.at(-1).args.length === 1, 'the trackpad: not for a program with the key alone; its hint written by the server, in the page\'s language, given on stdin', { byKey: byKeyTp.status, run: tpRun.at(-1) })
     ok(r.status === 200 && /"ready":true,"w":160,"h":100/.test(text) && /"d":\[0\.2,0\.5,0\]/.test(text) && /"m":\[0\.4,0\.6,0\.3\]/.test(text) && /"u":1/.test(text) && /event: end\ndata: \{"done":true\}/.test(text), 'the trackpad: ready with its size, the finger down, moving (with pressure), lifted, and done, streamed as it comes', text.slice(0, 400))
-    const setupHere = await api('/studio/sign/setup')
+    const setupHere = await win('/studio/sign/setup')
     ok(setupHere.trackpad === true, 'this Mac has a trackpad: Trackpad offered here')
   }
 
@@ -320,11 +356,11 @@ try {
   await B.request('POST', '/api/push/subscribe', { subscription: { endpoint: 'https://push.example/b', keys: { p256dh: 'p', auth: 'b' } }, label: 'Phone B' })
   // B isn't let in any more (Which Devices May Connect).
   await api('/remote/devices', { id: B.deviceId, allowed: false })
-  const reach = await until(async () => { const s2 = await api('/studio/sign/setup'); return s2.phones?.some((x) => x.id === A.deviceId) && s2.phones.some((x) => x.id === C.deviceId) ? s2 : null }, 15000)
+  const reach = await until(async () => { const s2 = await win('/studio/sign/setup'); return s2.phones?.some((x) => x.id === A.deviceId) && s2.phones.some((x) => x.id === C.deviceId) ? s2 : null }, 15000)
   ok(!!reach && !reach.phones.some((x) => x.id === B.deviceId), 'the phones a pad can ask: yours, let in, and reachable; not one kept out', reach?.phones)
   const ink = { w: 600, h: 300, strokes: [[[0.1, 0.5, 2], [0.2, 0.4, 2.4], [0.35, 0.6, 2.1], [0.5, 0.45, 1.8]], [[0.6, 0.5, 2], [0.8, 0.52, 2]]] }
   const pushedBefore = pushes().length
-  const ask1 = await api('/studio/sign/phone', { what: 'signature', doc: 'letter.pdf', to: A.deviceId })
+  const ask1 = await win('/studio/sign/phone', { what: 'signature', doc: 'letter.pdf', to: A.deviceId })
   const toA = await A.request('GET', '/api/studio/sign/phone')
   const forA = toA.json?.list?.find((x) => x.id === ask1.id)
   const told = pushes().slice(pushedBefore).filter((x) => x.note?.kind === 'sign')
@@ -335,56 +371,61 @@ try {
   const fromC = await C.request('POST', `/api/studio/sign/phone/${ask1.id}/answer`, { nonce: forA.nonce, ink })
   const fromB = await B.request('POST', `/api/studio/sign/phone/${ask1.id}/answer`, { nonce: forA.nonce, ink }).catch((e) => ({ error: e.message }))
   const badNonce = await A.request('POST', `/api/studio/sign/phone/${ask1.id}/answer`, { nonce: 'x'.repeat(24), ink })
-  const fromHere = await err(`/studio/sign/phone/${ask1.id}/answer`, { nonce: forA.nonce, ink })
+  const fromHere = await werr(`/studio/sign/phone/${ask1.id}/answer`, { nonce: forA.nonce, ink })
   // A program on this computer with the key, saying it's Phone A (without the relay's proof).
   const forged = await rawFetch(`${kit.url}/api/studio/sign/phone/${ask1.id}/answer`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${kit.key}`, 'x-bridge-relay': A.deviceId }, body: JSON.stringify({ nonce: forA.nonce, ink }) })
   const forgedList = await rawFetch(`${kit.url}/api/studio/sign/phone`, { headers: { authorization: `Bearer ${kit.key}`, 'x-bridge-relay': A.deviceId } }).then((r) => r.json())
   ok(fromC.status === 404 && (fromB.status === 403 || fromB.gone || fromB.error) && badNonce.status === 409 && fromHere?.status === 404 && [403, 404].includes(forged.status) && !forgedList.list?.length, 'answered by a phone it didn\'t go to, one not let in, without its nonce, not by a phone at all, or by a program here naming the phone: refused', { fromC: fromC.status, fromB, badNonce: badNonce.status, fromHere: fromHere?.status, forged: forged.status, forgedList })
   const answered = await A.request('POST', `/api/studio/sign/phone/${ask1.id}/answer`, { nonce: forA.nonce, ink })
   const replay = await A.request('POST', `/api/studio/sign/phone/${ask1.id}/answer`, { nonce: forA.nonce, ink })
-  const st1 = await api(`/studio/sign/phone/${ask1.id}/state`)
-  const st1b = await api(`/studio/sign/phone/${ask1.id}/state`)
+  const noPad = await werr(`/studio/sign/phone/${ask1.id}/state`)
+  const st1 = await win(`/studio/sign/phone/${ask1.id}/state?pad=${ask1.pad}`)
+  const st1b = await win(`/studio/sign/phone/${ask1.id}/state?pad=${ask1.pad}`)
+  ok(noPad?.status === 404 && /^\d{4}$/.test(ask1.code) && forA.code === ask1.code, 'the ink only to the pad that asked (its own key), and the same code on both screens', { noPad: noPad?.status, code: ask1.code, phone: forA.code })
   ok(answered.status === 200 && replay.status === 409 && replay.json?.code === 'answered', 'answered once; the same answer again is refused', { answered: answered.status, replay: replay.json })
   ok(st1.state === 'answered' && st1.by === 'Phone A' && st1.ink?.strokes?.length === 2 && st1.ink.w === 600 && !st1b.ink, 'the pad that asked gets the ink, once, and who drew it', { st1: { ...st1, ink: !!st1.ink }, st1b })
   // Cancelled on the phone, and on the computer.
-  const ask2 = await api('/studio/sign/phone', { what: 'initials', doc: 'letter.pdf' })
-  const waits = api(`/studio/sign/phone/${ask2.id}/state?wait=1`)
+  const ask2 = await win('/studio/sign/phone', { what: 'initials', doc: 'letter.pdf' })
+  const waits = win(`/studio/sign/phone/${ask2.id}/state?wait=1&pad=${ask2.pad}`)
   await A.request('POST', `/api/studio/sign/phone/${ask2.id}/cancel`, {})
   const st2 = await waits
   ok(st2.state === 'cancelled' && st2.cancelledBy === 'phone' && ask2.to.length === 2, 'cancelled on the phone: the pad hears it at once', { st2, to: ask2.to })
-  const ask3 = await api('/studio/sign/phone', { what: 'signature', to: C.deviceId })
-  await api(`/studio/sign/phone/${ask3.id}/cancel`, {})
+  const ask3 = await win('/studio/sign/phone', { what: 'signature', to: C.deviceId })
+  await win(`/studio/sign/phone/${ask3.id}/cancel`, { pad: ask3.pad })
   const late = await C.request('POST', `/api/studio/sign/phone/${ask3.id}/answer`, { nonce: 'n'.repeat(24), ink })
   const cl = await C.request('GET', '/api/studio/sign/phone')
   ok(late.status === 409 && late.json?.code === 'cancelled' && !cl.json?.list?.some((x) => x.id === ask3.id), 'cancelled on the computer: gone from the phone, and an answer after is refused', { late: late.json, list: cl.json })
   // Run out (15 seconds here, 2 minutes for everyone).
-  const ask4 = await api('/studio/sign/phone', { what: 'signature', to: A.deviceId })
+  const ask4 = await win('/studio/sign/phone', { what: 'signature', to: A.deviceId })
   const n4 = (await A.request('GET', '/api/studio/sign/phone')).json?.list?.find((x) => x.id === ask4.id)?.nonce
-  const out4 = await until(async () => { const s4 = await api(`/studio/sign/phone/${ask4.id}/state?wait=1`); return s4.state !== 'waiting' ? s4 : null }, 30000, 100)
+  const out4 = await until(async () => { const s4 = await win(`/studio/sign/phone/${ask4.id}/state?wait=1&pad=${ask4.pad}`); return s4.state !== 'waiting' ? s4 : null }, 30000, 100)
   const tooLate = await A.request('POST', `/api/studio/sign/phone/${ask4.id}/answer`, { nonce: n4, ink })
   ok(out4?.state === 'expired' && tooLate.status === 409 && tooLate.json?.code === 'expired', 'not answered in time: it ends, and a late answer is refused', { out4, late: tooLate.json })
   // Asked from a phone (Ask Before Signing from there): its PIN, checked here.
   if (!IS_WIN) {
     const noPin = await A.request('POST', '/api/studio/sign/ask', { ...F('letter.pdf') })
     const wrongPin = await A.request('POST', '/api/studio/sign/ask', { ...F('letter.pdf'), pin: '1111' })
+    const tooSoon = await A.request('POST', '/api/studio/sign/ask', { ...F('letter.pdf'), pin: '2468' })
+    await sleep(1100) // (a wrong PIN: the next try waits a second, twice as long after each)
     const pinOk = await A.request('POST', '/api/studio/sign/ask', { ...F('letter.pdf'), pin: '2468' })
+    ok(tooSoon.status === 429 && tooSoon.json?.code === 'pin-wait', 'right after a wrong PIN, even the right one waits a moment', tooSoon.json)
     // ...and not from a program on this computer naming the phone (without the relay's proof).
     const pinForged = await rawFetch(`${kit.url}/api/studio/sign/ask`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${kit.key}`, 'x-bridge-relay': A.deviceId }, body: JSON.stringify({ ...F('letter.pdf'), pin: '2468' }) })
-    ok(pinForged.status === 403 && (await pinForged.json()).code === 'not-here', 'a request only naming a phone can\'t ask with its PIN', pinForged.status)
+    ok(pinForged.status === 403 && (await pinForged.json()).code === 'not-yours', 'a request only naming a phone can\'t ask with its PIN', pinForged.status)
     ok(noPin.status === 428 && noPin.json?.code === 'pin' && wrongPin.status === 401 && wrongPin.json?.code === 'pin-wrong' && wrongPin.json.left === 4 && pinOk.status === 200 && pinOk.json?.how === 'pin', 'from a phone: its signing PIN is asked for, a wrong one refused (tries left), the right one gives a grant', { noPin: noPin.json, wrongPin: wrongPin.json, pinOk: { ...pinOk.json, grant: !!pinOk.json?.grant } })
-    const notHere = await err('/studio/sign', { ...F('letter.pdf'), grant: pinOk.json.grant, marks: [{ kind: 'signature', page: 1, x: 150, y: 199, w: 150, h: 46 }] })
+    const notHere = await werr('/studio/sign', { ...F('letter.pdf'), grant: pinOk.json.grant, marks: [{ kind: 'signature', page: 1, x: 150, y: 199, w: 150, h: 46 }] })
     const pinG2 = await A.request('POST', '/api/studio/sign/ask', { ...F('letter.pdf'), pin: '2468' })
     const fromPhone = await A.request('POST', '/api/studio/sign', { ...F('letter.pdf'), grant: pinG2.json.grant, marks: [{ kind: 'signature', page: 1, x: 150, y: 199, w: 150, h: 46 }] })
     ok(notHere?.status === 403 && fromPhone.status === 200 && fromPhone.json?.record?.how === 'pin' && fromPhone.json.record.on === 'Phone A', 'a phone\'s grant is the phone\'s: not used here; signed from the phone, the record says so', { notHere: notHere?.status, fromPhone: fromPhone.json?.record })
     // Off again, asked first.
     sign({ auth: { ok: true, how: 'touchid' } })
-    const offG = await api('/studio/sign/ask', { purpose: 'settings' })
-    const off = await api('/studio/sign/ask/setting', { on: false, grant: offG.grant })
+    const offG = await win('/studio/sign/ask', { purpose: 'settings' })
+    const off = await win('/studio/sign/ask/setting', { on: false, grant: offG.grant })
     ok(off.on === false, 'turned off once it was asked')
   }
 
   // ---------- The page ----------
-  const w = await page(b, kit.url, { width: 1440, height: 900 })
+  const w = await page(b, kit.url, { width: 1440, height: 900, before: asWindow })
   pages.push(w)
   const p = w.p
   const logs = []
@@ -450,7 +491,7 @@ try {
   await p.mouse.up()
   await shot(p, `${tag}studio-sign-pad`)
   await p.locator('.sd-pad button', { hasText: 'Keep it' }).click()
-  const kept = await until(async () => { const s = await api('/studio/sign/setup'); return s.signature?.at !== setup.signature.at ? s.signature : null }, 8000)
+  const kept = await until(async () => { const s = await win('/studio/sign/setup'); return s.signature?.at !== setup.signature.at && s.signature?.width > 400 ? s.signature : null }, 8000)
   // (The server has it a moment before the page has its answer and shows it.)
   const shown = await until(async () => (await p.locator('.sd-place .sd-sigcard img').count()) === 1, 5000)
   ok(!!kept && kept.width > 400 && shown,'a signature drawn on the pad with the mouse, kept sharp (three times its size), and shown', kept)
@@ -506,9 +547,9 @@ try {
   // Read once it knows what's drawn (it asks the server after it shows).
   await p.locator('.sd-sign-home[aria-busy="false"]').waitFor({ timeout: 10000 })
   const homeText = await p.locator('.sd-sign-home').innerText()
-  const savedNow = (await api('/studio/sign/setup')).list
+  const savedNow = (await win('/studio/sign/setup')).list
   ok((await p.locator('.sd-sign-home .sd-saved-sig img').count()) === savedNow.length && savedNow.length >= 5 && /Kept only on this computer, sealed/.test(homeText) && /Formal one/.test(homeText) && (await p.locator('.sd-sign-home .sd-saved-sig.default').count()) === 2 && (await p.locator('.sd-sign-home .sd-saved-sig button[aria-label^="Remove "]').count()) === savedNow.length, "Studio's home: Your Signatures, every signature and initials with its name, the default of each starred, where they're kept, and Remove", homeText)
-  // Every picture shows (its own window's cookie): none broken.
+  // Every picture shows (the app's window): none broken.
   ok(!!(await until(() => p.locator('.sd-sign-home .sd-saved-sig img').evaluateAll((els) => els.every((i) => i.complete && i.naturalWidth > 0)), 5000)), 'each picture shown in its own window')
   // Made the default here, and renamed in place.
   const shortRow = p.locator(`.sd-saved-sig[data-sig="${short.id}"]`)
@@ -516,7 +557,7 @@ try {
   await shortRow.locator('.sd-sig-title').click()
   await shortRow.locator('input.sd-sig-name').fill('Quick')
   await shortRow.locator('input.sd-sig-name').press('Enter')
-  const madeDefault = await until(async () => { const l = (await api('/studio/sign/setup')).list; const x = l.find((y) => y.id === short.id); return x?.default && x.name === 'Quick' ? l : null }, 5000)
+  const madeDefault = await until(async () => { const l = (await win('/studio/sign/setup')).list; const x = l.find((y) => y.id === short.id); return x?.default && x.name === 'Quick' ? l : null }, 5000)
   ok(!!madeDefault && (await shortRow.getAttribute('class')).includes('default'), 'Make default and a new name, from the list', madeDefault)
   await p.locator('.sd-sign-home').scrollIntoViewIfNeeded()
   await shot(p, `${tag}studio-sign-home`)
@@ -556,10 +597,10 @@ try {
     const ended = await until(async () => !(await p.locator('.sd-place .sd-pad-box.listening').count()), 10000, 100)
     const ink1 = await inked(p, '.sd-place .sd-pad-canvas')
     ok(!!ended && ink1 > 300 && await p.locator('.sd-place .sd-pad button', { hasText: 'Keep it' }).isEnabled(), 'done (a key): both strokes on the pad, to keep', ink1)
-    const n0 = (await api('/studio/sign/setup')).list.length
+    const n0 = (await win('/studio/sign/setup')).list.length
     await p.locator('.sd-place input.sd-sig-name').fill('From the trackpad')
     await p.locator('.sd-place .sd-pad button', { hasText: 'Keep it' }).click()
-    ok(!!(await until(async () => (await api('/studio/sign/setup')).list.find((x) => x.name === 'From the trackpad' && x.width > 300), 8000)) && (await api('/studio/sign/setup')).list.length === n0 + 1, 'kept, with the name given', (await api('/studio/sign/setup')).list.map((x) => x.name))
+    ok(!!(await until(async () => (await win('/studio/sign/setup')).list.find((x) => x.name === 'From the trackpad' && x.width > 300), 8000)) && (await win('/studio/sign/setup')).list.length === n0 + 1, 'kept, with the name given', (await win('/studio/sign/setup')).list.map((x) => x.name))
     // A phone asking for the trackpad: refused (it's this computer's).
     const tpPhone = await A.request('GET', '/api/studio/sign/trackpad')
     ok(tpPhone.status === 403, 'the trackpad isn\'t offered to a phone', tpPhone.status)
@@ -578,7 +619,7 @@ try {
   ok(!!back, 'answered: its ink on the pad here, said to be from Phone A', await p.locator('.sd-place .sd-pad-how').innerText())
   await shot(p, `${tag}studio-sign-phone-back`)
   await p.locator('.sd-place .sd-pad button', { hasText: 'Keep it' }).click()
-  ok(!!(await until(async () => (await api('/studio/sign/setup')).list.some((x) => x.kind === 'signature' && /^Signature \d+$/.test(x.name) && Date.parse(x.at) > req.until - 20000), 8000)), 'and kept from there, as any')
+  ok(!!(await until(async () => (await win('/studio/sign/setup')).list.some((x) => x.kind === 'signature' && /^Signature \d+$/.test(x.name) && Date.parse(x.at) > req.until - 20000), 8000)), 'and kept from there, as any')
   // ---------- Settings › Studio ----------
   await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'studio' } })))
   await p.locator('.st-sec[data-setting="ask-before-signing"] .st-check').waitFor({ timeout: 10000 })
@@ -588,11 +629,11 @@ try {
   if (!IS_WIN) {
     sign({ auth: { ok: true, how: 'touchid' } })
     await p.locator('.st-sec[data-setting="ask-before-signing"] .st-check input').click()
-    ok(!!(await until(async () => (await api('/studio/sign/ask')).on, 5000)) && !!(await until(() => p.locator('.st-sec[data-setting="ask-before-signing"] .st-check input').isChecked(), 5000)), 'turned on from Settings, and shown on')
+    ok(!!(await until(async () => (await win('/studio/sign/ask')).on, 5000)) && !!(await until(() => p.locator('.st-sec[data-setting="ask-before-signing"] .st-check input').isChecked(), 5000)), 'turned on from Settings, and shown on')
     await shot(p, `${tag}studio-settings-signing`)
     await until(async () => p.locator('.st-sec[data-setting="ask-before-signing"] .st-check input').isChecked(), 5000)
     await p.locator('.st-sec[data-setting="ask-before-signing"] .st-check input').click()
-    ok(!!(await until(async () => !(await api('/studio/sign/ask')).on, 8000)) && signed1().filter((a) => a[0] === 'auth').length >= 1, 'and off again, Touch ID asked first')
+    ok(!!(await until(async () => !(await win('/studio/sign/ask')).on, 8000)) && signed1().filter((a) => a.args[0] === 'auth').length >= 1, 'and off again, Touch ID asked first')
   }
   ok(!(await squeezed(p, '.modal.settings .st-scroll')).length, 'Settings › Studio: no button squeezed', await squeezed(p, '.modal.settings .st-scroll'))
   await p.keyboard.press('Escape')
@@ -601,7 +642,7 @@ try {
   // starts once it's open.
   let readerGo
   const reader = new Promise((r) => { readerGo = r })
-  const dk = await page(b, kit.url, { width: 1440, height: 900, mode: 'dark', before: async (ctx) => { await noServiceWorker(ctx); await ctx.route(/\/assets\/pdf_viewer-[\w-]+\.js$/, async (r) => { await reader; await r.continue().catch(() => {}) }) } })
+  const dk = await page(b, kit.url, { width: 1440, height: 900, mode: 'dark', before: async (ctx) => { await asWindow(ctx); await noServiceWorker(ctx); await ctx.route(/\/assets\/pdf_viewer-[\w-]+\.js$/, async (r) => { await reader; await r.continue().catch(() => {}) }) } })
   pages.push(dk)
   await dk.p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
   const opening = await until(async () => {
@@ -629,7 +670,7 @@ try {
   // Ask Before Signing, as you save: Touch ID, once, then the record.
   if (!IS_WIN) {
     // (Turned on after Sign this opened: the last step reads it as it is.)
-    await api('/studio/sign/ask/setting', { on: true })
+    await win('/studio/sign/ask/setting', { on: true })
     sign({ auth: { ok: true, how: 'touchid' } })
   }
   await dk.p.locator('.sd-place button', { hasText: 'Next: save a signed copy' }).click()
@@ -646,13 +687,13 @@ try {
     const vText = await until(async () => { const t3 = await dk.p.locator('.sd-panel').innerText().catch(() => ''); return /Signed by you on Studio Mac \(Touch ID\)/.test(t3) ? t3 : null }, 8000)
     ok(!!vText, 'the copy\'s versions: signed by you on Studio Mac (Touch ID), with its places', vText)
     await shot(dk.p, `${tag}studio-sign-versions-dark`)
-    const offG = await api('/studio/sign/ask', { purpose: 'settings' })
-    await api('/studio/sign/ask/setting', { on: false, grant: offG.grant })
+    const offG = await win('/studio/sign/ask', { purpose: 'settings' })
+    await win('/studio/sign/ask/setting', { on: false, grant: offG.grant })
   }
   ok(dk.errors.length === 0, 'dark: no page errors', dk.errors)
   // ---------- On a phone ----------
   for (const mode of ['light', 'dark']) {
-    const ph = await page(b, kit.url, { phone: true, mode })
+    const ph = await page(b, kit.url, { phone: true, mode, before: asWindow })
     pages.push(ph)
     await ph.p.waitForSelector('nav.tabbar', { timeout: 20000 })
     ok(!!(await openIn(ph.p, root, 'agreement.pdf')), `phone, ${mode}: the PDF is drawn`, ph.errors)
@@ -709,8 +750,8 @@ try {
     const mine = await until(async () => (await api('/relay')).devices.filter((d) => d.fresh).at(-1), 10000)
     if (mine) await api(`/relay/devices/${mine.id}/keep`, {})
     const phoneId = mine?.id
-    await until(async () => (await api('/studio/sign/setup')).phones.some((x) => x.id === phoneId), 15000)
-    const ask = await api('/studio/sign/phone', { what: 'signature', doc: 'letter.pdf', to: phoneId })
+    await until(async () => (await win('/studio/sign/setup')).phones.some((x) => x.id === phoneId), 15000)
+    const ask = await win('/studio/sign/phone', { what: 'signature', doc: 'letter.pdf', to: phoneId })
     const shownPad = await fr.locator('.ps .ps-canvas').waitFor({ timeout: 15000 }).then(() => true, () => false)
     const head = shownPad ? await fr.locator('.ps').innerText() : ''
     ok(shownPad && /Your signature for Studio Mac/.test(head) && /letter\.pdf/.test(head) && /left/.test(head), `on the phone, ${mode}: the pad over the whole screen, what it's for, from where, and the time left`, { head, perr })
@@ -724,10 +765,31 @@ try {
     await pp.mouse.up()
     await shot(pp, `${tag}studio-sign-on-phone-${mode}`)
     await fr.locator('.ps button', { hasText: 'Use' }).click()
-    const got2 = await until(async () => { const s5 = await api(`/studio/sign/phone/${ask.id}/state`); return s5.state === 'answered' ? s5 : null }, 15000)
+    const got2 = await until(async () => { const s5 = await win(`/studio/sign/phone/${ask.id}/state?pad=${ask.pad}`); return s5.state === 'answered' ? s5 : null }, 15000)
     ok(got2?.ink?.strokes?.length === 1 && got2.ink.strokes[0].length > 10 && !(await fr.locator('.ps').count()), `on the phone, ${mode}: Use sends the strokes back, and the pad goes`, { got: got2 && { ...got2, ink: got2.ink && { w: got2.ink.w, n: got2.ink.strokes.length } } })
     ok(perr.length === 0, `on the phone, ${mode}: no page errors`, perr)
   }
+  // A browser tab on this computer (the key's cookie, not the app's window): signing isn't there,
+  // and it says where it is.
+  {
+    const tab = await page(b, kit.url, { width: 1280, height: 800 })
+    await tab.p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
+    await tab.p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'studio' } })))
+    const note = await until(async () => (await tab.p.locator('.modal.settings .sd-not-here').innerText().catch(() => '')).trim(), 8000)
+    const addBtns = await tab.p.locator('.modal.settings button', { hasText: 'Add a signature' }).count()
+    const imgs = await tab.p.locator('.modal.settings img').evaluateAll((l) => l.filter((x) => /\/api\/studio\/signature\//.test(x.src)).length)
+    const askBox = tab.p.locator('[data-setting="ask-before-signing"] input[type="checkbox"]')
+    const askOff = await askBox.isDisabled()
+    const pinBtns = await tab.p.locator('[data-setting="ask-before-signing"] .sd-pin-row button').count()
+    await shot(tab.p, `${tag}studio-sign-browser-tab`)
+    ok(/^Signing is done in the Bridge AI app on this computer, or in the app on your phone/.test(note || '') && addBtns === 0 && imgs === 0 && askOff && pinBtns === 0, 'a browser tab: no signatures shown or added, Ask Before Signing shown but not changed there, and it says signing is done in the app', { note, addBtns, imgs, askOff, pinBtns })
+    await tab.ctx.close()
+  }
+  // Signed in the app, opened, its versions looked at: still no signed copy and no signature picture
+  // in Bridge AI's data folder.
+  const signedNow = new Set(fs.readdirSync(path.join(dir, '_signed')).map((f) => sha(path.join(dir, '_signed', f))))
+  const keptNow = everything(kit.data).filter((f) => signedNow.has(sha(f)) || (f.startsWith(path.join(kit.data, 'studio')) && fs.readFileSync(f).includes(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]))))
+  ok(!keptNow.length, 'after signing in the app: no signed copy anywhere in Bridge AI\'s data folder, and no picture in Studio\'s', keptNow)
   // ---------- native/bridgesign itself (a Mac) ----------
   // Built for both chips, with its Info.plist inside (so macOS names it Bridge AI), and its probe
   // answers, asking nothing. Its trackpad, Touch ID and Keychain are never run here.

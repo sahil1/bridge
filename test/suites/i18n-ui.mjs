@@ -8,6 +8,7 @@
 // language; and picking one in Settings › You switches to it, in another open window too.
 import fs from 'node:fs'
 import path from 'node:path'
+import crypto from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { startKit, checks, until, browser, page, shot, noServiceWorker, ROOT } from '../lib/harness.mjs'
 
@@ -25,7 +26,11 @@ ok(r.status === 0, 'every language file is valid and keeps each string\'s {place
 console.log(r.stdout.trim())
 ok(LANGS.length > 0 && LANGS.every((l) => !!words[l]), 'every pack reads', LANGS)
 
-const kit = await startKit('i18n-ui')
+// The pages are the app's own window (its secret, server/windowkey.js), so Studio's signing is
+// there to see in each language.
+const WINDOW = crypto.randomBytes(32).toString('base64url')
+const kit = await startKit('i18n-ui', { env: ({ bin }) => { fs.writeFileSync(path.join(bin, 'window-secret'), WINDOW); return { BRIDGE_TEST_WINDOW_FILE: path.join(bin, 'window-secret') } } })
+const asWindow = (ctx) => ctx.setExtraHTTPHeaders({ 'x-bridge-window': WINDOW })
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 const say = (l, en) => words[l]?.[en] || en
@@ -34,7 +39,7 @@ try {
   for (const l of LANGS) {
     const phone = l === 'de' || l === 'hi'
     const look = l === 'ja' || l === 'hi' ? { mode: 'dark', theme: 'midnight' } : { mode: 'light', theme: 'sky' }
-    const { ctx, p, errors } = await page(b, kit.url, { ...look, store: { 'cc-lang': l } })
+    const { ctx, p, errors } = await page(b, kit.url, { ...look, store: { 'cc-lang': l }, before: asWindow })
     // What the page was doing when the sidebar doesn't come: said, not just a timeout.
     const said = []
     const pending = new Set()

@@ -31,6 +31,7 @@
 // native/callwatch (bin/callwatch.json says whether it's allowed) and tccutil (bin/tcc.log).
 import fs from 'node:fs'
 import path from 'node:path'
+import crypto from 'node:crypto'
 import { startKit, startModel, checks, until, sleep, browser, page, shot, phoneFaults, advanced, withoutCutOff, noServiceWorker, IS_MAC, ROOT } from '../lib/harness.mjs'
 import { SECTIONS as PLACE_SECTIONS, TABS as PLACE_TABS, NO_ACCOUNTS, placeEn } from '../../shared/places.js'
 
@@ -40,7 +41,11 @@ const stand = (bin, name, source) => {
   fs.writeFileSync(path.join(bin, name), `#!/bin/sh\nexec "${process.execPath}" "${path.join(bin, `${name}.cjs`)}" "$@"\n`, { mode: 0o755 })
   return path.join(bin, name)
 }
-const kit = await startKit('settings-ui', { env: ({ bin }) => (IS_MAC ? {
+// The pages are the app's own window (its secret, server/windowkey.js), as Settings is in the app:
+// Studio's signatures are listed there, not "signing is done in the app".
+const WINDOW = crypto.randomBytes(32).toString('base64url')
+const asWindow = (ctx) => ctx.setExtraHTTPHeaders({ 'x-bridge-window': WINDOW })
+const kit = await startKit('settings-ui', { env: ({ bin }) => ({ BRIDGE_TEST_WINDOW_FILE: (fs.writeFileSync(path.join(bin, 'window-secret'), WINDOW), path.join(bin, 'window-secret')), ...(IS_MAC ? {
   BRIDGE_CALLWATCH: stand(bin, 'callwatch', `const fs = require('node:fs'), path = require('node:path')
 const read = () => { try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'callwatch.json'), 'utf8')) } catch { return {} } }
 const say = (o) => { process.stdout.write(JSON.stringify(o) + '\\n'); process.exit(0) }
@@ -49,7 +54,7 @@ if (process.argv[2] === 'screen') say({ allowed: !!read().screen })
 setInterval(() => {}, 1000); process.stdout.write('{"input":[]}\\n')`),
   BRIDGE_TCCUTIL: stand(bin, 'tccutil', `require('node:fs').appendFileSync(require('node:path').join(__dirname, 'tcc.log'), process.argv.slice(2).join(' ') + '\\n')`),
   BRIDGE_FIX_BUNDLE_ID: 'dev.bridge-ai.test',
-} : {}) })
+} : {}) }) })
 const model = await startModel('settings-ui')
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
@@ -178,7 +183,7 @@ try {
 
   // ---------- Your Features first, then each section: its essentials, Advanced closed; and nothing lost ----------
   {
-    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
+    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky', before: asWindow })
     await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
     await p.locator('button[aria-label="Settings"]').first().click()
     await p.waitForSelector('.st-nav-item', { timeout: 8000 })
@@ -252,7 +257,7 @@ try {
 
   // ---------- Where a link lands: each tab, and the ids that opened a section before it moved ----------
   {
-    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
+    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky', before: asWindow })
     await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
     const at = () => p.evaluate(() => ({ nav: document.querySelector('.st-nav-item.on > span')?.innerText.trim(), tab: document.querySelector('.st-tabs [role="tab"][aria-selected="true"]')?.innerText.trim() || null }))
     const lands = async (section, nav, tab, sel) => {
@@ -339,7 +344,7 @@ try {
 
   // ---------- Advanced: closed until opened, then kept for its section ----------
   {
-    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
+    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky', before: asWindow })
     await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
     const open = async (section) => { await p.evaluate((s) => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: s } })), section); await p.locator('.modal.settings .st-sections').first().waitFor({ timeout: 8000 }); await settled(p) }
     await open('meetings')
@@ -402,7 +407,7 @@ try {
 
   // ---------- What's on and sends what it reads off the computer: never under Advanced ----------
   {
-    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
+    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky', before: asWindow })
     await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
     const at = async (section) => { await p.evaluate((s) => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: s } })), section); await p.locator('.modal.settings .st-sections').first().waitFor({ timeout: 8000 }); await settled(p) }
     const first = async (id) => (await p.locator(`.modal.settings [data-setting="${id}"]`).isVisible()) && !(await p.locator(`.modal.settings .st-adv [data-setting="${id}"]`).count())
@@ -440,7 +445,7 @@ try {
   // stays just where it showed, and ticked then, it ticks.
   {
     const held = []
-    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky', before: async (c) => { await noServiceWorker(c); await c.route(/\/api\/(consult|subscriptions)(\?|$)/, (r) => held.push(r)) } })
+    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky', before: async (c) => { await asWindow(c); await noServiceWorker(c); await c.route(/\/api\/(consult|subscriptions)(\?|$)/, (r) => held.push(r)) } })
     await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
     await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'keep-agents' } })))
     const tick = p.locator('.modal.settings [data-setting="keep-agents"] input')
@@ -471,7 +476,7 @@ try {
       await advanced(p)
       return p.locator('.modal.settings .st-screen-names')
     }
-    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
+    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky', before: asWindow })
     await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
     let row = await go(p)
     const text = () => row.innerText().catch(() => '')
@@ -509,7 +514,7 @@ try {
 
   // ---------- A phone, dark ----------
   {
-    const { ctx, p, errors } = await page(b, kit.url, { mode: 'dark', theme: 'midnight', phone: true })
+    const { ctx, p, errors } = await page(b, kit.url, { mode: 'dark', theme: 'midnight', phone: true, before: asWindow })
     await p.setViewportSize({ width: 375, height: 812 })
     await p.waitForSelector('.tabbar button', { timeout: 15000 })
     await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'meetings' } })))

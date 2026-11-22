@@ -32,7 +32,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import zlib from 'node:zlib'
-import { startKit, startRelay, startSlack, checks, until, browser, page, shot, rawFetch, TEST, IS_WIN } from '../lib/harness.mjs'
+import crypto from 'node:crypto'
+import { startKit, startRelay, startSlack, checks, until, browser, page, shot, TEST, IS_WIN } from '../lib/harness.mjs'
 import { lookers, openSettings, M, openBot } from '../lib/bots.mjs'
 import { linkAs } from '../lib/linkclient.mjs'
 
@@ -50,19 +51,31 @@ const slack = await startSlack('backup-move')
 // set to one of its own (chief.path).
 const kitWith = async (name, rel, { inHome = false, chief = null } = {}) => {
   let dataDir = null
+  // The app's window secret, given to the server at start as the app gives it (server/windowkey.js):
+  // what signatures are used and moved from.
+  const windowSecret = crypto.randomBytes(32).toString('base64url')
   const k = await startKit(`backup-move-${name.toLowerCase()}`, {
     config: { name: 'Tester', trials: { 'slack-bot': true, routines: true }, ...(chief ? { chief: { kind: 'claude', path: chief } } : {}) },
-    env: ({ data, home }) => {
+    env: ({ data, home, bin }) => {
+      fs.writeFileSync(path.join(bin, 'window-secret'), windowSecret)
       let d = data
       if (inHome) { d = path.join(home, '.bridge-ai'); fs.mkdirSync(d, { recursive: true }); fs.copyFileSync(path.join(data, 'config.json'), path.join(d, 'config.json')) }
       if (chief) fs.mkdirSync(path.join(home, chief.replace(/^~[\\/]/, ''), 'state'), { recursive: true })
       dataDir = d
       if (rel) fs.writeFileSync(path.join(d, 'relay.json'), JSON.stringify(rel.relayFile))
       for (const f of ['notes', 'inbox']) fs.mkdirSync(path.join(home, f), { recursive: true })
-      return { BRIDGE_COMPUTER_NAME: name, BRIDGE_SLACK_URL: slack.url, BRIDGE_SLACK_PING_MS: '1000', BRIDGE_HELPER_GONE_MS: '3000', BRIDGE_HELPER_STALL_MS: '8000', BRIDGE_BOT_HOLD_MS: '60000', BRIDGE_LINK_PING_MS: '1500', ...(inHome ? { BRIDGE_HOME: d } : {}) }
+      return { BRIDGE_COMPUTER_NAME: name, BRIDGE_SLACK_URL: slack.url, BRIDGE_SLACK_PING_MS: '1000', BRIDGE_HELPER_GONE_MS: '3000', BRIDGE_HELPER_STALL_MS: '8000', BRIDGE_BOT_HOLD_MS: '60000', BRIDGE_LINK_PING_MS: '1500', BRIDGE_TEST_WINDOW_FILE: path.join(bin, 'window-secret'), ...(inHome ? { BRIDGE_HOME: d } : {}) }
     },
   })
   k.dataDir = dataDir
+  // As the app's own window asks: the JSON back, or a refusal thrown with its status and answer.
+  k.win = async (p, body, method) => {
+    const r = await fetch(`${k.url}/api${p}`, { method: method || (body ? 'POST' : 'GET'), headers: { 'content-type': 'application/json', 'x-bridge-window': windowSecret }, body: body ? JSON.stringify(body) : undefined })
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok) throw Object.assign(new Error(j.error || `HTTP ${r.status}`), { status: r.status, j })
+    return j
+  }
+  k.windowSecret = windowSecret
   kits.push(k)
   k.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'helper-claude.cjs'), 'utf8'))
   await k.api('/setup', { name: 'Tester' })
@@ -167,18 +180,28 @@ try {
     const chunk = (type, data) => { const len = Buffer.alloc(4); len.writeUInt32BE(data.length); const td = Buffer.concat([Buffer.from(type), data]); const c = Buffer.alloc(4); c.writeUInt32BE(zlib.crc32(td) >>> 0); return Buffer.concat([len, td, c]) }
     const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 6
     const png = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))])
-    await studio.api('/studio/signatures', { kind: 'signature', name: 'Studio hand', png: `data:image/png;base64,${png.toString('base64')}` })
-    const withSigs = await studio.api('/backup/file', { passphrase: PASS, signatures: true })
+    await studio.win('/studio/signatures', { kind: 'signature', name: 'Studio hand', png: `data:image/png;base64,${png.toString('base64')}` })
+    // Only from the app's own window, once it's asked that it's you (with no Touch ID or PIN here,
+    // the window itself): never for a program with only the key.
+    const byKey = await studio.api('/backup/file', { passphrase: PASS, signatures: true }).then(() => null, (e) => e)
+    const noGrant = await studio.win('/backup/file', { passphrase: PASS, signatures: true }).then(() => null, (e) => e)
+    const g = await studio.win('/studio/sign/ask', { purpose: 'export' })
+    ok(byKey?.status === 403 && noGrant?.status === 403 && noGrant.j?.code === 'ask' && !!g.grant, 'your signatures into a backup: refused to the key alone, and from the window until it\'s asked', { byKey: byKey?.j, noGrant: noGrant?.j })
+    const withSigs = await studio.win('/backup/file', { passphrase: PASS, signatures: true, grant: g.grant })
     const wText = JSON.stringify(withSigs)
     ok(!wText.includes(png.toString('base64').slice(10, 90)) && !wText.includes('Studio hand'), 'with your signatures ticked: in the file, sealed with the rest (not a picture in the open)')
     const o = await spare.api('/backup/open', { file: wText, passphrase: PASS })
     ok(o.plan.signatures.length === 1 && o.plan.signatures[0].name === 'Studio hand' && o.plan.optIn.includes('signatures'), 'opened: your signature listed, to tick', o.plan.signatures)
-    const r = await spare.api('/backup/apply', { id: o.id, parts: { bots: false, connections: false, chief: false, signatures: true } })
-    const there = (await spare.api('/studio/sign/setup')).list
+    // Applied by a program with only the key: the rest restored, the signatures not added, saying why.
+    const byProg = await spare.api('/backup/apply', { id: o.id, parts: { bots: false, connections: false, chief: false, signatures: true } })
+    ok(byProg.signatures === 0 && byProg.problems.some((x) => /Your signatures couldn't be added/.test(x)) && !(await spare.win('/studio/sign/setup')).list.length, 'applied by a program with only the key: no signature added, and it says why', byProg)
+    const o2 = await spare.api('/backup/open', { file: wText, passphrase: PASS })
+    const r = await spare.win('/backup/apply', { id: o2.id, parts: { bots: false, connections: false, chief: false, signatures: true } })
+    const there = (await spare.win('/studio/sign/setup')).list
     const one = there.find((x) => x.name === 'Studio hand')
-    const pic = one ? await rawFetch(`${spare.url}/api/studio/signature/${one.id}`, { headers: { cookie: `${spare.cookie.name}=${spare.cookie.value}` } }) : null
+    const pic = one ? await fetch(`${spare.url}/api/studio/signature/${one.id}`, { headers: { 'x-bridge-window': spare.windowSecret } }) : null
     ok(r.signatures === 1 && !!one && one.width === w && pic?.status === 200 && Buffer.from(await pic.arrayBuffer()).equals(png), 'ticked: on Spare, the same picture, sealed again with Spare\'s own key', { r: r.signatures, there })
-    await spare.api(`/studio/signatures/${one.id}`, null, 'DELETE')
+    await spare.win(`/studio/signatures/${one.id}`, null, 'DELETE')
   })
 
   // ---------- Restore, on Spare ----------
