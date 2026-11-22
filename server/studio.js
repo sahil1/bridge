@@ -494,7 +494,13 @@ export async function movedTo(root, rel, fileId) {
   return { path: null }
 }
 // The real path a file had (it may not be there now): its versions are kept under it.
-const realOf = async (root, rel) => path.resolve((await safePath(root, '')).realRoot, String(rel || '').replace(/^\/+/, ''))
+// Where a file that's gone was, inside its root: never a path that steps out of it.
+const realOf = async (root, rel) => {
+  const { realRoot } = await safePath(root, '')
+  const real = path.resolve(realRoot, String(rel || '').replace(/^\/+/, ''))
+  if (real !== realRoot && !real.startsWith(realRoot + path.sep)) throw new Error('Not found')
+  return real
+}
 // What the page has of a file that's gone, whole: as it is (buf), or, opened in parts, with the parts
 // the page never had put back from that file's versions (studioparts.merge).
 async function wholeOf(root, from, buf, fromParts) {
