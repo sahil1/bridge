@@ -11,6 +11,10 @@
 // over frames when the bandwidth drops, at a bitrate for the size; as pictures, WebP where this page
 // can make it, each as good as fits in one message. Another screen in the same session takes the
 // place of the first (the viewer picked it), with nothing to connect again.
+// A screen that won't start is tried once more a moment later, unless it's locked (macOS and Windows
+// let no app take a locked screen): that's said instead, the session kept, and the server has it
+// taken again once it's unlocked (resume). ?fake=1 stands in for both: window.bridgeTestLock (the
+// app's word, { locked }) and window.bridgeTestFails (starts that fail, as macOS's do).
 import { useEffect, useState } from 'react'
 import { openSocket } from '../../api.js'
 import { packFrame, MAX_FRAME, PICTURE, captureSize, bitrateFor, sdpBitrate } from '../../../shared/remote.js'
@@ -43,8 +47,11 @@ const fakeCanvas = (source, most) => {
   return c
 }
 
+// A display that just woke or changed can fail to start the first time: tried again this long after.
+const AGAIN_MS = 1000
+
 async function list() {
-  if (FAKE) return { sources: FAKE_SOURCES, permission: 'ok' }
+  if (FAKE) return { sources: FAKE_SOURCES, permission: 'ok', ...(window.bridgeTestLock ? { lock: window.bridgeTestLock } : {}) }
   const r = await window.bridgeApp?.remote?.sources?.().catch(() => null)
   return r || { sources: [], permission: null }
 }
@@ -58,10 +65,13 @@ async function thumbs() {
 // tests' canvas, drawn on so something changes.
 async function streamOf(source) {
   if (FAKE) {
+    // (As macOS says it for a screen it won't give; a locked one ends one it gave.)
+    const locked = () => !!window.bridgeTestLock?.locked
+    if (locked() || window.bridgeTestFails > 0) { if (!locked()) window.bridgeTestFails--; throw new DOMException('Could not start video source', 'NotReadableError') }
     const c = fakeCanvas(source, 960)
     let n = 0
-    const draw = () => drawFake(c, source, ++n)
-    draw()
+    const draw = () => { if (!locked()) return drawFake(c, source, ++n); clearInterval(tm); const v = s.getVideoTracks()[0]; v.stop(); v.dispatchEvent(new Event('ended')) }
+    drawFake(c, source, ++n)
     const tm = setInterval(draw, 200)
     const s = c.captureStream(10)
     s.getVideoTracks()[0].addEventListener('ended', () => clearInterval(tm))
@@ -71,6 +81,20 @@ async function streamOf(source) {
   // Its own pixels, its shape kept exactly (a box of another shape would letterbox the picture).
   const size = captureSize(source.w, source.h)
   return navigator.mediaDevices.getUserMedia({ audio: false, video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: source.id, maxWidth: size.w, maxHeight: size.h, maxFrameRate: 30 } } })
+}
+// The source's stream, tried once more a moment later when it fails, unless the screen is locked
+// (then { lock }, the app's word). { stream } | { lock } | { error, r } (r: the list, with whether
+// macOS lets Bridge AI record the screen). gone(): it's not wanted any more.
+async function take(source, gone) {
+  for (let tries = 0; ; tries++) {
+    try { return { stream: await streamOf(source) } } catch (error) {
+      const r = await list().catch(() => ({}))
+      if (r.lock?.locked) return { lock: r.lock }
+      if (tries || gone() || (r.permission && r.permission !== 'ok')) return { error, r }
+      await new Promise((ok) => setTimeout(ok, AGAIN_MS))
+      if (gone()) return { error, r }
+    }
+  }
 }
 // Text on a screen: detail over motion.
 const forScreen = (stream) => { const v = stream.getVideoTracks()[0]; if (v && 'contentHint' in v) v.contentHint = 'detail'; return v }
@@ -102,7 +126,13 @@ export default function Capture() {
     let closed = false
     let refused = 0 // connections turned away in a row
     const send = (m) => { if (ws?.readyState === 1) ws.send(JSON.stringify(m)) }
-    const hello = async (t) => { const r = await list(); send({ t, sources: r.sources, permission: r.permission, ...(r.none ? { none: r.none, problem: r.problem || null } : {}), p2p: typeof RTCPeerConnection === 'function' }) }
+    const hello = async (t) => { const r = await list(); send({ t, sources: r.sources, permission: r.permission, ...(r.none ? { none: r.none, problem: r.problem || null } : {}), ...(r.lock ? { lock: r.lock } : {}), p2p: typeof RTCPeerConnection === 'function' }) }
+    // A screen not taken, after a second try: why (in plain words, what the system said as detail),
+    // and which screens there are now.
+    const failed = (id, { error, r }) => {
+      send({ t: 'error', session: id, ...(r.permission && r.permission !== 'ok' ? { why: 'macOS hasn\'t allowed Bridge AI to record the screen here yet. Allow it at this computer in System Settings › Privacy & Security › Screen & System Audio Recording, then open Bridge AI again.' } : { code: 'capture', why: 'Bridge AI couldn\'t start showing this screen.', detail: String(error?.message || error || '').slice(0, 200) }) })
+      send({ t: 'sources', sources: r.sources || [], permission: r.permission || null, p2p: typeof RTCPeerConnection === 'function' })
+    }
     const stop = (id) => {
       starting.delete(id)
       const s = sessions.get(id)
@@ -159,14 +189,13 @@ export default function Capture() {
       const token = {}
       starting.set(m.session, token)
       const gone = () => starting.get(m.session) !== token
-      let stream
-      try { stream = await streamOf(m.source) } catch (e) {
+      const got = await take(m.source, gone)
+      if (!got.stream) {
         if (gone()) return
-        const r = await list().catch(() => ({}))
-        send({ t: 'error', session: m.session, why: r.permission && r.permission !== 'ok' ? 'macOS hasn\'t allowed Bridge AI to record the screen here yet. Allow it at this computer in System Settings › Privacy & Security › Screen & System Audio Recording, then open Bridge AI again.' : `The screen couldn't be shared: ${e.message}` })
-        send({ t: 'sources', sources: r.sources || [], permission: r.permission || null, p2p: typeof RTCPeerConnection === 'function' })
-        return
+        if (got.lock) return send({ t: 'locked', session: m.session, lock: got.lock })
+        return failed(m.session, got)
       }
+      const stream = got.stream
       const drop = () => { stream.getTracks().forEach((x) => x.stop()); stream.stopDraw?.() }
       if (gone()) return drop()
       const video = document.createElement('video')
@@ -198,14 +227,25 @@ export default function Capture() {
         send({ t: 'offer', session: m.session, sdp: offer.sdp })
       } catch { frames(m.session, m.rate) }
     }
-    // The screen's own end (unplugged, taken away): said, and the session stops.
-    const watchEnd = (id, track) => track?.addEventListener('ended', () => { const s = sessions.get(id); if (s?.stream?.getVideoTracks()[0] !== track) return; send({ t: 'error', session: id, why: 'The screen stopped being shared here.' }); stop(id) })
+    // The screen's own end (unplugged, taken away): said, and the session stops. Locked (which ends
+    // it): said so, and the session kept, to take the screen again over it once it's unlocked.
+    const watchEnd = (id, track) => track?.addEventListener('ended', async () => {
+      const s = sessions.get(id)
+      const mine = () => sessions.get(id) === s && s?.stream?.getVideoTracks()[0] === track
+      if (!mine()) return
+      const lock = (await list().catch(() => ({}))).lock
+      if (!mine()) return
+      if (lock?.locked) return send({ t: 'locked', session: id, kept: true, lock })
+      send({ t: 'error', session: id, why: 'The screen stopped being shared here.' })
+      stop(id)
+    })
     // Another screen picked by the viewer: its stream in place of the last, over the same connection.
     const switchTo = async (m) => {
       const s = sessions.get(m.session)
       if (!s) return
-      let stream
-      try { stream = await streamOf(m.source) } catch (e) { send({ t: 'error', session: m.session, why: `That screen couldn't be shared: ${e.message}` }); return }
+      const got = await take(m.source, () => sessions.get(m.session) !== s)
+      if (!got.stream) return sessions.get(m.session) === s && (got.lock ? send({ t: 'locked', session: m.session, kept: true, lock: got.lock }) : failed(m.session, got))
+      const stream = got.stream
       if (sessions.get(m.session) !== s) { stream.getTracks().forEach((x) => x.stop()); stream.stopDraw?.(); return }
       const old = s.stream
       const track = forScreen(stream)
@@ -237,6 +277,8 @@ export default function Capture() {
         else if (m.t === 'start') start(m).catch(() => {})
         else if (m.t === 'stop') stop(m.session)
         else if (m.t === 'switch' && s) switchTo(m).catch(() => {})
+        // Unlocked: the screen again, over the session's own connection when it has one still.
+        else if (m.t === 'resume') (s ? switchTo(m) : start(m)).catch(() => {})
         // Told to start sharp rather than climb from a blur, with a floor that keeps text readable.
         else if (m.t === 'answer' && s?.pc) s.pc.setRemoteDescription({ type: 'answer', sdp: sdpBitrate(m.sdp, { startKbps: Math.min(4000, bitrateFor(s.size?.w, s.size?.h) / 3000), minKbps: 500 }) }).then(() => tune(s.pc, s.size?.w, s.size?.h), () => {})
         else if (m.t === 'ice' && s?.pc) s.pc.addIceCandidate(m.c).catch(() => {})

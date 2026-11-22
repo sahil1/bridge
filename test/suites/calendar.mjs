@@ -300,12 +300,12 @@ try {
   ok(tk.tasks.some((x) => x.title.startsWith('Book the offsite') && x.due === ymd(wed)) && tk.tasks.some((x) => /tomorrow/.test(x.title) && x.due === ymd(NOW + DAY)) && !tk.tasks.some((x) => /wiki/.test(x.title)), 'the tasks that name a day, on that day; one with none isn\'t on the calendar', tk.tasks)
 
   // ---------- Meeting prep with no model ----------
-  // With Meeting Insights off (a beta feature, and what knows who's been in your meetings), who's
-  // invited is all it says: nobody met before, nobody new, here or in what a model would be told.
-  await api('/settings', { trials: { 'meeting-insights': false } }, 'PATCH')
+  // With Meeting Insights off (what knows who's been in your meetings), who's invited is all it says:
+  // nobody met before, nobody new, here or in what a model would be told.
+  await api('/settings', { meetings: { insights: false } }, 'PATCH')
   const pOff = await api('/prep', { event: soonEv })
   ok(pOff.people.insights === false && !pOff.people.known.length && pOff.people.new.length === 3, 'Meeting Insights off: who\'s coming, with nobody said to be met before or new', pOff.people)
-  await api('/settings', { trials: { 'meeting-insights': true } }, 'PATCH')
+  await api('/settings', { meetings: { insights: true } }, 'PATCH')
   const p0 = await api('/prep', { event: soonEv })
   ok(p0.writer === null && !p0.suggest && p0.people.known.map((x) => x.name).sort().join() === 'Leo Brandt,Maya Okafor' && p0.people.new.join() === 'Ravi Menon', "no model: who's coming, the people you've met (Meeting Insights' People) and the one who's new", p0.people)
   ok(p0.people.known.every((x) => x.invited === x.name && x.id), "each one you've met says the name they're invited by, for the guests to say who they are", p0.people.known)
@@ -768,7 +768,7 @@ try {
 
   // ---------- Home's Coming Up ----------
   {
-    await api('/settings', { trials: { home: true } }, 'PATCH')
+    await api('/settings', { home: { on: true } }, 'PATCH')
     const pg = await page(b, kit.url, { width: 1440, height: 900, before: async (c) => { await setUp(c); await changeAnswer(c, /\/api\/config(\?|$)/, (real) => ({ ...real, calendar: true })) } })
     pages.push(pg)
     const { p, errors } = pg
@@ -797,7 +797,7 @@ try {
     ok(!!(await until(async () => /Northwind pricing sync/.test(await p.locator('.cal-detail h4').innerText().catch(() => '')), 10000)) && opener.opened().length === opens, "View Calendar opens the meeting in Today › Calendar, with its panel (not the Mac's Calendar)")
     ok(real(errors).length === 0, 'Home: no page errors', errors)
     await p.context().close()
-    await api('/settings', { trials: { home: false } }, 'PATCH')
+    await api('/settings', { home: { on: false } }, 'PATCH')
   }
 
   // ---------- A phone, light and dark ----------

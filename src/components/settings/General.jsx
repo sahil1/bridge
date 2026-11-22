@@ -4,7 +4,7 @@ import AgentMark from './agentMark.jsx'
 import { USAGE_OFF_WHY } from '../Usage.jsx'
 import { t, tn, tx } from '../../i18n/index.js'
 import { api, settingsChanged, refetch } from '../../api.js'
-import { useTrial } from '../../trials.js'
+import { useFeature } from '../../trials.js'
 import { askRestart, useRecheck } from '../PermissionFix.jsx'
 import { Advanced, Line, More } from './Advanced.jsx'
 
@@ -28,6 +28,15 @@ export function useSettings() {
     } catch (e) { setNote({ error: e.message }) }
   }
   return { s, save, note, reload: load }
+}
+
+// A switch as you set it, at once, saved behind it, and put back if that fails (save resolves to
+// nothing then): [on, set]. saved: as the settings have it.
+export function useSwitch(saved, save) {
+  const [mine, setMine] = useState(null)
+  useEffect(() => { setMine(null) }, [saved])
+  const set = async (v) => { setMine(v); if (!(await save(v))) setMine(null) }
+  return [mine ?? saved, set]
 }
 
 export function SaveNote({ note }) {
@@ -120,7 +129,7 @@ export function ChiefOfStaff({ s, save, agents, children }) {
 // terminal and where agents run. For people who live in a terminal.
 export function AgentsAdvanced({ s, save }) {
   const eff = s.effective
-  const commandsOn = useTrial('routines')
+  const commandsOn = useFeature('routines')
   const seg = (label, value, options, onPick) => (
     <div className="seg ap-seg" role="radiogroup" aria-label={t(label)}>
       {options.map(([v, l]) => <button key={l} type="button" role="radio" aria-checked={value === v} className={value === v ? 'on' : ''} onClick={() => onPick(v)}>{t(l)}</button>)}
@@ -214,7 +223,7 @@ function TerminalApp({ value, onSave }) {
   )
 }
 
-// Command History (Scheduled Routines, a beta feature): what you asked in Bridge AI's boxes, kept on
+// Command History (with Scheduled Routines on): what you asked in Bridge AI's boxes, kept on
 // this computer for History › Commands and routine suggestions. On or off, for how long, Delete all.
 const KEEP = [['30d', tx('30 days')], ['90d', tx('90 days')], ['1y', tx('1 year')]]
 function CommandHistory({ value, save }) {

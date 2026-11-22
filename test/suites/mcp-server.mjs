@@ -9,11 +9,15 @@
 // Needs You (and one that can't be kept once the file changed says why), a task. Sending to an
 // agent: no such tool while it's off; turned on, the app is told the tools changed, and a send
 // waits in Needs You until approved, then reaches the agent. Every call written down with the app's
-// name. Turned off: refused, saying where to turn it on. Bridge AI not running: each tool says so.
+// name. Out of Beta Features, an ordinary setting off until turned on (this kit's settings are from
+// before, with its Beta Features switch on: on, saved as its own setting). Turned off: refused,
+// saying where to turn it on; turned on only at the computer itself (a device through the relay
+// can't, either way of saying it, but can turn it off). Bridge AI not running: each tool says so.
 // /mcp over HTTP: only with the key, never from a page, headers checked, 405 for GET. Added in one
 // click to Claude Code, Claude Desktop, Cursor and Codex (their configs in a stand-in home,
 // BRIDGE_MCP_HOME), each as its docs say, and the command it's given answers. And Settings › Agents
-// & Models › MCP Servers' card in the browser (BRIDGE_TEST_BROWSER), light and dark, and a suggestion in Needs You.
+// & Models › MCP Servers' card in the browser (BRIDGE_TEST_BROWSER), light and dark, with no Beta
+// mark, and a suggestion in Needs You.
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
@@ -82,6 +86,9 @@ try {
   })
   kit.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'claude.cjs'), 'utf8'))
   await kit.api('/setup', { name: 'Tester' })
+  // Its Beta Features switch on, from before 3.22.0: on, saved as its own setting.
+  const saved = JSON.parse(fs.readFileSync(path.join(kit.data, 'config.json'), 'utf8'))
+  ok((await kit.api('/config')).features?.['mcp-server'] === true && saved.mcpServer?.on === true && !saved.trials && !('mcp-server' in ((await kit.api('/config')).trials || {})), 'its Beta Features switch on from before: on, saved as its own setting, and no Beta Feature now', saved)
   await kit.api('/agents/catalog')
   await kit.api('/places', { path: path.join(kit.home, 'Projects') })
   await kit.api('/boards', { title: 'Roadmap', source: { kind: 'mermaid', text: 'flowchart LR\n  A[Plan] --> B[Build]' } })
@@ -222,10 +229,17 @@ try {
   ok(s.clients[0]?.name === 'Test Client' && s.clients[0].calls >= 20, 'and each app, with its calls', s.clients)
 
   // ---------- Off, and not running ----------
-  await kit.api('/settings', { trials: { 'mcp-server': false } }, 'PATCH')
+  // From one of your devices (through the relay): it can turn it off, never on, either way of saying it.
+  const fromDevice = (body) => fetch(`${kit.url}/api/settings`, { method: 'PATCH', headers: { 'content-type': 'application/json', 'x-bridge-relay': 'phone-test' }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, j: await r.json().catch(() => ({})) }))
+  const offThere = await fromDevice({ mcpServer: { on: false } })
+  ok(offThere.status === 200 && (await kit.api('/config')).features['mcp-server'] === false, 'a device can turn it off', offThere)
   const offRead = await c.call('bridge_find', {})
   ok(offRead.isError && /turned off/.test(offRead.text) && /Settings › Agents & Models › MCP Servers › Bridge AI as an MCP Server/.test(offRead.text), 'turned off: each call refused, saying where to turn it on', offRead.text)
-  await kit.api('/settings', { trials: { 'mcp-server': true } }, 'PATCH')
+  const onThere = await fromDevice({ mcpServer: { on: true } })
+  const onOld = await fromDevice({ trials: { 'mcp-server': true } })
+  const rawOn = await fetch(`${kit.url}/api/settings/raw`, { method: 'PUT', headers: { 'content-type': 'application/json', 'x-bridge-relay': 'phone-test' }, body: JSON.stringify({ text: JSON.stringify({ ...(await kit.api('/settings')).user, mcpServer: { on: true } }) }) })
+  ok(onThere.status === 403 && onThere.j.code === 'here' && onOld.status === 403 && rawOn.status === 403 && (await kit.api('/config')).features['mcp-server'] === false, 'but never on: refused, saying to do it at the computer itself, its old Beta Features switch and the file too', { onThere, onOld: onOld.status, raw: rawOn.status })
+  await kit.api('/settings', { mcpServer: { on: true } }, 'PATCH')
   const away = client({ BRIDGE_PORT: '9' })
   await away.rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'x', version: '1' } }, { modern: false })
   const awayList = await away.rpc('tools/list', null, { modern: false })
@@ -305,7 +319,7 @@ try {
     const card = p.locator('.mcp-self')
     await card.locator('.mcp-calls li').first().waitFor({ timeout: 15000 })
     const words = await card.innerText()
-    ok(/Bridge AI as an MCP Server/.test(words) && /Beta/i.test(words) && /Never/.test(words) && /transcripts/.test(words) && /Anthropic/.test(words), `the card (${mode}): what other apps get and never get, and where it goes`, words.slice(0, 400))
+    ok(/Bridge AI as an MCP Server/.test(words) && !(await card.locator('.st-chip.beta').count()) && /Never/.test(words) && /transcripts/.test(words) && /Anthropic/.test(words), `the card (${mode}): what other apps get and never get, and where it goes`, words.slice(0, 400))
     // Each line one sentence, its verb in bold (in a language's own order once translated).
     const lines = await card.locator('.mcp-shared li').evaluateAll((ls) => ls.map((l) => ({ b: l.querySelector('b')?.innerText.trim(), text: l.innerText.trim() })))
     ok(JSON.stringify(lines.map((l) => l.b)) === '["Read","Make","Suggest","Never"]' && lines.every((l) => l.text.startsWith(`${l.b} `) && !l.text.includes('*')), `(${mode}) each thing they can do starts with its verb in bold`, lines)
@@ -326,9 +340,9 @@ try {
     const sw = p.locator('.mcp-self .mcp-switch input')
     await p.locator('.mcp-self-body').waitFor({ timeout: 15000 })
     await sw.uncheck()
-    ok(!!(await until(async () => (await p.locator('.mcp-self-body').count()) === 0 && (await kit.api('/config')).trials?.['mcp-server'] === false, 15000)), 'its switch turns it off (the beta feature), and the rest folds away', { body: await p.locator('.mcp-self-body').count(), checked: await sw.isChecked(), trial: (await kit.api('/config')).trials })
+    ok(!!(await until(async () => (await p.locator('.mcp-self-body').count()) === 0 && (await kit.api('/config')).features?.['mcp-server'] === false && (await kit.api('/settings')).user.mcpServer?.on === false, 15000)), 'its switch turns it off (its own setting), and the rest folds away', { body: await p.locator('.mcp-self-body').count(), checked: await sw.isChecked(), trial: (await kit.api('/config')).trials })
     await sw.check()
-    ok(!!(await until(async () => (await p.locator('.mcp-self-body').count()) === 1 && (await kit.api('/config')).trials?.['mcp-server'] === true, 15000)), 'and on again')
+    ok(!!(await until(async () => (await p.locator('.mcp-self-body').count()) === 1 && (await kit.api('/config')).features?.['mcp-server'] === true, 15000)), 'and on again')
     await ctx.close()
   }
   {

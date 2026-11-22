@@ -673,7 +673,7 @@ try {
     const fromLaptop = await fetch(`${laptop.url}/m/${S.id}/api/settings`, { method: 'PATCH', headers: { 'content-type': 'application/json', authorization: `Bearer ${laptop.key}` }, body: JSON.stringify({ trials: { 'remote-screen': false } }) })
     const fromTs = await raw(studio, 'PATCH', '/api/settings', { headers: ts, body: { trials: { 'remote-screen': false } } })
     ok([fromPhone.status, gone0.status, rawOff.status, fromLaptop.status, fromTs.status].every((x) => x === 403) && await trial() === true, 'Remote Screen and Preview can\'t be turned off from a phone (nor its settings file, nor trials taken away), Laptop\'s window or Tailscale', [fromPhone.status, gone0.status, rawOff.status, fromLaptop.status, fromTs.status])
-    ok((await ph.request('PATCH', '/api/settings', { trials: { home: false } })).status === 200, 'another Beta Feature still changes from a phone')
+    ok((await ph.request('PATCH', '/api/settings', { trials: { 'usage-everywhere': false } })).status === 200, 'another Beta Feature still changes from a phone')
     // Turned off at Studio: one you unticked stays out; a New one is let in until it's on again.
     const p5 = over(await linkAs(ra.url, { code: (await studio.api('/relay/pair', {})).pairing.code, name: 'Phone5', about: { name: 'Phone5' } }))
     const d5 = await until(async () => (await studio.api('/remote')).access.devices.find((x) => x.name === 'Phone5'), 8000, 200)

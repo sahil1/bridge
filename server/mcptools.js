@@ -30,7 +30,7 @@ const ago = (ms) => {
 const say = (text, isError = false) => ({ content: [{ type: 'text', text }], ...(isError ? { isError: true } : {}) })
 const why = (e) => Object.assign(new Error(e), { said: true })
 
-// on(): the feature is on (a beta feature); sendOn(): sending to agents is; boards, meetings,
+// on(): the feature is on (mcpServer.on, off until you turn it on); sendOn(): sending to agents is; boards, meetings,
 // places, files, studio, doctext: the server's modules; tasks: the task list (chieftasks.js);
 // agents(): the agents running ({ paneId, name, kind, status, folder }); deliver(paneId, text): sends
 // a message to one, now or once it's free; outside: outside.js.

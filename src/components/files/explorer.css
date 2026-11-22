@@ -72,11 +72,15 @@
 /* As much as the scroll bars' rule for every element (styles.css, under :root), which this file can load before. */
 :root .fx-path { scrollbar-width: none; }
 .fx-path[hidden] { display: none; }
-.fx-crumb-wrap { display: inline-flex; align-items: center; gap: 2px; color: var(--ink-3); }
-.fx-crumb { flex: none; height: 26px; padding: 0 7px; border-radius: 6px; color: var(--ink-2); font: 13px var(--font); max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+/* The folders above the one you're in give way first (cut with …), down to a few letters each; the
+   one you're in stays whole (Explorer.jsx scrolls the bar to it when even that's too wide). */
+.fx-crumb-wrap { display: contents; color: var(--ink-3); }
+.fx-crumb-wrap > svg { flex: none; }
+.fx-crumb { flex: 0 1 auto; min-width: 3.5em; height: 26px; padding: 0 7px; border-radius: 6px; color: var(--ink-2); font: 13px var(--font); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fx-crumb[aria-current="location"] { flex: none; min-width: 0; }
 .fx-crumb:hover { background: color-mix(in srgb, var(--ink) 6%, transparent); color: var(--ink); }
 .fx-crumb[aria-current="location"] { color: var(--ink); font-weight: 600; }
-.fx-crumb-pc { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; margin-right: 4px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 12px; font-weight: 500; }
+.fx-crumb-pc { flex: none; display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; margin-right: 4px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 12px; font-weight: 500; }
 .fx-tools { display: flex; align-items: center; gap: 6px; flex: none; }
 .fx-search { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; width: 210px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane); color: var(--ink-3); }
 .fx-search:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, var(--line-2)); }

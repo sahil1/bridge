@@ -50,7 +50,7 @@ const slack = await startSlack('backup-move')
 const kitWith = async (name, rel, { inHome = false, chief = null } = {}) => {
   let dataDir = null
   const k = await startKit(`backup-move-${name.toLowerCase()}`, {
-    config: { name: 'Tester', trials: { 'slack-bot': true, routines: true }, ...(chief ? { chief: { kind: 'claude', path: chief } } : {}) },
+    config: { name: 'Tester', trials: { 'slack-bot': true }, ...(chief ? { chief: { kind: 'claude', path: chief } } : {}) },
     env: ({ data, home }) => {
       let d = data
       if (inHome) { d = path.join(home, '.bridge-ai'); fs.mkdirSync(d, { recursive: true }); fs.copyFileSync(path.join(data, 'config.json'), path.join(d, 'config.json')) }

@@ -25,7 +25,7 @@ export const configure = (c, { chief } = {}) => { cfg = c || {}; if (chief) chie
 const DAY = 864e5
 const low = (s) => String(s || '').toLowerCase().replace(/[\s-]+/g, ' ').trim()
 const me = () => String(cfg.name || '').trim()
-const insightsOn = () => cfg.trials?.['meeting-insights'] === true
+const insightsOn = () => cfg.meetings?.insights === true
 
 // ---------- What kind each one is ----------
 // The kind you or a summary gave it, else a guess: a person you've met (an invite, a name on a

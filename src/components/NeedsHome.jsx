@@ -13,8 +13,8 @@ import { split, isQuiet, compare, TOP, QUIET_DAYS } from '../../shared/focus.js'
 import { arrange, isDefault, reorder } from '../../shared/homelayout.js'
 import './needshome.css'
 
-// Home (a beta feature, `home`): Needs you as the place the app opens at, on a computer and a
-// phone. What needs you first, answered right there (Yes, No, the agent's own choices, Reply). Then
+// Home (home.on, on unless you turn it off in Settings › You): Needs you as a place of its own, on a
+// computer and a phone, where the app starts when there's nowhere to go back to (App.jsx). What needs you first, answered right there (Yes, No, the agent's own choices, Reply). Then
 // what's ready to look at (finished work and its pull request, a meeting's notes and the action
 // items not handed on, a whiteboard an agent drew, a task the Chief of Staff finished) as short
 // rows, newest first, the last day's few and the rest folded away. Beside it what's coming up, a day

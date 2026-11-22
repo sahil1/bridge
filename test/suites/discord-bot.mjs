@@ -33,7 +33,7 @@ await dc.heartbeat({ ms: 800 })
 const T1 = 'dtest.bot-one.0123456789abcdef'
 const gitDir = IS_WIN ? path.dirname(String(spawnSync('where', ['git'], { encoding: 'utf8' }).stdout || '').split(/\r?\n/)[0] || 'C:\\Program Files\\Git\\cmd\\git.exe') : null
 const kit = await startKit('discord-bot', {
-  config: { name: 'Tester', trials: { 'slack-bot': true, routines: true } },
+  config: { name: 'Tester', trials: { 'slack-bot': true } },
   env: ({ home, PATH }) => {
     for (const d of ['pricing', 'code']) fs.mkdirSync(path.join(home, d), { recursive: true })
     // (Each question its own conversation: the same person asking again soon after carries none on.)

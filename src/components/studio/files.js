@@ -41,11 +41,14 @@ export function partsOf(f, meta) {
     bytes: async (name) => { if (!got.has(name)) got.set(name, bytesOf(partUrl(f, meta, name)).then((b) => new Uint8Array(b))); return got.get(name) },
   }
 }
+// The slim zip of one in parts (server/studio.js slimFile): of the file as it was opened (mtime), or
+// one of its versions (version, its id).
+export const slimUrl = (f, { mtime = null, version = null } = {}) => `${BASE}/api/studio/slim?${q(f)}${mtime != null ? `&mtime=${encodeURIComponent(mtime)}` : ''}${version ? `&version=${encodeURIComponent(version)}` : ''}`
 // The file as its editor opens it: { data } its bytes (whole, or the slim zip of one in parts,
 // with parts its helper above), or { url } for pdf.js to read in parts.
 export async function loadFile(f, meta) {
   if (meta.inParts && meta.ext === '.pdf') return { data: null, url: rawUrl(f) }
-  if (meta.inParts) return { data: await bytesOf(`${BASE}/api/studio/slim?${q(f)}&mtime=${encodeURIComponent(meta.mtime)}`), parts: partsOf(f, meta) }
+  if (meta.inParts) return { data: await bytesOf(slimUrl(f, { mtime: meta.mtime })), parts: partsOf(f, meta) }
   return { data: await bytesOf(rawUrl(f)) }
 }
 export const textOf = (buf) => new TextDecoder().decode(buf)
@@ -62,6 +65,27 @@ export async function saveFile(f, data, { mtime, force = false, auto = false, in
   return j
 }
 export const openFile = (f, where) => api(`/studio/open?${q(f)}${where ? `&where=${encodeURIComponent(where)}` : ''}`)
+
+// ---------- A file moved or deleted while it was open ----------
+// (server/studio.js movedTo, saveCopy, wholeFile and the drafts.) What the page has is sent as it is;
+// one opened in parts (inParts) gets the parts it never had from the file's versions.
+const bytesFor = (data) => (typeof data === 'string' ? new TextEncoder().encode(data) : data)
+async function put(url, data) {
+  const r = await fetch(url, { method: 'PUT', headers: { 'content-type': 'application/octet-stream' }, body: bytesFor(data), credentials: 'same-origin' })
+  if (!r.ok) { const j = await r.json().catch(() => ({})); throw Object.assign(new Error(j.error || `HTTP ${r.status}`), { code: j.code, status: r.status }) }
+  return r
+}
+// Where it went, if it was moved (fileId: from open): { path, name } or { path: null }.
+export const movedTo = (f, fileId) => api(`/studio/moved?${q(f)}&id=${encodeURIComponent(fileId || '')}`)
+// A copy of it in a folder (to: its root; dir: the folder in it), under its name: { root, path, name }.
+export const saveCopy = async (f, data, { to, dir = '', name, inParts = false }) => (await put(`${BASE}/api/studio/copy?${q(f)}&to=${encodeURIComponent(to)}&dir=${encodeURIComponent(dir)}&name=${encodeURIComponent(name)}${inParts ? '&parts=1' : ''}`, data)).json()
+// Its bytes whole, to download.
+export const wholeFile = async (f, data, { inParts = false } = {}) => (inParts ? new Uint8Array(await (await put(`${BASE}/api/studio/whole?${q(f)}&parts=1`, data)).arrayBuffer()) : bytesFor(data))
+// Its recovery draft, kept on its computer until it's saved somewhere or downloaded.
+export const keepDraft = async (f, data, { kind = null, inParts = false } = {}) => (await put(`${BASE}/api/studio/draft?${q(f)}${kind ? `&kind=${encodeURIComponent(kind)}` : ''}${inParts ? '&parts=1' : ''}`, data)).json()
+export const draftOf = (f) => api(`/studio/draft?${q(f)}`)
+export const draftBytes = (f) => bytesOf(`${BASE}/api/studio/draft/file?${q(f)}`)
+export const dropDraft = (f) => api(`/studio/draft?${q(f)}`, { method: 'DELETE' })
 export const changedSince = (f, since) => api(`/studio/changed?${q(f)}&since=${encodeURIComponent(since)}`)
 export const restoreVersion = (f, id) => api('/studio/restore', { method: 'POST', body: { ...f, id } })
 
