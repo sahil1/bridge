@@ -506,6 +506,12 @@ try {
   let overOk = null
   const told = await feedEvent(kit, 'sign-start-over', async () => { overOk = await win('POST', '/studio/sign/start-over', { grant: og.grant }) })
   ok(unread.keysUnreadable && unread.canStartOver && noGrantOver.status === 403 && byProgOver.status === 403 && !!og.grant && overOk?.status === 200 && !!told?.at, 'keys the app can\'t open, tried again: Start Over offered, refused without Touch ID and to the key alone; with it, the app told to make new keys', { offered: unread.canStartOver, noGrant: noGrantOver.status, byKey: byProgOver.status, ok: overOk?.status, told })
+  // Confirmed while the app's feed isn't connected (the few seconds after the app starts its server):
+  // kept, and told to the app as its feed connects.
+  const og2 = (await win('POST', '/studio/sign/ask', { purpose: 'start-over' })).j
+  const overUnheard = await win('POST', '/studio/sign/start-over', { grant: og2.grant })
+  const toldLater = await feedEvent(kit, 'sign-start-over', async () => {})
+  ok(overUnheard.status === 200 && !!toldLater?.at, 'Start Over confirmed with the app\'s feed not connected yet: told to the app as it connects, not lost', { status: overUnheard.status, told: toldLater })
   // (The app's side: the old keys kept beside, new ones made, not unreadable any more.)
   const sdir = path.join(kit.dir, 'start-over-keys')
   fs.mkdirSync(sdir, { recursive: true })
@@ -564,20 +570,43 @@ try {
   gate.set(false) // (its feed gone: main.js serverGone)
   const goneAgain = await asked(`${gbase}/api/config`, 'xhr')
   ok(Object.values(nowProven).every(Boolean) && goneAgain, 'once it proves itself: its pages, messages, the screen and the feed; its feed gone: refused again until it proves itself', { proven: nowProven, goneAgain })
-  // And main.js wires it so: every request to the server's address through the gate, a page held back
-  // shown as such (or its window closed), the messages and permissions, the feed, the card and the main
-  // window's page.
+  // And main.js wires it so: every request any window makes through the gate (servergate.wire, which
+  // app-gate.mjs runs in Electron), at the server's ports and each linked computer's; a page held back
+  // shown as such in the main window (another program's only for a wrong proof), any other window
+  // opened again once the server proves itself; the messages and permissions, the feed, the card and
+  // the main window's page.
   const mainJs = fs.readFileSync(path.join(ROOT, 'desktop', 'main.js'), 'utf8')
   const wired = {
-    requests: /onBeforeRequest\(\{ urls: all \}, \(d, cb\) => \{\n\s+gate\.request\(d\)/.test(mainJs) && /const all = \[\.\.\.new Set\(\[PORT, SERVER_PORT\]\)\]\.map\(\(p\) => `http:\/\/127\.0\.0\.1:\$\{p\}\/\*`\)/.test(mainJs),
-    heldBack: /gate\.blocked\(code, url\)/.test(mainJs) && /if \(w === win\) w\.loadURL\(splash\(NOT_OURS\)\)/.test(mainJs),
+    requests: /servergate\.wire\(gate, \{\n\s+session: session\.defaultSession,/.test(mainJs) && /servergate\.addresses\(\(\) => \[PORT, SERVER_PORT, \.\.\.Object\.values\(machinePorts\(\)\)\]\)/.test(mainJs) && /isServer: atServer,\n\s+isAlias: atAlias,/.test(mainJs),
+    heldBack: /if \(w === win\) w\.loadURL\(splash\(gate\.wrong\(\) \? NOT_OURS : STARTING\)\)/.test(mainJs) && /else if \(atServer\(url\)\) held\.set\(wc, url\)/.test(mainJs) && /gate\.onProven\(\(\) => \{\n\s+for \(const \[wc, url\] of held\)/.test(mainJs) && !/else w\.destroy\(\)/.test(mainJs),
     messages: /senders\.create\(PORT, \{ ports: machinePorts, proven: \(\) => gate\.proven \}\)/.test(mainJs),
     feed: /if \(!gate\.feed\(\)\) continue/.test(mainJs),
     card: /function showFloat\(\) \{[^]*?if \(!gate\.proven\) return/.test(mainJs),
     main: /async function mainReady\(\) \{[^]*?if \(BUNDLED && !\(await proveServer\(\)\)\) return null/.test(mainJs),
     feedGone: /serverGone\(\)/.test(mainJs),
   }
-  ok(Object.values(wired).every(Boolean), 'the app wires it so: every request to its server\'s address, held-back pages, messages and permissions, the feed, the card and the main window', wired)
+  ok(Object.values(wired).every(Boolean), 'the app wires it so: every request any window makes, held-back pages, messages and permissions, the feed, the card and the main window', wired)
+  // Before a server has proved itself, the app sends it nothing of its own either: not its key (the
+  // proof and /api/health need none, and its feed is asked for only after the proof); a proof not
+  // answered in time is waited for as starting, and only a wrong one is another program's, or stops a
+  // server (never the one the app started); one that ends by itself is started again, one asked to
+  // stop isn't. Frames can't send a window anywhere; a service worker an older version left goes.
+  const serverJs = fs.readFileSync(path.join(ROOT, 'server', 'apiauth.js'), 'utf8')
+  const previewJsx = fs.readFileSync(path.join(ROOT, 'src', 'components', 'Preview.jsx'), 'utf8')
+  const sandboxed = /const FRAME_SANDBOX = '([^']+)'/.exec(previewJsx)?.[1] || ''
+  const noneBefore = {
+    key: /const fetch = \(u, o = \{\}\) => globalThis\.fetch\(u, ownServer\(u\) && \(!BUNDLED \|\| gate\.proven\) \?/.test(mainJs),
+    proofNoKey: /prove: \(\) => windowAuth\.proof\(\{ port: SERVER_PORT, launch: appKeys\(\)\.launch \}\)/.test(mainJs) && /new Set\(\['\/api\/health', '\/api\/window\/proof'\]\)/.test(serverJs),
+    upNoKey: /async function serverUp\(\) \{\n\s+try \{ const r = await fetch\(`\$\{URL_BASE\}\/api\/health`/.test(mainJs),
+    feedAfterProof: /if \(!\(await proveServer\(\)\) && BUNDLED\) throw new Error\('not proven'\)\n[^]*?fetch\(`\$\{URL_BASE\}\/api\/events`/.test(mainJs),
+    slowIsStarting: /if \(await proveServer\(\)\) return win\.loadURL\(URL_BASE\)\n\s+if \(gate\.wrong\(\)\) return win\.loadURL\(splash\(NOT_OURS\)\)/.test(mainJs) && !/serverProven\(\) \? win\.loadURL\(splash\(NOT_OURS\)\)/.test(mainJs),
+    stopsOnlyWrong: /async function replaceUnproven\(\) \{\n\s+if \(!gate\.wrong\(\)\) return/.test(mainJs) && /pid === serverChild\?\.pid\) return false/.test(mainJs) && !/api\/version/.test(mainJs),
+    restarted: /\(signal \? !STOPS\.includes\(signal\) : code !== 0\)\) restartServer\(\)/.test(mainJs) && /const STOPS = \['SIGTERM', 'SIGINT', 'SIGHUP'\]/.test(mainJs),
+    frames: (mainJs.match(/byFrame\((e|ev)\)/g) || []).length >= 3 && !/allow-top-navigation/.test(sandboxed) && /allow-scripts/.test(sandboxed) && /sandbox=\{FRAME_SANDBOX\}/.test(previewJsx),
+    redirects: (mainJs.match(/on\('will-redirect', redirects\)/g) || []).length === 3 && /const redirects = \(e, url\) => pages\.redirect\(e, url, \(to\) => openOutside\(to\)\)/.test(mainJs),
+    serviceWorkers: /clearStorageData\(\{ storages: \['serviceworkers'\] \}\)[^]*?windowsSendSecret\(\)\n\s+createWindow\(\)/.test(mainJs),
+  }
+  ok(Object.values(noneBefore).every(Boolean), 'nothing of the app\'s goes to a server before it proves itself (not its key); a slow proof is waited for as starting, only a wrong one is another program\'s or stops a server (never its own); a crashed server started again; no frame sends a window anywhere, nor a redirect out of the app; no leftover service worker', noneBefore)
 
   // ---------- Where the PIN is this computer's way ----------
   B_ = await signKit('sign-security-pin', { probe: { trackpad: false, touchID: false, auth: false }, more: { key: null, store: null } })

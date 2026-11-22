@@ -63,7 +63,7 @@ try {
     ok(posted.status === 401 && (await kit.api('/config')).name === 'Tester', 'a change without it: refused, and nothing changed', posted.status)
     const health = await req(kit, '/api/health')
     const healthIn = await req(kit, '/api/health', { headers: bearer(kit) })
-    ok(health.status === 200 && health.j?.app === 'Bridge AI' && health.j.in === false && healthIn.j?.in === true && !('computer' in health.j) && !('pid' in health.j), '/api/health is public: that Bridge AI is here and its version, and whether you\'re let in, nothing more', health.j)
+    ok(health.status === 200 && health.j?.app === 'Bridge AI' && health.j.in === false && healthIn.j?.in === true && !('computer' in health.j) && Number.isInteger(health.j.pid) && typeof health.j.bundled === 'boolean' && Object.keys(health.j).sort().join() === 'app,build,bundled,in,ok,pid,version', '/api/health is public: that Bridge AI is here and its version, whether you\'re let in, and to a program on this computer which server it is (for the desktop app, before it sends any key), nothing more', health.j)
     const entry = /src="\.?\/(assets\/[^"]+\.js)"/.exec(fs.readFileSync(path.join(ROOT, 'dist', 'index.html'), 'utf8'))?.[1]
     const files = await Promise.all([`/${entry}`, '/sw.js', '/manifest.webmanifest', '/icon.svg'].map((p) => req(kit, p)))
     ok(!!entry && files.every((r) => r.status === 200), 'the app\'s own files are public (its code, the same for everyone with this version)', files.map((r) => r.status))

@@ -9,6 +9,10 @@
 // what it asks of the server can't fall behind it unseen until a release: what only a built app has
 // (its signature, the dictation key's helper, the speech engine and the local model's runtime) is
 // left out then.
+//   SMOKE_WINDOWS=1 node scripts/smoke.js
+// also opens the built Mac app itself, with a data folder and a port of its own, and checks its
+// windows and the line between them and its server (scripts/smokewindows.js). SMOKE_DIST: where the
+// build is, if not desktop/dist.
 import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import net from 'node:net'
@@ -19,7 +23,7 @@ import { createRequire } from 'node:module'
 import WebSocket from 'ws'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const DIST = path.join(ROOT, 'desktop', 'dist')
+const DIST = process.env.SMOKE_DIST ? path.resolve(process.env.SMOKE_DIST) : path.join(ROOT, 'desktop', 'dist')
 const SOURCE = process.env.SMOKE_FROM_SOURCE === '1'
 const PORT = Number(process.env.SMOKE_PORT) || 7599
 const BASE = `http://127.0.0.1:${PORT}`
@@ -217,6 +221,12 @@ try {
     if (!answered()) throw new Error(`no output${prompted ? '' : ' (and no prompt in 30 s)'} ${taken() ? `${secs} s after the shell took the line` : 'and the line never showed'}; the terminal showed: ${JSON.stringify(shown().replace(/(\r?\n)+/g, '⏎').slice(-400))}`)
     return `answered ${secs} s after it was typed`
   })
+  // The app itself: its windows, and the line between them and its own server (smokewindows.js).
+  // Asked for (SMOKE_WINDOWS=1), as it opens the app's windows on the screen; a built Mac app's only.
+  if (process.env.SMOKE_WINDOWS === '1') {
+    if (SOURCE || process.platform !== 'darwin') console.log('--   the app\'s windows: a built Mac app\'s only')
+    else await (await import('./smokewindows.js')).windows({ app, step, ROOT })
+  }
 } finally {
   server.kill()
   if (failed) console.log(`\nServer log:\n${log.join('').slice(-3000)}`)
