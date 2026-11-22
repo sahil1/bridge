@@ -213,16 +213,30 @@ export function MeetingsProvider({ children }) {
     // The desktop app's window, when it's hidden (a call's notes taken from the menu bar).
     if (document.hidden) window.bridgeApp?.focusMain?.()
   })
+  // One start at a time: a second click while one is asking for the mic or making the meeting (a
+  // double click, Start recording and the floating card at once) is that same start, not a second
+  // meeting recording beside it, whose mic nothing here could stop. go runs at once, so a picker it
+  // opens still has the click's moment.
+  const starting = useRef(null)
+  const once = (go) => {
+    if (starting.current) return starting.current
+    let p
+    try { p = Promise.resolve(go()) } catch (e) { p = Promise.reject(e) }
+    const mine = p.finally(() => { if (starting.current === mine) starting.current = null })
+    starting.current = mine
+    return mine
+  }
   // picking: the screen to record (Record the screen too), asked for already (startNow), or here
   // before anything is waited on: a browser shows its picker only straight after a click. fresh:
   // a new meeting, picked over carrying on one that stopped when Bridge AI closed.
-  const start = async ({ title, event, kind, picking, fresh = false } = {}) => {
+  const start = (o) => once(() => startOne(o))
+  const startOne = async ({ title, event, kind, picking, fresh = false } = {}) => {
     if (handle.current) { letGo(picking); openMeeting(rec.id); return rec.id }
     if (picking === undefined) picking = pickFirst()
     if (!fresh && import.meta.env.MODE !== 'demo') {
       const c = await api('/meetings/carry-on', { method: 'POST', body: { event: event || null } }).then((r) => r.meeting, () => null)
       const how = c ? await askCarry(c) : 'new'
-      if (how === 'resume') return recordAgain(c.id, { picking })
+      if (how === 'resume') return recordOneAgain(c.id, { picking })
       if (how !== 'new') { letGo(picking); return null }
     }
     let mic, m
@@ -237,7 +251,8 @@ export function MeetingsProvider({ children }) {
   }
   // Resume recording: a meeting that ended (stopped by mistake, or by itself) records again, the
   // same meeting from where it had got to. Not while another one records.
-  const recordAgain = async (id, { picking } = {}) => {
+  const recordAgain = (id, o) => once(() => recordOneAgain(id, o))
+  const recordOneAgain = async (id, { picking } = {}) => {
     if (handle.current && rec.id === id) { letGo(picking); return id }
     const other = handle.current ? rec : calls?.recording && calls.recording.id !== id ? calls.recording : null
     if (other) { letGo(picking); throw new Error(t('"{title}" is recording. Stop it first.', { title: other.title })) }
@@ -466,6 +481,9 @@ export function MeetingsProvider({ children }) {
   const unwatch = () => share.current?.stop()
   const stop = async () => {
     if (!handle.current) return
+    // A screen still being picked is let go: its wait, ending later, would say on the next
+    // recording that nothing was picked.
+    if (tryNow.current) cancelPick()
     // The video's last pieces go before the meeting is stopped.
     const f = film.current
     share.current?.stop()
@@ -482,18 +500,18 @@ export function MeetingsProvider({ children }) {
   }
   // Notes for a call that just started: named after the calendar event on now, if there is one
   // (picked: the one chosen in its prompt, with more than one on).
-  const startForCall = async (app, picked, { fresh = false } = {}) => {
+  const startForCall = (app, picked, { fresh = false } = {}) => once(async () => {
     const picking = pickFirst()
     const event = picked?.title ? picked : await eventNow(app)
-    return start({ title: event?.title || `${app} call, ${when()}`, event, picking, fresh })
-  }
+    return startOne({ title: event?.title || `${app} call, ${when()}`, event, picking, fresh })
+  })
   // Recording now, from the sidebar: for the calendar event on now (its name and people), if there
   // is one.
-  const startNow = async () => {
+  const startNow = () => once(async () => {
     const picking = pickFirst()
     const event = await eventNow()
-    return start(event ? { title: event.title, event, picking } : { picking })
-  }
+    return startOne(event ? { title: event.title, event, picking } : { picking })
+  })
   // A new section from here (a lap).
   const section = async (title) => {
     if (!rec) throw new Error(t('Start recording first'))

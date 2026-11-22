@@ -291,11 +291,13 @@ function asTranscript(messages, system) {
   return `${system}\n\nThe conversation so far:\n\n${text}Reply to the user's last message as the assistant. Answer with the reply only.`
 }
 
+// Said wherever a model is used (a meeting's notes, AI Assist, Settings' Models for Each Task), so
+// in words for all of them: the chat agent adds its own /model to switch (chatagent.js).
 const failed = (who, status, body) => {
   const msg = body?.error?.message || body?.message || body?.Message || (typeof body?.error === 'string' ? body.error : '') || `HTTP ${status}`
   if (status === 401 || status === 403) return Object.assign(new Error(`${who} turned the key down (${msg}). Check it in ${placeEn('providers')}.`), { status })
-  if (status === 404) return Object.assign(new Error(`${who} doesn't know that model (${msg}). Pick another with /model.`), { status })
-  if (status === 429) return Object.assign(new Error(`${who} says you're over your limit for now (${msg}). Try again later, or pick another model with /model.`), { status })
+  if (status === 404) return Object.assign(new Error(`${who} doesn't know that model (${msg}). Pick another model.`), { status })
+  if (status === 429) return Object.assign(new Error(`${who} says you're over your limit for now (${msg}). Try again later, or pick another model.`), { status })
   return Object.assign(new Error(`${who}: ${msg}`), { status })
 }
 const parseArgs = (s) => { if (s && typeof s === 'object') return s; try { return JSON.parse(s || '{}') } catch { return { _unparsed: String(s || '') } } }

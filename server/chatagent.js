@@ -334,7 +334,8 @@ async function pump() {
   } catch (e) {
     if (ctrl.signal.aborted) say(dim('Stopped.'))
     else {
-      const msg = `Couldn't get an answer from ${describe(model)}. ${e.message}`
+      // (A model it doesn't know, or over its limit: here, /model switches.)
+      const msg = `Couldn't get an answer from ${describe(model)}. ${e.message}${e.status === 404 || e.status === 429 ? ' Switch with /model.' : ''}`
       said('assistant', msg, { bridge_error: true })
       say(`\x1b[31m${msg}\x1b[0m`)
     }

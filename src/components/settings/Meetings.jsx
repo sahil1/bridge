@@ -154,6 +154,8 @@ function RoomVoices({ v, m, set, refresh }) {
 const openSpeechKeys = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'providers-speech' } }))
 const openVoice = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'voice' } }))
 const openProviders = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'providers' } }))
+// Meeting notes' model is picked in one place: Models for Each Task.
+const openModelJobs = () => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'model-jobs' } }))
 
 export default function Meetings({ onOpenAgent }) {
   const { s, save, note } = useSettings()
@@ -197,9 +199,10 @@ export default function Meetings({ onOpenAgent }) {
   )
   const mine = d.services.filter((x) => x.ready || d.engine === x.id)
   const others = d.services.filter((x) => !mine.includes(x))
-  // The model that writes the notes, and with it cleans up, names who spoke and prepares: which, and
-  // where it runs, said where each is turned on (what it reads leaves this computer unless it's local).
-  const notes = models && (m.model || auto) ? models.find((x) => x.id === (m.model || auto)) || null : null
+  // The model that writes the notes, and with it names who spoke and prepares: which, and where it
+  // runs, said where each is turned on (what it reads leaves this computer unless it's local). It's
+  // picked in one place, Models for Each Task's Meeting notes (auto: the one that gives now).
+  const notes = models && auto ? models.find((x) => x.id === auto) || null : null
   const by = notes ? (notes.via === 'local' ? t('{model}, on this computer', { model: notes.label }) : t('{model}, at {provider}', { model: notes.label, provider: notes.provider })) : null
   const prepWhy = home ? t("Fifteen minutes before a meeting with other people, AI Assist suggests goals and questions, with the model that writes your notes, from who's coming, last time with them, the invite and your mail with them. Off, it does this only when you ask, with AI Assist on the meeting in Calendar, or Prepare on Home.")
     : t("Fifteen minutes before a meeting with other people, AI Assist suggests goals and questions, with the model that writes your notes, from who's coming, last time with them, the invite and your mail with them. Off, it does this only when you ask, with AI Assist on the meeting in Calendar.")
@@ -267,15 +270,15 @@ export default function Meetings({ onOpenAgent }) {
 
       <section className="st-sec" data-setting="notes-model">
         <h4>{t('Notes are written by')}</h4>
-        <p className="muted small" data-notes-where>{!models ? '\u00a0' : m.model && !notes ? t("{model} can't be used just now, so the next model that can writes them.", { model: m.model })
+        <p className="muted small" data-notes-where>{!models ? '\u00a0'
           : !notes ? t('No model to write them yet: sign in to an agent, or add one in {place}.', { place: where('providers') })
           : notes.via === 'local' ? t('{model} runs on this computer: what it reads stays here.', { model: notes.label })
             : t('{model}, at {provider}: the transcript, and what each one below reads, go there.', { model: notes.label, provider: notes.provider })}</p>
-        {!m.model && short && <p className="muted small" data-notes-short>{t('Meetings up to about {n} minutes are written by {model} on this computer instead (Auto, in {place}).', { n: short.minutes, model: short.label, place: where('model-jobs') })}</p>}
-        <select className="st-input" value={m.model || ''} onChange={(e) => set({ model: e.target.value || null })} aria-label={t('Model for meeting notes')}>
-          <option value="">{t('Automatic (your Claude sign-in first, then a key or a local model)')}</option>
-          {(models || []).map((x) => <option key={x.id} value={x.id}>{x.label} ({x.provider})</option>)}
-        </select>
+        {short && <p className="muted small" data-notes-short>{t('Meetings up to about {n} minutes are written by {model} on this computer instead (Auto, in {place}).', { n: short.minutes, model: short.label, place: where('model-jobs') })}</p>}
+        <div className="st-row" data-notes-pick>
+          <span className="muted small">{t('Picked in {place}, with the models to fall back on.', { place: where('model-jobs') })}</span>
+          <button type="button" className="btn small" onClick={openModelJobs}>{t('Change it')}</button>
+        </div>
         <label className="st-check">
           <input type="checkbox" checked={m.autoSummary !== false} onChange={(e) => set({ autoSummary: e.target.checked })} />
           <span><b>{t('Write the summary when a meeting ends')}</b> <span className="muted small">{t('Otherwise, Summarize on the meeting when you want it.')}</span></span>

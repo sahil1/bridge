@@ -56,6 +56,38 @@ export function replaceRaw(text) {
   return changedKeys(before, obj)
 }
 
+// ---------- The model meeting notes are written with ----------
+// One place: Models for Each Task's Meeting notes (jobModels.notes, with the ones to fall back on).
+// Settings › Meetings & Voice had a model of its own for the notes (meetings.model), which also went
+// ahead of AI Assist's, Mail's, live suggestions', the board's and the cleanup's own. Picked there
+// (before 3.22.0, or sent by an app that still has it), it goes first in Meeting notes' row instead,
+// so the notes keep it, and every other task goes by its own row. falls: the models the notes fell
+// back on with it (index.js notesFallbacks: up to three of the others you have, in the order they
+// were tried), after it in the row, so it falls back as it did; a row there before stays after them.
+// (A row can't end in Automatic, so those models are named.)
+export const MODEL_ID = /^[a-z][\w-]*:\S{1,200}$/
+export const notesPick = (o) => (o?.meetings && typeof o.meetings === 'object' && 'model' in o.meetings ? o.meetings.model : undefined)
+export function notesModel(o, falls = []) {
+  if (notesPick(o) === undefined) return o
+  const { model, ...meetings } = o.meetings
+  const next = { ...o, meetings }
+  if (typeof model === 'string' && MODEL_ID.test(model)) {
+    const had = Array.isArray(o.jobModels?.notes) ? o.jobModels.notes : []
+    const row = [...new Set([model, ...falls, ...had].filter((x) => typeof x === 'string' && MODEL_ID.test(x)))].slice(0, 6)
+    next.jobModels = { ...(o.jobModels && typeof o.jobModels === 'object' ? o.jobModels : {}), notes: row }
+  }
+  return next
+}
+// One in the file now (saved before 3.22.0, sent since, or typed into it), moved with what it fell
+// back on: the keys that changed.
+export function moveNotesModel(falls = []) {
+  const before = readUser()
+  const next = notesModel(before, falls)
+  if (next === before) return []
+  writeUser(next)
+  return changedKeys(before, next)
+}
+
 // As the server starts: a settings file from before 3.22.0 with Beta Features switches for the
 // features out of beta, saved with those switches as their settings, once. Nothing is written when
 // there are none, or when the file can't be read.
