@@ -308,6 +308,7 @@ const ASKED = {
   cancelled: tx('Not signed: Touch ID or the password was cancelled.'),
   'no-pin': tx('Ask Before Signing is on, and from here it asks for your signing PIN, but there isn\'t one yet. Set it in {place}, on the computer.'),
   changed: tx('The PDF changed since it was shown here, so nothing was signed. Open it again to see it as it is now, then sign.'),
+  'need-sha': tx('Nothing was signed: Bridge AI couldn\'t tell what this PDF showed you. Open it again, then sign.'),
 }
 function Save({ file, shown, setup, marks, dateText, using, onBack, onOpen }) {
   const [check, setCheck] = useState(null)
@@ -331,12 +332,14 @@ function Save({ file, shown, setup, marks, dateText, using, onBack, onOpen }) {
     if (e.code === 'no-pin') return t(ASKED['no-pin'], { place: where('ask-before-signing') })
     if (e.code === 'cancelled' && way === 'device') return t(ASKED.cancelled)
     if (e.code === 'changed') return t(ASKED.changed)
+    if (e.code === 'need-sha') return t(ASKED['need-sha'])
     return t("Couldn't make the signed copy: {error}", { error: e.message })
   }
   const save = async () => {
     setBusy(true); setErr(null)
     try {
-      const sha = shown ? await shown().catch(() => null) : null
+      // (The bytes this page has, or for one it read in parts, as Studio found it when it opened it.)
+      const sha = (shown ? await shown().catch(() => null) : null) || file.sha256 || null
       let grant = null
       if (way) {
         setAsking(way === 'device' ? (ask.touchID ? t('Touch ID, or your Mac\'s password, on this Mac…') : t('Your Mac\'s password, on this Mac…')) : way === 'hello' ? t('Windows Hello, on this computer…') : t('Checking your PIN…'))

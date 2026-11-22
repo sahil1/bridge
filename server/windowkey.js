@@ -4,10 +4,12 @@
 // app makes and keeps in the Keychain (Electron's safeStorage), given to the server it starts on a
 // pipe of its own (appkeys.js), and never sent anywhere after that: each request its windows make to
 // this server's /api carries a MAC of it instead (X-Bridge-Window: 1.<ms>.<nonce>.<mac>, over the
-// method, the path and the time), added by the app outside the page (desktop/main.js), so no page
-// script has it and one seen can't be used again or for another request.
-// The app sends nothing to a server until it has proved it has this start's own secret (launch:
-// proof below), so a program on the port the app expects gets neither.
+// method, the address and port it was sent to, the path, the time and the body's SHA-256), added by
+// the app outside the page (desktop/main.js), so no page script has it, one seen can't be used again
+// or for another request, and one passed on through another program (sent to it, not here) or with
+// its body changed is refused.
+// The app sends nothing to a server until it has proved it has this start's own secret over that very
+// connection (launch: proof below), so a program on the port the app expects gets neither.
 //
 // Kept sealed with your signatures (signstore.js), so a server started again finds it; replaced only
 // by one the app gives with the signatures' own key (said in Settings › Studio when it is). A server
@@ -42,14 +44,21 @@ async function reconcile() {
   if (!sealed) return store.setWindowSecret(given)
   if (sealed === given) return
   // Another one on the pipe: taken only when it came with the list's own key (the app's: it opened
-  // the list), and said; otherwise the sealed one stays.
+  // the list), and said. With a key file instead (an app with no keychain to keep its secret in makes
+  // a new one each time it starts: appkeys.js), the app's new one is taken as it is: whoever can start
+  // this server can read that file too. Otherwise the sealed one stays.
   if (store.sealedWith()?.by === 'app') return store.setWindowSecret(given, { changed: true })
+  if (store.sealedWith()?.by === 'file') return store.setWindowSecret(given)
   current = sealed
 }
 export const settled = () => ready
 
-// The MAC a window's request carries (the app makes it the same way: desktop/windowauth.js).
-export const macFor = (secret, method, url, ms, nonce) => hmac(secret, `bridge-ai window\n${String(method).toUpperCase()}\n${url}\n${ms}\n${nonce}`)
+// The MAC a window's request carries (the app makes it the same way: desktop/windowauth.js): at, the
+// address and port it was sent to (127.0.0.1:7420); body, its SHA-256 ('' with none).
+export const macFor = (secret, method, at, url, ms, nonce, body = '') => hmac(secret, `bridge-ai window 2\n${String(method).toUpperCase()}\n${at}\n${url}\n${ms}\n${nonce}\n${body}`)
+// This end of a connection, as the app writes the address it dialled: 127.0.0.1:7420, [::1]:7420.
+const plain = (a) => String(a || '').replace(/^::ffff:/, '')
+export const hereOf = (socket) => { const a = plain(socket?.localAddress); return `${a.includes(':') ? `[${a}]` : a}:${socket?.localPort}` }
 const used = new Map() // nonce -> until
 function fresh(nonce, ms) {
   const now = Date.now()
@@ -65,7 +74,7 @@ export function fromWindow(req, here) {
   if (req._fromWindow !== undefined) return req._fromWindow
   let ok = false
   const m = /^1\.(\d{12,16})\.([A-Za-z0-9_-]{16,64})\.([A-Za-z0-9_-]{43})$/.exec(String(req.headers[HEADER] || ''))
-  if (current && here && m && Math.abs(Date.now() - Number(m[1])) <= SKEW && same(macFor(current, req.method, req.originalUrl || req.url, m[1], m[2]), m[3])) ok = fresh(m[2], Number(m[1]))
+  if (current && here && m && Math.abs(Date.now() - Number(m[1])) <= SKEW && same(macFor(current, req.method, hereOf(req.socket), req.originalUrl || req.url, m[1], m[2], req.bodySha256 || ''), m[3])) ok = fresh(m[2], Number(m[1]))
   // (A test's browser page, in the tests only: appkeys.js testHeader.)
   else if (current && here && appKeys().testHeader && same(String(req.headers[HEADER] || ''), `test.${current}`)) ok = true
   req._fromWindow = ok
@@ -75,8 +84,10 @@ export const have = () => !!current
 
 // ---------- The app checking this server, and this server the app ----------
 // proof: that this server is the one the app started (it has this start's secret), answered to the
-// app's nonce. null when it isn't one the app started.
-export const proof = (nonce) => (appKeys().launch && /^[A-Za-z0-9_-]{16,64}$/.test(String(nonce || '')) ? hmac(appKeys().launch, `bridge-ai server\n${nonce}`) : null)
+// app's nonce, over this very connection: this end's address and port and the other end's port, as
+// the app sees them from its own end (desktop/windowauth.js proves). null when it isn't one the app
+// started.
+export const proof = (nonce, socket) => (appKeys().launch && /^[A-Za-z0-9_-]{16,64}$/.test(String(nonce || '')) ? hmac(appKeys().launch, `bridge-ai server 2\n${nonce}\n${hereOf(socket)}\n${socket?.remotePort}`) : null)
 // hello: the app checking that this server has its window secret, without sending it: a nonce
 // (GET), then the app's MAC of it (POST). From source only, with none yet, the secret itself, once.
 const nonces = new Map() // nonce -> until

@@ -58,20 +58,35 @@ async function letInWindows() {
 // (added outside the page, so no page script ever has it), never the secret itself. windowauth.js.
 const windowAuth = require('./windowauth.js')
 let keys = null
-const appKeys = () => (keys ||= windowAuth.keysAt(path.join(app.getPath('userData'), 'signing-keys'), electron.safeStorage))
+// (The server listens where the app talks to it, 127.0.0.1:<its port>, and nowhere else: listen.)
+const appKeys = () => (keys ||= windowAuth.keysAt(path.join(app.getPath('userData'), 'signing-keys'), electron.safeStorage, { listen: { host: '127.0.0.1', port: SERVER_PORT } }))
 let serverProven = false
-// Checked now: the server the app started (built app), or, from source (no pipe: npm and node --watch
-// don't pass it on), one that has the app's window secret (given once, the first time).
+// Checked now: the server the app started, over the connection the app itself makes to it (built
+// app), or, from source (no pipe: npm and node --watch don't pass it on), one that has the app's
+// window secret (given once, the first time).
 async function proveServer() {
-  serverProven = BUNDLED ? await windowAuth.proves(fetch, `http://127.0.0.1:${SERVER_PORT}`, appKeys().launch) : await windowAuth.hello(fetch, `http://127.0.0.1:${SERVER_PORT}`, appKeys().window, { tofu: true })
+  serverProven = BUNDLED
+    ? await windowAuth.proves({ port: SERVER_PORT, launch: appKeys().launch, headers: { authorization: `Bearer ${apiKey()}` } })
+    : await windowAuth.hello(fetch, `http://127.0.0.1:${SERVER_PORT}`, appKeys().window, { tofu: true })
   return serverProven
 }
+// Each window request's MAC is over its body too: its SHA-256 from what Electron will send
+// (onBeforeRequest), then the header added (onBeforeSendHeaders), by the request's id. One whose body
+// the app can't read (a file, a blob) goes without, and isn't taken as the window's.
+const bodies = new Map() // request id -> its body's SHA-256
 function windowsSendSecret() {
   const urls = [...new Set([PORT, SERVER_PORT])].map((p) => `http://127.0.0.1:${p}/api/*`)
+  session.defaultSession.webRequest.onBeforeRequest({ urls }, (d, cb) => {
+    if (bodies.size > 500) bodies.clear()
+    bodies.set(d.id, windowAuth.bodyHash(d.uploadData))
+    cb({ cancel: false })
+  })
   session.defaultSession.webRequest.onBeforeSendHeaders({ urls }, (d, cb) => {
     const h = d.requestHeaders
     for (const k of Object.keys(h)) if (k.toLowerCase() === 'x-bridge-window') delete h[k]
-    const mac = serverProven && ownServer(d.url) ? windowAuth.windowHeader(appKeys().window, d.method, d.url) : null
+    const body = bodies.has(d.id) ? bodies.get(d.id) : ''
+    bodies.delete(d.id)
+    const mac = serverProven && ownServer(d.url) && body != null ? windowAuth.windowHeader(appKeys().window, d.method, d.url, { at: `127.0.0.1:${SERVER_PORT}`, body }) : null
     if (mac) h['X-Bridge-Window'] = mac
     cb({ requestHeaders: h })
   })
@@ -135,8 +150,9 @@ async function startServer() {
   const env = { ...process.env, PATH: PATH_READY ? await PATH_READY : process.env.PATH }
   // Built app: run the bundled server on Electron's Node. It keeps running when the window
   // closes, like `npm start`, so agents carry on; quit it from the Bridge AI menu.
+  // (With SIGUSR1 kept from opening Node's inspector: serverflags.js.)
   const [cmd, args] = BUNDLED
-    ? [NODE_BIN, [path.join(ROOT, 'server', 'index.js')]]
+    ? [NODE_BIN, [...require('./serverflags.js').SERVER_NODE_FLAGS, path.join(ROOT, 'server', 'index.js')]]
     : [process.platform === 'win32' ? 'node.exe' : 'node', ['scripts/start.js', ...(DEV ? ['dev'] : [])]]
   if (BUNDLED) env.ELECTRON_RUN_AS_NODE = '1'
   // The app's keys (above), on the server's fd 3, with a secret for this start only. From source (npm
@@ -678,11 +694,13 @@ ipc.handle('bridge:focus-popout', (e, paneId) => {
   return true
 })
 
+const NOT_OURS = `Another program is answering on port ${PORT}, where Bridge AI's server should be, and it isn't the one this app started, so Bridge AI won't show it.<br>Quit that program (or set <code>"port"</code> in ~/.bridge-ai/config.json), then reopen Bridge AI.`
 async function connect() {
   // Never in the way of opening: if the check fails, use whatever server is there.
   if (await serverUp()) await replaceStale().catch(() => {})
   if (await serverUp() && !(await proveServer()) && BUNDLED) await replaceUnproven().catch(() => {})
-  if (await serverUp()) return win.loadURL(URL_BASE)
+  // (A server this app can't prove it started, on the address it uses: its page isn't shown here.)
+  if (await serverUp()) return BUNDLED && !serverProven ? win.loadURL(splash(NOT_OURS)) : win.loadURL(URL_BASE)
   win.loadURL(splash('Starting Bridge AI…'))
   // Dev mode needs both ports; a normal server already on the API port would block it.
   if (DEV && !startedServer) {
@@ -694,7 +712,7 @@ async function connect() {
   // server can take longer the first time).
   for (let i = 0; i < 600; i++) {
     await new Promise((r) => setTimeout(r, 100))
-    if (await serverUp()) { await proveServer(); return win.loadURL(URL_BASE) }
+    if (await serverUp()) { await proveServer(); return BUNDLED && !serverProven ? win.loadURL(splash(NOT_OURS)) : win.loadURL(URL_BASE) }
   }
   win.loadURL(splash(BUNDLED
     ? `Couldn't start Bridge AI on port ${PORT}.<br>Another program may be using it: set <code>"port"</code> in ~/.bridge-ai/config.json and reopen.`
@@ -785,6 +803,8 @@ async function watchFleet() {
         }
       }
     } catch { /* server down or restarting; retry */ }
+    // (Checked again before the windows send it anything, once the feed is back.)
+    serverProven = false
     // The feed gone: nobody is known to be viewing this screen until it says so again (it does as it
     // connects), so the display may sleep, and the badge goes.
     remote?.onEvent({ t: 'sessions', list: [], asks: [] })

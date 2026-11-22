@@ -1,8 +1,11 @@
+// First: what the desktop app handed this server on its pipe, read and the pipe closed before
+// anything else here starts a program that could inherit it (appkeys.js).
+import { appKeys } from './appkeys.js'
 import express from 'express'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { randomInt, randomUUID } from 'node:crypto'
+import { randomInt, randomUUID, createHash } from 'node:crypto'
 import { transcript, earlier, replyDiffs, markUndone, preview, locate, imageFrom, written } from './transcripts.js'
 import { listSubagents, runningFor, forgetExcept } from './subagents.js'
 import { ttyHandler } from './tty.js'
@@ -163,6 +166,9 @@ ensureDir(DATA)
 try { fs.chmodSync(DATA, 0o700) } catch { /* Windows, or a folder that isn't yours */ }
 ensureDir(CACHE)
 const cfg = loadConfig()
+// Started by the desktop app: where the app talks to it, and nowhere else (appkeys.js listen), so no
+// other program can sit at the address the app uses while this listens somewhere config.json says.
+if (appKeys().listen) Object.assign(cfg, appKeys().listen)
 labs.configure(cfg) // more models (Qwen, DeepSeek, Kimi, GLM): hidden unless cfg.moreModels
 llm.configure(cfg) // the local model you picked in Settings › Model Providers (llmModel), if any
 const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version
@@ -280,18 +286,21 @@ app.use(perf.timing)
 app.use('/m', (req, res) => machines.proxy(req, res, { frames: pages.frames, ui: UI_DIR }))
 // A project's app on this computer, for another of your devices (devpreview.js), before anything reads the body.
 app.use('/_preview', (req, res) => { servePreview.http(req, res).catch((e) => { if (!res.headersSent) res.status(502).json({ error: e.message }) }) })
+// A request from one of the app's windows has its body in the window's MAC (windowkey.js): its
+// SHA-256, as it came, kept to check it with.
+function bodyHash(req, _res, buf) { if (req.headers['x-bridge-window']) req.bodySha256 = createHash('sha256').update(buf).digest('hex') }
 // Saving a file from the viewer can send more than the usual 1 MB.
-const jsonSmall = express.json({ limit: '1mb' })
-const jsonFile = express.json({ limit: '6mb' })
+const jsonSmall = express.json({ limit: '1mb', verify: bodyHash })
+const jsonFile = express.json({ limit: '6mb', verify: bodyHash })
 // And a whiteboard, with the pictures pasted into it (boards.js).
-const jsonBoard = express.json({ limit: '45mb' })
+const jsonBoard = express.json({ limit: '45mb', verify: bodyHash })
 // And Studio: a picture put in a document or a deck, a new file (a Word copy), a deck for AI Assist
 // with its pictures. Every limit is here, read before any route: one a route gave itself came after
 // the 1 MB here, which had turned a phone's photo away already.
-const jsonStudio = express.json({ limit: '30mb' })
-const jsonDeckAi = express.json({ limit: '40mb' })
+const jsonStudio = express.json({ limit: '30mb', verify: bodyHash })
+const jsonDeckAi = express.json({ limit: '40mb', verify: bodyHash })
 // Studio's signatures: a drawing (1.5 MB at most, as base64) and no more (signstore.js).
-const jsonSig = express.json({ limit: '2200kb' })
+const jsonSig = express.json({ limit: '2200kb', verify: bodyHash })
 const jsonFor = (req) => (req.method === 'PUT' && /^\/api\/agents\/[^/]+\/file$/.test(req.path) ? jsonFile
   : /^\/api\/studio\/signatures?(\/|$)/.test(req.path) ? jsonSig
   // An outside app's new file or suggestion, through MCP (mcptools.js takes up to 2 MB of text).
@@ -771,7 +780,9 @@ signing.routes(app, { wrap, rootOf, sq, window: signWindow, phone: signPhoneOf, 
 // the app's MAC of it; from source, with none yet, the secret itself once). Only at this computer.
 const windowHere = (req) => { if (!atThisComputer(req)) throw Object.assign(new Error('Only the app on this computer'), { status: 403 }) }
 const windowAnswer = (fn) => async (req, res) => { try { windowHere(req); res.json(await fn(req)) } catch (e) { res.status(e.status || 502).json({ error: e.message, ...(e.code ? { code: e.code } : {}) }) } }
-app.get('/api/window/proof', windowAnswer((req) => { const mac = windowkey.proof(String(req.query.n || '')); if (!mac) throw Object.assign(new Error('Not started by the app'), { status: 404, code: 'not-started' }); return { mac } }))
+// (The proof is of this connection too: this server's own address and port, and the port the app's
+// end of it has, which a program passing requests on from elsewhere can't give.)
+app.get('/api/window/proof', windowAnswer((req) => { const mac = windowkey.proof(String(req.query.n || ''), req.socket); if (!mac) throw Object.assign(new Error('Not started by the app'), { status: 404, code: 'not-started' }); return { mac } }))
 app.get('/api/window/hello', windowAnswer(() => windowkey.helloNonce()))
 app.post('/api/window/hello', windowAnswer((req) => windowkey.hello({ nonce: req.body?.nonce, mac: req.body?.mac, secret: req.body?.secret })))
 // A signature kept open before 3.22, sealed at start (signstore.js), not only once Studio's signing opens.

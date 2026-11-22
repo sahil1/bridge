@@ -144,7 +144,8 @@ export function SignatureList({ setup }) {
   if (!setup.data) return <div className="sd-sigcards waiting" aria-busy="true"><span className="sd-sigcard waiting"><span className="sd-sigcard-pic" /></span></div>
   return (
     <div className="sd-siglist">
-      {setup.data.sealError && <p className="error-text small" role="alert">{t('Your saved signatures can\'t be opened: {error}', { error: setup.data.sealError })}</p>}
+      {setup.data.keysUnreadable ? <p className="error-text small" role="alert">{t('Bridge AI couldn\'t read its keychain item this time, so your signatures can\'t be opened. Quit and reopen Bridge AI to try again, and allow it if macOS asks.')}</p>
+        : setup.data.sealError && <p className="error-text small" role="alert">{t('Your saved signatures can\'t be opened: {error}', { error: setup.data.sealError })}</p>}
       <KeyWarning sealed={setup.data.sealed} />
       {setup.data.older && <p className="sd-warn small" role="status"><Icon name="alert" size={11} /> {t('Your signatures\' list is older than the app last saw, as if a copy from before was put back. Signing asks that it\'s you each time until you confirm it once.')}</p>}
       {setup.data.windowChanged && <p className="sd-warn small" role="status"><Icon name="alert" size={11} /> {t('The Bridge AI app\'s key for its windows changed on {date}. That happens when it\'s reinstalled or its Keychain item is reset; if neither happened, look at what runs on this computer.', { date: new Date(setup.data.windowChanged.at).toLocaleDateString(locale(), { dateStyle: 'medium' }) })}</p>}

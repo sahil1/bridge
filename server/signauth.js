@@ -86,7 +86,9 @@ async function wayFor(here, a) {
 export async function status(here) {
   const a = await store.askOf().catch(() => null)
   const p = await probe()
-  const on = !!a?.on || store.askMarked()
+  // (On as signing sees it: also while a list set aside, or older than the app last heard, keeps it
+  // asking, so the page asks first rather than being turned away.)
+  const on = await needed()
   let way = null
   try { way = await wayFor(here, a) } catch { way = null }
   return { on, pin: !!a?.pin, way, recorded: a?.way || null, touchID: p.touchID, deviceAuth: p.auth, hello: await helloAvailable(), locked: a?.lockUntil > Date.now() ? a.lockUntil : null, closed: !a }

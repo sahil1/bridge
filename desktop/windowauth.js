@@ -5,6 +5,7 @@
 // MAC each of its windows' requests carries instead of the secret.
 const crypto = require('node:crypto')
 const fs = require('node:fs')
+const http = require('node:http')
 const path = require('node:path')
 
 const rand = (n = 32) => crypto.randomBytes(n).toString('base64url')
@@ -14,27 +15,43 @@ const same = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(Strin
 // Kept in one file, sealed by safeStorage (macOS's Keychain, Windows' DPAPI, a Linux secret service),
 // so no other program reads it without asking. With none of those (safeStorage can't), nothing is
 // kept: a window secret for this run only, and the signatures stay with the server's own key file.
-function keysAt(file, safeStorage) {
+// A file there that can't be opened (its keychain item denied this time, or damaged) is never
+// written over: it's moved aside (<file>.unreadable) and tried again at the next start, and until it
+// opens this run has no signatures' key (unreadable: said in Settings › Studio), never a new one,
+// which would leave every saved signature sealed with a key nobody has.
+function keysAt(file, safeStorage, { listen = null } = {}) {
   const can = (() => { try { return !!safeStorage?.isEncryptionAvailable() } catch { return false } })()
   const store = process.platform === 'darwin' ? 'keychain' : process.platform === 'win32' ? 'dpapi' : (() => { try { return safeStorage.getSelectedStorageBackend?.() === 'basic_text' ? 'basic' : 'secret-service' } catch { return 'basic' } })()
+  const aside = `${file}.unreadable`
+  const open = (f) => JSON.parse(safeStorage.decryptString(fs.readFileSync(f)))
   let k = null
-  if (can) { try { k = JSON.parse(safeStorage.decryptString(fs.readFileSync(file))) } catch { k = null } }
-  if (!k || typeof k.window !== 'string') k = { window: rand(), key: can ? crypto.randomBytes(32).toString('base64') : null, launch: null, state: null }
+  // (Kept before, and no keychain to open it with this time: as unreadable, never replaced.)
+  let unreadable = !can && fs.existsSync(file)
+  if (can && fs.existsSync(file)) {
+    try { k = open(file) } catch { unreadable = true }
+    if (unreadable) { try { if (!fs.existsSync(aside)) fs.renameSync(file, aside) } catch { /* left where it is */ } }
+  } else if (can && fs.existsSync(aside)) {
+    try { k = open(aside); fs.renameSync(aside, file) } catch { unreadable = true; k = null }
+  }
+  if (k && typeof k.window !== 'string') { k = null; unreadable = true }
+  if (unreadable) k = { window: rand(), key: null, launch: null, state: null }
+  if (!k) k = { window: rand(), key: can ? crypto.randomBytes(32).toString('base64') : null, launch: null, state: null }
   const save = () => {
-    if (!can) return
+    if (!can || unreadable) return
     try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, safeStorage.encryptString(JSON.stringify(k)), { mode: 0o600 }) } catch { /* this run only */ }
   }
   save()
   return {
     get window() { return k.window },
     get launch() { return k.launch },
-    kept: can,
+    kept: can && !unreadable,
+    unreadable,
     // For a server about to start: a new secret for this start, kept (so a later run of the app can
-    // check the same server), and what goes on its fd 3.
+    // check the same server), and what goes on its fd 3, with where the app talks to it (listen).
     forStart() {
       k.launch = rand()
       save()
-      return JSON.stringify({ window: k.window, key: k.key, launch: k.launch, state: k.state, store: can ? store : null })
+      return JSON.stringify({ window: k.window, key: k.key, launch: k.launch, state: k.state, store: can && !unreadable ? store : null, listen, unreadable })
     },
     // What the server says of the signatures' list ({ v, ask }), kept for its next start.
     heard(st) {
@@ -45,27 +62,47 @@ function keysAt(file, safeStorage) {
   }
 }
 
-// The MAC a window's request carries (server/windowkey.js macFor): over the method, the path with
-// its query, the time and a nonce of its own.
-function windowHeader(secret, method, url) {
+// The MAC a window's request carries (server/windowkey.js macFor): over the method, the address and
+// port it's sent to (at: the server's own, 127.0.0.1:<port>; the URL's when not given), the path
+// with its query, the time, a nonce of its own and the body's SHA-256 ('' with none).
+function windowHeader(secret, method, url, { at = null, body = '' } = {}) {
   let u
   try { u = new URL(url) } catch { return null }
   const ms = String(Date.now())
   const nonce = rand(18)
-  return `1.${ms}.${nonce}.${hmac(secret, `bridge-ai window\n${String(method).toUpperCase()}\n${u.pathname}${u.search}\n${ms}\n${nonce}`)}`
+  return `1.${ms}.${nonce}.${hmac(secret, `bridge-ai window 2\n${String(method).toUpperCase()}\n${at || u.host}\n${u.pathname}${u.search}\n${ms}\n${nonce}\n${body}`)}`
+}
+// A request body's SHA-256, from what Electron says it will send (webRequest's uploadData): '' with
+// none, null when part of it is a file or a blob it doesn't give the bytes of.
+function bodyHash(uploadData) {
+  if (!uploadData?.length) return ''
+  const h = crypto.createHash('sha256')
+  for (const part of uploadData) {
+    if (!part.bytes) return null
+    h.update(part.bytes)
+  }
+  return h.digest('hex')
 }
 
-// Whether the server at base is the one this app started (it has that start's secret), asked with a
-// nonce of the app's; fetch: one that sends the app's key.
-async function proves(fetch, base, launch) {
-  if (!launch) return false
+// Whether the server at host:port is the one this app started: it answers the app's nonce with this
+// start's secret over this very connection, naming its own address and port and the app's end's port
+// as the app sees them from its end, so a program passing requests on to it from elsewhere can't.
+// headers: the app's key.
+function proves({ host = '127.0.0.1', port, launch, headers = {} }) {
+  if (!launch) return Promise.resolve(false)
   const n = rand(24)
-  try {
-    const r = await fetch(`${base}/api/window/proof?n=${n}`, { signal: AbortSignal.timeout(3000) })
-    if (!r.ok) return false
-    const j = await r.json()
-    return same(j.mac, hmac(launch, `bridge-ai server\n${n}`))
-  } catch { return false }
+  return new Promise((resolve) => {
+    const req = http.get({ host, port, path: `/api/window/proof?n=${n}`, headers, timeout: 3000, agent: false }, (res) => {
+      const s = res.socket
+      const there = `${s.remoteAddress?.includes(':') ? `[${s.remoteAddress}]` : s.remoteAddress}:${s.remotePort}`
+      const want = hmac(launch, `bridge-ai server 2\n${n}\n${there}\n${s.localPort}`)
+      let body = ''
+      res.on('data', (c) => { body += c })
+      res.on('end', () => { try { resolve(res.statusCode === 200 && same(JSON.parse(body).mac, want)) } catch { resolve(false) } })
+    })
+    req.on('timeout', () => req.destroy())
+    req.on('error', () => resolve(false))
+  })
 }
 // Whether the server has this app's window secret, never sending it: its nonce, the app's MAC of it.
 // tofu (from source only): a server with none yet is given it, once.
@@ -81,4 +118,4 @@ async function hello(fetch, base, secret, { tofu = false } = {}) {
   } catch { return false }
 }
 
-module.exports = { keysAt, windowHeader, proves, hello }
+module.exports = { keysAt, windowHeader, bodyHash, proves, hello }

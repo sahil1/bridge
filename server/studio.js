@@ -138,7 +138,14 @@ async function noCopy(real, h, buf) {
   if ((await signedSet()).has(h)) return true
   try {
     const bytes = buf || ((await fsp.stat(real)).size <= 100 * MB ? await fsp.readFile(real) : null)
-    return !!bytes && bytes.includes(MARK)
+    if (!bytes) return false
+    if (bytes.includes(MARK)) return true
+    // Saved again by something that packs its objects (the mark then compressed): its own
+    // information read, as a PDF reader reads it.
+    if (bytes.length > 40 * MB || !bytes.includes('ObjStm')) return false
+    const { PDFDocument, PDFName } = await import('pdf-lib')
+    const doc = await PDFDocument.load(bytes, { updateMetadata: false, ignoreEncryption: true, throwOnInvalidObject: false })
+    return !!doc.getInfoDict().get(PDFName.of('BridgeAISigned'))
   } catch { return false }
 }
 function snapshot(real, by, { name = null, buf = null, auto = false, saved = false, signed = null } = {}) {
@@ -445,6 +452,9 @@ export async function open(root, rel, { rootId = null, label = null } = {}) {
     path: r, name: path.basename(real), kind, ext, size: st.size, mtime: st.mtimeMs, versions: await shownChecked(await versionsOf(real), real), signings: await signingsOf(real),
     inParts: inParts(ext, st.size) && (ext === '.pdf' || !!partsOf), ...(partsOf ? { left: partsOf.left, model: partsOf.model } : {}),
     saves: st.size <= SAVE_MAX, keep: keepFor(st.size), limits: { open: OPEN_MAX, save: SAVE_MAX, whole: WHOLE_MAX },
+    // A PDF one could sign (80 MB at most): its SHA-256 as it's opened, which signing then has to find
+    // (signing.js); the page sends it for one it reads in parts and can't hash itself.
+    ...(ext === '.pdf' && st.size <= 80 * MB ? { sha256: await fullHash(real) } : {}),
   }
 }
 

@@ -11,6 +11,7 @@
 // left out then.
 import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
+import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -39,7 +40,9 @@ const home = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-smoke-'))
 // Terminals still run in the terminal host, but end with the server here, so nothing is left behind.
 fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ keepAgents: false }))
 const log = []
-const server = spawn(app.exe, [path.join(app.root, 'server', 'index.js')], {
+// (Started as the app starts it: desktop/serverflags.js.)
+const { SERVER_NODE_FLAGS } = createRequire(import.meta.url)('../desktop/serverflags.js')
+const server = spawn(app.exe, [...SERVER_NODE_FLAGS, path.join(app.root, 'server', 'index.js')], {
   cwd: app.root,
   env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', BRIDGE_HOME: home, BRIDGE_PORT: String(PORT) },
   stdio: ['ignore', 'pipe', 'pipe'],
@@ -128,6 +131,18 @@ try {
     try { key = fs.readFileSync(path.join(home, 'api-token'), 'utf8').trim() } catch { /* said below */ }
     if (!key) throw new Error('it made no key (api-token) in its data folder')
     await get('/api/config')
+  })
+  // Another program sending the server SIGUSR1 (which opens Node's inspector on 9229, from which
+  // its memory can be read): nothing opens, and the server carries on. Not on Windows (no signals).
+  if (process.platform !== 'win32') await step('SIGUSR1 opens no inspector', async () => {
+    const listening = () => new Promise((resolve) => { const c = net.connect(9229, '127.0.0.1'); c.once('connect', () => { c.destroy(); resolve(true) }); c.once('error', () => resolve(false)) })
+    if (await listening()) return 'skipped: something else is on 9229 here'
+    process.kill(server.pid, 'SIGUSR1')
+    await new Promise((r) => setTimeout(r, 1500))
+    if (await listening()) throw new Error('an inspector is listening on 9229')
+    if (server.exitCode != null) throw new Error(`the server exited (${server.exitCode})`)
+    await get('/api/health')
+    return 'nothing on 9229, still answering'
   })
   await step('without its key, the API is refused', async () => {
     const r = await fetch(`${BASE}/api/setup`)

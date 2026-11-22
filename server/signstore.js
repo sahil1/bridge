@@ -40,6 +40,9 @@ export const sealedWith = () => (where ? { by: where, store: where === 'app' ? a
 
 const readFileKey = async () => { try { const k = Buffer.from((await fsp.readFile(KEYFILE, 'utf8')).trim(), 'base64'); return k.length === 32 ? k : null } catch { return null } }
 async function fileKey() {
+  // The app couldn't read its own keys this time (its keychain item denied, or damaged): no key at
+  // all, rather than one of this server's own that the list would then be sealed with.
+  if (appKeys().unreadable) throw err('Bridge AI couldn\'t read its keychain item this time, so your signatures can\'t be opened. Quit and reopen Bridge AI to try again, and allow it if macOS asks.', 503, 'keys-unreadable')
   const have = await readFileKey()
   if (have) return have
   // None, and signatures sealed already: by the app's key, which a server started another way
@@ -49,9 +52,11 @@ async function fileKey() {
   writeFileAtomic(KEYFILE, k.toString('base64'), { mode: 0o600 })
   return k
 }
-// Sealed with a key file before the app started this server: each file sealed again with the app's
-// key, then the key file overwritten and taken away. One that won't open with the old key is left
-// as it is.
+// Sealed with a key file before the app first started this server (it has heard nothing of the list
+// yet: appkeys.js state): each file sealed again with the app's key, then the key file overwritten
+// and taken away. One that won't open with the old key is left as it is. Once the app has sealed the
+// list, a key file beside it is never anyone's but another program's: it's moved aside, unused, and a
+// list sealed with it doesn't open, so it's set aside too (loadStore), never sealed again as yours.
 async function rekey(old, k) {
   for (const f of (await fsp.readdir(DIR)).filter((x) => x.endsWith('.bin'))) {
     const name = f === 'store.bin' ? 'store' : f.slice(0, -4)
@@ -66,7 +71,8 @@ async function loadKey() {
   const app = appKeys().key
   if (app) {
     const old = await readFileKey()
-    if (old) await rekey(old, app)
+    if (old && !appKeys().state) await rekey(old, app)
+    else if (old) await fsp.rename(KEYFILE, path.join(DIR, `key-not-yours-${new Date().toISOString().replace(/[:.]/g, '-')}`)).catch(() => wipe(KEYFILE))
     where = 'app'
     return app
   }
@@ -126,8 +132,10 @@ async function loadStore() {
   // appkeys.js): a copy from before put back. Kept as it is, but signing asks first until you
   // confirm it's you (signauth.js), and it's said; noted in the list itself, so changes made
   // meanwhile can't make it look new again, and the app isn't told of them.
+  // And when the app last heard Ask Before Signing was on and this list says it's off, whatever its
+  // version says: closed until you confirm.
   const was = appKeys().state
-  if (was && s.v < was.v && !s.older && !s.setAside) {
+  if (was && (s.v < was.v || (was.ask && !s.ask?.on)) && !s.older && !s.setAside) {
     s.older = { at: new Date().toISOString(), was: was.v, is: s.v, ask: was.ask }
     await writeStore(s)
   }
@@ -167,6 +175,8 @@ async function putBack(now) {
 }
 // Said until a new one is drawn: the list's set-aside note.
 export const setAsideNote = () => one(async () => (await readStore()).setAside || null)
+// Whether the app couldn't read its own keys this time (said in Settings › Studio).
+export const keysUnreadable = () => appKeys().unreadable
 // A list older than the app last heard (above): { at, was, is, ask }, until you confirm it's you.
 export const olderNote = () => one(async () => (await readStore()).older || null)
 async function writeStore(s) {

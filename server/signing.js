@@ -327,7 +327,7 @@ export function routes(app, { wrap, rootOf, sq, window: fromWindow, phone: phone
     const here = fromWindow(req)
     const device = here ? null : phoneOf(req)
     let sigs
-    try { sigs = { ...(await mine()), setAside: await store.setAsideNote(), older: await store.olderNote(), windowChanged: await store.windowChangedNote() } } catch (e) { sigs = { list: [], signature: null, initials: null, sealError: e.message } }
+    try { sigs = { ...(await mine()), setAside: await store.setAsideNote(), older: await store.olderNote(), windowChanged: await store.windowChangedNote() } } catch (e) { sigs = { list: [], signature: null, initials: null, sealError: e.message, ...(e.code === 'keys-unreadable' ? { keysUnreadable: true } : {}) } }
     const p = here ? await probe() : { trackpad: false }
     return {
       ...sigs, sealed: store.sealedWith(), model: await modelInfo(String(req.query.model || '') || null), readsScans: !!helpers.scanText,
@@ -414,6 +414,10 @@ export function routes(app, { wrap, rootOf, sq, window: fromWindow, phone: phone
       if (want && g.sha256 && want !== g.sha256) throw Object.assign(new Error('The document changed since you confirmed: look at it again, then sign.'), { status: 409, code: 'changed' })
       want = g.sha256 || want
     }
+    // What was shown, always (the page's own hash of the bytes it has, or for one it read in parts,
+    // the one Studio took as it opened it: studio.js open): no document is signed as it is now
+    // without it having been seen so.
+    if (!/^[0-9a-f]{64}$/.test(String(req.body?.sha256 || ''))) throw Object.assign(new Error('Open the PDF again to sign it: what it showed you wasn\'t sent.'), { status: 400, code: 'need-sha' })
     const id = `s${Date.now().toString(36)}${crypto.randomBytes(3).toString('hex')}`
     const r = await sign(root, q.path, req.body?.marks, { want, id })
     const rec = { id, on: nameOf(req), via: a.here ? 'window' : 'phone', how, places: r.places, at: new Date().toISOString(), copy: r.path, from: String(q.path), sha256: r.sha256, fromSha256: r.fromSha256 }
