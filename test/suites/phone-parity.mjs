@@ -413,6 +413,16 @@ try {
     await ph.p.waitForSelector('.m-more-row')
     const names = (await ph.p.locator('.m-more-row .m-more-text > b').allInnerTexts()).map((x) => x.trim())
     ok(names[0] === 'Today' && names[1] === 'Usage', 'Home on: More has Today, then Usage, a row of its own', names)
+    // Left at Meetings, Bridge AI restarted, and the phone app opened again: where it was left, not
+    // Home (Home is where it starts only on its very first open, as above).
+    await follow(ph.p, 'Meetings', HOME_TABS)
+    await kit.restart()
+    await ph.p.goto(kit.url)
+    await ph.p.waitForSelector('.tabbar button', { timeout: 20000 })
+    await until(async () => (await tabNames()).join('|') === HOME_TABS.join('|'), 10000)
+    await ph.p.waitForTimeout(2000)
+    const back = await ph.p.locator('.tabbar button[aria-current="true"]').innerText().catch(() => '')
+    ok(/Meetings/.test(back) && !(await ph.p.locator('.hm').isVisible()), 'Home on: left at Meetings, restarted and opened again: Meetings, not Home', back)
     // The desktop's Edit in Home's header: on a phone, a long press on a section's name (as on an
     // iPhone's home screen), besides Search's Edit Home above. It fits the phone.
     // (Opened again, it's at the tab it last showed: Home's tapped.)

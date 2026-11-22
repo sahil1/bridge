@@ -10,9 +10,10 @@
 // Claude Code asking for permission, the tasks that wait on you on both computers (Desk's asked for
 // with its summary), a meeting's notes with two action items, a whiteboard a Chief of Staff drew and
 // not one you made, the tasks coming up; a reply to a task with no Chief of Staff running says so.
-// In the app, on a desktop: it opens at Home; switched to another computer and back, or reloaded, it
-// stays where you were, and opened again in a new window (the app starting), it's at Home again; the
-// sidebar's Home row and the top bar's chip lead there; Yes answers the agent in place; a filter by kind and by device; the next meeting (the
+// In the app, on a desktop: a window with nowhere to go back to (as on a new install) opens at Home;
+// switched to another computer and back, reloaded, or opened again in a new window (the app starting)
+// it stays where you were, Home never put over it; the sidebar's Home row and the top bar's chip lead
+// there; Yes answers the agent in place; a filter by kind and by device; the next meeting (the
 // calendar stood in for) with its brief from the last one in the series and the files in its invite;
 // To Chief of Staff hands the meeting's action items on; a whiteboard opens; a reply that can't go
 // says why; Home that can't load says why, with Try again; Everything in lanes by device and by kind.
@@ -446,18 +447,18 @@ try {
     await p.locator('.ws-tab', { hasText: 'Auth flow v2' }).click()
     await p.locator('.rail-nav-btn.rail-home').click()
     ok(!!(await until(() => p.locator('.work.maxed .hm').isVisible(), 5000)), "and the sidebar's Home row")
-    // The app opened again (a new window, with the tabs as you left them, the whiteboard last): at
-    // Home, the whiteboard's tab still in the strip.
+    // The app opened again (a new window, with the tabs as you left them, the whiteboard last):
+    // where you were, the whiteboard, and Home not put over it.
     await p.keyboard.press('Escape')
     await p.locator('.ws-tab', { hasText: 'Auth flow v2' }).click()
     await until(onBoard, 5000)
     {
       const p2 = await ctx.newPage()
       await p2.goto(a.url)
-      const atHome = !!(await until(() => p2.locator('.work.maxed .hm').isVisible(), 20000))
-      await p2.keyboard.press('Escape')
-      const strip = await until(async () => { const x = await p2.locator('.ws-tabs').innerText().catch(() => ''); return /Auth flow v2/.test(x) && x }, 5000)
-      ok(atHome && !!strip, "opened again in a new window (the app starting), it's at Home, the whiteboard's tab still there", strip || await p2.locator('.ws-tabs').innerText().catch(() => ''))
+      const onIt = async () => /Auth flow v2/.test(await p2.locator('.ws-tab.main').innerText().catch(() => '')) && !(await p2.locator('.work.maxed .hm').count())
+      const there = !!(await until(onIt, 20000))
+      await p2.waitForTimeout(2500)
+      ok(there && await onIt(), 'opened again in a new window (the app starting): where you were, the whiteboard, and still there once its first answers are in (Home not put over it)', await p2.locator('.ws-tab.main').innerText().catch(() => ''))
       await p2.close()
     }
     await p.locator('.rail-nav-btn.rail-home').click()
@@ -1439,6 +1440,40 @@ try {
     ok(/Agents/.test(on) && !(await p.locator('.hm').isVisible()), 'a phone opened afresh, Agents tapped before its first answers came: it stays on Agents, not taken to Home', on)
     ok(errors.length === 0, 'and no page errors', errors)
     await ctx.close()
+  }
+
+  // ---------- Where it opens, with a restart in the middle ----------
+  // A window left at a whiteboard; Bridge AI quits and starts again (an update, say) and the app's
+  // window opens: at the whiteboard, and Home not put over it once the first answers are in. Left at
+  // a whiteboard deleted since, or at an agent closed since: Home, saying nothing.
+  {
+    const boardTab = (id) => `view:studio:board:${encodeURIComponent(id)}`
+    const leftAt = (active) => ({ 'cc-ws': { tabs: [active], active, side: null, split: false, group: 'main' } })
+    const atHome = (pg) => pg.locator('.work.maxed .hm').isVisible().catch(() => false)
+    const soon = await a.api('/boards', { title: 'Gone soon' })
+    await a.restart()
+    {
+      const { ctx, p } = await pageAt(b, a.url, { width: 1440, store: leftAt(boardTab(drawn.id)) })
+      const onIt = async () => /Auth flow v2/.test(await p.locator('.ws-tab.main').innerText().catch(() => '')) && !(await atHome(p))
+      const there = !!(await until(onIt, 20000))
+      await p.waitForTimeout(2500)
+      ok(there && await onIt(), 'restarted, the app opened again: where it was left, the whiteboard, and Home not put over it', await p.locator('.ws-tab.main').innerText().catch(() => ''))
+      await ctx.close()
+    }
+    await a.api(`/boards/${encodeURIComponent(soon.id)}`, null, 'DELETE')
+    {
+      const { ctx, p, errors } = await pageAt(b, a.url, { width: 1440, store: leftAt(boardTab(soon.id)) })
+      const home = !!(await until(() => atHome(p), 20000))
+      const said = await p.locator('body').innerText().catch(() => '')
+      ok(home && !/Gone soon|No such whiteboard/.test(said), 'left at a whiteboard deleted since: Home, saying nothing about it', { home, said: said.slice(0, 300) })
+      ok(!errors.length, 'and no page errors', errors)
+      await ctx.close()
+    }
+    {
+      const { ctx, p } = await pageAt(b, a.url, { width: 1440, store: leftAt('w9:p99') })
+      ok(!!(await until(() => atHome(p), 20000)), 'left at an agent closed since: Home')
+      await ctx.close()
+    }
   }
 
   // Turned off: nothing leads to it, and the app opens where you were.

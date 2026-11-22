@@ -21,7 +21,8 @@
 // out of beta (Home, Scheduled Routines, Meeting Insights, Bridge AI as an MCP Server) are regular
 // cards in Your Features and ordinary switches in their own places, with no Beta mark; and a
 // settings file from before 3.22.0 with their Beta Features switches on, off or never set comes up
-// as it was left (on stays on, off stays off, never set takes each one's default). A setting
+// as it was left (on stays on, off stays off, never set takes each one's default), and so after a
+// restart. A setting
 // that needs another one on shows greyed with Turn On (Dictation's extras), and Which Devices May
 // Connect shows with Remote Screen and Preview off. Meetings & Voice and Devices & Access have four
 // tabs each: a link to one of them lands on it, the section's own id and its row in the list on the
@@ -205,7 +206,7 @@ try {
     const sw = (id) => p.locator(`.ft-card[data-feature="${id}"] input[role="switch"]`)
     ok(['home', 'meeting-insights', 'routines', 'mcp-server'].every((id) => card(id).sw && !card(id).beta) && !card('tidy').name
       && await sw('home').isChecked() && await sw('routines').isChecked() && !(await sw('meeting-insights').isChecked()) && !(await sw('mcp-server').isChecked())
-      && card('home').status === 'Where Bridge AI opens' && card('meeting-insights').status === 'On by itself after 5 meetings' && card('routines').status === 'None on a schedule yet' && card('mcp-server').status === 'Your boards and files in other AI apps',
+      && card('home').status === 'Your day at a glance' && card('meeting-insights').status === 'On by itself after 5 meetings' && card('routines').status === 'None on a schedule yet' && card('mcp-server').status === 'Your boards and files in other AI apps',
     'Home, Meeting Insights, Scheduled Routines and Bridge AI as an MCP Server: regular cards with their switches, Home and Scheduled Routines on, Meeting Insights on by itself after 5 meetings, the MCP server off; Tidy What I Say only in the desktop app', ['home', 'meeting-insights', 'routines', 'mcp-server', 'tidy'].map((id) => [id, card(id)]))
     await sw('meeting-insights').check()
     ok(!!(await until(async () => (await kit.api('/config')).features?.['meeting-insights'] === true && (await kit.api('/settings')).user.meetings?.insights === true, 5000)), 'its card\'s switch turns Meeting Insights on, saved as its own setting')
@@ -622,6 +623,11 @@ try {
           `the Beta Features switches ${k === 'never' ? 'never set: each takes its default' : `all ${k}: each its own setting, ${k}`}${k === 'on' ? ', and the one still in beta stays one' : ''}`, { features, saved })
       }
       ok((await olds.on.api('/config')).trials?.['meeting-board'] === true, 'Live Meeting Board, still in beta, still on')
+      // Restarted: each as it was saved (nothing read again from the old switches, which are gone).
+      const savedOff = fs.readFileSync(path.join(olds.off.data, 'config.json'), 'utf8')
+      await olds.off.restart()
+      const offAgain = await olds.off.api('/config')
+      ok(fs.readFileSync(path.join(olds.off.data, 'config.json'), 'utf8') === savedOff && FIVE.every((id) => offAgain.features?.[id] === false), 'all off, restarted: still off, the settings file as it was saved', offAgain.features)
       // In the app: each card and its switch as it was left, and Beta Features without them.
       for (const k of ['on', 'off']) {
         const { ctx, p, errors } = await page(b, olds[k].url)
