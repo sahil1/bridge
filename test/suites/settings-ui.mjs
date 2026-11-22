@@ -118,6 +118,9 @@ const ALL = {
 // 3.19.0; Home, Tidy what I say, Meeting Insights, Scheduled Routines and Bridge AI as an MCP Server
 // since 3.22.0); Speakers From the Call's Video only where the server runs on a Mac. Each one's
 // switch is first in its own place too.
+// Your Features' cards in a browser: 15, and the Mac's Speakers From the Call's Video (Tidy What I
+// Say's only in the desktop app, where it can hear the key from other apps).
+const CARDS = IS_MAC ? 16 : 15
 const BETAS = ['Usage Across Every Provider', 'Live Meeting Board', 'Answers in AI Assist', 'Bots', 'Remote Screen and Preview', 'Share Links', ...(IS_MAC ? ["Speakers From the Call's Video"] : [])]
 const BETA_AT = { 'Share Links': 'Share Links', 'Usage Across Every Provider': 'Model Providers', 'Live Meeting Board': 'Meetings', 'Answers in AI Assist': 'Meetings', Bots: 'Bots', 'Remote Screen and Preview': 'Remote Access', "Speakers From the Call's Video": 'Meetings' }
 // Out of beta: each an ordinary switch in its own place, by its data-setting, with no Beta mark (Tidy
@@ -200,7 +203,7 @@ try {
     await settled(p)
     const cards = await p.locator('.ft-card').evaluateAll((l) => l.map((c) => ({ id: c.dataset.feature, name: c.querySelector('.ft-name b')?.innerText.trim(), status: c.querySelector('.ft-status')?.innerText.trim(), open: !!c.querySelector('.ft-open'), beta: !!c.querySelector('.st-chip.beta'), sw: !!c.querySelector('input[role="switch"]') })))
     const betaCards = cards.filter((c) => c.beta).map((c) => c.name)
-    ok(cards.length >= 16 && cards.every((c) => c.name && c.status && c.open) && JSON.stringify(betaCards) === JSON.stringify(BETAS) && cards.filter((c) => c.beta).every((c) => c.sw), 'Your Features: a card for each feature, each with a line on how it\'s doing and Open, every beta there and marked, with its switch', cards)
+    ok(cards.length >= CARDS && cards.every((c) => c.name && c.status && c.open) && JSON.stringify(betaCards) === JSON.stringify(BETAS) && cards.filter((c) => c.beta).every((c) => c.sw), 'Your Features: a card for each feature, each with a line on how it\'s doing and Open, every beta there and marked, with its switch', cards)
     ok(cards.find((c) => c.id === 'remote-screen')?.status === 'See and control your other computers' && cards.every((c) => c.status !== 'Off') && cards.find((c) => c.id === 'dictation')?.sw && /^Hold .+ and talk$/.test(cards.find((c) => c.id === 'dictation')?.status || ''), 'and says how each is: Remote Screen, off, says what it is (its switch says it\'s off), Dictation is on with its key', cards.filter((c) => ['remote-screen', 'dictation'].includes(c.id)))
     // The ones out of beta: regular cards, each with its switch, as each starts.
     const card = (id) => cards.find((c) => c.id === id) || {}
@@ -271,13 +274,14 @@ try {
         const opts = p.locator('.modal.settings [data-setting="enter-key"] [role="radio"]')
         const said = (await opts.allInnerTexts()).map((x) => x.trim())
         ok(said.length === 3 && said[0] === 'Smart' && said[1] === 'Always Sends' && /^(⌘Enter|Ctrl\+Enter) Sends$/.test(said[2]) && (await opts.first().getAttribute('aria-checked')) === 'true', 'You: Enter Key, Smart, Always Sends or ⌘Enter Sends (Ctrl+Enter off a Mac), Smart picked', said)
-        const kept = (v) => until(async () => (await kit.api('/settings')).user.enterKey === v && (await kit.api('/config')).enterKey === (v || 'smart'), 5000, 100)
+        // Kept: saved, in /config, and the page showing it picked (it draws that once the save is back).
+        const kept = (v, i) => until(async () => (await kit.api('/settings')).user.enterKey === v && (await kit.api('/config')).enterKey === (v || 'smart') && (await opts.nth(i).getAttribute('aria-checked')) === 'true', 5000, 100)
         await opts.nth(2).click()
-        ok(!!(await kept('mod')) && (await opts.nth(2).getAttribute('aria-checked')) === 'true', 'You: ⌘Enter Sends picked is kept', (await kit.api('/settings')).user.enterKey)
+        ok(!!(await kept('mod', 2)), 'You: ⌘Enter Sends picked is kept', (await kit.api('/settings')).user.enterKey)
         await opts.nth(1).click()
-        ok(!!(await kept('always')), 'You: Always Sends picked is kept', (await kit.api('/settings')).user.enterKey)
+        ok(!!(await kept('always', 1)), 'You: Always Sends picked is kept', (await kit.api('/settings')).user.enterKey)
         await opts.nth(0).click()
-        ok(!!(await kept(undefined)), 'You: Smart again takes it out of your settings (the default)', (await kit.api('/settings')).user)
+        ok(!!(await kept(undefined, 0)), 'You: Smart again takes it out of your settings (the default)', (await kit.api('/settings')).user)
       }
       if (name === 'About & Updates') {
         const betas = (await p.locator('[data-setting="beta"] .ab-trial .st-check b').allInnerTexts()).map((x) => x.trim())
@@ -600,7 +604,7 @@ try {
     await settled(p)
     const ff = await phoneFaults(p, '.modal.settings .st-scroll')
     const opens = await p.locator('.modal.settings.phone .ft-open').evaluateAll((l) => l.map((e) => Math.round(e.getBoundingClientRect().height)))
-    ok(!ff.wider && !ff.past && !ff.sideways && !ff.cut && opens.length >= 16 && opens.every((h) => h >= 40), 'phone: Your Features, nothing wider than the screen or cut off, each Open a whole 40 px target', { ff, opens })
+    ok(!ff.wider && !ff.past && !ff.sideways && !ff.cut && opens.length >= CARDS && opens.every((h) => h >= 40), 'phone: Your Features, nothing wider than the screen or cut off, each Open a whole 40 px target', { ff, opens })
     await shot(p, `${tag}settings-ui-phone-features`)
     ok(errors.length === 0, 'phone: no page errors', errors)
     await ctx.close()

@@ -820,7 +820,9 @@ try {
   ok(w4.heard.some(([h, t]) => h === 'north wind' && t === 'Northwind') && !w4.heard.some(([h]) => h === 'nor wind'), 'and Undo puts back the ways it was misheard before', w4.heard)
   const bad = await kit.api('/dictation/remember', { term: 'x', heard: 'ex' }).catch((e) => e.message)
   ok(/A name or term/.test(bad), 'a name that isn\'t one: said, nothing kept', bad)
-  ok(JSON.stringify((await kit.api('/config')).dictation) === '{}', 'no dictation settings at first: everything as it comes')
+  // Nothing set at first: /config has only Tidy what I say, as it starts on this computer.
+  const first = (await kit.api('/config')).dictation
+  ok(Object.keys(first).join() === 'tidy' && typeof first.tidy === 'boolean', 'no dictation settings at first: everything as it comes', first)
   await kit.api('/settings', { dictation: { key: 'Control+Alt+D', cleanup: false } }, 'PATCH')
   const c = (await kit.api('/config')).dictation
   ok(c.key === 'Control+Alt+D' && c.cleanup === false, 'Settings › Meetings & Voice saves them, and pages read them from /api/config', c)
