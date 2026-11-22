@@ -32,6 +32,10 @@ function serverEnv(env = process.env, { platform = process.platform, smoke = fal
   }
   out.WS_NO_BUFFER_UTIL = '1'
   out.WS_NO_UTF_8_VALIDATE = '1'
+  // (This computer's own addresses never through a proxy, whatever else NO_PROXY says.)
+  const no = [...new Set([...String(out.NO_PROXY || out.no_proxy || '').split(',').map((x) => x.trim()).filter(Boolean), 'localhost', '127.0.0.1', '::1'])].join(',')
+  out.NO_PROXY = no
+  if (platform !== 'win32') out.no_proxy = no
   return out
 }
 

@@ -43,10 +43,11 @@ const serverFlags = require('./serverflags.js')
 // The smoke test's own Mac build (startgate.js, by its bundle id): its server gets its BRIDGE_ settings.
 const SMOKE_BUILD = app.isPackaged && require('./startgate.js').smokeBuild(require('./startgate.js').bundleId())
 // The app's own code-signing requirement (codesig.js), once: what each program in its copy is held
-// to, and what the server holds its signing helper to (on the pipe, with the keys).
+// to, and what the server holds its signing helper to (on the pipe, with the keys). Read from the app
+// as it runs (its pid), not from its files on disk, which could be changed under it.
 const codesig = require('./codesig.js')
 let codeReqIs
-const codeReq = () => (codeReqIs === undefined ? (codeReqIs = BUNDLED && IS_MAC_APP ? codesig.requirementOf(path.resolve(process.resourcesPath, '..', '..')) : null) : codeReqIs)
+const codeReq = () => (codeReqIs === undefined ? (codeReqIs = BUNDLED && IS_MAC_APP ? codesig.requirementOf(String(process.pid)) : null) : codeReqIs)
 const IS_MAC_APP = process.platform === 'darwin'
 const PORT = (Number(process.env.BRIDGE_PORT) || CONFIG.port || 7420) + (DEV ? 1 : 0)
 const URL_BASE = `http://127.0.0.1:${PORT}`
@@ -115,7 +116,9 @@ const CHANGED = () => {
 // (And never opened while the app's own copy isn't as built: checkRoot.)
 const appKeys = () => {
   if (!rootOk) throw new Error('Bridge AI\'s own files aren\'t as built')
-  return (keys ||= windowAuth.keysAt(path.join(app.getPath('userData'), 'signing-keys'), electron.safeStorage, { listen: { host: '127.0.0.1', port: SERVER_PORT } }))
+  // (Sealed for this data folder only: profile.)
+  const profile = (() => { try { return fs.realpathSync(DATA) } catch { return path.resolve(DATA) } })()
+  return (keys ||= windowAuth.keysAt(path.join(app.getPath('userData'), 'signing-keys'), electron.safeStorage, { listen: { host: '127.0.0.1', port: SERVER_PORT }, profile }))
 }
 // Checked now: the server the app started, over the connection the app itself makes to it (built
 // app: servergate.js holds everything back until it has, and checks again before each page loads),

@@ -7,6 +7,7 @@
 const { execFile, spawnSync } = require('node:child_process')
 
 const CODESIGN = '/usr/bin/codesign'
+// bundle: the app's path, or a pid (main.js asks with its own: the app as it runs).
 function requirementOf(bundle, { platform = process.platform } = {}) {
   if (platform !== 'darwin' || !bundle) return null
   const d = spawnSync(CODESIGN, ['-d', '-r-', bundle], { encoding: 'utf8', timeout: 15000 })

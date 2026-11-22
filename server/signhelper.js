@@ -19,9 +19,21 @@ export const signBin = () => {
   return (IS_MAC || (TESTS && process.env.BRIDGE_SIGNHELPER)) && fs.existsSync(f) ? f : null
 }
 // Started by the Mac app: the helper must be signed as the app is (its requirement, on the app's pipe:
-// appkeys.js code) before anything it says is taken, checked each time it's run, as it could be
-// swapped for another program (one that says Touch ID said yes). Not signed so: no helper.
-const holds = (bin, req) => new Promise((resolve) => execFile('/usr/bin/codesign', ['--verify', '--strict', '-R', `=${req}`, bin], { timeout: 20000 }, (err) => resolve(!err)))
+// appkeys.js code, which the app read from itself as it runs) before anything it says is taken,
+// checked each time it's run, as it could be swapped for another program (one that says Touch ID said
+// yes): the file before it's started, and, for what it's asked (Touch ID, the trackpad), the very
+// process started, by its pid, before it's told anything (it waits for that on its stdin), so a file
+// swapped in between is caught too. Not signed so: no helper. (probe, which only says what this Mac
+// has and grants nothing, is over before its process could be looked at: the file only.)
+const holds = (target, req) => new Promise((resolve) => execFile('/usr/bin/codesign', ['--verify', '--strict', '-R', `=${req}`, String(target)], { timeout: 20000 }, (err) => resolve(!err)))
+const runningHolds = async (child) => {
+  const req = appKeys().code
+  if (!req || TESTS) return true
+  if (await holds(child.pid, req)) return true
+  console.error(`signing: the helper started (pid ${child.pid}) isn't signed as Bridge AI is, so what it says isn't taken`)
+  try { child.kill('SIGKILL') } catch { /* gone */ }
+  return false
+}
 async function trusted() {
   const bin = signBin()
   if (!bin) return null
@@ -36,16 +48,19 @@ const lastJson = (out) => { for (const line of String(out || '').trim().split('\
 export async function runHelper(args, said = null, ms = 15000) {
   const bin = await trusted()
   if (!bin) return null
-  return new Promise((resolve) => {
-    const child = spawn(bin, args, { stdio: ['pipe', 'pipe', 'ignore'] })
+  let child
+  const answer = new Promise((resolve) => {
+    child = spawn(bin, args, { stdio: ['pipe', 'pipe', 'ignore'] })
     let out = ''
     const timer = setTimeout(() => { try { child.kill() } catch { /* gone */ } }, ms)
     child.stdout.on('data', (d) => { out += d })
     child.on('error', () => { clearTimeout(timer); resolve(null) })
     child.on('close', () => { clearTimeout(timer); resolve(lastJson(out)) })
     child.stdin.on('error', () => {})
-    child.stdin.end(said ? `${JSON.stringify(said)}\n` : '')
   })
+  if (args[0] !== 'probe' && !(await runningHolds(child))) { await answer; return null }
+  child.stdin.end(said ? `${JSON.stringify(said)}\n` : '')
+  return answer
 }
 
 // One budget for each of them (who: a key), so one can't use up another's (limiter, below).
@@ -129,6 +144,7 @@ export function trackpad({ hint, seconds = 120, onLine, onEnd }) {
     if (stopped || ended) { end({ cancel: 'stop' }); return }
     if (!bin) { end({ cancel: 'none' }); return }
     child = spawn(bin, ['trackpad'], { stdio: ['pipe', 'pipe', 'ignore'] })
+    const started = child
     let buf = ''
     child.stdout.on('data', (d) => {
       buf += d
@@ -144,7 +160,11 @@ export function trackpad({ hint, seconds = 120, onLine, onEnd }) {
     child.on('exit', () => end({ cancel: 'stop' }))
     child.on('error', () => end({ cancel: 'none' }))
     child.stdin.on('error', () => {})
-    child.stdin.write(`${JSON.stringify({ hint: hint ? String(hint).slice(0, 160) : null, seconds })}\n`)
+    // (The process itself as signed as the app is, before it's told anything: runningHolds.)
+    runningHolds(started).then((ok) => {
+      if (!ok) { end({ cancel: 'none' }); return }
+      try { started.stdin.write(`${JSON.stringify({ hint: hint ? String(hint).slice(0, 160) : null, seconds })}\n`) } catch { /* gone */ }
+    })
   }, () => end({ cancel: 'none' }))
   return me
 }

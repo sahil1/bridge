@@ -22,11 +22,19 @@ const same = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(Strin
 // opening (retried), Settings › Studio offers Start Over, behind Touch ID, the Mac's password or
 // Windows Hello (server/signing.js): startOver() keeps the file that won't open (<file>.unreadable-
 // <time>) and makes new keys; the signatures sealed with the old ones are then set aside, and said.
-function keysAt(file, safeStorage, { listen = null } = {}) {
+// profile: the data folder they're for (BRIDGE_HOME, or ~/.bridge-ai), sealed in with them. Every copy
+// of the app opens the same keychain item, so a copy of this file put in another data folder would
+// open there too: one sealed for another folder is taken as one that won't open (moved aside, no
+// signatures' key). One from before this was kept takes this folder's as it's next saved.
+function keysAt(file, safeStorage, { listen = null, profile = null } = {}) {
   const can = (() => { try { return !!safeStorage?.isEncryptionAvailable() } catch { return false } })()
   const store = process.platform === 'darwin' ? 'keychain' : process.platform === 'win32' ? 'dpapi' : (() => { try { return safeStorage.getSelectedStorageBackend?.() === 'basic_text' ? 'basic' : 'secret-service' } catch { return 'basic' } })()
   const aside = `${file}.unreadable`
-  const open = (f) => JSON.parse(safeStorage.decryptString(fs.readFileSync(f)))
+  const open = (f) => {
+    const j = JSON.parse(safeStorage.decryptString(fs.readFileSync(f)))
+    if (profile && j?.profile && j.profile !== profile) throw new Error('sealed for another data folder')
+    return j
+  }
   let k = null
   // (Kept before, and no keychain to open it with this time: as unreadable, never replaced.)
   let unreadable = !can && fs.existsSync(file)
@@ -40,6 +48,7 @@ function keysAt(file, safeStorage, { listen = null } = {}) {
   if (k && typeof k.window !== 'string') { k = null; unreadable = true }
   if (unreadable) k = { window: rand(), key: null, launch: null, state: null }
   if (!k) k = { window: rand(), key: can ? crypto.randomBytes(32).toString('base64') : null, launch: null, state: null }
+  if (profile && !unreadable) k.profile = profile
   const save = () => {
     if (!can || unreadable) return
     try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, safeStorage.encryptString(JSON.stringify(k)), { mode: 0o600 }) } catch { /* this run only */ }
@@ -56,7 +65,7 @@ function keysAt(file, safeStorage, { listen = null } = {}) {
       if (!unreadable || !retried || !can) return false
       const stamp = new Date().toISOString().replace(/[:.]/g, '-')
       for (const f of [aside, file]) { try { if (fs.existsSync(f)) fs.renameSync(f, `${file}.unreadable-${stamp}${f === file ? '-b' : ''}`) } catch { return false } }
-      k = { window: rand(), key: crypto.randomBytes(32).toString('base64'), launch: null, state: null }
+      k = { window: rand(), key: crypto.randomBytes(32).toString('base64'), launch: null, state: null, ...(profile ? { profile } : {}) }
       unreadable = false
       retried = false
       save()
