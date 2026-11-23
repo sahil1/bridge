@@ -176,16 +176,19 @@ try {
     delete process.env.DO_NOT_TRACK
     delete process.env.BRIDGE_TELEMETRY
     const c = await import('../../server/counts.js')
+    // Last week by this computer's calendar, as send() decides a week is over (the server's is UTC's:
+    // on a Sunday evening in California it's already Monday there).
+    const over = c.weekOf(new Date(+c.now() - 7 * 864e5))
     let settings = { counts: { share: true } }
     c.configure(settings, { about: async () => ({ app: '3.9.2', os: 'linux', osVersion: 'Ubuntu 24.04', arch: 'x64', chip: 'AMD Ryzen 7', memory: '32-63 GB', cores: '9-12', install: 'docker', layout: 'everything', runtime: 'builtin', phone: 'none', phones: '0', computers: '2', agents: ['claude', 'codex', 'not-an-agent'], features: { chief: 'claude', relay: 'own', planUsage: 'on', secretPath: ['', 'home', 'x'].join('/') } }), save: (patch) => { settings = { ...settings, ...patch }; c.configure(settings) } })
     // A week that's over, as Bridge AI writes it down.
-    const kept = { week: lastWeek, counts: { 'agents.started.codex': 3, 'voice.transcribed': 40 }, days: [1, 2, 5], nonce: 'b'.repeat(24), installAge: '13+ weeks', about: { app: '3.9.2', os: 'linux', osVersion: 'Ubuntu 24.04', arch: 'x64', chip: 'AMD Ryzen 7', memory: '32-63 GB', cores: '9-12', install: 'docker', layout: 'everything', runtime: 'builtin', phone: 'none', phones: '0', computers: '2', agents: ['claude', 'codex', 'not-an-agent'], features: { chief: 'claude', relay: 'own', planUsage: 'on', secretPath: ['', 'home', 'x'].join('/') } } }
+    const kept = { week: over, counts: { 'agents.started.codex': 3, 'voice.transcribed': 40 }, days: [1, 2, 5], nonce: 'b'.repeat(24), installAge: '13+ weeks', about: { app: '3.9.2', os: 'linux', osVersion: 'Ubuntu 24.04', arch: 'x64', chip: 'AMD Ryzen 7', memory: '32-63 GB', cores: '9-12', install: 'docker', layout: 'everything', runtime: 'builtin', phone: 'none', phones: '0', computers: '2', agents: ['claude', 'codex', 'not-an-agent'], features: { chief: 'claude', relay: 'own', planUsage: 'on', secretPath: ['', 'home', 'x'].join('/') } } }
     fs.mkdirSync(path.join(home, 'telemetry'), { recursive: true })
-    fs.writeFileSync(path.join(home, 'telemetry', `${lastWeek}.json`), JSON.stringify(kept))
+    fs.writeFileSync(path.join(home, 'telemetry', `${over}.json`), JSON.stringify(kept))
     const sent = await c.send()
     const r = rows(db, 'reports')
     const cs = rows(db, 'counts')
-    ok(sent.sent.join() === lastWeek && fs.existsSync(path.join(home, 'telemetry', 'sent', `${lastWeek}.json`)), 'Bridge AI\'s own send() delivers a week that\'s over, and keeps its copy of what went', sent)
+    ok(sent.sent.join() === over && fs.existsSync(path.join(home, 'telemetry', 'sent', `${over}.json`)), 'Bridge AI\'s own send() delivers a week that\'s over, and keeps its copy of what went', sent)
     ok(r.length === 1 && r[0].os === 'linux' && r[0].install === 'docker' && r[0].install_age === '13+ weeks' && r[0].days_active === 3 && cs.find((x) => x.name === 'agents.started.codex')?.bucket === '2-5' && cs.find((x) => x.name === 'voice.transcribed')?.bucket === '21-100', 'and the server keeps it as totals, in the same ranges the app showed', { r, cs })
     const dims = Object.fromEntries(rows(db, 'dims').map((x) => [`${x.dim}=${x.value}`, x.n]))
     ok(dims['osVersion=Ubuntu 24.04'] === 1 && dims['chip=AMD Ryzen 7'] === 1 && dims['memory=32-63 GB'] === 1 && dims['cores=9-12'] === 1 && dims['computers=2'] === 1 && dims['phones=0'] === 1 && dims['agent=claude'] === 1 && dims['agent=codex'] === 1 && dims['feature.relay=own'] === 1 && dims['feature.planUsage=on'] === 1, 'the system\'s version, chip, memory, cores, linked computers, phones, agents installed and features on are each kept as their own total', dims)
