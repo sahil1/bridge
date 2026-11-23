@@ -806,7 +806,8 @@ export const solid = async (p, sel) => {
 
 // Speech models from this computer instead of Hugging Face: a small fake model's files (for
 // Parakeet and Parakeet English, the natural voice's (voice), the speaker model's, and Whisper's:
-// large turbo and base), served with ranges, and the file (BRIDGE_SPEECH_MODELS) that gives the
+// large turbo and base, and whisper.cpp's Base English with Silero, for a computer where sherpa-onnx
+// can't run), served with ranges, and the file (BRIDGE_SPEECH_MODELS) that gives the
 // server their sizes and checksums. Whisper small's has the wrong checksum, so its download is
 // thrown away. env: what a kit needs to use them (with no Mac speech standing in, and the stand-in
 // engine's log in the kit's folder: sherpa.log). cut: the next encoder download stops after that
@@ -821,6 +822,8 @@ export async function startSpeechModels(name) {
   const whisperFiles = (stem, seed) => ({ [`${stem}-tokens.txt`]: Buffer.from('<|endoftext|> 0\nthe 1\n'), [`${stem}-decoder.int8.onnx`]: fake(60_000, seed), [`${stem}-encoder.int8.onnx`]: fake(400_000, seed + 1) })
   const whisper = { ...whisperFiles('turbo', 11), ...whisperFiles('base', 13), ...whisperFiles('small', 15) }
   const speaker = { '3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx': fake(50_000, 17) }
+  // whisper.cpp's Base English and Silero, for a computer where sherpa-onnx can't run.
+  const ggml = { 'ggml-base.en-q5_1.bin': fake(300_000, 19), 'ggml-silero-v6.2.0.bin': fake(20_000, 21) }
   const sha = (b) => crypto.createHash('sha256').update(b).digest('hex')
   const list = (o) => Object.entries(o).map(([n, b]) => ({ name: n, bytes: b.length, sha256: sha(b) }))
   const pick = (stem) => Object.fromEntries(Object.entries(whisper).filter(([n]) => n.startsWith(`${stem}-`)))
@@ -831,11 +834,12 @@ export async function startSpeechModels(name) {
     'parakeet-v3': { files: sherpa }, 'parakeet-en': { files: sherpa }, 'supertonic-3': { files: list(voice) }, voices: { files: list(speaker) },
     'whisper-turbo': { files: list(pick('turbo')) }, 'whisper-base': { files: list(pick('base')) },
     'whisper-small': { files: list(pick('small')).map((f) => (f.name.includes('encoder') ? { ...f, sha256: '0'.repeat(64) } : f)) },
+    'base.en-q5_1': { files: list({ 'ggml-base.en-q5_1.bin': ggml['ggml-base.en-q5_1.bin'] }) }, vad: { files: list({ 'ggml-silero-v6.2.0.bin': ggml['ggml-silero-v6.2.0.bin'] }) },
   }))
-  const me = { asked: [], cut: 0, slow: 0, files, voice, whisper, speaker, sha }
+  const me = { asked: [], cut: 0, slow: 0, files, voice, whisper, speaker, ggml, sha }
   const srv = http.createServer(async (req, res) => {
     const [, model, file] = req.url.split('/')
-    const body = files[file] || voice[file] || whisper[file] || speaker[file] || null
+    const body = files[file] || voice[file] || whisper[file] || speaker[file] || ggml[file] || null
     me.asked.push({ model, name: file, range: req.headers.range || null })
     if (!body) { res.writeHead(404); res.end(); return }
     const m = /bytes=(\d+)-/.exec(req.headers.range || '')

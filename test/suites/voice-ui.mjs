@@ -8,7 +8,9 @@
 //   downloads of earlier versions are offered for removal.
 //   Linux with an old glibc (a server standing in for one): no speech model in the list, a quiet
 //   line that other computers are offered more, and a Parakeet picked on another computer says it
-//   can't run there, nor can another.
+//   can't run there, nor can another. The same with whisper.cpp installed there (a stand-in
+//   whisper-cli): whisper.cpp's models, Settings saying whisper.cpp is used there and why, and
+//   nothing offering to install anything.
 //   The message box's mic with no model yet (Chromium's fake mic; WebKit has none, so it skips
 //   this): you talk, and the answer offers the one-time download (its name, size, and that it stays
 //   on this computer); one click downloads it with progress, then what you said turns into text in
@@ -109,6 +111,32 @@ try {
     await shot(p, `${tag}voice-oldlinux`)
     ok(errors.length === 0, 'no page errors', errors)
     await ctx.close()
+  }
+
+  // ---------- The same, with whisper.cpp installed there already ----------
+  {
+    const cpp = await startKit('voice-ui-whispercpp', {
+      env: ({ bin }) => {
+        fs.writeFileSync(path.join(bin, 'whisper-cli.cjs'), fs.readFileSync(path.join(TEST, 'stand-ins', 'whisper-cli.cjs')))
+        fs.writeFileSync(path.join(bin, 'whisper-cli'), `#!/bin/sh\nexec "${process.execPath}" "${path.join(bin, 'whisper-cli.cjs')}" "$@"\n`, { mode: 0o755 })
+        return models.env({ BRIDGE_MACHINE: JSON.stringify({ platform: 'linux', arch: 'x64', glibc: '2.31', docker: false }) })({ bin })
+      },
+      config: { speech: { model: 'parakeet-v3' } },
+    })
+    try {
+      await cpp.api('/setup', { name: 'Tester' })
+      const { ctx, p, errors } = await page(b, cpp.url, { mode: 'light', theme: 'sky' })
+      await openVoice(p)
+      const ids = await p.locator('.st-voice li[data-model]').evaluateAll((l) => l.map((x) => x.dataset.model))
+      ok(ids.join(',') === 'large-v3-turbo-q5_0,small.en-q5_1,small-q5_1,base.en-q5_1,large-v3-q5_0', 'Linux with glibc 2.31 and whisper.cpp installed: whisper.cpp\'s models', ids)
+      const text = await p.locator('.st-voice').innerText()
+      ok(/Here, whisper\.cpp, which is installed on this computer, turns speech into text: Bridge AI's own engine can't run here \(sherpa-onnx needs glibc 2\.32 or later/.test(text), 'Settings says whisper.cpp is what\'s used here, and why', text)
+      ok(/so Whisper large turbo \(whisper\.cpp\) is used here\./.test(text) && /Here it runs through whisper\.cpp: each model is one download\./.test(text), 'and which model, by its whisper.cpp name', text)
+      ok(!/Install|Homebrew/.test(text) && (await p.locator('.st-voice button', { hasText: /Install/ }).count()) === 0, 'nothing offers to install anything')
+      await shot(p, `${tag}voice-whispercpp`)
+      ok(errors.length === 0, 'no page errors', errors)
+      await ctx.close()
+    } finally { cpp.stop() }
   }
 
   // ---------- The mic, the first time ----------

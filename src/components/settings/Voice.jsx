@@ -11,8 +11,10 @@ import '../meetings/meetings.css'
 // (the ones it can't aren't listed), the one voice notes, dictation and meetings use, and their
 // downloads. Parakeet first; Whisper, for the languages Parakeet doesn't hear, folded away until
 // it's wanted. Both run inside Bridge AI (sherpa-onnx), each one download. What earlier versions
-// downloaded for whisper.cpp, which nothing uses now, can be removed. Server: speech.js (status,
-// and what this computer can run), voice.js. The voice that
+// downloaded for whisper.cpp, which nothing uses now, can be removed. On a computer where sherpa-onnx
+// can't run, a whisper.cpp installed there runs Whisper instead, and this says so (it's never
+// offered for installing). Server: speech.js (status, and what this computer can run), voice.js.
+// The voice that
 // reads the Chief of Staff's answers aloud (speaking) is the next tab, Spoken Answers (Spoken,
 // below: voice/SpokenAnswers.jsx). Dictation's own settings are the tab before (Dictation.jsx).
 const size = (mb) => (mb >= 1000 ? t('{n} GB', { n: (mb / 1000).toFixed(1) }) : t('{n} MB', { n: mb }))
@@ -39,6 +41,7 @@ export default function Voice() {
   const whispers = d.local.models.filter((x) => x.whisper)
   const whisperOpen = whispers.some((x) => x.have || x.downloading || x.id === using) || !parakeets.length
   const earlier = d.local.earlier?.files > 0 ? d.local.earlier : null
+  const cpp = d.local.engine === 'whisper.cpp'
 
   const row = (x) => {
     const on = using === x.id
@@ -86,6 +89,10 @@ export default function Voice() {
         <h4>{t('Speech Model')}</h4>
         <p className="muted small">{t('Voice notes, dictation and meetings are turned into text here: what you say never leaves this computer.')} <More>{t('Voice notes, dictation and meetings are turned into text on this computer by the speech model you pick here. What you say never leaves it. Each model is one download, from Hugging Face.')}</More></p>
         {v.standIn === 'apple' && <p className="small">{t("Until {model} is downloaded, the Mac's own speech turns what you say into text.", { model: v.model.label })}</p>}
+        {/* Where Bridge AI's own engine can't run and whisper.cpp is installed: that's what's used. */}
+        {cpp && <p className="st-note small st-engine" role="status"><Icon name="info" size={13} /> {d.local.engineWhy && !fell?.why
+          ? t("Here, whisper.cpp, which is installed on this computer, turns speech into text: Bridge AI's own engine can't run here ({why}).", { why: d.local.engineWhy.replace(/^\w/, (c) => c.toLowerCase()) })
+          : t('Here, whisper.cpp, which is installed on this computer, turns speech into text.')}</p>}
         <ul className="mt-models" aria-label={t('Speech models')}>
           {parakeets.map(row)}
           {d.apple?.available && (
@@ -98,7 +105,7 @@ export default function Voice() {
         {whispers.length > 0 && (
           <details className="st-fold st-whisper" open={whisperOpen} data-setting="whisper">
             <summary><Icon name="chevron" size={12} />{t('Whisper, for other languages')}</summary>
-            <p className="muted small">{t('Whisper hears about 100 languages and tells which one it hears. It runs in Bridge AI, on this computer: each model is one download, with nothing to install.')}</p>
+            <p className="muted small">{cpp ? t('Whisper hears about 100 languages. Here it runs through whisper.cpp: each model is one download.') : t('Whisper hears about 100 languages and tells which one it hears. It runs in Bridge AI, on this computer: each model is one download, with nothing to install.')}</p>
             <ul className="mt-models" aria-label={t('Whisper models')}>{whispers.map(row)}</ul>
           </details>
         )}

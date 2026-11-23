@@ -27,7 +27,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { startKit, startSpeechModels, checks, until, sleep, OUT, IS_MAC } from '../lib/harness.mjs'
+import { startKit, startSpeechModels, checks, until, sleep, OUT, TEST, IS_MAC } from '../lib/harness.mjs'
 
 const { ok, skip, done } = checks('speech')
 const NO_MAC_SPEECH = path.join(OUT, 'no-such-bridgespeech') // so the Mac's own speech never stands in here
@@ -67,6 +67,13 @@ ok(fit({ platform: 'linux', arch: 'x64', glibc: '2.35', memGB: 2 }, {}, whisper)
 // Whisper runs in Bridge AI itself (sherpa-onnx, as Parakeet): wherever Parakeet does, the Docker
 // image too, with nothing to install; where sherpa-onnx can't run, neither does Whisper.
 for (const [what, m, shown] of COMPUTERS) ok(fit(m, {}, whisper).ok === shown, `${what}: Whisper ${shown ? 'is offered too, with nothing to install' : 'isn\'t either'}`)
+// whisper.cpp: only where sherpa-onnx can't run, and only when it's installed there already.
+const cppTurbo = speech.CPP_MODELS.find((m) => m.id === 'large-v3-turbo-q5_0')
+const oldLinux = { platform: 'linux', arch: 'x64', glibc: '2.31' }
+ok(!fit({ platform: 'linux', arch: 'x64', glibc: '2.35' }, { whisperHere: true }, cppTurbo).ok && /Bridge AI's own engine/.test(fit({ platform: 'linux', arch: 'x64', glibc: '2.35' }, { whisperHere: true }, cppTurbo).why), 'whisper.cpp installed where sherpa-onnx runs: not used (Whisper runs in Bridge AI\'s own engine there)')
+ok(fit(oldLinux, { whisperHere: true }, cppTurbo).ok && fit({ platform: 'darwin', arch: 'x64', os: '14.7' }, { probe: { ok: false, error: 'Symbol not found' }, whisperHere: true }, cppTurbo).ok, 'where sherpa-onnx can\'t run (an old glibc, an addon that won\'t load), a whisper.cpp installed there runs Whisper')
+ok(!fit(oldLinux, {}, cppTurbo).ok && /glibc 2\.32/.test(fit(oldLinux, {}, cppTurbo).why), 'and without whisper.cpp there, nothing runs, saying why')
+ok(speech.CPP_MODELS.every((m) => m.runtime === 'whisper' && /\(whisper\.cpp\)$/.test(m.label)), 'whisper.cpp\'s models say so in their names', speech.CPP_MODELS.map((m) => m.label))
 const ws = speech.MODELS.filter((m) => m.whisper)
 ok(ws.map((m) => m.short).join(', ') === 'Large turbo, Small, Base, Large' && ws.every((m) => m.runtime === 'sherpa' && m.languages === 'auto' && m.files.length === 3 && m.files.every((f) => f.bytes > 0 && /^[0-9a-f]{64}$/.test(f.sha256)) && /^csukuangfj\/sherpa-onnx-whisper-/.test(m.repo) && /^[0-9a-f]{40}$/.test(m.rev)), 'four Whisper models, each three files (tokens, encoder, decoder) from a pinned revision, each with its size and SHA-256', ws.map((m) => [m.id, m.mb]))
 ok(ws.find((m) => m.id === 'whisper-turbo').mb === 1037 && ws.find((m) => m.id === 'whisper-base').mb === 161, 'their downloads: Large turbo about 1 GB, Base 161 MB', ws.map((m) => m.mb))
@@ -146,7 +153,45 @@ try {
   const sp = await nope.api('/speech')
   ok(sp.local.models.length === 0, 'sherpa-onnx that won\'t load on this computer: no Parakeet or Whisper in the list', sp.local.models.map((m) => m.id))
   ok(sp.hidden.some((h) => h.id === 'parakeet-v3' && /doesn't load on this computer: dlopen\(sherpa-onnx\.node\): Symbol not found/.test(h.why)) && sp.machine.sherpa?.ok === false, 'and the diagnostics say what the loader said', sp.hidden)
+  ok(sp.local.engine === null && !sp.local.models.length, 'and with no whisper.cpp there either, no engine on this computer', sp.local.engine)
 } finally { nope.stop() }
+
+// The same computer with whisper.cpp installed already (a stand-in whisper-cli): Whisper runs through
+// it, as in 3.22 and before, and Settings says so; nothing offers to install anything.
+const cppKit = await startKit('speech-whispercpp', {
+  env: ({ bin }) => {
+    fs.writeFileSync(path.join(bin, 'whisper-cli.cjs'), fs.readFileSync(path.join(TEST, 'stand-ins', 'whisper-cli.cjs')))
+    fs.writeFileSync(path.join(bin, 'whisper-cli'), `#!/bin/sh\nexec "${process.execPath}" "${path.join(bin, 'whisper-cli.cjs')}" "$@"\n`, { mode: 0o755 })
+    return { ...kitEnv({ BRIDGE_SHERPA: broken, BRIDGE_MACHINE: JSON.stringify({ platform: 'darwin', arch: 'x64', os: '14.7', docker: false }) })({ bin }), BRIDGE_WHISPER_LOG: path.join(bin, 'whisper.log') }
+  },
+  config: { speech: { model: 'parakeet-v3' } },
+})
+try {
+  await cppKit.api('/setup', { name: 'Tester' })
+  let sp = await cppKit.api('/speech')
+  ok(sp.local.engine === 'whisper.cpp' && /doesn't load on this computer/.test(sp.local.engineWhy || ''), 'sherpa-onnx can\'t run here, whisper.cpp is installed: Settings is told whisper.cpp runs speech here, and why', { engine: sp.local.engine, why: sp.local.engineWhy })
+  ok(sp.local.models.map((m) => m.id).join(',') === 'large-v3-turbo-q5_0,small.en-q5_1,small-q5_1,base.en-q5_1,large-v3-q5_0' && sp.local.models.every((m) => m.usable && m.runtime === 'whisper' && /\(whisper\.cpp\)$/.test(m.label)), 'its models are whisper.cpp\'s, named so', sp.local.models.map((m) => m.label))
+  ok(sp.fellBack?.from === 'parakeet-v3' && sp.fellBack.to === 'large-v3-turbo-q5_0' && sp.fellBack.toLabel === 'Whisper large turbo (whisper.cpp)', 'Parakeet picked on another computer: whisper.cpp\'s Large turbo is used here, said so', sp.fellBack)
+  ok(!JSON.stringify(sp).match(/installCommand|brew/i), 'and nothing anywhere offers to install whisper.cpp or Homebrew')
+  // Its own downloads are in use there: not offered for removal.
+  await cppKit.api('/settings', { speech: { model: 'base.en-q5_1' } }, 'PATCH')
+  await cppKit.api('/voice/setup', {})
+  ok(!!(await until(async () => (await cppKit.api('/voice')).ready, 15000)), 'whisper.cpp\'s Base English picked: one download, then ready')
+  sp = await cppKit.api('/speech')
+  ok(sp.local.model === 'base.en-q5_1' && sp.local.earlier.files === 0 && fs.existsSync(path.join(cppKit.data, 'models', 'ggml-base.en-q5_1.bin')), 'its file in models/, and not offered for removal (it\'s what runs here)', sp.local.earlier)
+  const v = await cppKit.api('/voice')
+  ok(!('installCommand' in v) && !('needsBrew' in v), 'voice notes offer no install either')
+  const r = await post(cppKit, wav(2))
+  const said = (() => { try { return fs.readFileSync(path.join(cppKit.bin, 'whisper.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)) } catch { return [] } })()
+  ok(r.status === 200 && r.text === 'Heard by whisper.cpp.' && r.engine === 'whisper.cpp Base, English', 'a voice note is transcribed by the whisper.cpp installed there', r)
+  ok(said.at(-1)?.model === 'ggml-base.en-q5_1.bin' && said.at(-1).language === 'en' && Math.abs(said.at(-1).seconds - 2) < 0.1, 'given its model, English for an English-only one, and the recording', said.at(-1))
+  const plan = await cppKit.api('/setup/plan')
+  ok(plan.items.filter((i) => ['meetings', 'voice'].includes(i.id)).every((i) => i.parts.join() === 'model'), 'Set up everything asks for no program for speech there (its speech items need only a model)', plan.items.map((i) => [i.id, i.parts]))
+} catch (e) {
+  ok(false, `whisper.cpp where sherpa-onnx can't run crashed: ${e.stack}`)
+  console.log(cppKit.log().slice(-1500))
+} finally { cppKit.stop() }
+served.asked.length = 0 // (what that computer downloaded)
 
 // ---------- This computer, with the stand-in engine ----------
 const kit = await startKit('speech', { env: kitEnv({ BRIDGE_ASR_IDLE_MS: '2500' }), config: { meetings: { vocabulary: 'Kubernetes, OKRs' } } })

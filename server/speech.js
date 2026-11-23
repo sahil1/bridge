@@ -1,6 +1,7 @@
 // Speech to text for meeting notes, voice notes, dictation and the files you transcribe, with the
 // engine you pick: on this computer (a speech model, Parakeet or Whisper, both run by sherpa-onnx
-// in a process of its own: asr.js), on the Mac itself (Apple's own transcriber, macOS 26 and later:
+// in a process of its own: asr.js; where sherpa-onnx can't run, Whisper through a whisper.cpp that's
+// installed there already, never offered for installing), on the Mac itself (Apple's own transcriber, macOS 26 and later:
 // native/bridgespeech, nothing to install), or, for meetings and files, a service you have a key
 // for. Picked nothing: a speech model when it's here, else the Mac's own. Only what can run on this
 // computer is offered (fit() below). meetings.js sends one spoken stretch at a time: a 16 kHz mono
@@ -18,8 +19,10 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { execFile } from 'node:child_process'
+import net from 'node:net'
+import { spawn, execFile } from 'node:child_process'
 import { DATA, ROOT, IS_MAC } from './paths.js'
+import { tool } from './fixes.js'
 import { providerEnv } from './providers.js'
 import { machine, freeBytes, atLeast } from './machine.js'
 import * as asr from './asr.js'
@@ -88,12 +91,29 @@ export const MODELS = [
 ]
 // The portable default: it runs on every computer Bridge AI does (fit() says where it can't).
 export const DEFAULT = 'parakeet-v3'
-// The Whisper models of 3.22 and before, run by whisper.cpp installed separately: a pick of one is
-// the built-in Whisper nearest it, and their downloads (one file each in models/, beside Silero's
-// for whisper.cpp) are offered for removal in Settings, never removed by themselves.
+// Whisper through whisper.cpp, as in 3.22 and before, only on a computer where sherpa-onnx can't
+// run (Linux older than glibc 2.32, musl, 32-bit Arm, an addon that won't load) and whisper.cpp is
+// installed there already: then a speech model still runs on the computer. Never offered for
+// installing. Each is one file in models/, from whisper.cpp's own repository at a pinned revision;
+// Silero (VAD) lets whisper.cpp skip what isn't speech inside a stretch.
+const WHISPER_CPP = { repo: 'ggerganov/whisper.cpp', rev: '5359861c739e955e79d9a303bcbc70fb988958b1' }
+const cpp = (id, file, bytes, sha256, short, o) => ({ id, runtime: 'whisper', whisper: true, file, short, label: `Whisper ${short.replace(/^\w/, (c) => c.toLowerCase())} (whisper.cpp)`, mb: Math.round(bytes / 1e6), ...WHISPER_CPP, files: [{ name: file, bytes, sha256 }], license: 'MIT', by: 'OpenAI', ...o })
+export const CPP_MODELS = [
+  cpp('large-v3-turbo-q5_0', 'ggml-large-v3-turbo-q5_0.bin', 574041195, '394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2', 'Large turbo', { memGB: 2, languages: 'auto', note: 'For the languages Parakeet doesn\'t hear. Accurate and still quick.' }),
+  cpp('small.en-q5_1', 'ggml-small.en-q5_1.bin', 190098681, 'bfdff4894dcb76bbf647d56263ea2a96645423f1669176f4844a1bf8e478ad30', 'Small, English', { memGB: 1, languages: ['en'], note: 'Light and quick.' }),
+  cpp('small-q5_1', 'ggml-small-q5_1.bin', 190085487, 'ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb', 'Small', { memGB: 1, languages: 'auto', note: 'Light and quick.' }),
+  cpp('base.en-q5_1', 'ggml-base.en-q5_1.bin', 59721011, '4baf70dd0d7c4247ba2b81fafd9c01005ac77c2f9ef064e00dcf195d0e2fdd2f', 'Base, English', { memGB: 1, languages: ['en'], note: 'The lightest that does the job.' }),
+  cpp('large-v3-q5_0', 'ggml-large-v3-q5_0.bin', 1081140203, 'd75795ecff3f83b5faa89d1900604ad8c780abd5739fae406de19f23ecd98ad1', 'Large', { memGB: 3, languages: 'auto', note: 'The most accurate Whisper, and the slowest.' }),
+]
+const VAD = { id: 'vad', runtime: 'whisper', label: 'Silero', file: 'ggml-silero-v6.2.0.bin', repo: 'ggml-org/whisper-vad', rev: '9ffd54a1e1ee413ddf265af9913beaf518d1639b', files: [{ name: 'ggml-silero-v6.2.0.bin', bytes: 885098, sha256: '2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987' }] }
+// Every speech model Bridge AI knows, for finding one by its id.
+const ALL = [...MODELS, ...CPP_MODELS]
+// Where sherpa-onnx runs, a whisper.cpp model picked in 3.22 or before is the built-in Whisper
+// nearest it, and its download (and Silero's) is offered for removal in Settings, never removed by
+// itself. Where whisper.cpp is what runs Whisper, they're used as they are.
 const EARLIER = { 'large-v3-turbo-q5_0': 'whisper-turbo', 'large-v3-q5_0': 'whisper-large', 'small-q5_1': 'whisper-small', 'small.en-q5_1': 'whisper-small', 'base.en-q5_1': 'whisper-base' }
-const EARLIER_FILES = ['ggml-large-v3-turbo-q5_0.bin', 'ggml-large-v3-q5_0.bin', 'ggml-small-q5_1.bin', 'ggml-small.en-q5_1.bin', 'ggml-base.en-q5_1.bin', 'ggml-silero-v6.2.0.bin']
-export const now = (id) => EARLIER[id] || id
+const EARLIER_FILES = [...CPP_MODELS.map((m) => m.file), VAD.file]
+export const now = (id) => (EARLIER[id] && !cppHere() ? EARLIER[id] : id)
 // Telling voices apart in a room (voices.js): 3D-Speaker's ERes2Net speaker model, trained on
 // VoxCeleb, in the ONNX form the sherpa-onnx project made. Not speech to text, so not in the list
 // above; downloaded the first time you ask Who spoke on a meeting recorded in a room. Of the
@@ -128,8 +148,10 @@ export const NATURAL = {
 const standIns = (() => { try { return JSON.parse(fs.readFileSync(process.env.BRIDGE_SPEECH_MODELS, 'utf8')) } catch { return {} } })()
 export const filesOf = (m) => standIns[m.id]?.files || m.files
 const DIR = () => path.join(DATA, 'models')
-// Where a model lives: its files in models/<id>/.
-export const dirOf = (m) => path.join(DIR(), m.id)
+// Where a model lives: its files in models/<id>/; whisper.cpp's one file in models/.
+export const dirOf = (m) => (m.runtime === 'whisper' ? DIR() : path.join(DIR(), m.id))
+const fileOf = (m) => path.join(DIR(), m.file)
+const has = (f) => size(f) > 0
 // What each of a model's files is to sherpa-onnx (asr-worker.js), by its name: { encoder, decoder,
 // joiner, tokens }.
 export const rolesOf = (m) => Object.fromEntries(filesOf(m).map((f) => [/tokens/.test(f.name) ? 'tokens' : /encoder/.test(f.name) ? 'encoder' : /decoder/.test(f.name) ? 'decoder' : /joiner/.test(f.name) ? 'joiner' : f.name.split('.')[0], f.name]))
@@ -145,7 +167,9 @@ const size = (f) => { try { return fs.statSync(f).size } catch { return -1 } }
 export const have = (m) => filesOf(m).every((f) => { const n = size(path.join(dirOf(m), f.name)); return f.bytes ? n === f.bytes : n > 0 })
 
 // The downloads of earlier Whisper models (EARLIER_FILES), which nothing uses now: { files, mb }.
+// Where whisper.cpp runs Whisper, they're in use: none.
 export async function earlier() {
+  if (cppHere()) return { files: 0, mb: 0 }
   const found = (await Promise.all(EARLIER_FILES.map(async (f) => { try { return { f, n: (await fs.promises.stat(path.join(DIR(), f))).size } } catch { return null } }))).filter(Boolean)
   return { files: found.length, mb: Math.round(found.reduce((n, x) => n + x.n, 0) / 1e6) }
 }
@@ -162,8 +186,14 @@ export async function removeEarlier() {
 // macOS 14 is what trying it (asr.probe) finds out.
 const SHERPA = { 'darwin-arm64': {}, 'darwin-x64': {}, 'win32-x64': {}, 'win32-ia32': {}, 'win32-arm64': {}, 'linux-x64': { glibc: '2.32' }, 'linux-arm64': { glibc: '2.17' } }
 // What runs where, for this computer (m: machine()), as { ok, why }. Pure, so tests can ask it
-// about any computer. probe: whether the addon loaded here ({ ok, error }), once it's been tried.
-export function fitRuntime(runtime, m, { probe = null } = {}) {
+// about any computer. probe: whether the addon loaded here ({ ok, error }), once it's been tried;
+// whisperHere: whether whisper.cpp's programs are on this computer (only asked where sherpa-onnx
+// can't run).
+export function fitRuntime(runtime, m, { probe = null, whisperHere = false } = {}) {
+  if (runtime === 'whisper') {
+    if (fitRuntime('sherpa', m, { probe }).ok) return { ok: false, why: 'Whisper runs in Bridge AI\'s own engine here' }
+    return whisperHere ? { ok: true, why: null } : { ok: false, why: fitRuntime('sherpa', m, { probe }).why }
+  }
   if (runtime !== 'sherpa') return { ok: false, why: 'Unknown speech engine' }
   const want = SHERPA[`${m.platform}-${m.arch}`]
   if (!want) return { ok: false, why: `sherpa-onnx has no build for ${m.platform} on ${m.arch}` }
@@ -179,21 +209,27 @@ export function fitModel(model, m, o = {}) {
   return r
 }
 
-let fitted = null // { at, m, probe, models: Map(id -> { ok, why }) }
-// What's offered here, worked out again at most every 10 seconds. The addon is tried once, in a
-// process of its own, unless the rules already say no.
+let fitted = null // { at, m, probe, sherpa: { ok, why }, whisperHere, models: Map(id -> { ok, why }) }
+// What's offered here, worked out again at most every 10 seconds (whisper.cpp may have just been
+// installed, where it's used). The addon is tried once, in a process of its own, unless the rules
+// already say no; whisper.cpp is looked for only where sherpa-onnx can't run.
 export async function fit() {
   if (fitted && Date.now() - fitted.at < 10_000) return fitted
   const m = await machine()
   const probe = fitRuntime('sherpa', m).ok ? await asr.probe() : null
-  const models = new Map(MODELS.map((x) => [x.id, fitModel(x, m, { probe })]))
-  fitted = { at: Date.now(), m, probe, models }
+  const sherpa = fitRuntime('sherpa', m, { probe })
+  const whisperHere = !sherpa.ok && (await Promise.all([tool('whisper-server'), tool('whisper-cli')])).some(Boolean)
+  const models = new Map(ALL.map((x) => [x.id, fitModel(x, m, { probe, whisperHere })]))
+  fitted = { at: Date.now(), m, probe, sherpa, whisperHere, models }
   return fitted
 }
-const shown = (id) => !fitted || !!fitted.models.get(id)?.ok
-export const offered = () => MODELS.filter((x) => shown(x.id))
-// Parakeet; where it can't run (too little memory), the lightest Whisper that can.
-const portable = () => offered().find((x) => x.id === DEFAULT) || [...offered()].reverse().find((x) => x.whisper && x.id !== 'whisper-large') || MODELS[0]
+const shown = (id) => (!fitted ? !CPP_MODELS.some((x) => x.id === id) : !!fitted.models.get(id)?.ok)
+// whisper.cpp is what runs speech models here (sherpa-onnx can't, and whisper.cpp is installed).
+const cppHere = () => !!fitted?.whisperHere
+export const offered = () => ALL.filter((x) => shown(x.id))
+// Parakeet; where it can't run (too little memory), the lightest built-in Whisper that can; where
+// sherpa-onnx can't run at all, whisper.cpp's Large turbo when whisper.cpp is here.
+const portable = () => offered().find((x) => x.id === DEFAULT) || [...offered()].reverse().find((x) => x.whisper && x.runtime === 'sherpa' && x.id !== 'whisper-large') || offered().find((x) => x.runtime === 'whisper') || MODELS[0]
 // Ready to turn speech into text: downloaded, and it runs here.
 const runnable = (m) => have(m) && shown(m.id)
 // Why a model can't run here, in words; null when it can.
@@ -201,11 +237,11 @@ export const whyNot = (id) => (shown(id) ? null : fitted.models.get(id)?.why || 
 
 // The model picked (Settings › Voice & Meetings › Speech to Text, or an older pick in its Meetings tab), when it can run
 // here; else one already here that can run, Parakeet first; else the portable default. A Whisper
-// model of 3.22 or before is the built-in one nearest it.
+// model of 3.22 or before is the built-in one nearest it, where that runs.
 const pickedId = (cfg) => now(cfg?.meetings?.localModel || cfg?.speech?.model || '') || null
-export const modelById = (id) => MODELS.find((m) => m.id === now(id)) || null
+export const modelById = (id) => ALL.find((m) => m.id === now(id)) || null
 export function localModel(cfg) {
-  const picked = MODELS.find((m) => m.id === pickedId(cfg))
+  const picked = ALL.find((m) => m.id === pickedId(cfg))
   if (picked && shown(picked.id)) return picked
   if (picked) return portable()
   return offered().find(runnable) || portable()
@@ -213,7 +249,7 @@ export function localModel(cfg) {
 // A pick that can't run on this computer (a config copied from another one): what's used instead
 // and why, so Settings says so. { from, to, why } or null; to null where no speech model runs here.
 export function fellBack(cfg) {
-  const picked = MODELS.find((m) => m.id === pickedId(cfg))
+  const picked = ALL.find((m) => m.id === pickedId(cfg))
   if (!picked || shown(picked.id)) return null
   const to = portable()
   const none = !shown(to.id)
@@ -270,10 +306,10 @@ async function fetchFile(m, f, d) {
   fs.renameSync(tmp, dest)
 }
 export function fetchModel(id) {
-  const m = [VOICE, NATURAL].find((x) => x.id === id) || modelById(id)
+  const m = [VOICE, NATURAL, ...(cppHere() ? [VAD] : [])].find((x) => x.id === id) || modelById(id)
   if (!m) throw new Error('No such model')
   if (have(m) || (downloads.has(m.id) && !downloads.get(m.id).error)) return
-  if (fitted && MODELS.includes(m) && !shown(m.id)) throw new Error(fitted.models.get(m.id)?.why || 'That model can\'t run on this computer')
+  if (fitted && ALL.includes(m) && !shown(m.id)) throw new Error(fitted.models.get(m.id)?.why || 'That model can\'t run on this computer')
   const files = filesOf(m)
   const d = { got: 0, total: files.reduce((n, f) => n + (f.bytes || 0), 0), error: null, stop: new AbortController() }
   downloads.set(m.id, d)
@@ -300,6 +336,11 @@ export async function removeModel(id) {
   const d = downloads.get(m.id)
   if (d) { d.stop.abort(); await d.done }
   downloads.delete(m.id)
+  if (m.runtime === 'whisper') {
+    if (server?.model === fileOf(m)) stopServer()
+    for (const f of [fileOf(m), `${fileOf(m)}.part`]) await fs.promises.rm(f, { force: true })
+    return
+  }
   asr.stop(m.id)
   await fs.promises.rm(dirOf(m), { recursive: true, force: true })
 }
@@ -308,6 +349,73 @@ export const downloading = (id) => { const d = downloads.get(id); return d ? { p
 const progress = downloading
 // Once a download going now has ended, either way.
 export const downloaded = (id) => downloads.get(id)?.done || Promise.resolve()
+
+// ---------- whisper.cpp, where it's what runs Whisper ----------
+// Its server keeps the model loaded while it's used (half a gigabyte or more), let go ten minutes
+// after the last stretch; without the server (an older whisper.cpp), its command line, loading the
+// model each time.
+let server = null // { proc, port, model, ready, last }
+const freePort = () => new Promise((resolve, reject) => {
+  const s = net.createServer()
+  s.once('error', reject)
+  s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)) })
+})
+function stopServer() { if (server) { try { server.proc.kill() } catch { /* gone */ } server = null } }
+setInterval(() => { if (server && Date.now() - server.last > 10 * 60 * 1000) stopServer() }, 60 * 1000).unref?.()
+process.on('exit', stopServer)
+async function whisperServer(model) {
+  if (server && server.model === model && server.proc.exitCode === null) { server.last = Date.now(); await server.ready; return server }
+  stopServer()
+  const bin = await tool('whisper-server')
+  if (!bin) return null
+  const port = await freePort()
+  const vad = path.join(DIR(), VAD.file)
+  const args = ['-m', model, '--host', '127.0.0.1', '--port', String(port), '-t', String(asr.threads()), ...(has(vad) ? ['--vad', '-vm', vad] : [])]
+  const proc = spawn(bin, args, { stdio: ['ignore', 'ignore', 'pipe'] })
+  let errText = ''
+  proc.stderr.on('data', (b) => { errText = (errText + b).slice(-2000) })
+  proc.on('error', () => {})
+  const me = { proc, port, model, last: Date.now() }
+  me.ready = (async () => {
+    const end = Date.now() + 90_000
+    while (Date.now() < end) {
+      if (proc.exitCode !== null) throw new Error(`whisper-server stopped: ${errText.trim().split('\n').pop() || proc.exitCode}`)
+      try { const r = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(1000) }); if (r.status < 500) return } catch { /* not up yet */ }
+      await new Promise((r) => setTimeout(r, 300))
+    }
+    throw new Error('whisper-server took too long to start')
+  })()
+  server = me
+  try { await me.ready } catch (e) { if (server === me) stopServer(); throw e }
+  return me
+}
+async function viaWhisperCpp(m, wav, { language, prompt }) {
+  const file = fileOf(m)
+  if (!has(path.join(DIR(), VAD.file))) fetchModel('vad')
+  const lang = m.file.includes('.en') ? 'en' : language && language !== 'auto' ? String(language).split('-')[0] : 'auto'
+  const srv = await whisperServer(file).catch((e) => { throw fatal(e.message) })
+  if (srv) {
+    const form = new FormData()
+    form.append('file', new Blob([wav], { type: 'audio/wav' }), 'speech.wav')
+    form.append('response_format', 'json')
+    form.append('temperature', '0')
+    form.append('language', lang)
+    if (prompt) form.append('prompt', prompt.slice(0, 600))
+    const r = await fetch(`http://127.0.0.1:${srv.port}/inference`, { method: 'POST', body: form, signal: AbortSignal.timeout(120_000) })
+    srv.last = Date.now()
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok || j.error) throw new Error(j.error || `whisper-server: HTTP ${r.status}`)
+    return { text: j.text || '', engine: `whisper.cpp ${m.short}` }
+  }
+  const cli = await tool('whisper-cli')
+  if (!cli) throw fatal(`${m.label} needs whisper.cpp, which isn't on this computer any more.`)
+  const tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'bridge-speech-'))
+  try {
+    await fs.promises.writeFile(path.join(tmp, 'in.wav'), wav)
+    const out = await run(cli, ['-m', file, '-f', path.join(tmp, 'in.wav'), '-nt', '-np', '-l', lang, '-t', String(asr.threads()), ...(prompt ? ['--prompt', prompt.slice(0, 600)] : [])])
+    return { text: out, engine: `whisper.cpp ${m.short}` }
+  } finally { await fs.promises.rm(tmp, { recursive: true, force: true }) }
+}
 
 const run = (bin, args, timeout = 120000) => new Promise((resolve, reject) => {
   execFile(bin, args, { timeout, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => (err ? reject(new Error((stderr || err.message).slice(-300))) : resolve(stdout)))
@@ -333,13 +441,14 @@ export function pcmOf(wav) {
 const wordsOf = (words) => [...new Set([...(words || []), ...memory.hint(400).split(',')].map((w) => String(w).trim().replace(/[.,;:!?]+$/, '')).filter((w) => w.length >= 2 && w.length <= 40 && !/[@/\\]/.test(w) && w.split(' ').length <= 4))].slice(0, 80)
 
 // language: what's spoken, for Whisper (it tells by itself without one); words: names to listen
-// for (Parakeet). lang in the answer: the language Whisper heard.
+// for (Parakeet); prompt: whisper.cpp's hint. lang in the answer: the language Whisper heard.
 async function local(wav, o) {
   const { cfg, language, words, model } = o
   await fit()
   const m = model || localModel(cfg)
   if (!have(m)) { if (o.fetch !== false) fetchModel(m.id); throw fatal(`The speech model (${m.label}, ${m.mb} MB) is still downloading. The missed parts can be transcribed again once it's here.`, { needs: 'model', model: m.id }) }
   if (!shown(m.id)) throw fatal(whyNot(m.id) || `${m.label} can't run on this computer`)
+  if (m.runtime === 'whisper') return viaWhisperCpp(m, wav, o)
   const r = await asr.recognize(specOf(m, { language }), pcmOf(wav), { hotwords: m.hotwords ? wordsOf(words) : [] })
   return { text: r.text, engine: m.label, ms: r.ms, ...(r.lang ? { lang: r.lang } : {}) }
 }
@@ -515,7 +624,14 @@ export async function prepare(cfg) {
   await fit()
   const m = localModel(cfg)
   if (!have(m)) { try { fetchModel(m.id) } catch { /* can't run here: the transcript says why */ } }
+  if (m.runtime !== 'whisper') return
+  if (!has(path.join(DIR(), VAD.file))) fetchModel('vad')
+  else if (have(m)) whisperServer(fileOf(m)).catch(() => {})
 }
+
+// What runs speech models on this computer: 'sherpa-onnx' (Bridge AI's own engine), 'whisper.cpp'
+// (where that can't run and whisper.cpp is installed), or null (neither), with why the first can't.
+const engineHere = (f) => ({ engine: f.sherpa.ok ? 'sherpa-onnx' : f.whisperHere ? 'whisper.cpp' : null, engineWhy: f.sherpa.ok ? null : f.sherpa.why })
 
 // One model as Settings shows it: what it is, whether it's here, ready to run, or downloading.
 const modelInfo = (x) => ({
@@ -555,6 +671,8 @@ export async function status(cfg) {
     local: {
       ready: localIsReady,
       runtime: m.runtime,
+      // What runs them here, for Settings to say (whisper.cpp only where sherpa-onnx can't run).
+      ...engineHere(f),
       model: m.id,
       default: DEFAULT,
       models: offered().map((x) => modelInfo(x)),
@@ -565,7 +683,7 @@ export async function status(cfg) {
     // A pick that can't work here, and what's used instead (Settings says so once).
     fellBack: fellBack(cfg) || engineFellBack,
     // Not offered on this computer, and why: for diagnostics, not for the lists.
-    hidden: MODELS.filter((x) => !shown(x.id)).map((x) => ({ id: x.id, label: x.label, why: f.models.get(x.id)?.why || null })),
+    hidden: (f.whisperHere ? ALL : MODELS).filter((x) => !shown(x.id)).map((x) => ({ id: x.id, label: x.label, why: f.models.get(x.id)?.why || null })),
     machine: { platform: f.m.platform, arch: f.m.arch, os: f.m.os, glibc: f.m.glibc, rosetta: f.m.rosetta, emulated: f.m.emulated, docker: f.m.docker, memGB: f.m.memGB, sherpa: f.probe },
     services,
     language: cfg?.meetings?.language || 'auto',
