@@ -1075,8 +1075,11 @@ const forHeaders = (d) => (d ? [['x-bridge-for', '1'], ['x-bridge-for-id', d.id]
 // The same for what this computer asks of another for one of its devices (a copy it asked for, a
 // meeting it mentions): id, its id here (none: for this computer's own user).
 export const forDevice = (id) => forHeaders(relay.deviceOf(id))
+// (at: this computer, which cuts it off, rather than the one it's viewing, so the viewer names this
+// one. Blocked from the computer it's viewing, that one ends it too and says the same: whichever
+// comes first is what it's told.)
 export function endOnward(id, why) {
-  for (const c of onward.get(id) || []) { try { c.send(JSON.stringify({ t: 'error', code: 'device', why })); c.close(1008, 'refused') } catch { /* closed */ } }
+  for (const c of onward.get(id) || []) { try { c.send(JSON.stringify({ t: 'error', code: 'device', why, at: relay.thisName() })); c.close(1008, 'refused') } catch { /* closed */ } }
 }
 
 // A WebSocket to /m/<id>/... (a live terminal there).
@@ -1101,7 +1104,7 @@ export function upgrade(req, socket, head) {
   }
   const no = view && asker ? passCheck(asker) : null
   wss.handleUpgrade(req, socket, head, (client) => {
-    if (no) { client.send(JSON.stringify({ t: 'error', ...no })); setTimeout(() => { try { client.close(1008, 'refused') } catch { /* closed */ } }, 50); return }
+    if (no) { client.send(JSON.stringify({ t: 'error', ...no, ...(no.code === 'device' ? { at: relay.thisName() } : {}) })); setTimeout(() => { try { client.close(1008, 'refused') } catch { /* closed */ } }, 50); return }
     let remote = null
     let open = false
     const pending = [] // what the page sent before the other end was open

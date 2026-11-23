@@ -556,7 +556,8 @@ export default function ScreenView({ machine, name, onClose, windowed = false })
         locked: lockedUntil > Date.now() ? t('Too many wrong passwords. {name} lets this device try again at {time}.', { name, time: timeOf(err.until) }) : t('Too many wrong passwords were typed here. You can try again now.'),
         denied: t('Someone at {name} said no to this.', { name }),
         unanswered: t("Nobody at {name} answered within {n} seconds, so it wasn't allowed.", { name, n: limits.askSeconds }),
-        device: t("{name} doesn't let this device connect. That's changed at {name} itself, in {place}.", { place: where('remote-devices'), name }),
+        // (at: the computer it came through, when that one turned it away.)
+        device: t("{name} doesn't let this device connect. That's changed at {name} itself, in {place}.", { place: where('remote-devices'), name: err.at || name }),
         blocked: t("{name} doesn't let this device connect. That's changed at {name} itself, in {place}.", { place: where('remote-devices'), name: err.at || name }),
         stopped: t('Stopped from {device}.', { device: err.by || t('another of your devices') }),
         // (What that computer says in English, said here in this device's language.)
