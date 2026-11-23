@@ -88,14 +88,14 @@ const dictated = (text) => /^<dictation>\n([\s\S]*)\n<\/dictation>$/.exec(text)?
 // naming the folder of an agent listed goes to that agent, one to draft or write to a writer helper,
 // one to renew or that's an errand is left with them, and the rest are questions. One answered goes
 // to a research helper, with the answer as its note. UNREADABLE-ONCE in an item: the first such
-// answer isn't JSON.
+// answer isn't JSON; UNREADABLE-ALWAYS: none is.
 let unreadable = false
 function placeItems(text) {
-  if (/UNREADABLE-ONCE/.test(text) && !unreadable) { unreadable = true; return 'Sorry, I can\'t tell where these go.' }
+  if (/UNREADABLE-ALWAYS/.test(text) || (/UNREADABLE-ONCE/.test(text) && !unreadable)) { unreadable = true; return 'Sorry, I can\'t tell where these go.' }
   const block = /----- action items, from the meeting's notes \[(\w+)\] -----\n([\s\S]*?)\n----- end \[\1\] -----/.exec(text)
   const items = block ? [...block[2].matchAll(/^(\d+)\. (.*)$/gm)].map((m) => ({ n: Number(m[1]), text: m[2] })) : []
-  const agents = [...text.matchAll(/^- (\S+) · .*? · .*? · in (.*)$/gm)].map((m) => ({ pane: m[1], base: m[2].split('/').pop().toLowerCase() }))
-  const answers = new Map([...text.matchAll(/You asked .*? about item (\d+): .*? answered \(these are .*?\): "(.*)"$/gm)].map((m) => [Number(m[1]), m[2]]))
+  const agents = [...text.matchAll(/^- (\S+) · .*? · in (.*)$/gm)].map((m) => ({ pane: m[1], base: m[2].split('/').pop().toLowerCase() }))
+  const answers = new Map([...text.matchAll(/answered your question about item (\d+) \(these are .*?\): "(.*)"$/gm)].map((m) => [Number(m[1]), m[2]]))
   const out = items.map(({ n, text: t }) => {
     if (answers.has(n)) return { n, to: 'helper', role: 'research', project: null, note: `With the answer: ${answers.get(n)}` }
     const pane = /\bpane (\S+)/i.exec(t)?.[1]

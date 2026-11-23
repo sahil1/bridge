@@ -156,7 +156,7 @@ export default function ChiefTasks({ agent, onOpenPath, onBoard }) {
       <li key={it.id} className={`ct-item s-${asks ? 'waiting' : it.status}`}>
         <span className={`sdot sdot-${asks ? 'blocked' : DOT[it.status]}`} style={{ '--d': '8px' }} role="img" aria-label={asks ? t('Needs you') : t(LABEL[it.status])} title={asks ? t('Needs you') : t(LABEL[it.status])} />
         <div className="ct-main">
-          <span className="ct-title"><span className="ct-id">{it.id}</span>{it.role && <span className="ct-role">{roleName(it.role)}</span>}{it.title}</span>
+          <span className="ct-title"><span className="ct-id">{it.id}</span>{it.role && <span className="ct-role">{roleName(it.role)}</span>}{it.shown || it.title}</span>
           {it.status === 'waiting' && it.needs && <span className="ct-needs">{t('Needs: {needs}', { needs: it.needs })}</span>}
           {isDone && it.outcome && <span className="ct-outcome">{outcomeOf(it.outcome)}</span>}
           {it.link && <span className="ct-links"><Result link={it.link} cwd={agent.cwd} onOpenPath={onOpenPath} /></span>}
@@ -250,7 +250,7 @@ function Card({ it, col, cwd, onOpenPath, onRetry, busy }) {
           <span className="cb-id">#{it.id}</span>
           <span className="cb-when">{when}</span>
         </span>
-        <span className="cb-title">{it.title}</span>
+        <span className="cb-title">{it.shown || it.title}</span>
         {now && <span className={`cb-now${col === 'needs' ? ' needs' : ''}`}>{h?.doing?.tool && col === 'working' && <Icon name="tool" size={10} />}<span>{now}</span></span>}
       </Main>
       {col === 'done' && it.outcome && <p className="cb-outcome">{outcomeOf(it.outcome)}</p>}

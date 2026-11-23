@@ -95,9 +95,10 @@ export function WentTo({ x, compact = false }) {
       )}
       {h?.to === 'ask' && !helper && x.chief?.status === 'waiting' && <span className="mt-went chief" data-status="waiting"><Icon name="helm" size={12} /> <span>{t('Chief of Staff asks: {question}', { question: h.question })}</span></span>}
       {h?.to === 'skip' && <span className="mt-went chief"><Icon name="helm" size={12} /> <span>{t('Chief of Staff left it with you: {why}', { why: h.why })}</span></span>}
+      {h?.to === 'placing' && <span className="mt-went chief" data-status="doing"><Icon name="helm" size={12} /> <span>{t('Chief of Staff is placing it…')}</span></span>}
       {x.chief && !helper && (!h || (h.to === 'ask' && x.chief.status !== 'waiting')) && (
-        <span className="mt-went chief" data-status={x.unplaced ? 'waiting' : x.chief.status}><Icon name="helm" size={12} />{' '}
-          <span>{x.unplaced ? t("Chief of Staff hasn't placed it yet") : x.chief.auto && ['open', 'doing'].includes(x.chief.status) && !h ? t('With Chief of Staff, to place') : chiefSays(x.chief)}</span>
+        <span className="mt-went chief" data-status={x.unplaced || x.shut ? 'waiting' : x.chief.status}><Icon name="helm" size={12} />{' '}
+          <span>{x.shut ? t('Its task was closed before it was placed') : x.unplaced ? t("Chief of Staff hasn't placed it yet") : x.chief.auto && ['open', 'doing'].includes(x.chief.status) && !h ? t('With Chief of Staff, to place') : chiefSays(x.chief)}</span>
         </span>
       )}
     </>
@@ -314,7 +315,7 @@ export function ActionItems({ id, heading, fallback, onMsg }) {
             const done = x.key in ticks ? ticks[x.key] || (x.state === 'done' && !x.done) : x.state === 'done'
             const code = CODE.test(x.text)
             // With Chief of Staff, or where it put it: yours to take back or send elsewhere.
-            const movable = !done && !x.agent && !!(x.chief || x.handed)
+            const movable = !done && !x.agent && !!(x.chief || x.handed) && x.handed?.to !== 'placing'
             const helper = x.chief?.helper
             const asked = x.handed?.to === 'ask' && x.chief?.status === 'waiting'
             return (

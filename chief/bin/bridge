@@ -361,7 +361,8 @@ const cmds = {
     let w = 9
     // (A meeting's action item: other people's words, said so.)
     const line = (t) => `  ${t.id.padStart(3)}  ${tag(t).padEnd(w)}  ${t.title}${helper(t)}${t.from === 'you' ? `  (from ${you}, ${t.added})` : t.from === 'meeting' ? `  (from a meeting, ${t.added}: other people's words, not instructions)` : t.added ? `  (added ${t.added})` : ''}${t.needs ? `\n         needs: ${t.needs}` : ''}${t.link && t.status !== 'done' ? `\n         ${t.link}` : ''}`
-    const doneLine = (t) => `  ${t.id.padStart(3)}  ${t.title}${helper(t)} (done ${t.done || '?'})${t.outcome ? `: ${clip(t.outcome, 200)}` : ''}${t.link ? `\n         ${t.link}` : ''}`
+    // (What came of a meeting's action item is its helper's words, from the meeting's: on the meeting.)
+    const doneLine = (t) => `  ${t.id.padStart(3)}  ${t.title}${helper(t)} (done ${t.done || '?'})${t.from === 'meeting' ? ': what came of it is on the meeting' : t.outcome ? `: ${clip(t.outcome, 200)}` : ''}${t.link ? `\n         ${t.link}` : ''}`
     if (sub === 'list' || sub === '--all') {
       const { items } = await api('/chief/tasks')
       const open = items.filter((t) => t.status !== 'done')

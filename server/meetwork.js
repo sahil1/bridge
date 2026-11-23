@@ -237,15 +237,20 @@ async function stateOf(w, fleet, tasks) {
     else if (h.to === 'ask') out.handed.question = h.question
     else if (h.to === 'skip') out.handed.why = h.why
   }
+  if (out.handed?.to === 'placing' && !out.done) { out.state = 'working'; return out }
+  // Put on the list by itself, and its task closed before it was placed (by hand, or by the chief):
+  // it never went anywhere, which needs you.
+  if (w?.chief?.auto && !w.handed && out.chief?.status === 'done' && !out.chief.helper && !out.done) { out.shut = true; out.state = 'needs'; return out }
   // Told to Chief of Staff by itself, not placed after a while: said, so it isn't left unsaid.
   if (w?.chief?.auto && !w.handed && out.chief?.status === 'open' && !out.chief.helper && Date.now() - Date.parse(w.chief.at || 0) > STALE_MS) out.unplaced = true
   const pr = out.agent?.pr
   const ha = out.handed?.to === 'agent' ? out.handed : null
   if (ha && !out.done) {
     // With an agent: as the agent is (just sent, its screen may not say so yet).
-    // (Its agent closed with the message still waiting for it: it never got it, and that needs you.)
+    // (Its agent closed with the message still waiting for it: it never got it, and that needs you.
+    // Closed otherwise: whether it did it isn't known here, so it's yours to look at, not done.)
     if (!ha.live && ha.queued) ha.lost = true
-    out.state = ha.held || ha.lost || ha.status === 'blocked' ? 'needs' : !ha.live ? 'done' : ha.queued || ha.status === 'working' || Date.now() - Date.parse(ha.approved || ha.at || 0) < 15000 ? 'working' : 'review'
+    out.state = ha.held || ha.lost || ha.status === 'blocked' ? 'needs' : !ha.live ? 'review' : ha.queued || ha.status === 'working' || Date.now() - Date.parse(ha.approved || ha.at || 0) < 15000 ? 'working' : 'review'
     return out
   }
   if (out.handed?.to === 'skip' && !out.done) { out.state = 'open'; return out }

@@ -679,10 +679,12 @@ export const SMALLEST = 8192
 // think: let a model that thinks before answering do so (a chat); Bridge AI's own jobs don't wait.
 // feature: the part of Bridge AI asking (usagelog.js FEATURES), noted with what the answer took;
 // instead: { of, why }, the model it answers for, which couldn't (a job's fallback: modeljobs.js).
-export async function reply(id, messages, { signal, tools, system = SYSTEM, json = null, think = false, feature = null, instead = null } = {}) {
+// noTools: with no tools at all, a sign-in's one-shot mode too (what places a meeting's action items,
+// meetitems.js): one that can't be run so refuses (code 'tools').
+export async function reply(id, messages, { signal, tools, system = SYSTEM, json = null, think = false, feature = null, instead = null, noTools = false } = {}) {
   if (hiddenModel(id)) throw new Error(OFF)
   const started = Date.now()
-  const { usage, ...r } = await answer(id, messages, { signal, tools: canUseTools(id) ? tools : null, system, json, think })
+  const { usage, ...r } = await answer(id, messages, { signal, tools: canUseTools(id) && !noTools ? tools : null, system, json, think, noTools })
   usagelog.record({ id, feature, usage, ms: Date.now() - started, instead })
   // The usage counts, when they're shared: the model's family, how it was reached, what asked.
   counts.answered(id, feature, usage?.model).catch(() => {})
@@ -694,7 +696,7 @@ async function answer(id, messages, o) {
   const model = rest.join(':')
   if (route === 'cli') {
     if (!CLI[model]) throw new Error(`Can't chat through ${model}`)
-    const r = await oneShot(model, asTranscript(messages, system), null, {}, signal)
+    const r = await oneShot(model, asTranscript(messages, system), null, {}, signal, { noTools: !!o.noTools })
     const text = String(r.text).trim()
     if (!text) throw new Error(`${adapter(model).label} sent back an empty answer`)
     return { text, calls: [], usage: r.usage }
