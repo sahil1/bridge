@@ -84,7 +84,7 @@
     "exceljs": "^4.4.0",
     "jspdf": "4.2.1",
     "jsqr": "1.4.0",
-    "pdfjs-dist": "6.5.438",
+    "pdfjs-dist": "6.4.299",
     "playwright-core": "1.65.0",
     "simple-icons": "^16.37.0",
     "svg2pdf.js": "2.9.0",
