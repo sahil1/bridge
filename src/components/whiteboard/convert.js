@@ -1,8 +1,10 @@
 // Diagrams into whiteboard shapes, and back into words for a model. X is the Excalidraw module
 // (excalidraw.js), handed in so nothing here loads it by itself.
 //   Mermaid (a model's "Draw this", an agent's .mmd, a ```mermaid block): Excalidraw's own
-//   mermaid-to-excalidraw lays it out as boxes, arrows and words. Flowcharts and sequence, class
-//   and state diagrams become shapes where it can read them; other kinds come in as one picture.
+//   mermaid-to-excalidraw lays it out as boxes, arrows and words (with Pele, Obsidian's Mermaid
+//   renderer, since its 3.0). Flowcharts, sequence, class, state and ER diagrams, Gantt charts,
+//   timelines and quadrant charts become shapes where it can read them; other kinds come in as one
+//   picture.
 //   draw.io (.drawio): its boxes, ellipses, diamonds, words and arrows, where they were, with their
 //   colours; each page beside the last.
 //   A diagram spec (a model's "Draw this", an agent's .json): drawn by spec.js.
@@ -37,8 +39,9 @@ const aside = (a, b, [fa], n, mid) => {
 }
 export async function fromMermaid(X, text, look = 'clean') {
   const { parseMermaidToExcalidraw } = await loadMermaid()
-  // Strict, as Mermaid is by default: no scripts, links or HTML from a diagram an agent wrote.
-  const { elements, files } = await parseMermaidToExcalidraw(String(text).trim(), { securityLevel: 'strict', themeVariables: { fontSize: look === 'sketch' ? '20px' : '16px' } })
+  // Nothing of a diagram an agent wrote runs: Pele draws no scripts or HTML, only words, and keeps a
+  // node's link only when it's http, https, mailto or tel (Mermaid's securityLevel is gone with it).
+  const { elements, files } = await parseMermaidToExcalidraw(String(text).trim(), { themeVariables: { fontSize: look === 'sketch' ? '20px' : '16px' } })
   let out = restyle(X, X.convertToExcalidrawElements(elements, { regenerateIds: true }), look)
   const l = lookOf(look)
   if (l.arrowType === 'elbow') {
