@@ -1,6 +1,6 @@
 // A list of models to answer with, in order: a first choice and then its fallbacks, as a bot's What
 // Answers has them (botanswer.js) and each kind of job's model in Settings › Model Providers
-// (modeljobs.js). A model is named as chatmodels.js names it ("groq:llama-3.3-70b-versatile",
+// (modeljobs.js). A model is named as chatmodels.js names it ("groq:openai/gpt-oss-120b",
 // "ollama:qwen3"); one that can't run now (no key for it, its server here not running, the local
 // model built in not downloaded) is passed over before it's tried, and one that fails (its provider
 // down or saying no, a rate limit, its usage limit) when it's tried, each with why. A list goes
@@ -17,9 +17,13 @@ export function labelOf(id, models = []) {
 }
 
 // Why it can't run now, before it's tried, or null. models: what chatmodels.js reaches now (its
-// list, or their ids); provider(route): the provider's name, to say whose key it needs.
+// list, or their ids); provider(route): the provider's name, to say whose key it needs. A model by
+// name from a provider whose key is there (one of its models in the list, via 'key') can run: the
+// list is the provider's, not all it has, and one it has retired answers with its current model.
 export function whyNot(id, models = [], provider = () => null) {
   if (models.some((m) => (m?.id ?? m) === id)) return null
+  const route = String(id || '').split(':')[0]
+  if (!isLocal(id) && route !== 'cli' && models.some((m) => m?.via === 'key' && String(m.id).split(':')[0] === route)) return null
   const name = labelOf(id, models.filter((m) => m?.id))
   if (/^bridge:/.test(id)) return `${name} isn't downloaded on this computer`
   if (isLocal(id)) return `${name} isn't running on this computer`

@@ -13,6 +13,7 @@ import { DATA, HOME, IS_MAC, IS_WIN, dataFile, ensureDir, writeFileAtomic } from
 import { AGENTS, installed as installedAgents } from './agents.js'
 import { hiddenAgent, hiddenProvider } from './labs.js'
 import { machine } from './machine.js'
+import { kept as keptList } from './livemodels.js'
 
 // ---------- Catalog ----------
 // fields: env vars the provider uses. type 'secret' (masked), 'text' (plain setting) or 'flag'
@@ -354,8 +355,11 @@ async function statusOf(p) {
   const all = (pick) => req.length > 0 && req.every((f) => pick(f.env))
   const t = tested.get(p.id)
   const refused = t && !t.ok && t.fp === fingerprint(p) ? { status: 'rejected', message: t.message } : null
-  if (all((e) => saved[e])) return { ...base, status: 'connected', source: 'bridge', ...refused }
-  if (all((e) => saved[e] || process.env[e]) || (p.alsoEnv || []).some((e) => process.env[e])) return { ...base, status: 'connected', source: 'environment', ...refused }
+  // Its own list of models, as last asked with the key (livemodels.js): its models, when, or why not.
+  const l = keptList(p.id)
+  const list = l && { list: { at: l.at ? new Date(l.at).toISOString() : null, error: l.error || null }, ...(l.models?.length ? { models: l.models.map((m) => m.id) } : {}) }
+  if (all((e) => saved[e])) return { ...base, status: 'connected', source: 'bridge', ...list, ...refused }
+  if (all((e) => saved[e] || process.env[e]) || (p.alsoEnv || []).some((e) => process.env[e])) return { ...base, status: 'connected', source: 'environment', ...list, ...refused }
   if (p.cloud?.()) return { ...base, status: 'connected', source: 'cloud' }
   if (req.some((f) => saved[f.env])) return { ...base, status: 'incomplete', source: 'bridge' }
   return { ...base, status: 'not set', source: null }

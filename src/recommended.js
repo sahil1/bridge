@@ -30,9 +30,10 @@ export const isEffort = (e) => EFFORTS.includes(e)
 // is for that session only: nothing is written to Claude Code's settings.
 // Aliases follow the newest model of each kind (opus is Opus 5.5 now), so this needn't change when
 // one comes out. What to look at again then: what a new kind costs, and whether a plan's limits
-// have room for it. Fable, the most capable, isn't anyone's default: it costs about 2.5 times what
+// have room for it. Fable, the most capable, isn't anyone's default: it costs twice what
 // Opus does per token (API prices), so it's worth picking for one hard task, not for every agent.
-// Prices compared: Sonnet $2/$10 per million tokens in and out, Opus $4/$20, Fable $10/$50.
+// Prices compared: Sonnet $2/$10 per million tokens in and out, Opus $4/$20, Fable 5.2 $8/$40
+// (platform.claude.com/docs/en/about-claude/models/overview, November 2026).
 //   plan     what Claude Code's sign-in calls it (subscriptionType), or api / cloud
 //   label    the plan's name, as Bridge AI shows it
 //   to       "Recommended for {to}: …"

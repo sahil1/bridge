@@ -12,9 +12,9 @@ const CLAUDE = path.join(HOME, '.claude')
 const CLAUDE_BUILTINS = [
   { name: 'model', description: 'Switch model', mode: 'pick', terminal: true, args: [
     { value: 'claude-opus-5-5', label: 'Opus 5.5', description: 'Complex work and everyday tasks' },
-    { value: 'claude-fable-5-1', label: 'Fable 5.1', description: 'Toughest challenges' },
+    { value: 'claude-fable-5-2', label: 'Fable 5.2', description: 'Toughest challenges' },
     { value: 'claude-sonnet-5-5', label: 'Sonnet 5.5', description: 'Efficient for simpler tasks' },
-    { value: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5', description: 'Fastest for quick answers' },
+    { value: 'claude-haiku-5-5', label: 'Haiku 5.5', description: 'Fastest for quick answers' },
     { value: '', label: 'All models…', description: 'Open the full picker in the terminal' },
   ] },
   { name: 'effort', description: 'Set reasoning effort (picker has "this session only")', mode: 'terminal' },

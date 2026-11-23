@@ -18,10 +18,10 @@ export const CAPS = {
   opencode: {},
 }
 export const LABELS = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI', opencode: 'OpenCode' }
-export const MODELS = { claude: ['opus', 'sonnet', 'haiku', 'claude-fable-5-1'], codex: ['gpt-6.1-sol', 'gpt-6-luna'] }
+export const MODELS = { claude: ['opus', 'sonnet', 'haiku', 'claude-fable-5-2'], codex: ['gpt-6.2-sol', 'gpt-6-luna'] }
 // What each agent is on, for the message box's model chip, and what Claude's aliases stand for.
-export const MODEL_ON = { claude: 'claude-opus-5-5', codex: 'gpt-6.1-sol' }
-export const MODEL_IDS = { opus: 'claude-opus-5-5', sonnet: 'claude-sonnet-5-5', haiku: 'claude-haiku-5-5', fable: 'claude-fable-5-1', default: 'claude-opus-5-5' }
+export const MODEL_ON = { claude: 'claude-opus-5-5', codex: 'gpt-6.2-sol' }
+export const MODEL_IDS = { opus: 'claude-opus-5-5', sonnet: 'claude-sonnet-5-5', haiku: 'claude-haiku-5-5', fable: 'claude-fable-5-2', default: 'claude-opus-5-5' }
 export const modelName = (id) => { const m = /^claude-(\w+)-(\d+)-(\d+)$/.exec(id); return m ? `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}.${m[3]}` : id }
 export const kinds = () => Object.keys(CAPS).map((kind) => ({ kind, label: LABELS[kind], path: `/opt/homebrew/bin/${kind}`, caps: CAPS[kind] }))
 export const catalog = () => [

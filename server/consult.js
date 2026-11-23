@@ -21,6 +21,7 @@ import * as accounts from './accounts.js'
 import * as usagelog from './usagelog.js'
 import * as counts from './counts.js'
 import { placeEn } from '../shared/places.js'
+import { learnGone, unknownModel } from './livemodels.js'
 
 const DIR = () => ensureDir(dataFile('consult'))
 // BRIDGE_ANTHROPIC_URL (tests): a stand-in for Anthropic's API.
@@ -85,20 +86,26 @@ function readRun(kind, stdout, fromFile) {
   return { text: fromFile ?? out, usage: null }
 }
 
-// APIs, with a sensible default model each. Change one with "consult": { "models": { "xai": "..." } }
-// in your config, or pass a model with the request. BRIDGE_PERPLEXITY_URL (tests): a stand-in for
-// Perplexity's API.
+// APIs, with a sensible default model each: the provider's current one, from its own models page
+// (checked 22 November 2026: Groq's llama-3.3-70b-versatile and DeepSeek's deepseek-chat are
+// retired, OpenAI's gpt-5 shuts down 11 December 2026 and Google's gemini-2.5-pro 1 December). also:
+// a few more of its current ones, listed where you pick a model when its own list can't be had
+// (livemodels.js). Change one with "consult": { "models": { "xai": "..." } } in your config, or pass
+// a model with the request; one the provider has retired answers with its default instead
+// (chatmodels.js retiredInfo).
+// BRIDGE_PERPLEXITY_URL (tests): a stand-in for Perplexity's API.
 export const API = {
-  anthropic: { label: 'Anthropic API', key: 'ANTHROPIC_API_KEY', anthropic: true, model: 'claude-opus-5-5' },
-  openai: { label: 'OpenAI API', base: 'https://api.openai.com/v1', key: 'OPENAI_API_KEY', model: 'gpt-5' },
-  xai: { label: 'xAI API', base: 'https://api.x.ai/v1', key: 'XAI_API_KEY', model: 'grok-4' },
+  anthropic: { label: 'Anthropic API', key: 'ANTHROPIC_API_KEY', anthropic: true, model: 'claude-opus-5-5', also: ['claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-2'] },
+  openai: { label: 'OpenAI API', base: 'https://api.openai.com/v1', key: 'OPENAI_API_KEY', model: 'gpt-6.2-sol', also: ['gpt-6.2-astra', 'gpt-6.1-terra', 'gpt-6-luna'] },
+  xai: { label: 'xAI API', base: 'https://api.x.ai/v1', key: 'XAI_API_KEY', model: 'grok-4.7' },
   meta: { label: 'Meta Model API', base: 'https://api.meta.ai/v1', key: 'MODEL_API_KEY', model: 'muse-spark-1.3' },
-  gemini: { label: 'Gemini API', base: 'https://generativelanguage.googleapis.com/v1beta/openai', key: 'GEMINI_API_KEY', alt: 'GOOGLE_API_KEY', model: 'gemini-2.5-pro' },
+  gemini: { label: 'Gemini API', base: 'https://generativelanguage.googleapis.com/v1beta/openai', key: 'GEMINI_API_KEY', alt: 'GOOGLE_API_KEY', model: 'gemini-4-neon', also: ['gemini-4-carbon', 'gemini-4-hydrogen', 'gemini-4-argon'] },
   perplexity: { label: 'Perplexity API', base: String(process.env.BRIDGE_PERPLEXITY_URL || 'https://api.perplexity.ai').replace(/\/+$/, ''), key: 'PERPLEXITY_API_KEY', model: 'sonar-pro' },
-  openrouter: { label: 'OpenRouter', base: 'https://openrouter.ai/api/v1', key: 'OPENROUTER_API_KEY', model: 'openrouter/auto' },
-  deepseek: { label: 'DeepSeek API', base: 'https://api.deepseek.com/v1', key: 'DEEPSEEK_API_KEY', model: 'deepseek-chat' },
-  mistral: { label: 'Mistral API', base: 'https://api.mistral.ai/v1', key: 'MISTRAL_API_KEY', model: 'mistral-large-latest' },
-  groq: { label: 'Groq API', base: 'https://api.groq.com/openai/v1', key: 'GROQ_API_KEY', model: 'llama-3.3-70b-versatile' },
+  // (OpenRouter's router, kept at the top of its list: it picks a model for each question.)
+  openrouter: { label: 'OpenRouter', base: 'https://openrouter.ai/api/v1', key: 'OPENROUTER_API_KEY', model: 'openrouter/auto', keep: true },
+  deepseek: { label: 'DeepSeek API', base: 'https://api.deepseek.com', key: 'DEEPSEEK_API_KEY', model: 'deepseek-flash', also: ['deepseek-v4-pro'] },
+  mistral: { label: 'Mistral API', base: 'https://api.mistral.ai/v1', key: 'MISTRAL_API_KEY', model: 'mistral-large-latest', also: ['mistral-small-latest'] },
+  groq: { label: 'Groq API', base: 'https://api.groq.com/openai/v1', key: 'GROQ_API_KEY', model: 'openai/gpt-oss-120b', also: ['openai/gpt-oss-20b'] },
   // A model on this computer, through chatmodels.js: Ollama at the address set in Settings › Model
   // Providers (or OLLAMA_HOST), LM Studio, or the local model built in once it's downloaded (after
   // your own), and the model picked there (localModel).
@@ -248,35 +255,52 @@ async function runApi(id, prompt, model, feature, ms = TIMEOUT) {
     return { text: r.text, model: m.id, route: localRoute(m) }
   }
   const key = keyFor(a)
-  const m = model || a.model
-  if (!m) throw new Error(`No model to use for ${a.label}`)
-  if (a.anthropic) {
-    const r = await fetch(`${anthropicUrl()}/v1/messages`, {
+  const asked = model || a.model
+  if (!asked) throw new Error(`No model to use for ${a.label}`)
+  // One its provider has retired asks the provider's default instead, and so does one it says it
+  // doesn't know when the default then answers (remembered: livemodels.js learnGone). retired: why.
+  const c = await chat()
+  let gone = c.retiredInfo(`${id}:${asked}`)
+  let m = gone ? a.model : asked
+  let out
+  try { out = await once(m) } catch (e) {
+    if (gone || !unknownModel(e) || !a.model || asked === a.model) throw e
+    try { out = await once(a.model) } catch { throw e }
+    learnGone(id, asked, e.message)
+    gone = c.retiredInfo(`${id}:${asked}`)
+    m = a.model
+  }
+  return { ...out, model: m, ...(gone ? { retired: gone } : {}) }
+
+  async function once(m) {
+    if (a.anthropic) {
+      const r = await fetch(`${anthropicUrl()}/v1/messages`, {
+        method: 'POST', signal: AbortSignal.timeout(ms),
+        headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({ model: m, max_tokens: 4096, messages: [{ role: 'user', content: prompt }] }),
+      })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) throw Object.assign(new Error(`${a.label} (${m}): ${j.error?.message || `HTTP ${r.status}`}`), { status: r.status })
+      noted(j, m)
+      return { text: (j.content || []).filter((x) => x.type === 'text').map((x) => x.text).join('\n').trim() }
+    }
+    const r = await fetch(`${a.base}/chat/completions`, {
       method: 'POST', signal: AbortSignal.timeout(ms),
-      headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: m, max_tokens: 4096, messages: [{ role: 'user', content: prompt }] }),
+      headers: { 'content-type': 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}) },
+      body: JSON.stringify({ model: m, messages: [{ role: 'user', content: prompt }] }),
     })
     const j = await r.json().catch(() => ({}))
-    if (!r.ok) throw new Error(`${a.label} (${m}): ${j.error?.message || `HTTP ${r.status}`}`)
+    if (!r.ok) throw Object.assign(new Error(`${a.label} (${m}): ${j.error?.message || j.message || `HTTP ${r.status}`}. Set another model with "consult": { "models": { "${id}": "..." } } in your config.`), { status: r.status })
     noted(j, m)
-    return { text: (j.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n').trim(), model: m }
+    const msg = j.choices?.[0]?.message
+    const said = String(msg?.content || '').trim()
+    let text = said
+    if (Array.isArray(j.citations) && j.citations.length) text += `\n\nSources:\n${j.citations.map((u, i) => `[${i + 1}] ${u}`).join('\n')}`
+    // The pages, in the order the answer numbers them: search_results has their titles too.
+    const found = Array.isArray(j.search_results) && j.search_results.length ? j.search_results.map((s) => ({ url: s?.url, title: s?.title })) : Array.isArray(j.citations) ? j.citations.map((u) => ({ url: u })) : []
+    const links = found.filter((l) => typeof l.url === 'string' && /^https?:\/\/[^\s]+$/i.test(l.url)).slice(0, 8).map((l) => ({ url: l.url, title: typeof l.title === 'string' && l.title.trim() ? l.title.trim().slice(0, 200) : null }))
+    return { text, said, links }
   }
-  const r = await fetch(`${a.base}/chat/completions`, {
-    method: 'POST', signal: AbortSignal.timeout(ms),
-    headers: { 'content-type': 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}) },
-    body: JSON.stringify({ model: m, messages: [{ role: 'user', content: prompt }] }),
-  })
-  const j = await r.json().catch(() => ({}))
-  if (!r.ok) throw new Error(`${a.label} (${m}): ${j.error?.message || j.message || `HTTP ${r.status}`}. Set another model with "consult": { "models": { "${id}": "..." } } in your config.`)
-  noted(j, m)
-  const msg = j.choices?.[0]?.message
-  const said = String(msg?.content || '').trim()
-  let text = said
-  if (Array.isArray(j.citations) && j.citations.length) text += `\n\nSources:\n${j.citations.map((u, i) => `[${i + 1}] ${u}`).join('\n')}`
-  // The pages, in the order the answer numbers them: search_results has their titles too.
-  const found = Array.isArray(j.search_results) && j.search_results.length ? j.search_results.map((s) => ({ url: s?.url, title: s?.title })) : Array.isArray(j.citations) ? j.citations.map((u) => ({ url: u })) : []
-  const links = found.filter((l) => typeof l.url === 'string' && /^https?:\/\/[^\s]+$/i.test(l.url)).slice(0, 8).map((l) => ({ url: l.url, title: typeof l.title === 'string' && l.title.trim() ? l.title.trim().slice(0, 200) : null }))
-  return { text, model: m, said, links }
 }
 
 // ---------- Looking something up on the web ----------
@@ -320,7 +344,7 @@ export async function ask({ who, prompt, model, via, env, feature = 'consult' },
   }
   if (c.api && (via === 'api' || opt.via === 'api' || !c.cli)) {
     const r = await runApi(c.api, q, model || cfg.consult?.models?.[c.api], feature)
-    return { who: c.id, via: 'api', route: r.route || API[c.api].label, model: r.model, text: r.text, ms: Date.now() - started }
+    return { who: c.id, via: 'api', route: r.route || API[c.api].label, model: r.model, text: r.text, ms: Date.now() - started, ...(r.retired ? { retired: (await chat()).retiredWhy(r.retired) } : {}) }
   }
   throw new Error(`${c.label} isn't available: ${opt.route}`)
 }
