@@ -17,6 +17,8 @@ import { sessionTitle } from './components/bots/sessions.js'
 import Home from './components/Home.jsx'
 import { FirstRunAnswers } from './components/FirstRun.jsx'
 import { MeetingsProvider, RecordingPill, CallPrompt, useMeetings } from './components/meetings/recording.jsx'
+import TranscribeHost from './components/meetings/transcribehost.jsx'
+import { pick as pickToTranscribe, canPickFolder } from './components/meetings/transcribefiles.js'
 import { memoryTab, meetingsAt } from './components/memory/open.js'
 import { openLink } from './pwa.js'
 import NewAgent from './components/NewAgent.jsx'
@@ -979,6 +981,10 @@ function App() {
     { id: 'a:new', label: t('New agent with all the options…'), icon: 'bot', keywords: 'launch start claude codex gemini copilot opencode project dialog compare account', run: () => setNewAgent({ mode: 'project' }) },
     { id: 'a:record', label: t('Record a meeting'), icon: 'mic', keywords: 'meeting notes transcript record call granola minutes', run: () => meetings?.start().catch(() => openAgent('view:meetings')) },
     { id: 'a:meetings', label: t('Meetings'), icon: 'mic', keywords: 'meeting notes transcripts summaries', run: openMeetings },
+    // Transcribe a file or a folder (meetings/transcribefiles.js): the system's picker, straight
+    // from the pick, so the browser lets it open; then how, and the file's line in Meetings.
+    !cloudOnly && { id: 'a:transcribe', label: t('Transcribe a file…'), sub: t('In Meetings'), icon: 'upload', keywords: 'transcribe transcription audio video file recording mp3 m4a wav mp4 mov podcast interview lecture voice memo subtitles srt vtt captions whisper macwhisper speakers', run: () => pickToTranscribe() },
+    !cloudOnly && canPickFolder() && { id: 'a:transcribe-folder', label: t('Transcribe a folder…'), sub: t('In Meetings'), icon: 'folder', keywords: 'transcribe transcription folder batch many files audio video recordings', run: () => pickToTranscribe({ folder: true }) },
     insightsOn && { id: 'a:insights', label: t('Meeting Insights'), icon: 'trend', keywords: 'meetings stats hours talk time share words week kind', run: () => meetingsTab('insights') },
     insightsOn && { id: 'a:people', label: t('People You Meet'), icon: 'users', keywords: 'people attendees contacts who met meetings together', run: () => meetingsTab('people') },
     { id: 'a:dictations', label: t('Dictations'), sub: t('In Meetings'), icon: 'wave', keywords: 'dictation history voice said typed pasted wispr macwhisper', run: () => openAgent(DICTATIONS) },
@@ -1049,6 +1055,7 @@ function App() {
       {settings && <Settings section={settings} onClose={closeSettings} onOpenAgent={openAgent} />}
       {(fleet?.agents || []).filter((a) => a.chief && a.setup).map((a) => <FirstRunAnswers key={a.paneId} agent={a} />)}
       <CallPrompt />
+      {!cloudOnly && <TranscribeHost />}
       {!cloudOnly && <Quiet name="Crash notice"><CrashNotice /></Quiet>}
       {inbox && !cloudOnly && <NeedsYouPanel data={ny.data} refresh={ny.refresh} phone={!wide} focus={inbox.focus} onClose={() => setInbox(null)} onOpen={openItem} />}
       {onboarding && <Onboarding onDone={(pane) => { setOnboarding(false); confPoll.refresh(); if (pane) setTimeout(() => openAgent(pane), 800); else openAgent('view:new') }} />}

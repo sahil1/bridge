@@ -230,13 +230,13 @@ try {
     ok(fs.readFileSync(path.join(asker.bin, 'calask.log'), 'utf8').split('\n').filter(Boolean).length === 3, 'checking and reading never ask macOS')
   }
 
-  // whisper.cpp picked but not on this computer: the Mac's own speech stands in when it has the
-  // language, so a meeting still turns into text instead of waiting on an install.
+  // A speech model on this computer picked but not downloaded yet: the Mac's own speech stands in
+  // when it has the language, so a meeting still turns into text instead of waiting on a download.
   if (!IS_WIN) {
     await asker.api('/settings', { meetings: { engine: 'local' } }, 'PATCH')
     const sp = await asker.api('/speech')
-    ok(sp.engine === 'local' && sp.ready === true && sp.standIn === 'apple' && !sp.needs, 'whisper.cpp picked but not here: the Mac\'s own speech stands in, and nothing is asked of you', { engine: sp.engine, ready: sp.ready, standIn: sp.standIn, needs: sp.needs, apple: sp.apple })
-    ok(sp.local?.program === null && sp.local?.ready === false, 'and whisper.cpp itself still shows as not here, so Settings keeps offering it', sp.local)
+    ok(sp.engine === 'local' && sp.ready === true && sp.standIn === 'apple' && !sp.needs, 'a speech model picked but not here yet: the Mac\'s own speech stands in, and nothing is asked of you', { engine: sp.engine, ready: sp.ready, standIn: sp.standIn, needs: sp.needs, apple: sp.apple })
+    ok(sp.local?.ready === false && !('program' in sp.local) && !('installCommand' in sp.local), 'and the model itself still shows as not here, so Settings keeps offering its download (nothing to install)', sp.local)
   }
 } catch (e) {
   ok(false, `asking an agent crashed: ${e.message}`)

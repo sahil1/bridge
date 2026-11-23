@@ -149,7 +149,9 @@ export function transcript(id, { raw = false, clean = true, dropped = false } = 
   const c = clean ? cleanedOf(id) : null
   const drop = new Set(c?.drop || [])
   let one = null
-  try { one = onlyGuest(meta(id)) } catch { /* gone */ }
+  // A file's lines are nobody's until a voice or a name says whose (file: for who said it).
+  let mark = {}
+  try { const m = meta(id); one = onlyGuest(m); if (m.file) mark = { file: true } } catch { /* gone */ }
   // Each line's voice (voices.js), on the side told apart: your mic's in a room, the call's on a
   // call, both with a room on the call. Speaker n, or the name given to that voice, or you. A name
   // you gave the line comes first.
@@ -164,7 +166,7 @@ export function transcript(id, { raw = false, clean = true, dropped = false } = 
   for (const l of kept) {
     const k = keyOf(l)
     const s = names[k]
-    const n = { ...voiceOf(l, k), ...(s ? (s.name ? { name: s.name, guess: !!s.guess, me: false } : {}) : one && l.src === 'them' ? { name: one, guess: true } : {}) }
+    const n = { ...mark, ...voiceOf(l, k), ...(s ? (s.name ? { name: s.name, guess: !!s.guess, me: false } : {}) : one && l.src === 'them' ? { name: one, guess: true } : {}) }
     const heard = l.heard ?? l.text
     if (edits[k] != null) { out.push({ ...l, key: k, ...n, text: edits[k], edited: true, heard }); continue }
     if (drop.has(k)) { if (dropped) out.push({ ...l, key: k, ...n, dropped: true, heard }); continue }
@@ -176,8 +178,8 @@ export function transcript(id, { raw = false, clean = true, dropped = false } = 
 }
 const clock = (s) => { const t = Math.max(0, Math.round(s)); const h = Math.floor(t / 3600); const m = Math.floor((t % 3600) / 60); const ss = String(t % 60).padStart(2, '0'); return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}` }
 export const who = (src) => (src === 'them' ? 'Them' : 'You')
-// Who said a line: a name, else a voice in a room (Speaker 2), else You or Them.
-const speaker = (l, label = who) => l.name || (l.voice && !l.me ? `Speaker ${l.voice}` : label(l.src))
+// Who said a line: a name, else a voice in a room (Speaker 2), else You or Them (a file's: Speaker).
+const speaker = (l, label = who) => l.name || (l.voice && !l.me ? `Speaker ${l.voice}` : l.file && !l.me ? 'Speaker' : label(l.src))
 // The lines with a heading where each section starts: [{ head: section }, line, line, ...]. A
 // section with nothing said in it still gets its heading.
 function bySection(said, sections = []) {
@@ -428,7 +430,7 @@ async function run(job) {
     const r = await speech.transcribe(wav(job.pcm), { cfg: job.cfg || cfg, language: job.language || m.language || cfg.meetings?.language, prompt: [hint, before].filter(Boolean).join('. '), words: listenFor(m) })
     const text = speech.spoken(r.text)
     if (text && !/^(thank you\.?|thanks for watching!?|you)$/i.test(text)) {
-      const line = { src: job.src, t0: round(job.t0), t1: round(job.t1), text, engine: r.engine }
+      const line = { src: job.src, t0: round(job.t0), t1: round(job.t1), text, engine: r.engine, ...(r.lang ? { lang: r.lang } : {}) }
       append(job.id, line)
       if (!job.retry) { assistSoon(job.id); boardSoon(job.id) }
       // In a room, whose voice it was, while it records (voices.js decides whether it can).
@@ -438,9 +440,12 @@ async function run(job) {
     const so = live.get(job.id)?.sources[job.src]
     if (so) { so.lineTo = Math.max(so.lineTo || 0, round(job.t1)); if (so.partial && so.partial.t0 <= so.lineTo) so.partial = null }
     if (job.retry) fs.rmSync(job.retry, { force: true })
+    heardTo(job)
   } catch (e) {
     job.tries = (job.tries || 0) + 1
     if (job.tries < 3 && !e.fatal) { setTimeout(() => enqueue(job), 2000 * job.tries); return }
+    heardTo(job)
+    if (!fs.existsSync(path.join(dirOf(job.id), 'meeting.json'))) return // deleted meanwhile
     const dir = path.join(dirOf(job.id), 'pending')
     fs.mkdirSync(dir, { recursive: true })
     const file = path.join(dir, `${round(job.t0)}-${job.src}-${round(job.t1)}.wav`)
@@ -454,13 +459,30 @@ async function run(job) {
 const listenFor = (m) => [...(m.event?.attendees || []).slice(0, 12), ...String(cfg.meetings?.vocabulary || '').split(','), ...String(m.fileTerms || '').split(',')]
 const round = (s) => Math.round(s * 100) / 100
 function append(id, line) { fs.appendFileSync(path.join(dirOf(id), 'transcript.jsonl'), `${JSON.stringify(line)}\n`) }
+// A stretch done (heard, or given up on): how far a file's transcript has got (fileProgress).
+const fileWork = new Map() // id -> { total, heard, stop }, while a file's meeting is transcribed
+const heardTo = (job) => { const d = fileWork.get(job.id); if (d) d.heard = Math.max(d.heard, job.t1 || 0) }
 const waiting = (id) => [...queue, ...running].filter((j) => j.id === id).length
 // Recording stopped and every stretch is in: the meeting is done, its transcript cleaned up and
 // then summarized, each when you have it happen by itself (Settings › Voice & Meetings).
 function settle(id) {
   const m = readJSON(path.join(DIR, id, 'meeting.json'))
   if (!m || m.status !== 'transcribing' || waiting(id) || decoding.has(id)) return
-  saveMeta({ ...m, status: 'done', ...(m.again ? { again: { ...m.again, done: new Date().toISOString() } } : {}) })
+  saveMeta({ ...m, status: 'done', ...(m.again ? { again: { ...m.again, done: new Date().toISOString() } } : {}), ...(m.file && !m.endedAt ? { endedAt: new Date().toISOString() } : {}) })
+  // A file's: told it's in (meetfiles.js tells the voices apart next); nothing else by itself.
+  if (m.file) {
+    fileWork.delete(id)
+    const done = settled.get(id)
+    settled.delete(id)
+    done?.()
+    // Transcribed again (Transcribe again): its speakers told apart again, where that runs here.
+    if (!done) {
+      const said = transcript(id, { raw: true }).filter((l) => l.text)
+      if (said.length > 1) voices.tell(id, said, { file: true }).catch(() => {})
+      resave(id)
+    }
+    return
+  }
   // A live board's last look, at what was said since its last (meetboard.js), unless it was a
   // transcript made again.
   if (!m.again) boardSoon(id, { last: true })
@@ -794,7 +816,8 @@ export function recover() {
       pcmToWav(m.id)
       saveMeta({ ...m, status: 'done', endedAt: at, interrupted: { at } })
     } else if (m.status === 'transcribing') {
-      const write = !m.again && !m.summarizing && cfg.meetings?.autoSummary !== false && !hasSum() && said()
+      // (A file's is transcribed again from its start by meetfiles.js.)
+      const write = !m.again && !m.file && !m.summarizing && cfg.meetings?.autoSummary !== false && !hasSum() && said()
       if (write) m.summaryRetryAt = soon()
       saveMeta({ ...m, status: 'done', endedAt: m.endedAt || m.startedAt, ...(write ? { summaryRetryAt: m.summaryRetryAt } : {}) })
     }
@@ -840,13 +863,12 @@ export async function retranscribe(id, { engine, localModel, language } = {}) {
   if (!files.length) throw new Error('This meeting has no audio to transcribe again')
   const ff = await tool('ffmpeg')
   if (files.some((f) => f.endsWith('.ogg')) && !ff) throw new Error('Transcribing again needs ffmpeg, which reads the recording. Install it with Homebrew: brew install ffmpeg')
-  if (localModel && !speech.MODELS.some((x) => x.id === localModel)) throw new Error('No such speech model')
+  if (localModel && !speech.modelById(localModel)) throw new Error('No such speech model')
   if (engine && !['local', 'apple'].includes(engine) && !speech.SERVICES[engine]) throw new Error('No such speech engine')
-  const c = { ...cfg, meetings: { ...(cfg.meetings || {}), ...(engine ? { engine } : {}), ...(localModel ? { localModel } : {}) } }
+  const c = { ...cfg, meetings: { ...(cfg.meetings || {}), ...(engine ? { engine } : {}), ...(localModel ? { localModel: speech.now(localModel) } : {}) } }
   const st = await speech.status(c)
   if (st.engine === 'local') {
     const lm = st.local.models.find((x) => x.id === st.local.model)
-    if (lm?.runtime === 'whisper' && !st.local.program) throw new Error(`${lm.label} needs whisper.cpp. Install it in ${placeEn('voice')}, or pick Parakeet there.`)
     if (!lm?.have) throw new Error(`Download ${lm?.label || 'that speech model'} first, in ${placeEn('voice')}.`)
   } else if (st.engine === 'apple') {
     if (!st.apple.available) throw new Error(`The Mac's own speech isn't available here (${st.apple.why || 'it needs macOS 26 or later'}). Pick another engine in ${placeEn('meetings')}.`)
@@ -885,6 +907,8 @@ async function feed(id, src, file, offset, opts) {
   let rest = null
   await new Promise((resolve, reject) => {
     stream.on('data', (b) => {
+      // Stopped (a file you took back while it was transcribed): nothing more goes in.
+      if (fileWork.get(id)?.stop) { stream.destroy(); resolve(); return }
       const buf = rest ? Buffer.concat([rest, b]) : b
       const even = buf.length - (buf.length % 2)
       rest = even < buf.length ? buf.subarray(even) : null
@@ -893,17 +917,75 @@ async function feed(id, src, file, offset, opts) {
       samples += pcm.length
       const p = decoding.get(id)
       if (p) p.done += pcm.length / RATE
-      // Wait while the engine has plenty to do.
-      if (waiting(id) > 8) {
+      // Wait while the engine has plenty to do; a file's, while a meeting records too (it goes first).
+      const busy = () => waiting(id) > 8 || (fileWork.has(id) && live.size > 0)
+      if (busy()) {
         stream.pause()
-        const t = setInterval(() => { if (waiting(id) < 4) { clearInterval(t); stream.resume() } }, 300)
+        const t = setInterval(() => { if ((waiting(id) < 4 && !(fileWork.has(id) && live.size > 0)) || fileWork.get(id)?.stop) { clearInterval(t); stream.resume() } }, 300)
       }
     })
     stream.on('end', resolve)
     stream.on('error', reject)
   })
-  finder.flush()
+  if (!fileWork.get(id)?.stop) finder.flush()
   return samples / RATE
+}
+
+// ---------- A file you transcribe (meetfiles.js) ----------
+// An audio or video file sent in to be transcribed is a meeting of its own, with its sound as the
+// meeting's recording (audio-you.wav, made by audiofile.js) and its lines told apart by voice
+// (Speaker 1, Speaker 2…), so what a meeting has works on it too: the transcript and its edits, Ask,
+// export, Transcribe again, search, the phone. But not what's for a meeting you were in: nothing is
+// written by a model by itself (no cleanup, no summary until you ask), it isn't saved to your notes
+// folder until you save it, its lines are nobody's until named (never You), and it's left out of
+// Meeting Insights and of merging. file: { name, size, type, modified, at }.
+export function fromFile({ name, size, type, modified, language } = {}) {
+  // (Never one that's there already: a folder adds hundreds in a day.)
+  let id
+  do id = `${new Date().toISOString().slice(0, 10)}-${crypto.randomBytes(3).toString('hex')}`; while (fs.existsSync(dirOf(id)))
+  const full = clean(name, 255) || 'Recording'
+  const title = full.replace(/\.[^.\s]{1,8}$/, '').trim().slice(0, 200) || full
+  return saveMeta({
+    id, title, event: null, links: [], startedAt: new Date().toISOString(), endedAt: null, status: 'transcribing', language: language || null, kind: 'general', seconds: 0, call: 'off', callApps: [], assist: false, board: false,
+    file: { name: full, size: Number(size) || 0, type: clean(type, 100) || null, modified: Number.isFinite(Number(modified)) && Number(modified) > 0 ? new Date(Number(modified)).toISOString() : null, at: new Date().toISOString() },
+  })
+}
+export const fileDir = (id) => { meta(id); return dirOf(id) }
+// Its recording (audio-you.wav, there already) transcribed with the engine, model and language
+// picked for it: resolves once every stretch is in (the meeting done). How far it's got is
+// fileProgress(id).
+const settled = new Map() // id -> resolve, for a file's meeting
+export function transcribeFile(id, { engine, localModel, language, seconds } = {}) {
+  const m = meta(id)
+  const file = path.join(dirOf(id), 'audio-you.wav')
+  if (!fs.existsSync(file)) throw new Error('Its sound isn\'t here any more. Add the file again.')
+  const c = { ...cfg, meetings: { ...(cfg.meetings || {}), ...(engine ? { engine } : {}), ...(localModel ? { localModel: speech.now(localModel) } : {}) } }
+  const total = Math.max(1, seconds || m.seconds || 1)
+  for (const f of ['transcript.jsonl', 'cleaned.json', 'voices.json', 'voices.jsonl']) fs.rmSync(path.join(dirOf(id), f), { force: true })
+  fs.rmSync(path.join(dirOf(id), 'pending'), { recursive: true, force: true })
+  decoding.set(id, { done: 0, total })
+  fileWork.set(id, { total, heard: 0, stop: false })
+  saveMeta({ ...m, status: 'transcribing', error: null, seconds: Math.round(total), endedAt: null })
+  return new Promise((resolve) => {
+    settled.set(id, resolve)
+    ;(async () => {
+      try { await feed(id, 'you', file, 0, { cfg: c, language: language || null }) } catch (e) { try { patchMeta(id, { error: e.message }) } catch { /* gone */ } } finally {
+        decoding.delete(id)
+        if (fileWork.get(id)?.stop) { fileWork.delete(id); settled.delete(id); resolve() } else settle(id)
+      }
+    })()
+  })
+}
+// A meeting recording now (its sound coming in): a file waits for it to end, so the meeting's
+// transcript keeps up.
+export const soundComing = () => live.size > 0
+// How far a file's transcript has got, 0 to 99 (what's been heard, not just read), or null.
+export const fileProgress = (id) => { const d = fileWork.get(id); return d ? Math.min(99, Math.round((d.heard / d.total) * 100)) : null }
+// A file taken back while it's transcribed: what's waiting for the engine goes, nothing more is read.
+export function stopFile(id) {
+  const d = fileWork.get(id)
+  if (d) d.stop = true
+  for (let i = queue.length - 1; i >= 0; i--) if (queue[i].id === id) queue.splice(i, 1)
 }
 
 export function get(id) {
@@ -916,7 +998,8 @@ export function get(id) {
   const levels = l ? Object.fromEntries(Object.entries(l.sources).map(([k, s]) => [k, s.level || 0])) : null
   const quiet = callQuiet(id)
   const dec = decoding.get(id)
-  const progress = dec ? Math.min(99, Math.round((dec.done / dec.total) * 100)) : null
+  // A file's: what's been heard of it, to its end.
+  const progress = fileWork.has(id) ? fileProgress(id) : dec ? Math.min(99, Math.round((dec.done / dec.total) * 100)) : null
   const links = (m.links || []).map((l) => (l.kind === 'file' ? { ...l, exists: fs.existsSync(l.path), readable: doctext.readable(l.path) } : l))
   const help = assistOf(id)
   // An answer still being looked up on the web when Bridge AI closed never will be: it says so.
@@ -1378,7 +1461,7 @@ setInterval(() => { try { tidyMerged() } catch { /* a meeting gone */ } }, 6 * 3
 const MERGE_GAP_MS = Number(process.env.BRIDGE_MERGE_GAP_MS) || 15 * 60_000
 const sameEvent = (a, b) => !!a.event?.title && !!b.event?.title && a.event.title === b.event.title && (a.event.start || null) === (b.event.start || null)
 const sameTitle = (a, b) => clean(a.title, 200).toLowerCase() === clean(b.title, 200).toLowerCase()
-const mergeable = (m) => !m.parts && !m.archived && !m.partOf && m.status === 'done'
+const mergeable = (m) => !m.parts && !m.archived && !m.partOf && !m.file && m.status === 'done'
 function restOf(b, all) {
   if (!mergeable(b) || b.mergeDismissed?.length) return null
   const t = Date.parse(b.startedAt)
@@ -2655,7 +2738,11 @@ export async function ask(id, question, { model } = {}) {
   const left = isLocal(use) ? Math.max(1000, size - summary.length - notes.length - more.length - q.length - 2000) : size
   const context = text.length > left ? `${summary}\n\n(Transcript, the end of it:)\n${text.slice(-left)}` : text
   const mem = memory.about(`${m.title}\n${notes}\n${context}`)
-  const r = await replyAny(use, [{ role: 'user', text: `Meeting: ${m.title}, ${new Date(m.startedAt).toDateString()}\n${mem ? `\n${mem}\n` : ''}${notes ? `\nMy notes:\n${notes}\n` : ''}${more ? `\n${more}\n` : ''}\nTranscript ("You" is me, "Them" the others):\n${context}\n\nQuestion: ${q}\n\nAnswer from the meeting only, briefly. When asked to write something (a follow-up email, an update), write it ready to send, from what was said. Say so if it wasn't covered.` }], { system: 'You answer questions about a meeting from its transcript. Be accurate and brief.', ...how(pick) })
+  // A file you transcribed: a recording, not a meeting you were in, its lines by voice.
+  const said = m.file
+    ? `Recording: ${m.file.name}, transcribed ${new Date(m.startedAt).toDateString()}\n${mem ? `\n${mem}\n` : ''}${notes ? `\nMy notes:\n${notes}\n` : ''}\nTranscript (who spoke, told apart by voice as Speaker 1, Speaker 2…, or by name):\n${context}\n\nQuestion: ${q}\n\nAnswer from the recording only, briefly. When asked to write something (a summary, a list, an email), write it ready to use, from what was said. Say so if it wasn't covered.`
+    : `Meeting: ${m.title}, ${new Date(m.startedAt).toDateString()}\n${mem ? `\n${mem}\n` : ''}${notes ? `\nMy notes:\n${notes}\n` : ''}${more ? `\n${more}\n` : ''}\nTranscript ("You" is me, "Them" the others):\n${context}\n\nQuestion: ${q}\n\nAnswer from the meeting only, briefly. When asked to write something (a follow-up email, an update), write it ready to send, from what was said. Say so if it wasn't covered.`
+  const r = await replyAny(use, [{ role: 'user', text: said }], { system: m.file ? 'You answer questions about a recording from its transcript. Be accurate and brief.' : 'You answer questions about a meeting from its transcript. Be accurate and brief.', ...how(pick) })
   return { answer: String(r.text || '').trim(), model: r.model, note: r.fellBack ? `${r.fellBack} ${isLocal(r.fellBack) ? 'couldn\'t answer here' : 'couldn\'t be reached'}, so ${r.model} answered.` : null }
 }
 
@@ -3504,17 +3591,112 @@ export async function saveExport(id, format, buf) {
 }
 // The file exported last, for the iPhone app to take (its share sheet) or Show in Finder.
 export function exported(id, format) {
-  const file = exportable(format) ? meta(id).exported?.[format] : null
-  if (!file) throw new Error(`Not saved as a ${exportable(format) ? exportName[format] : 'Word file or a PDF'} yet`)
-  if (!fs.existsSync(file)) throw new Error(`The ${exportName[format]} isn't where it was. Save it again.`)
+  const known = exportable(format) || Object.hasOwn(TEXTS, String(format))
+  const name = exportName[format] || TEXTS[format]?.name
+  const file = known ? meta(id).exported?.[format] : null
+  if (!file) throw new Error(`Not saved as a ${known ? name : 'Word file or a PDF'} yet`)
+  if (!fs.existsSync(file)) throw new Error(`The ${name} isn't where it was. Save it again.`)
   return file
+}
+
+// ---------- The transcript as text or subtitles ----------
+// Text (TXT), Markdown, or subtitles (SRT, WebVTT), made here from the transcript as it's shown
+// (your edits and names in it): text a paragraph for each run of one speaker, "[0:12] Speaker 1:
+// …"; subtitles a cue for each few seconds, two short lines at most, a long stretch cut between its
+// words with its time shared out by their length. Who's speaking is said where it's known: always
+// in a meeting, in a file once more than one voice was told apart or someone was named.
+export const TEXTS = {
+  txt: { name: 'text file', type: 'text/plain; charset=utf-8' },
+  md: { name: 'Markdown file', type: 'text/markdown; charset=utf-8' },
+  srt: { name: 'SRT file', type: 'application/x-subrip; charset=utf-8' },
+  vtt: { name: 'WebVTT file', type: 'text/vtt; charset=utf-8' },
+}
+const LINE = 42 // a subtitle line's letters, at most
+const stamp = (s, sep) => { const ms = Math.max(0, Math.round(s * 1000)); const h = Math.floor(ms / 3600000); const m = Math.floor((ms % 3600000) / 60000); const x = Math.floor((ms % 60000) / 1000); return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(x).padStart(2, '0')}${sep}${String(ms % 1000).padStart(3, '0')}` }
+// Words, with a word too long for a line (Chinese, Japanese: no spaces) cut into pieces.
+const cueWords = (text) => String(text).split(/\s+/).filter(Boolean).flatMap((w) => (w.length > LINE ? w.match(new RegExp(`.{1,${Math.floor(LINE / 2)}}`, 'gu')) : [w]))
+// A line's text as cues of two lines at most: [{ t0, t1, lines: [..] }].
+function cues(l) {
+  const ws = cueWords(l.text)
+  const out = []
+  let cur = []
+  const len = (a) => a.join(' ').length
+  for (const w of ws) { if (cur.length && len([...cur, w]) > LINE * 2) { out.push(cur); cur = [] } cur.push(w) }
+  if (cur.length) out.push(cur)
+  const all = ws.join(' ').length || 1
+  const span = Math.max(0.5, (l.t1 ?? l.t0 + 2) - l.t0)
+  let at = l.t0
+  return out.map((c) => {
+    const d = span * (len(c) / all)
+    const rows = []
+    let row = []
+    for (const w of c) { if (row.length && len([...row, w]) > LINE) { rows.push(row.join(' ')); row = [] } row.push(w) }
+    if (row.length) rows.push(row.join(' '))
+    const cue = { t0: at, t1: Math.max(at + 0.4, at + d), lines: rows.length > 2 ? [rows[0], rows.slice(1).join(' ')] : rows }
+    at += d
+    return cue
+  })
+}
+export function transcriptFile(id, format) {
+  const f = TEXTS[String(format)]
+  if (!f) throw new Error('A transcript is saved as text (txt), Markdown (md) or subtitles (srt, vtt)')
+  const m = meta(id)
+  const o = saving()
+  const label = (src) => (src === 'them' ? o.them : o.you)
+  const said = transcript(id).filter((l) => l.text && !l.dropped)
+  const names = new Set(said.map((l) => speaker(l, label)))
+  const named = said.some((l) => l.name || l.me)
+  const say = !m.file || names.size > 1 || named
+  const who = (l) => (say ? speaker(l, label) : null)
+  // Runs of one speaker, for text: a pause of 4 seconds or more starts a new paragraph too.
+  const runs = []
+  for (const l of said) {
+    const last = runs[runs.length - 1]
+    if (last && who(last) === who(l) && l.t0 - last.t1 < 4 && last.text.length < 1500) { last.text += ` ${l.text}`; last.t1 = l.t1 } else runs.push({ ...l })
+  }
+  const base = fileSafe(m.title)
+  const at = new Date(m.startedAt)
+  const when = m.file
+    ? `Transcribed from ${m.file.name}, ${clock(m.seconds || 0)} long`
+    : `${at.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}, ${pad(at.getHours())}:${pad(at.getMinutes())}, ${clock(m.seconds || 0)} long`
+  let text
+  if (format === 'txt') text = runs.map((l) => `[${clock(l.t0)}] ${who(l) ? `${who(l)}: ` : ''}${l.text}`).join('\n\n')
+  else if (format === 'md') text = [`# ${m.title}`, when, runs.map((l) => `**[${clock(l.t0)}]**${who(l) ? ` **${who(l)}:**` : ''} ${l.text.replace(/([\\`*_[\]<>#])/g, '\\$1')}`).join('\n\n') || '_Nothing was transcribed._'].join('\n\n')
+  else {
+    const all = said.flatMap((l) => cues(l).map((c) => ({ ...c, who: who(l) })))
+    if (format === 'srt') text = all.map((c, i) => `${i + 1}\n${stamp(c.t0, ',')} --> ${stamp(c.t1, ',')}\n${c.who ? `${c.who}: ` : ''}${c.lines.join('\n')}`).join('\n\n')
+    else text = ['WEBVTT', ...all.map((c) => `${stamp(c.t0, '.')} --> ${stamp(c.t1, '.')}\n${c.who ? `<v ${c.who.replace(/[<>&]/g, '')}>` : ''}${c.lines.join('\n').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/-->/g, '- ->')}`)].join('\n\n')
+  }
+  return { name: `${base}${format === 'md' ? ' (transcript)' : ''}.${format}`, type: f.type, text: `${text.trim()}\n` }
+}
+// Saved on this computer, beside where its transcript note goes (named as the meeting's notes are,
+// "Interview.srt", Markdown "Interview (transcript).md" so it's never a note itself), over the one
+// saved before: { file }.
+function textFile(m, format) {
+  const o = saving()
+  const t = target(m, o)
+  const base = t.transcript || t.note || path.join(o.folder, fill(o.noteSub, m, { dir: true }), `${fill(o.noteName, m)}.md`)
+  const stem = path.join(path.dirname(base), path.basename(base, '.md').replace(/-(transcript|summary)$/, ''))
+  return format === 'md' ? `${stem} (transcript).md` : `${stem}.${format}`
+}
+export async function saveTranscriptFile(id, format) {
+  const r = transcriptFile(id, format)
+  const m = meta(id)
+  const file = textFile(m, format)
+  try {
+    await fs.promises.mkdir(path.dirname(file), { recursive: true })
+    await writeWhole(file, r.text)
+  } catch (e) { throw new Error(savingError(e)) }
+  patchMeta(id, { exported: { ...(meta(id).exported || {}), [format]: file } })
+  return { file }
 }
 const resaving = new Map()
 function resave(id, ms = 0) {
   let m
   try { m = meta(id) } catch { return }
-  // Saving every meeting by itself is on unless turned off (Settings › Voice & Meetings).
-  if (!m.saved && !(cfg.meetings?.autoSave !== false && (m.summarizedAt || (m.status === 'done' && !m.summarizing)))) return
+  // Saving every meeting by itself is on unless turned off (Settings › Voice & Meetings). A file
+  // you transcribed is saved once you save it.
+  if (!m.saved && (m.file || !(cfg.meetings?.autoSave !== false && (m.summarizedAt || (m.status === 'done' && !m.summarizing))))) return
   // "Keep saved notes up to date" off: a meeting saved once isn't written again by itself.
   if (m.saved && cfg.meetings?.keepSaved === false) return
   if (m.parts && !target(m).note) return

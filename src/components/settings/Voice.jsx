@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import Icon from '../Icon.jsx'
-import { api, usePoll, viaRelay } from '../../api.js'
+import { api, usePoll } from '../../api.js'
 import { useSettings, SaveNote } from './General.jsx'
 import SpokenAnswers from '../../voice/SpokenAnswers.jsx'
 import { More } from './Advanced.jsx'
@@ -10,7 +10,9 @@ import '../meetings/meetings.css'
 // Settings › Meetings & Voice › Speech Models (listening): the speech models this computer can run
 // (the ones it can't aren't listed), the one voice notes, dictation and meetings use, and their
 // downloads. Parakeet first; Whisper, for the languages Parakeet doesn't hear, folded away until
-// it's wanted. Server: speech.js (status, and what this computer can run), voice.js. The voice that
+// it's wanted. Both run inside Bridge AI (sherpa-onnx), each one download. What earlier versions
+// downloaded for whisper.cpp, which nothing uses now, can be removed. Server: speech.js (status,
+// and what this computer can run), voice.js. The voice that
 // reads the Chief of Staff's answers aloud (speaking) is the next tab, Spoken Answers (Spoken,
 // below: voice/SpokenAnswers.jsx). Dictation's own settings are the tab before (Dictation.jsx).
 const size = (mb) => (mb >= 1000 ? t('{n} GB', { n: (mb / 1000).toFixed(1) }) : t('{n} MB', { n: mb }))
@@ -25,7 +27,6 @@ export default function Voice() {
   const vo = usePoll('/voice', 3000)
   const [busy, setBusy] = useState(null)
   const [err, setErr] = useState(null)
-  const [installing, setInstalling] = useState(null) // the terminal tab whisper.cpp installs in
   if (!s || !sp.data || !vo.data) return <div className="skeleton-rows"><div /><div /><div /></div>
   const d = sp.data
   const v = vo.data
@@ -34,10 +35,10 @@ export default function Voice() {
   const use = (id) => act(`use:${id}`, () => save({ speech: { model: id }, meetings: { localModel: null } }))
   const using = v.engine === 'apple' ? 'apple' : v.model.id
   const fell = d.fellBack || v.fellBack
-  const parakeets = d.local.models.filter((x) => x.runtime !== 'whisper')
-  const whispers = d.local.models.filter((x) => x.runtime === 'whisper')
-  const whisperHere = whispers.some((x) => x.usable)
-  const whisperOpen = whispers.some((x) => x.have || x.downloading || x.id === using) || (whisperHere && !parakeets.length)
+  const parakeets = d.local.models.filter((x) => !x.whisper)
+  const whispers = d.local.models.filter((x) => x.whisper)
+  const whisperOpen = whispers.some((x) => x.have || x.downloading || x.id === using) || !parakeets.length
+  const earlier = d.local.earlier?.files > 0 ? d.local.earlier : null
 
   const row = (x) => {
     const on = using === x.id
@@ -49,7 +50,6 @@ export default function Voice() {
           <small>{x.note ? t(x.note) : ''} {t('{size}, {languages}. {license}, by {by}.', { size: size(x.mb), languages: heard(x.languages), license: x.license, by: x.by })}</small>
           {dl && !dl.error && <span className="vs-bar" role="progressbar" aria-valuenow={dl.percent} aria-valuemin={0} aria-valuemax={100} aria-label={t('Downloading {model}', { model: x.label })}><span style={{ width: `${dl.percent}%` }} /></span>}
           {dl?.error && <span className="error-text small">{dl.error}</span>}
-          {x.runtime === 'whisper' && !x.usable && <span className="muted small">{t('Needs whisper.cpp, a free program, on this computer.')}</span>}
         </span>
         {dl && !dl.error ? <span className="muted small">{t('Downloading {n}%', { n: dl.percent })}</span>
           : x.have ? (
@@ -75,9 +75,11 @@ export default function Voice() {
       <SaveNote note={note} />
       {err && <p className="st-note bad"><Icon name="alert" size={13} /> {err}</p>}
       {fell && (
-        <p className="st-note warn" role="status"><Icon name="info" size={13} /> {fell.why
-          ? t("{from} can't run on this computer ({why}), so {to} is used here.", { from: fell.fromLabel || fell.from, to: fell.toLabel, why: fell.why.replace(/^\w/, (c) => c.toLowerCase()) })
-          : t("{from} can't run on this computer, so {to} is used here.", { from: fell.fromLabel || fell.from, to: fell.toLabel })}</p>
+        <p className="st-note warn" role="status"><Icon name="info" size={13} /> {!fell.toLabel
+          ? t("{from} can't run on this computer ({why}), nor can another speech model. Meetings can use a speech service.", { from: fell.fromLabel || fell.from, why: String(fell.why || '').replace(/^\w/, (c) => c.toLowerCase()) })
+          : fell.why
+            ? t("{from} can't run on this computer ({why}), so {to} is used here.", { from: fell.fromLabel || fell.from, to: fell.toLabel, why: fell.why.replace(/^\w/, (c) => c.toLowerCase()) })
+            : t("{from} can't run on this computer, so {to} is used here.", { from: fell.fromLabel || fell.from, to: fell.toLabel })}</p>
       )}
 
       <section className="st-sec" data-setting="speech-model">
@@ -96,13 +98,12 @@ export default function Voice() {
         {whispers.length > 0 && (
           <details className="st-fold st-whisper" open={whisperOpen} data-setting="whisper">
             <summary><Icon name="chevron" size={12} />{t('Whisper, for other languages')}</summary>
-            <p className="muted small">{t('Whisper hears about 100 languages, through whisper.cpp, a free program installed separately.')}</p>
+            <p className="muted small">{t('Whisper hears about 100 languages and tells which one it hears. It runs in Bridge AI, on this computer: each model is one download, with nothing to install.')}</p>
             <ul className="mt-models" aria-label={t('Whisper models')}>{whispers.map(row)}</ul>
-            {!whisperHere && !viaRelay && (d.local.installCommand
-              ? <p className="small"><button type="button" className="btn small" disabled={busy === 'install' || !!installing} onClick={() => act('install', async () => setInstalling((await api('/speech/install', { method: 'POST' })).openId))}>{installing ? t('Installing…') : t('Install whisper.cpp')}</button>
-                {installing && <span className="muted small"> {t('Installing in a terminal tab, in the Setup space.')} <button type="button" className="link-btn" onClick={() => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId: installing } }))}>{t('Show it')}</button></span>}</p>
-              : <p className="muted small">{t('Install whisper.cpp with your package manager to use these.')}</p>)}
           </details>
+        )}
+        {earlier && (
+          <p className="muted small st-earlier">{t("Whisper models downloaded by earlier versions ({size}) aren't used any more.", { size: size(earlier.mb) })} <button type="button" className="link-btn" disabled={!!busy} onClick={() => act('earlier', () => api('/speech/earlier', { method: 'DELETE' }))}>{t('Remove them')}</button></p>
         )}
         {d.hidden?.length > 0 && <p className="muted small">{t('More speech models are offered on other computers.')}</p>}
       </section>

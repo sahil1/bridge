@@ -563,6 +563,9 @@ export function createDemo({ everything = true } = {}) {
 
   // Meetings: two made-up ones, read only.
   on('GET', '/meetings', () => ({ meetings: S.meetings.map(({ transcript: _t, notes: _n, summary, ...m }) => ({ ...m, hasSummary: !!summary })), kinds: F.MEETING_KINDS }))
+  // Transcribing a file: nothing going on the made-up computer, and none can be sent to it.
+  on('GET', '/meetings/files', () => ({ items: [], going: false, piece: 2 * 1024 * 1024 }))
+  on('POST', '/meetings/files', () => needs('Transcribing a file'))
   on('GET', '/meetings/search', ({ query }) => {
     const ws = String(query.get('q') || '').toLowerCase().match(/[\p{L}\p{N}']+/gu) || []
     const has = (s) => ws.some((w) => String(s).toLowerCase().includes(w))
@@ -666,7 +669,6 @@ export function createDemo({ everything = true } = {}) {
   on('POST', '/meetings/:id/save', () => needs('Saving to your notes folder'))
   on('GET', '/speech', () => F.speech())
   on('POST', '/speech/models/:id', () => needs('Downloading a speech model'))
-  on('POST', '/speech/install', () => needs('Installing whisper.cpp'))
 
   // An agent
   on('GET', '/agents/:pane/transcript', ({ p }) => transcript(agent(p.pane)))

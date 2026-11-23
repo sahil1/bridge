@@ -3,8 +3,9 @@
 // loading a model (a second or so, and up to 2 GB of memory) or a crash in native code never holds
 // up or takes down the rest of Bridge AI. One request at a time, in the order they come.
 //   { type: 'probe' } -> { type: 'probe', ok, error }: whether the addon loads on this computer.
-//   { id, model: { key, dir, files, hotwords }, pcm: Int16Array, hotwords: [], threads }
-//     -> { id, text, ms, loadMs } or { id, error }
+//   { id, model: { key, dir, files, hotwords, whisper }, pcm: Int16Array, hotwords: [], threads }
+//     -> { id, text, ms, loadMs, lang } or { id, error }. A model with whisper ({ language }, ''
+//     to tell) is Whisper, its files { encoder, decoder, tokens }; else a NeMo transducer (Parakeet).
 //   { id, type: 'embed', voice: { key, file }, pcm: Int16Array, threads }
 //     -> { id, v: Float32Array or null (too short), ms }: how the voice sounds, for voices.js
 // BRIDGE_SHERPA (tests): a module to load instead of sherpa-onnx-node, with the same API.
@@ -38,7 +39,17 @@ async function recognizer(model, threads) {
   loaded = null
   const t0 = Date.now()
   const f = (n) => path.join(model.dir, model.files[n])
-  const config = {
+  const config = model.whisper ? {
+    featConfig: { sampleRate: 16000, featureDim: 80 },
+    modelConfig: {
+      whisper: { encoder: f('encoder'), decoder: f('decoder'), language: model.whisper.language || '', task: 'transcribe', tailPaddings: -1 },
+      tokens: f('tokens'),
+      numThreads: threads,
+      provider: 'cpu',
+      debug: 0,
+    },
+    decodingMethod: 'greedy_search',
+  } : {
     featConfig: { sampleRate: 16000, featureDim: 80 },
     modelConfig: {
       transducer: { encoder: f('encoder'), decoder: f('decoder'), joiner: f('joiner') },
@@ -72,7 +83,7 @@ async function decode({ model, pcm, hotwords, threads }) {
   let out
   if (r.decodeAsync) out = await r.decodeAsync(stream)
   else { r.decode(stream); out = r.getResult(stream) }
-  return { text: String(out?.text || '').trim(), ms: Date.now() - t0, loadMs }
+  return { text: String(out?.text || '').trim(), ms: Date.now() - t0, loadMs, ...(model.whisper && out?.lang ? { lang: String(out.lang).replace(/[^\w-]/g, '').slice(0, 12) } : {}) }
 }
 
 // The speaker model (voices.js), loaded the first time and kept beside the recognizer.

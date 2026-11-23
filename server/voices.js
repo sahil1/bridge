@@ -332,8 +332,9 @@ async function fromRecording(id, todo, onLine, src = 'you') {
 }
 
 // Tell the voices apart in a meeting. lines: its transcript (meetings.transcript, raw). Resolves
-// with voices.json once done; starts the model's download first if it isn't here.
-export async function tell(id, lines) {
+// with voices.json once done; starts the model's download first if it isn't here. file: a file
+// you transcribed (meetfiles.js), which leaves the setting for rooms as it is.
+export async function tell(id, lines, { file = false } = {}) {
   if (work.has(id) && !work.get(id).error) return { working: working(id) }
   const f = await fit()
   if (!f.ok) throw new Error(f.why || 'Telling voices apart can\'t run on this computer')
@@ -350,7 +351,7 @@ export async function tell(id, lines) {
       }
       // Used once in a room, so room meetings from now on get their speakers by themselves
       // (Settings › Voice & Meetings turns it off).
-      if (sideOf(lines) === 'you' && cfg.meetings?.roomVoices == null) await setting({ roomVoices: true })
+      if (!file && sideOf(lines) === 'you' && cfg.meetings?.roomVoices == null) await setting({ roomVoices: true })
       const done = embeddings(id)
       const todo = lines.filter((l) => sides.includes(l.src) && l.text && !done.has(keyOf(l)))
       let n = 0

@@ -361,7 +361,7 @@ export async function press(target, at = Date.now()) {
   words()
   // The model that tidies it, loaded while you talk rather than after.
   if (tidyFor(target)) api('/dictation/tidy/warm', { method: 'POST' }).catch(() => {})
-  // Something to install first (whisper.cpp, for a Whisper model)? Then the mic isn't opened: nothing
+  // Something that can't be set up here first? Then the mic isn't opened: nothing
   // could turn it into text. The speech model only to download is different: you talk now, and
   // what you said is kept and turned into text once it's here (transcribe, below). Asked once in a
   // while, not on every press.
@@ -451,7 +451,7 @@ async function transcribe(id) {
     const res = await fetch(apiUrl('/transcribe'), { method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: blob })
     const data = await res.json().catch(() => ({}))
     if (seq !== id) return
-    // Not set up yet (the speech model to download, or whisper.cpp to install): the setup panel, in
+    // Not set up yet (the speech model to download): the setup panel, in
     // the server's words, and what you said kept for when it's ready.
     if (res.status === 409 && /^needs-/.test(data.code || '')) {
       const v = await api('/voice').catch(() => ({}))

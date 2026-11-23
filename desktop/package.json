@@ -71,7 +71,33 @@
         "NSDesktopFolderUsageDescription": "Bridge AI shows your projects, lets your agents work in the folders you pick, and suggests files you saved for a meeting.",
         "NSDocumentsFolderUsageDescription": "Bridge AI shows your projects, lets your agents work in the folders you pick, and saves meeting notes where you choose.",
         "NSDownloadsFolderUsageDescription": "Bridge AI lets your agents work in the folders you pick, and suggests files you downloaded for a meeting, like a resume or a deck.",
-        "NSAppleEventsUsageDescription": "Bridge AI asks Finder to move a file you discard to the Trash."
+        "NSAppleEventsUsageDescription": "Bridge AI asks Finder to move a file you discard to the Trash.",
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "Audio to transcribe",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": [
+              "public.audio"
+            ]
+          },
+          {
+            "CFBundleTypeName": "Video to transcribe",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": [
+              "public.movie"
+            ]
+          },
+          {
+            "CFBundleTypeName": "Folder of recordings to transcribe",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": [
+              "public.folder"
+            ]
+          }
+        ]
       },
       "hardenedRuntime": true,
       "entitlements": "entitlements.mac.plist",

@@ -21,9 +21,10 @@ transcripts on your computer and types into them for you.
 The outside requests Bridge AI makes itself are for what it shows you: the weather (Open-Meteo,
 with only the coordinates you picked), market prices and news headlines (Yahoo Finance, the Federal
 Reserve and public news feeds), speech models when you download one, the first time you use the
-mic or a meeting or from Settings › Voice & Meetings (one download each from Hugging Face; what you say is
-turned into text on your computer and never sent anywhere, unless you pick a speech service for
-meetings), a local model (Gemma 4 E2B, 2.8 GB; E4B, 4.6 GB; or 26B-A4B, 14.6 GB, as fits your
+mic, a meeting or a file you transcribe, or from Settings › Voice & Meetings (one download each from
+Hugging Face; what you say, and the files you transcribe, are turned into text on your computer
+and never sent anywhere, unless you pick a speech service for meetings or for those files), a
+local model (Gemma 4 E2B, 2.8 GB; E4B, 4.6 GB; or 26B-A4B, 14.6 GB, as fits your
 computer) only when you click Download for it in Settings › Model Providers or where Tidy what I
 say needs one (one download from Hugging Face; what you give it is read on your computer by
 llama.cpp, which runs there and answers only Bridge AI, and is never sent anywhere), a check on

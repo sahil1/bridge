@@ -1,7 +1,8 @@
 // A stand-in for sherpa-onnx's Node addon (sherpa-onnx-node), for server/asr-worker.js in the tests
 // (BRIDGE_SHERPA names this file), so no test loads a real model. Same API, as far as Bridge AI
-// uses it: OfflineRecognizer.createAsync(config), createStream(hotwords), acceptWaveform,
-// decodeAsync. Loading checks the model's files are there, as the real one does.
+// uses it: OfflineRecognizer.createAsync(config) for Parakeet (a transducer) or Whisper,
+// createStream(hotwords), acceptWaveform, decodeAsync. Loading checks the model's files are there,
+// as the real one does.
 // It hears BRIDGE_SHERPA_SAYS, or "Open the work tree in Claud Code." (two things Parakeet gets
 // wrong without help), or with "@words" a word for each half second of sound, and writes a line of
 // JSON for each load and each request to BRIDGE_SHERPA_LOG: { load: model folder, pid, decoding }
@@ -24,13 +25,19 @@ class OfflineStream {
   }
 }
 
+// Whisper (modelConfig.whisper): its encoder, decoder and tokens checked, as the real one does, and
+// the language it's set to logged ({ load, whisper: language or 'auto' }). Like the real one it hears
+// the first 30 seconds of a longer piece only (logged as { cut: seconds }), and answers with the
+// language it heard: the one it's set to, else BRIDGE_SHERPA_LANG or 'en'.
 class OfflineRecognizer {
   constructor(config) {
+    const w = config.modelConfig.whisper
     const t = config.modelConfig.transducer
-    for (const f of [t.encoder, t.decoder, t.joiner, config.modelConfig.tokens]) if (!fs.existsSync(f)) throw new Error(`stand-in: no such file ${f}`)
-    this.dir = path.dirname(t.encoder)
+    for (const f of w ? [w.encoder, w.decoder, config.modelConfig.tokens] : [t.encoder, t.decoder, t.joiner, config.modelConfig.tokens]) if (!fs.existsSync(f)) throw new Error(`stand-in: no such file ${f}`)
+    this.dir = path.dirname(w ? w.encoder : t.encoder)
     this.config = config
-    log({ load: path.basename(this.dir), decoding: config.decodingMethod, threads: config.modelConfig.numThreads, bpeVocab: !!config.modelConfig.bpeVocab })
+    this.whisper = w ? { language: w.language || '' } : null
+    log({ load: path.basename(this.dir), decoding: config.decodingMethod, threads: config.modelConfig.numThreads, bpeVocab: !!config.modelConfig.bpeVocab, ...(w ? { whisper: w.language || 'auto' } : {}) })
   }
   static async createAsync(config) { return new OfflineRecognizer(config) }
   createStream(hotwords) { return new OfflineStream(hotwords) }
@@ -38,14 +45,16 @@ class OfflineRecognizer {
     const once = path.join(this.dir, 'crash-once')
     if (fs.existsSync(once)) { fs.rmSync(once); process.kill(process.pid, 'SIGKILL') }
     if (fs.existsSync(path.join(this.dir, 'crash-always'))) process.kill(process.pid, 'SIGKILL')
-    const seconds = Math.round((stream.samples / 16000) * 100) / 100
+    let seconds = Math.round((stream.samples / 16000) * 100) / 100
+    if (this.whisper && seconds > 30) { log({ cut: seconds }); seconds = 30 }
     log({ seconds, peak: Math.round(stream.peak * 1000) / 1000, hotwords: stream.hotwords ? stream.hotwords.split('/') : [] })
     // A file called slow in the model's folder: as long to decode as 90% of the sound's length, as on
     // a computer too slow for live words.
     if (fs.existsSync(path.join(this.dir, 'slow'))) await new Promise((r) => setTimeout(r, seconds * 900))
+    const lang = this.whisper ? { lang: this.whisper.language || process.env.BRIDGE_SHERPA_LANG || 'en' } : {}
     // "@words": a word for each half second of sound, so what's heard grows as the sound does.
-    if (process.env.BRIDGE_SHERPA_SAYS === '@words') return { text: WORDS.slice(0, Math.max(1, Math.round(seconds * 2))).join(' '), tokens: [], timestamps: [] }
-    return { text: process.env.BRIDGE_SHERPA_SAYS || 'Open the work tree in Claud Code.', tokens: [], timestamps: [] }
+    if (process.env.BRIDGE_SHERPA_SAYS === '@words') return { text: WORDS.slice(0, Math.max(1, Math.round(seconds * 2))).join(' '), tokens: [], timestamps: [], ...lang }
+    return { text: process.env.BRIDGE_SHERPA_SAYS || 'Open the work tree in Claud Code.', tokens: [], timestamps: [], ...lang }
   }
 }
 

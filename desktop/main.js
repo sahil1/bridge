@@ -13,6 +13,7 @@ const senders = require('./senders.js')
 const screenpick = require('./screenpick.js')
 const { execFile } = require('node:child_process')
 const fs = require('node:fs')
+const crypto = require('node:crypto')
 const os = require('node:os')
 const path = require('node:path')
 const crashes = require('./crashes.js')
@@ -1185,6 +1186,65 @@ app.on('before-quit', (e) => {
 // The graphics process went away (Chromium starts it again): written down, to offer a report.
 app.on('child-process-gone', (_e, d) => { if (!quitting) crashes.note(crashes.fromChildGone(d), { base: URL_BASE, data: DATA, version: app.getVersion(), fetch }).catch(() => {}) })
 app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus() } })
+// Audio or video dropped on the Dock icon, or opened with Bridge AI from Finder (Open With; a
+// folder's files too): transcribed (server/meetfiles.js), each as a meeting of its own, with the
+// speech model and language picked in Settings, and Meetings shows how far each has got. The app
+// sends them to its server, in pieces as the page does a file it's given (macOS lets the app read
+// what you dropped on it; the server never reads your folders). Before the app is ready they wait.
+const MEDIA = /\.(mp3|m4a|m4b|m4r|aac|wav|wave|aif|aiff|aifc|caf|flac|ogg|oga|opus|wma|amr|mp4|m4v|mov|qt|mkv|webm|avi|wmv|3gp|3g2|mpg|mpeg|mts|m2ts|ts|ac3)$/i
+const toTranscribe = []
+let transcribing = null
+app.on('open-file', (e, file) => {
+  e.preventDefault()
+  if (typeof file !== 'string' || !path.isAbsolute(file)) return
+  toTranscribe.push(file)
+  if (app.isReady()) transcribeOpened()
+})
+// The files a path stands for: itself, or a folder's audio and video, and its folders' (to 500).
+async function mediaIn(p, depth = 0, out = []) {
+  if (out.length >= 500) return out
+  const st = await fs.promises.stat(p).catch(() => null)
+  if (st?.isFile()) out.push({ path: p, name: path.basename(p), size: st.size, modified: st.mtimeMs })
+  else if (st?.isDirectory() && depth < 6) {
+    for (const d of (await fs.promises.readdir(p, { withFileTypes: true }).catch(() => [])).sort((a, b) => a.name.localeCompare(b.name))) {
+      if (d.name.startsWith('.')) continue
+      if (d.isDirectory()) await mediaIn(path.join(p, d.name), depth + 1, out)
+      else if (d.isFile() && MEDIA.test(d.name)) await mediaIn(path.join(p, d.name), depth + 1, out)
+    }
+  }
+  return out
+}
+function transcribeOpened() {
+  if (transcribing) return
+  transcribing = (async () => {
+    for (let i = 0; i < 90 && !(await serverUp()); i++) await new Promise((r) => setTimeout(r, 1000))
+    while (toTranscribe.length) {
+      const files = []
+      for (const p of toTranscribe.splice(0)) await mediaIn(p, 0, files)
+      tellMain(`window.dispatchEvent(new CustomEvent('bridge-open-meeting', { detail: { list: true } }))`, true).catch(() => {})
+      if (!files.length) continue
+      const api = (p, o = {}) => fetch(`${URL_BASE}/api${p}`, { ...o, headers: { ...(o.body && !Buffer.isBuffer(o.body) ? { 'content-type': 'application/json' } : {}), ...(o.headers || {}) } }).then(async (r) => ({ ok: r.ok, j: await r.json().catch(() => ({})) }))
+      const added = await api('/meetings/files', { method: 'POST', body: JSON.stringify({ files: files.map((f) => ({ name: f.name, size: f.size, modified: f.modified })), by: 'app' }) }).catch(() => null)
+      if (!added?.ok) continue
+      const piece = added.j.piece || 2 * 1024 * 1024
+      for (const [i, x] of (added.j.items || []).entries()) {
+        if (x.state === 'failed' || !files[i]) continue
+        const h = await fs.promises.open(files[i].path, 'r').catch(() => null)
+        if (!h) { await api(`/meetings/files/${encodeURIComponent(x.id)}`, { method: 'DELETE' }).catch(() => {}); continue }
+        try {
+          for (let at = 0, tries = 0; at < files[i].size;) {
+            const buf = Buffer.alloc(Math.min(piece, files[i].size - at))
+            const { bytesRead } = await h.read(buf, 0, buf.length, at)
+            const body = buf.subarray(0, bytesRead)
+            const r = await api(`/meetings/files/${encodeURIComponent(x.id)}?at=${at}`, { method: 'PUT', headers: { 'content-type': 'application/octet-stream', 'x-sha256': crypto.createHash('sha256').update(body).digest('hex') }, body }).catch(() => null)
+            if (r?.ok) { at = r.j.have; tries = 0 } else if (!r || r.j?.code === 'damaged') { if (++tries > 5) break; await new Promise((ok) => setTimeout(ok, 1000 * tries)) } else break
+          }
+          await api(`/meetings/files/${encodeURIComponent(x.id)}/done`, { method: 'POST' }).catch(() => {})
+        } finally { await h.close().catch(() => {}) }
+      }
+    }
+  })().catch((e) => console.error('transcribe:', e.message)).finally(() => { transcribing = null; if (toTranscribe.length) transcribeOpened() })
+}
 app.on('activate', () => { if (!win) createWindow(); else win.show() })
 app.on('window-all-closed', () => { win = null })
 app.on('will-quit', () => { globalShortcut.unregisterAll(); floatShare.stop() })
@@ -1252,6 +1312,8 @@ app.whenReady().then(async () => {
   watchFleet()
   watchCalls()
   startUpdatingWhileAway()
+  // Files dropped on the Dock icon as the app opened: transcribed now it's up.
+  if (toTranscribe.length) transcribeOpened()
   // The dictation key from any app (dictation.js): the main window, an agent's own window and
   // another device's window take it as their own when they're in front.
   const ours = (w) => w === win || [...pops.values(), ...machineWins.values()].includes(w)

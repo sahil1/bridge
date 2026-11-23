@@ -221,7 +221,7 @@ export default function Meetings({ onOpenAgent }) {
           <label className={`mt-engine ${d.engine === 'local' ? 'on' : ''}`}>
             <input type="radio" name="engine" checked={d.engine === 'local'} onChange={() => set({ engine: 'local' })} />
             <span className="mt-engine-main"><b>{t('On this computer')}</b><small>{t('{model}, the speech model picked in Speech Models. Free and private.', { model: model?.label || 'Parakeet' })}</small></span>
-            <span className={`mt-state ${d.local.ready ? 'good' : ''}`}>{d.local.ready ? t('Ready') : d.needs === 'whisper' || d.needs === 'brew' ? t('Needs whisper.cpp') : t('Needs a download')}</span>
+            <span className={`mt-state ${d.local.ready ? 'good' : ''}`}>{d.local.ready ? t('Ready') : t('Needs a download')}</span>
           </label>
           {(d.apple?.available || d.engine === 'apple') && (
             <label className={`mt-engine ${d.engine === 'apple' ? 'on' : ''}`}>
