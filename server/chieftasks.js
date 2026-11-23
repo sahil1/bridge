@@ -21,7 +21,8 @@ const DETAIL = /^\s+(Outcome|File|Link|Needs):\s*(.*)$/i
 const KEEP_DONE = 40
 const today = () => new Date().toLocaleDateString('en-CA')
 const minute = () => { const d = new Date(); return `${d.toLocaleDateString('en-CA')}T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` }
-const oneLine = (s, n) => String(s ?? '').replace(/<!--|-->/g, '').replace(/\s+/g, ' ').trim().slice(0, n)
+// (Its markers out with a space, so what's left of two can't make one.)
+const oneLine = (s, n) => String(s ?? '').replace(/<!--|-->/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n)
 // A role or a pane id, kept as one word in the line's notes.
 const word = (s, n) => oneLine(s, n).replace(/\s/g, '') || null
 const RANK = { waiting: 0, doing: 1, open: 2 }

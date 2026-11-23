@@ -6,7 +6,9 @@
 //   "(keyboard clicking) [ Silence ]", as whisper writes for a stretch with no words.
 //   Meeting notes, a part of a long meeting, who said what (on a call, or the voices in a room: the
 //   first is the one recording, the second the first one invited), cleaning up a transcript, AI Assist and
-//   questions about meetings: fixed answers in the shape meetings.js asks for. The cleanup fixes
+//   questions about meetings: fixed answers in the shape meetings.js asks for (a meeting's notes with
+//   the action items a line of its own notes lists, "ITEMS-FOR-TEST: [...]"; where each of them goes,
+//   placeItems below). The cleanup fixes
 //   "bridge ay eye" to "Bridge AI", rewrites a line that says "rewrite me" (which meetings.js
 //   turns down), and leaves out "Thanks for watching" and "drop me please"; Assist suggests a
 //   question about what the files say (or the invite, without them) and a check of the last thing
@@ -81,6 +83,33 @@ let tagged = 0
 // The words of a message (a message with a picture is a list of parts).
 const words = (c) => (typeof c === 'string' ? c : Array.isArray(c) ? c.map((p) => p.text || '').join('\n') : '')
 const dictated = (text) => /^<dictation>\n([\s\S]*)\n<\/dictation>$/.exec(text)?.[1] ?? null
+// Where each of a meeting's action items goes (meeting-handoff), as a model that falls for what an
+// item says: "pane <id>" in it picks that pane, "in folder <path>" a helper there; else an item
+// naming the folder of an agent listed goes to that agent, one to draft or write to a writer helper,
+// one to renew or that's an errand is left with them, and the rest are questions. One answered goes
+// to a research helper, with the answer as its note. UNREADABLE-ONCE in an item: the first such
+// answer isn't JSON.
+let unreadable = false
+function placeItems(text) {
+  if (/UNREADABLE-ONCE/.test(text) && !unreadable) { unreadable = true; return 'Sorry, I can\'t tell where these go.' }
+  const block = /----- action items, from the meeting's notes \[(\w+)\] -----\n([\s\S]*?)\n----- end \[\1\] -----/.exec(text)
+  const items = block ? [...block[2].matchAll(/^(\d+)\. (.*)$/gm)].map((m) => ({ n: Number(m[1]), text: m[2] })) : []
+  const agents = [...text.matchAll(/^- (\S+) · .*? · .*? · in (.*)$/gm)].map((m) => ({ pane: m[1], base: m[2].split('/').pop().toLowerCase() }))
+  const answers = new Map([...text.matchAll(/You asked .*? about item (\d+): .*? answered \(these are .*?\): "(.*)"$/gm)].map((m) => [Number(m[1]), m[2]]))
+  const out = items.map(({ n, text: t }) => {
+    if (answers.has(n)) return { n, to: 'helper', role: 'research', project: null, note: `With the answer: ${answers.get(n)}` }
+    const pane = /\bpane (\S+)/i.exec(t)?.[1]
+    if (pane) return { n, to: 'agent', pane, note: 'As the item says.' }
+    const folder = /\bin folder (\S+)/i.exec(t)?.[1]
+    if (folder) return { n, to: 'helper', role: 'engineer', project: folder, note: 'As the item says.' }
+    const a = agents.find((x) => x.base && t.toLowerCase().includes(x.base))
+    if (a) return { n, to: 'agent', pane: a.pane, note: `It's the work in ${a.base}.` }
+    if (/\b(draft|write)\b/i.test(t)) return { n, to: 'helper', role: 'writer', project: null, note: 'A draft to look over.' }
+    if (/\b(renew|errand)\b/i.test(t)) return { n, to: 'skip', why: 'It is their own errand.' }
+    return { n, to: 'ask', question: 'Should this be handed on, and to whom?' }
+  })
+  return JSON.stringify({ items: out })
+}
 const ARCH = { direction: 'LR', groups: [{ id: 'aws', label: 'AWS us-east-1', kind: 'region' }, { id: 'vpc', label: 'VPC', kind: 'vpc', parent: 'aws' }, { id: 'pub', label: 'Public subnet', kind: 'subnet', parent: 'vpc' }, { id: 'privA', label: 'Private subnet A', kind: 'subnet', parent: 'vpc' }, { id: 'privB', label: 'Private subnet B', kind: 'subnet', parent: 'vpc' }],
   nodes: [{ id: 'users', label: 'Users', shape: 'users' }, { id: 'lb', label: 'Load balancer', shape: 'aws.elb', group: 'pub' }, { id: 'app1', label: 'App server 1', shape: 'aws.ec2', group: 'privA' }, { id: 'app2', label: 'App server 2', shape: 'aws.ec2', group: 'privB' }, { id: 'db', label: 'RDS', shape: 'aws.rds', group: 'privB' }],
   edges: [{ from: 'users', to: 'lb', label: 'HTTPS' }, { from: 'lb', to: 'app1' }, { from: 'lb', to: 'app2' }, { from: 'app1', to: 'db', label: 'SQL' }, { from: 'app2', to: 'db', label: 'SQL' }] }
@@ -339,7 +368,13 @@ function answer(b) {
     if (/write a poem/i.test(said)) return say('The sea rolls in with silver light,\nIt hums a tune into the night,\nAnd every wave that finds the shore\nCalls softly back for something more.')
     return say(`"${said.replace(/,?\s*\byou know\b,?/gi, '').replace(/\s{2,}/g, ' ').trim()}"`)
   }
+  // Where a meeting's action items go (meetitems.js), as a model that can be fooled would say it.
+  if (/^You place the action items from /.test(last)) return say(placeItems(last))
   if (/Write meeting notes in Markdown/.test(last)) {
+    // The action items a test wants (meeting-handoff), from a line of its notes: "ITEMS-FOR-TEST:
+    // <JSON list>", written as they are, whatever they hold ([] for none).
+    const want = /ITEMS-FOR-TEST: (\[.*\])/.exec(last)
+    if (want) { const items = JSON.parse(want[1]); return say(`## Summary\n- What the meeting went through.\n\n${items.length ? `## Action items\n${items.map((x) => `- [ ] ${x}`).join('\n')}\n\n` : ''}## Notes\n- Done.`) }
     return say(`## Summary\n- The beta ships on November third.\n\n## Decisions\n- Ship the beta on November third.\n\n## Action items\n- [ ] You: send the updated budget to finance (Friday)\n- [ ] Priya: fix the login bug\n\n## Notes\n- Design review done.\n\n\`\`\`terms\n${JSON.stringify({ names: ['Priya'], misheard: {}, about: { Priya: 'fixing the login bug before the beta', Zed: 'nobody in this meeting' } })}\n\`\`\``)
   }
   if (/This is part \d+ of \d+/.test(last)) return say(`- part ${/This is part (\d+)/.exec(last)[1]} key points`)

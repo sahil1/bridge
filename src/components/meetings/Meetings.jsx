@@ -28,7 +28,7 @@ import { VideoPane, VideoNotes } from './player.jsx'
 import { useCropping, CropButton } from './cropping.jsx'
 import './meetings.css'
 import SpeechSetup, { MeetingsSetup } from './SpeechSetup.jsx'
-import { ActionItems, SinceLastTime } from './work.jsx'
+import { ActionItems, HandOn, SinceLastTime } from './work.jsx'
 import { MergePick, MergeHint, Merged } from './merge.jsx'
 import { useFeature } from '../../trials.js'
 import { InsightsView } from './insights.jsx'
@@ -1260,7 +1260,13 @@ export function MeetingPage({ id, onBack }) {
           </div>
           {todo.tail.trim() && <div className="mt-summary md" dangerouslySetInnerHTML={{ __html: md(todo.tail) }} />}
         </>
-      ) : <div className="mt-summary md" dangerouslySetInnerHTML={{ __html: md(data.summary) }} />)
+      ) : (
+        <>
+          <div className="mt-summary md" dangerouslySetInnerHTML={{ __html: md(data.summary) }} />
+          {/* Handed on by themselves, with no action items to hand on: said, not left unsaid. */}
+          {data.handoff && <HandOn id={id} run={data.handoff} onMsg={setMsg} onDone={refresh} />}
+        </>
+      ))
         : !data.summarizing && !data.summaryError && <p className="muted small mt-hint">{combined ? t('No summary yet. Summarize writes an overview across its meetings, from their summaries and notes.') : done ? t('No summary yet. Summarize writes one from the transcript, your notes, the screen and the files.') : t('The summary is written when the meeting ends. Meanwhile, My notes is yours to write in.')}</p>}
       {data.summary && data.summaryFrom && !data.summarizing && <WrittenFrom from={data.summaryFrom} onView={(v) => { setView(v); if (v === 'transcript') setSel(null) }} />}
       {lb?.id && <BoardLink b={lb} onView={() => setView('board')} />}

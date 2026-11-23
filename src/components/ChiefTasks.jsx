@@ -4,6 +4,7 @@ import { api, usePoll } from '../api.js'
 import { usePersisted } from './layout.jsx'
 import { onFor } from './Machines.jsx'
 import { locale, t, tx } from '../i18n/index.js'
+import { runSaid } from './meetings/handon.js'
 
 // The chief of staff's task list (state/tasks.md, kept through `bridge task` and `bridge
 // delegate`), in a tray on its message box like Subagents: open tasks first, done ones folded away.
@@ -264,6 +265,21 @@ function Card({ it, col, cwd, onOpenPath, onRetry, busy }) {
   )
 }
 
+// How handing a meeting's action items on by themselves last went (server/meetitems.js), with its
+// meeting a click away: shown while Hand on action items is on, or once it has run.
+function MeetingRun({ st }) {
+  const said = st?.last ? runSaid(st.last, { title: true }) : st?.on ? { text: t('Hands on action items as each meeting ends. None has ended since.') } : null
+  if (!said) return null
+  const open = () => window.dispatchEvent(new CustomEvent('bridge-open-meeting', { detail: { id: st.last.id } }))
+  return (
+    <p className={`cb-note cb-run${said.bad ? ' bad' : ''}`} role="status">
+      <Icon name={said.bad ? 'alert' : 'helm'} size={12} />
+      <span>{said.text}</span>
+      {st.last && <button type="button" className="link-btn" onClick={open}>{t('Open the meeting')}</button>}
+    </p>
+  )
+}
+
 export function ChiefBoard({ agent, onOpenPath }) {
   const { data, error, refresh } = usePoll('/chief/tasks', 3000)
   const [pick, setPick] = useState(null) // the column shown when there's room for one
@@ -299,6 +315,7 @@ export function ChiefBoard({ agent, onOpenPath }) {
         {summary && <span className="cb-sum">{summary}</span>}
       </div>
       {error && !data && <p className="cb-note error" role="alert"><Icon name="alert" size={12} /> {t("Couldn't load the tasks: {error}", { error })}</p>}
+      {data?.meetingItems && <MeetingRun st={data.meetingItems} />}
       {note && <p className="cb-note" role="status">{note}</p>}
       {!data && !error && <div className="cb-loading" aria-hidden="true"><div /><div /><div /></div>}
       {data && !items.length && (

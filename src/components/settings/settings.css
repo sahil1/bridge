@@ -25,6 +25,8 @@
 .st-check input { margin-top: 3px; flex: none; }
 /* A folder's path has no spaces to wrap at: it breaks anywhere rather than run past a phone's edge. */
 .st-check > span { min-width: 0; overflow-wrap: anywhere; }
+/* A switch with how its last run went under it (Chief of Staff's Hand on action items). */
+.st-meet-items > .st-last, .st-meet-items > .st-note { margin: 4px 0 0 22px; overflow-wrap: anywhere; }
 
 /* Found: marked for a moment. */
 .st-found { animation: st-found 2.4s ease-out; border-radius: 10px; }

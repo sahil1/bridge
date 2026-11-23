@@ -86,6 +86,7 @@ import * as memoryView from './memoryview.js'
 import * as voices from './voices.js'
 import * as sights from './sights.js'
 import * as meetWork from './meetwork.js'
+import { makeMeetItems } from './meetitems.js'
 import * as meetInsights from './meetinsights.js'
 import * as meetPrep from './meetprep.js'
 import * as speech from './speech.js'
@@ -1244,6 +1245,14 @@ app.post('/api/chief/threads/link', wrap(async (req) => {
 app.post('/api/chief/delegate', wrap((req) => delegate.add({ ...(req.body || {}), list: undefined })))
 // Try again, on a task whose helper couldn't start or was closed before it finished.
 app.post('/api/chief/delegate/:task/retry', wrap((req) => delegate.retry(req.params.task)))
+// `bridge item`: a meeting's action item on its list placed (meetitems.js), once: with an agent, a
+// helper, a question for you, or left with you. Bridge AI writes the brief.
+app.post('/api/chief/items/:task', wrap((req) => {
+  const b = req.body || {}
+  return meetItems.place(req.params.task, { to: b.to, pane: b.pane, role: b.role, cwd: b.cwd, kind: b.kind, note: b.note, question: b.question, why: b.why, thread: b.thread })
+}))
+// Whether it hands a meeting's action items on by itself, and how the last one went (Settings).
+app.get('/api/chief/meeting-items', wrap(() => meetItems.status()))
 // A helper's agent: in its own folder (made by delegate.js inside the chief's, so not checked
 // as a folder you picked), allowed edits there when you said helpers may; in a folder the chief
 // named, as New agent starts one. Either way in the Helpers space, a tab each (the bots' answers in
@@ -1705,7 +1714,8 @@ app.get('/api/chief/tasks', wrap(async () => {
   const list = chiefTasks.list()
   const f = lastFleet || await fleetView().catch(() => null)
   const map = f && !f.down && list.items.some((x) => x.role) ? await runs.agents(f).catch(() => []) : []
-  return delegate.board(list, { agents: f?.agents || [], map })
+  // ...and how handing a meeting's action items on by themselves last went (meetitems.js).
+  return { ...delegate.board(list, { agents: f?.agents || [], map }), meetingItems: await meetItems.status().catch(() => null) }
 }))
 // send: added in the Tasks panel, so the chief hears about it now (held if it's busy). Without a
 // running chief it waits on the list, which the chief reads before each request.
@@ -1743,6 +1753,20 @@ async function tellChief(text, { thread = null } = {}) {
     return held()
   }
 }
+// A meeting's action item for an agent (meetitems.js): in now if it's at its prompt, else queued for
+// when it's free, as `bridge send` does it.
+async function handTo(paneId, text) {
+  return onPane(paneId, async () => {
+    const agent = await findAgent(paneId)
+    if (agent.status === 'blocked' || holdFor(paneId, agent, text)) {
+      const item = queue.add(paneId, text)
+      pushFleet()
+      return { queued: true, id: item.id }
+    }
+    const r = await sendPrompt(paneId, text, agent)
+    return r.queued ? { queued: true, id: r.id } : { queued: false }
+  })
+}
 app.patch('/api/chief/tasks/:id', wrap((req) => ({ item: chiefTasks.update(req.params.id, req.body || {}) })))
 // Your answer to a task that waits on you (Home): to the chief of staff, now or after what it's doing.
 // Not running, it says so rather than leave the answer nowhere.
@@ -1751,6 +1775,9 @@ app.post('/api/chief/tasks/:id/reply', wrap(async (req) => {
   if (!text) throw new Error('Say what to tell the chief of staff')
   const it = chiefTasks.list().items.find((x) => x.id === String(req.params.id))
   if (!it) throw Object.assign(new Error(`No task ${req.params.id} on the list`), { status: 404 })
+  // A meeting's action item it asked about: placed with your answer, as on the meeting (meetitems.js).
+  const placed = meetItems.answerTask(it.id, text)
+  if (placed) { const r = await placed; engaged.task(it.id); homeList.forget(); return { ok: true, sent: true, ...r } }
   const r = await tellChief(`About task ${it.id}, "${it.title}"${it.needs ? `, which waits on me for: ${it.needs}` : ''}\n\n${text}\n\n(Keep the task current with \`node bin/bridge task\`.)`)
   if (!r.sent) throw Object.assign(new Error(r.error || 'The chief of staff isn\'t running. Start it, then send this again.'), { code: 'chief_off' })
   engaged.task(it.id)
@@ -2185,7 +2212,30 @@ meetings.setHelpers({
 })
 // A meeting's action items as agents and Chief of Staff's tasks (meetwork.js).
 meetWork.configure(cfg)
-meetWork.setHelpers({ fleet: () => (lastFleet ? Promise.resolve(lastFleet) : fleetView()), projects: () => projects.list(), tasks: () => chiefTasks.list(), pr: (dir, branch) => pr.status(dir, { branch }), tree: (folder) => worktrees.describe(folder), kindLabel: (k) => adapter(k).label || k, launch: (body) => launchFrom(body) })
+meetWork.setHelpers({ fleet: () => (lastFleet ? Promise.resolve(lastFleet) : fleetView()), projects: () => projects.list(), tasks: () => delegate.board(chiefTasks.list(), { agents: lastFleet?.agents || [] }), pr: (dir, branch) => pr.status(dir, { branch }), tree: (folder) => worktrees.describe(folder), kindLabel: (k) => adapter(k).label || k, launch: (body) => launchFrom(body) })
+// ...and handed on by themselves as a meeting ends, when Chief of Staff's settings say so
+// (meetitems.js): on its task list, each placed where the model for the meeting's notes says (with no
+// tools, from the agents and projects listed for it, checked), and what came of it shown on the
+// meeting. A question it asks is answered on the meeting or in Home, and your devices are told.
+const meetItems = makeMeetItems({
+  on: () => cfg.chief?.meetingItems === true,
+  you: () => String(cfg.name || '').trim() || 'the user',
+  meetings, work: meetWork, tasks: chiefTasks, delegate,
+  decide: (id, prompt) => meetings.decide(id, prompt),
+  asks: (kind) => !!adapter(kind)?.access,
+  defaultKind: () => cfg.defaultAgent || 'claude',
+  screen: async (paneId) => plainScreen(await rt.read(paneId, 30)).join('\n'),
+  notify: (o) => { if (cfg.notify?.needsYou !== false) notify.send({ kind: 'needs-you', ...o }).catch(() => {}) },
+  fleet: () => fleetView(),
+  handTo: (paneId, text) => handTo(paneId, text),
+  unqueue: (paneId, id) => { try { queue.remove(paneId, id); pushFleet(); return true } catch { return false } },
+  closePane: (paneId) => closePane(paneId),
+  link: async (thread, paneId) => { const r = threads.link(thread, paneId, await fleetView()); if (r) pushFleet(); return r },
+  projects: () => projects.list(),
+  resolveDir: (p) => places.resolveDir(p),
+  changed: () => pushFleet(),
+})
+meetings.setHelpers({ summarized: (id, o) => meetItems.summarized(id, o) })
 // Speech engines (speech.js): what Settings › Voice & Meetings shows, models to download, whisper.cpp to install.
 app.get('/api/speech', wrap(async () => ({ ...(await speech.status(cfg)), callAudio: cfg.meetings?.callAudio !== false, canRecordCall: !!meetings.tapBin(), canWatchCalls: !!calls.watchBin(), folder: meetings.folder(), voices: await voices.status() })))
 app.post('/api/speech/models/:id', wrap(async (req) => { speech.fetchModel(req.params.id); return speech.status(cfg) }))
@@ -2671,10 +2721,24 @@ app.get('/api/meetings/:id/links/:lid/file', (req, res) => {
 // Its action items and what became of each (meetwork.js): start an agent on one (what it would be
 // told and the projects it's likely about first), tick one done, and since the last meeting it
 // follows on from.
-app.get('/api/meetings/:id/work', wrap((req) => meetWork.work(req.params.id)))
+app.get('/api/meetings/:id/work', wrap(async (req) => {
+  const { handoff, title, ...out } = await meetWork.work(req.params.id)
+  // How handing them on by themselves went, and whether that's on (meetitems.js).
+  return { ...out, handOn: { on: cfg.chief?.meetingItems === true, run: await meetItems.runOf({ id: req.params.id, title, handoff }, out.items) } }
+}))
 app.get('/api/meetings/:id/work/:key', wrap((req) => meetWork.prepare(req.params.id, req.params.key)))
 app.post('/api/meetings/:id/work/:key/agent', wrap((req) => { counts.add('meetings.toAgents'); return meetWork.start(req.params.id, req.params.key, { cwd: req.body?.cwd, kind: req.body?.kind, own: req.body?.own !== false, prompt: req.body?.prompt, label: req.body?.label }) }))
 app.post('/api/meetings/:id/work/:key/done', wrap((req) => meetWork.tick(req.params.id, req.params.key, req.body?.done !== false)))
+// Where Chief of Staff put one, changed by you (meetitems.js): taken back, sent somewhere else (Chief
+// of Staff again, an agent, a new helper), or sent on to an agent that waits for your OK. From any of
+// your devices; none of it is a command the chief has.
+app.post('/api/meetings/:id/work/:key/undo', wrap((req) => meetItems.undo(req.params.id, req.params.key)))
+app.post('/api/meetings/:id/work/:key/redirect', wrap((req) => meetItems.redirect(req.params.id, req.params.key, { to: req.body?.to, pane: req.body?.pane, role: req.body?.role, note: req.body?.note })))
+app.post('/api/meetings/:id/work/:key/approve', wrap((req) => meetItems.approve(req.params.id, req.params.key)))
+// Your answer to Chief of Staff's question about one: it's placed with what you said.
+app.post('/api/meetings/:id/work/:key/answer', wrap((req) => meetItems.answer(req.params.id, req.params.key, req.body?.text)))
+// Its action items handed on again, as they would be by themselves (Try again).
+app.post('/api/meetings/:id/handoff', wrap((req) => meetItems.run(req.params.id, { by: 'you' })))
 app.get('/api/meetings/:id/since', wrap((req) => meetWork.since(meetings.get(req.params.id))))
 app.get('/api/meetings/:id/suggest', wrap((req) => meetings.suggest(req.params.id, { ask: req.query.ask === '1' })))
 app.post('/api/meetings/:id/reveal', wrap((req) => { hereOnly(req, 'Show it in Finder'); return meetings.revealSaved(req.params.id, req.body?.format || null) }))
