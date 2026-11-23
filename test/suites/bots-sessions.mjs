@@ -28,7 +28,7 @@
 //   with its turns, end; and the fleet's botSessions.
 import fs from 'node:fs'
 import path from 'node:path'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { checks, until, sleep, ROOT } from '../lib/harness.mjs'
 import { botKit, M, OWNER } from '../lib/bots.mjs'
@@ -342,13 +342,21 @@ await new Promise((r) => setTimeout(r, 500));
 const ps = (await import('node:child_process')).execFileSync('/bin/ps', ['-A', '-o', 'pid=,command=']).toString();
 const mcp = ps.split('\\n').find((l) => l.includes('sleep 414; : mcp-server'));
 console.log(JSON.stringify({ ended, agent: alive(agent.pid), attached: alive(jobs.attached), detached: alive(jobs.detached), cleared: alive(jobs.cleared), mcp: !!mcp }));
-for (const p of [...Object.values(jobs), agent.pid]) { try { process.kill(p, 'SIGKILL') } catch {} }
-if (mcp) { try { process.kill(Number(mcp.trim().split(' ')[0]), 'SIGKILL') } catch {} }`
-    const r = spawnSync(process.execPath, ['--input-type=module', '-e', js, g], { encoding: 'utf8', env: { ...process.env, BRIDGE_HOME: path.join(g, 'data') }, timeout: 60000 })
+for (const p of [...Object.values(jobs), agent.pid]) { try { process.kill(p, 'SIGKILL') } catch {} }`
+    // In a process group of its own, ended whole afterwards with everything it started (the MCP
+    // server's sleep too), never by a name: a pattern can match what isn't this test's.
+    const child = spawn(process.execPath, ['--input-type=module', '-e', js, g], { detached: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, BRIDGE_HOME: path.join(g, 'data') } })
+    const endAll = () => { try { process.kill(-child.pid, 'SIGKILL') } catch { /* all gone */ } }
+    const r = { stdout: '', stderr: '' }
+    child.stdout.on('data', (d) => { r.stdout += d })
+    child.stderr.on('data', (d) => { r.stderr += d })
+    const late = setTimeout(endAll, 60000)
+    await new Promise((resolve) => child.on('close', resolve))
+    clearTimeout(late)
     let out = null
     try { out = JSON.parse(String(r.stdout).trim().split('\n').pop()) } catch { out = { error: String(r.stderr || r.stdout || '').slice(0, 600) } }
     ok(out && out.agent === true && out.attached === false && out.detached === false && out.cleared === false && out.mcp === true, 'what its commands leave running is ended: one below its agent, a detached one, one that cleared its environment (working in its copy); never its agent, nor its MCP server', out)
-    spawnSync('/usr/bin/pkill', ['-f', 'sleep 41[1-4]'])
+    endAll()
   })
 
   // ---------- Its copy, put aside while Bridge AI works in it ----------
