@@ -12,10 +12,10 @@ import { offer, dropped, mayBeMedia, hasFiles } from './transcribefiles.js'
 const TranscribeDialog = lazy(() => import('./TranscribeFiles.jsx').then((m) => ({ default: m.TranscribeDialog })))
 
 export default function TranscribeHost() {
-  const [ask, setAsk] = useState(null) // { files, folder, picked }
+  const [ask, setAsk] = useState(null) // { files, folder }
   const [over, setOver] = useState(false)
   useEffect(() => {
-    const on = (e) => setAsk({ files: e.detail?.files || [], folder: !!e.detail?.folder, picked: e.detail?.picked || 0 })
+    const on = (e) => setAsk({ files: e.detail?.files || [], folder: !!e.detail?.folder })
     let hide = null
     const dragover = (e) => {
       if (e.defaultPrevented || !hasFiles(e.dataTransfer) || !mayBeMedia(e.dataTransfer)) return
@@ -29,7 +29,7 @@ export default function TranscribeHost() {
       if (e.defaultPrevented || !hasFiles(e.dataTransfer) || !mayBeMedia(e.dataTransfer)) return
       e.preventDefault()
       setOver(false)
-      dropped(e.dataTransfer).then(({ files, folder }) => offer(files, { folder, picked: files.length }))
+      dropped(e.dataTransfer).then(({ files, folder }) => offer(files, { folder }))
     }
     window.addEventListener('bridge-transcribe', on)
     window.addEventListener('dragover', dragover)
@@ -39,7 +39,7 @@ export default function TranscribeHost() {
   return (
     <>
       {over && createPortal(<div className="tf-over" aria-hidden="true"><div><Icon name="wave" size={22} /><b>{t('Drop to transcribe')}</b><span className="small">{t('Audio or video, or a folder of them')}</span></div></div>, document.body)}
-      {ask && <Suspense fallback={null}><TranscribeDialog files={ask.files} folder={ask.folder} picked={ask.picked} onClose={() => setAsk(null)} /></Suspense>}
+      {ask && <Suspense fallback={null}><TranscribeDialog files={ask.files} folder={ask.folder} onClose={() => setAsk(null)} /></Suspense>}
     </>
   )
 }

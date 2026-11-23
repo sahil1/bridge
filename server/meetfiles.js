@@ -119,7 +119,7 @@ export async function add({ files = [], with: how = {}, by = 'page' } = {}) {
   return { items: out.map(view), piece: PIECE }
 }
 const withOf = (h = {}) => ({
-  engine: ['local', 'apple'].includes(h.engine) || speech.SERVICES[h.engine] ? h.engine : null,
+  engine: ['local', 'apple'].includes(h.engine) || (typeof h.engine === 'string' && Object.hasOwn(speech.SERVICES, h.engine)) ? h.engine : null,
   localModel: h.localModel && speech.modelById(h.localModel) ? speech.now(h.localModel) : null,
   language: typeof h.language === 'string' && LANG.test(h.language) ? h.language : null,
   speakers: h.speakers !== false,

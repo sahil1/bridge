@@ -30,7 +30,7 @@ export function pick({ folder = false } = {}) {
   input.style.display = 'none'
   document.body.append(input)
   const gone = () => setTimeout(() => input.remove(), 0)
-  input.addEventListener('change', () => { const files = [...(input.files || [])]; gone(); if (files.length) offer(files, { folder, picked: files.length }) }, { once: true })
+  input.addEventListener('change', () => { const files = [...(input.files || [])]; gone(); if (files.length) offer(files, { folder }) }, { once: true })
   input.addEventListener('cancel', gone, { once: true })
   input.click()
 }

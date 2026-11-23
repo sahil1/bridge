@@ -27,9 +27,12 @@ const mbSize = (mb) => (mb >= 1000 ? t('{n} GB', { n: (mb / 1000).toFixed(1) }) 
 const KEPT = 'cc-transcribe-with' // the last way picked, for next time
 
 // ---------- How to transcribe them ----------
-export function TranscribeDialog({ files, folder, picked, onClose }) {
-  const media = files.filter(isMedia)
-  const others = files.length - media.length
+// (At most MOST at once, as the computer takes them: server/meetfiles.js MAX_FILES.)
+const MOST = 500
+export function TranscribeDialog({ files, folder, onClose }) {
+  const all = files.filter(isMedia)
+  const media = all.slice(0, MOST)
+  const others = files.length - all.length
   const [sp, setSp] = useState(null)
   const [vs, setVs] = useState(null)
   const [err, setErr] = useState(null)
@@ -90,7 +93,7 @@ export function TranscribeDialog({ files, folder, picked, onClose }) {
         <p className="muted small">
           {media.length > 1 ? t('{n} files, {size}. Each one becomes a transcript of its own in Meetings, with who spoke and when.', { n: media.length, size: size(total) }) : t('{size}. It becomes a transcript in Meetings, with who spoke and when.', { size: size(total) })}
           {others > 0 && ` ${others === 1 ? t('{n} file that isn\'t audio or video is left out.', { n: others }) : t('{n} files that aren\'t audio or video are left out.', { n: others })}`}
-          {picked > media.length + others ? ` ${t('Only the first {n} are taken.', { n: media.length + others })}` : ''}
+          {all.length > media.length ? ` ${t('Only the first {n} of them are taken at once; add the rest after.', { n: media.length })}` : ''}
         </p>
         {media.length > 1 && <ul className="tf-names small">{media.slice(0, 4).map((f, i) => <li key={`${f.name}-${i}`}>{f.webkitRelativePath || f.name}</li>)}{media.length > 4 && <li className="muted">{t('and {n} more', { n: media.length - 4 })}</li>}</ul>}
         <label><span>{t('With')}</span>
