@@ -130,10 +130,14 @@ try {
       const ids = await p.locator('.st-voice li[data-model]').evaluateAll((l) => l.map((x) => x.dataset.model))
       ok(ids.join(',') === 'large-v3-turbo-q5_0,small.en-q5_1,small-q5_1,base.en-q5_1,large-v3-q5_0', 'Linux with glibc 2.31 and whisper.cpp installed: whisper.cpp\'s models', ids)
       const text = await p.locator('.st-voice').innerText()
-      ok(/Here, whisper\.cpp, which is installed on this computer, turns speech into text: Bridge AI's own engine can't run here \(sherpa-onnx needs glibc 2\.32 or later/.test(text), 'Settings says whisper.cpp is what\'s used here, and why', text)
-      ok(/so Whisper large turbo \(whisper\.cpp\) is used here\./.test(text) && /Here it runs through whisper\.cpp: each model is one download\./.test(text), 'and which model, by its whisper.cpp name', text)
+      ok(/Parakeet can't run on this computer \(sherpa-onnx needs glibc 2\.32 or later.*\), so Whisper large turbo \(whisper\.cpp\) is used here\./.test(text) && /Here, whisper\.cpp, which is installed on this computer, turns speech into text\./.test(text), 'the Parakeet picked elsewhere: why it can\'t run, which whisper.cpp model is used instead, and that whisper.cpp turns speech into text here', text)
+      ok(/Here it runs through whisper\.cpp: each model is one download\./.test(text), 'Whisper says it runs through whisper.cpp here', text)
       ok(!/Install|Homebrew/.test(text) && (await p.locator('.st-voice button', { hasText: /Install/ }).count()) === 0, 'nothing offers to install anything')
       await shot(p, `${tag}voice-whispercpp`)
+      // With one of its own models picked, nothing fell back: the note says why on its own.
+      await cpp.api('/settings', { speech: { model: 'large-v3-turbo-q5_0' } }, 'PATCH')
+      const said = await until(async () => { const x = await p.locator('.st-engine').innerText().catch(() => ''); return /can't run here/.test(x) && x }, 10000)
+      ok(/Here, whisper\.cpp, which is installed on this computer, turns speech into text: Bridge AI's own engine can't run here \(sherpa-onnx needs glibc 2\.32 or later/.test(said || ''), 'with whisper.cpp\'s own model picked: Settings says whisper.cpp is what\'s used here, and why', said)
       ok(errors.length === 0, 'no page errors', errors)
       await ctx.close()
     } finally { cpp.stop() }
