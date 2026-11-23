@@ -2216,11 +2216,16 @@ meetWork.configure(cfg)
 meetWork.setHelpers({ fleet: () => (lastFleet ? Promise.resolve(lastFleet) : fleetView()), projects: () => projects.list(), tasks: () => delegate.board(chiefTasks.list(), { agents: lastFleet?.agents || [] }), pr: (dir, branch) => pr.status(dir, { branch }), tree: (folder) => worktrees.describe(folder), kindLabel: (k) => adapter(k).label || k, launch: (body) => launchFrom(body) })
 // Whether an agent CLI's own settings in your home folder let it act without asking first, for a
 // meeting's action item to wait for your OK before it goes to one (meetitems.js): Claude Code's
-// default mode and its rules for any command, Codex's approvals and sandbox. Only those fields are
-// read, again only when the file changed.
+// default mode and its rules that allow any command, or one that can send, fetch, publish or
+// delete, or an MCP server's tools; Codex's approvals and sandbox. Only those fields are read, again
+// only when the file changed. (Each account's settings are these same files, accounts.js share.)
 const autonomy = new Map() // file -> { at, free }
+// (Any command, or a page fetched, or an MCP server's tool, or edits anywhere, unless a command only
+// reads or stays in its folder's own git history.)
+const RISKY_RULE = /^(Bash|WebFetch|Edit|Write|MultiEdit|NotebookEdit)$|^(Bash|WebFetch)\(|^(Edit|Write|MultiEdit)\((~|\/)|^mcp__/
+const SAFE_BASH = /^Bash\((?!\*|sudo\b)(?:git (?:status|diff|log|show|branch|add|commit|fetch)|npm test|ls|cat|grep|rg|pwd|mkdir|head|tail|wc|sort|which)\b[^)]*\)$/
 async function autonomous(kind) {
-  const file = kind === 'claude' ? path.join(os.homedir(), '.claude', 'settings.json') : kind === 'codex' ? path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'config.toml') : null
+  const file = kind === 'claude' ? path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'settings.json') : kind === 'codex' ? path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'config.toml') : null
   const st = file && await fs.promises.stat(file).catch(() => null)
   if (!st) return false
   const had = autonomy.get(file)
@@ -2230,7 +2235,7 @@ async function autonomous(kind) {
   if (kind === 'claude') {
     try {
       const p = JSON.parse(text)?.permissions || {}
-      free = p.defaultMode === 'bypassPermissions' || (Array.isArray(p.allow) && p.allow.some((r) => /^Bash(\((\*|\*:\*)\))?$/.test(String(r).trim())))
+      free = p.defaultMode === 'bypassPermissions' || (Array.isArray(p.allow) && p.allow.some((r) => { const x = String(r).trim(); return RISKY_RULE.test(x) && !SAFE_BASH.test(x) }))
     } catch { free = false }
   } else free = /^\s*approval_policy\s*=\s*["']never["']/m.test(text) || /^\s*sandbox_mode\s*=\s*["']danger-full-access["']/m.test(text)
   autonomy.set(file, { at: st.mtimeMs, free })
@@ -2300,10 +2305,10 @@ app.post('/api/meetings/bulk', wrap(async (req) => {
   if (action === 'chief') {
     const items = []
     for (const id of ids) {
-      try { const m = meetings.get(id); const fresh = meetWork.unsent(id); for (const t of fresh.length ? fresh : meetings.actions(id)) items.push({ m, t }); out.done.push(id) } catch (e) { out.failed.push({ id, error: e.message }) }
+      try { const m = meetings.get(id); const fresh = meetWork.unsent(id); const placed = meetWork.placedBy(id); for (const t of fresh.length ? fresh : meetings.actions(id)) if (!placed(t)) items.push({ m, t }); out.done.push(id) } catch (e) { out.failed.push({ id, error: e.message }) }
     }
     if (!items.length) throw new Error('No action items in those summaries')
-    const added = items.slice(0, 60).map(({ m, t }) => ({ m, t, task: chiefTasks.add(cleanSaid(t, 300), { from: 'meeting', link: m.saved || null }) }))
+    const added = items.slice(0, 60).map(({ m, t }) => ({ m, t, task: chiefTasks.add(cleanSaid(t, 200), { from: 'meeting', link: m.saved || null }) }))
     const by = new Map()
     for (const { m, t, task } of added) { if (!by.has(m.id)) by.set(m.id, { m, tasks: [], pairs: [] }); by.get(m.id).tasks.push(task); by.get(m.id).pairs.push({ text: t, task }) }
     for (const { m, tasks, pairs } of by.values()) { meetings.toChief(m.id, tasks.length); meetWork.sentToChief(m.id, pairs) }
@@ -2774,14 +2779,17 @@ app.post('/api/meetings/:id/chief', wrap(async (req) => {
   const m = meetings.get(req.params.id)
   // All of them: the ones that haven't gone anywhere yet (Send again: all).
   const fresh = Array.isArray(req.body?.items) ? null : meetWork.unsent(m.id)
-  const items = (Array.isArray(req.body?.items) ? req.body.items : fresh.length ? fresh : meetings.actions(req.params.id)).map((x) => String(x).trim()).filter(Boolean).slice(0, 30)
-  if (!items.length) throw new Error('No action items in the summary')
+  // (Not ones handed on by themselves, or placed since: they have their own task, meetitems.js.)
+  const placed = meetWork.placedBy(m.id)
+  const asked = (Array.isArray(req.body?.items) ? req.body.items : fresh.length ? fresh : meetings.actions(req.params.id)).map((x) => String(x).trim()).filter(Boolean)
+  const items = asked.filter((x) => !placed(x)).slice(0, 30)
+  if (!items.length) throw new Error(asked.length ? 'They\'re all with Chief of Staff already: see where each went on the meeting' : 'No action items in the summary')
   // One that's already on Chief of Staff's list and not done, word for word, is the same task, not
   // a copy: Send again with nothing new hands over the same tasks (it added all of them again).
   const same = (s) => String(s).replace(/\s+/g, ' ').trim().toLowerCase()
   const open = new Map(chiefTasks.list().items.filter((x) => x.status !== 'done').map((x) => [same(x.title), x]))
   // (Cleaned as a meeting's words always are, and quoted in what the chief is told: meetitems.js.)
-  const added = items.map((t) => open.get(same(cleanSaid(t, 200))) || chiefTasks.add(cleanSaid(t, 300), { from: 'meeting', link: m.saved || null }))
+  const added = items.map((t) => open.get(same(cleanSaid(t, 200))) || chiefTasks.add(cleanSaid(t, 200), { from: 'meeting', link: m.saved || null }))
   if (!Array.isArray(req.body?.items)) meetings.toChief(m.id, added.length)
   meetWork.sentToChief(m.id, items.map((text, i) => ({ text, task: added[i] })))
   const mark = markOf()

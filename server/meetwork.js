@@ -202,6 +202,7 @@ export async function start(id, key, { cwd, kind, own = true, prompt, label } = 
 // Chief of Staff's task (open, doing, waiting on you with what for, done with its outcome).
 // state: done, needs (you), working, review (finished, or a pull request open) or open.
 const STALE_MS = Number(process.env.BRIDGE_HANDOFF_STALE_MS) || 20 * 60 * 1000 // as meetitems.js
+const PLACING_MS = 10 * 60 * 1000 // as meetitems.js
 async function stateOf(w, fleet, tasks) {
   const out = { done: w?.done || null, agent: null, chief: null, handed: null }
   if (w?.agent) {
@@ -237,12 +238,14 @@ async function stateOf(w, fleet, tasks) {
     else if (h.to === 'ask') out.handed.question = h.question
     else if (h.to === 'skip') out.handed.why = h.why
   }
+  // (A mark left from a decision that never came back: not being placed any more.)
+  if (out.handed?.to === 'placing' && Date.now() - Date.parse(w.handed.at || 0) > PLACING_MS) out.handed = null
   if (out.handed?.to === 'placing' && !out.done) { out.state = 'working'; return out }
   // Put on the list by itself, and its task closed before it was placed (by hand, or by the chief):
   // it never went anywhere, which needs you.
   if (w?.chief?.auto && !w.handed && out.chief?.status === 'done' && !out.chief.helper && !out.done) { out.shut = true; out.state = 'needs'; return out }
   // Told to Chief of Staff by itself, not placed after a while: said, so it isn't left unsaid.
-  if (w?.chief?.auto && !w.handed && out.chief?.status === 'open' && !out.chief.helper && Date.now() - Date.parse(w.chief.at || 0) > STALE_MS) out.unplaced = true
+  if (w?.chief?.auto && !out.handed && out.chief?.status === 'open' && !out.chief.helper && Date.now() - Date.parse(w.chief.at || 0) > STALE_MS) out.unplaced = true
   const pr = out.agent?.pr
   const ha = out.handed?.to === 'agent' ? out.handed : null
   if (ha && !out.done) {
@@ -304,8 +307,16 @@ export function sentToChief(id, pairs) {
   try { items = itemsOf(id).items } catch { return }
   for (const { text, task } of pairs) {
     const it = items.find((x) => norm(x.text) === norm(text)) || items.find((x) => like(x.text, text) >= 0.6)
-    if (it) meetings.setWork(id, it.workKey || it.key, { text: it.text, chief: { task: String(task.id), at: new Date().toISOString() } })
+    // (One placed by itself, or where it was put since, keeps its task: meetitems.js.)
+    if (it && !placedOne(it)) meetings.setWork(id, it.workKey || it.key, { text: it.text, chief: { task: String(task.id), at: new Date().toISOString() } })
   }
+}
+// Handed on by itself, or placed since (meetitems.js): not sent to Chief of Staff again by hand.
+const placedOne = (it) => !!(it.work?.chief?.title || it.work?.handed)
+export function placedBy(id) {
+  let items = []
+  try { items = itemsOf(id).items.filter(placedOne) } catch { return () => false }
+  return (text) => items.some((x) => norm(x.text) === norm(text) || like(x.text, text) >= 0.6)
 }
 
 // ---------- Since last time ----------

@@ -32,7 +32,7 @@ import { startKit, startModel, checks, until, sleep, browser, page, shot, phoneF
 
 const { ok, done } = checks('meeting-handoff')
 const model = await startModel('meeting-handoff')
-const kit = await startKit('meeting-handoff', { env: { BRIDGE_HELPER_GONE_MS: '3000', BRIDGE_HELPER_STALL_MS: '8000', BRIDGE_HANDOFF_STALE_MS: '6000', BRIDGE_HANDOFF_DAY_MAX: '23' } })
+const kit = await startKit('meeting-handoff', { env: { BRIDGE_HELPER_GONE_MS: '3000', BRIDGE_HELPER_STALL_MS: '8000', BRIDGE_HANDOFF_STALE_MS: '6000', BRIDGE_HANDOFF_DAY_MAX: '24' } })
 kit.program('claude', fs.readFileSync(path.join(TEST, 'stand-ins', 'helper-claude.cjs'), 'utf8'))
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
@@ -230,6 +230,10 @@ try {
   ok(/went to .*payments/.test(out) && !!toPay2 && /note on it from my Chief of Staff/.test(toPay2.text) && /it is the budget sheet/.test(toPay2.text), 'item agent: one you sent it goes, with the chief\'s note quoted', out)
   out = bridge('item', tMine, 'agent', payPane)
   ok(/Only (Tester|the user) can move it now/.test(out), 'once', out)
+  // Send action items to Chief of Staff again, by hand: none placed already goes again.
+  const zedTask = (await itemOf(M1.id, /^Zed/)).chief.task
+  const sentAgain = await err(`/meetings/${M1.id}/chief`, {})
+  ok(/all with Chief of Staff already/.test(sentAgain || '') && (await itemOf(M1.id, /^Zed/)).chief.task === zedTask && !(await tasks()).some((x) => /Zed: tell pane/.test(x.title)), 'Send again by hand when each is placed: none goes twice, each keeps its own task', sentAgain)
 
   // Undo a helper at work: stopped, its tab closed, its task closed, nothing reported.
   const danaHelper = (await itemOf(M1.id, /^Dana/)).chief.helper.paneId
@@ -287,6 +291,14 @@ try {
   ok(!r.error && run5b?.state === 'placed' && run5b.n === 1 && run5b.by === 'you' && (await tasks()).filter((x) => /Kai: send the vendor shortlist/.test(x.shown || '')).length === 1, 'Try again, from the phone: placed, the same task (not a second one)', { r, run: run5b })
   const board = await kit.api('/chief/tasks')
   ok(board.meetingItems?.on === true && board.meetingItems.last?.id === M5.id && board.meetingItems.last.state === 'placed', 'its board has the last run', board.meetingItems)
+  // An agent whose own settings let it run a command that can send (curl here): its items wait for your OK too.
+  fs.mkdirSync(path.join(kit.home, '.claude'), { recursive: true })
+  fs.writeFileSync(path.join(kit.home, '.claude', 'settings.json'), JSON.stringify({ permissions: { allow: ['Bash(git status:*)', 'Bash(curl:*)'] } }))
+  const M10 = await meet('Payments follow-up', ['Pia: fix the refund rounding in payments-api'])
+  await settled(M10.id)
+  const iPia = await itemOf(M10.id, /^Pia/)
+  ok(iPia?.handed?.held === true && iPia.handed.paneId === payPane && !gotBy(pay, /Pia: fix the refund/).length, 'to an agent whose own settings let it run curl without asking: held for your OK', iPia?.handed && { held: iPia.handed.held, pane: iPia.handed.paneId })
+  fs.rmSync(path.join(kit.home, '.claude', 'settings.json'), { force: true })
   // Its task closed before it was placed (here, by the chief): it never went anywhere, so it needs you.
   const M9 = await meet('Numbers sync', ['Ivo: compile the numbers UNREADABLE-ALWAYS'])
   await settled(M9.id)
@@ -375,7 +387,7 @@ try {
   const M7 = await meet('After hours', ['Zoe: water the plants'])
   await sleep(2000)
   ok(!(await kit.api(`/meetings/${M7.id}`)).handoff && !(await tasks()).some((x) => /water the plants/.test(x.title)), 'off again: nothing goes')
-  // On, past the day's limit (23 here): the rest stay, said.
+  // On, past the day's limit (24 here): the rest stay, said.
   await kit.api('/settings', { chief: { meetingItems: true } }, 'PATCH')
   const M8 = await meet('Late sync', ['Ana: errand one', 'Bo: errand two', 'Cy: errand three'])
   const run8 = await settled(M8.id)

@@ -42,6 +42,7 @@ const MAX = 12 // action items one meeting hands on by itself
 const DAY_MAX = Number(process.env.BRIDGE_HANDOFF_DAY_MAX) || 30 // ...and all of them in a day
 const STALE_MS = Number(process.env.BRIDGE_HANDOFF_STALE_MS) || 20 * 60 * 1000 // with the chief, never placed: said so
 const RECENT_MS = 24 * 3600 * 1000 // a meeting's first notes, written within a day of its end
+const PLACING_MS = 10 * 60 * 1000 // a decision that hasn't come back by then won't: the item is free again
 
 // ---------- What a meeting says, made safe to quote ----------
 // Terminal escapes, with what they carry.
@@ -144,7 +145,9 @@ export function readPlaces(text, n) {
 // to your devices. changed(): news.
 export function makeMeetItems({ on, you, meetings, work, tasks, delegate, decide, fleet, handTo, unqueue, closePane, link, projects, resolveDir, asks = () => true, defaultKind = () => 'claude', screen = async () => '', autonomous = async () => false, notify = () => {}, changed = () => {} }) {
   const running = new Map() // meeting id -> the run under way
-  const placingNow = new Set() // meeting id:item key, while the model decides where it goes
+  const placingNow = new Map() // meeting id:item key -> the flow placing it, while the model decides
+  const isPlacing = (h) => h?.to === 'placing' && Date.now() - Date.parse(h.at || 0) < PLACING_MS
+  const flowId = () => crypto.randomBytes(4).toString('hex')
   const locks = new Map() // meeting id:item key -> the change under way: one at a time each
   const one = (key, fn) => {
     const prev = locks.get(key) || Promise.resolve()
@@ -263,13 +266,14 @@ export function makeMeetItems({ on, you, meetings, work, tasks, delegate, decide
         capWhy = capped ? (room < MAX && room < all.length ? 'day' : 'meeting') : null
         if (!go.length) return said('capped', { capped, capWhy })
         // Each marked as being placed, so nothing else places it meanwhile.
+        const flow = flowId()
         const list = go.map((it) => {
           const k = it.workKey || it.key
           const had = it.work?.chief && ownTask(it.work)
           const task = had || newTask(m, it)
-          meetings.setWork(id, k, { text: it.text, ...(had ? {} : { chief: { task: String(task.id), title: task.title, at, auto: true } }), handed: { to: 'placing', at } })
-          placingNow.add(`${id}:${k}`)
-          return { it, k, task }
+          meetings.setWork(id, k, { text: it.text, ...(had ? {} : { chief: { task: String(task.id), title: task.title, at, auto: true } }), handed: { to: 'placing', at, flow } })
+          placingNow.set(`${id}:${k}`, flow)
+          return { it, k, task, flow }
         })
         n = list.length
         said('placing', { n, capped, capWhy })
@@ -277,7 +281,7 @@ export function makeMeetItems({ on, you, meetings, work, tasks, delegate, decide
           const r = await placeAll(m, list)
           if (r.asks) notify({ title: r.asks === 1 ? 'Chief of Staff asks about an action item' : `Chief of Staff asks about ${r.asks} action items`, body: 'From a meeting that just ended. Answer on the meeting, or in Home.', url: `/?meeting=${encodeURIComponent(id)}`, tag: `meeting-items-${id}` })
           return said('placed', { n, capped, capWhy, model: r.model, ...(r.why ? { why: r.why } : {}) })
-        } finally { unplace(id, list) }
+        } finally { unplace(id, list, flow) }
       } catch (e) {
         return said('failed', { n, capped, capWhy, error: clean(e.message, 300) || 'They couldn\'t be placed' })
       }
@@ -289,10 +293,11 @@ export function makeMeetItems({ on, you, meetings, work, tasks, delegate, decide
   // Where each goes, from the model with no tools; then each placed, one at a time. A pick that isn't
   // among the places offered, or that can't be done, becomes a question for you, saying why.
   // Ones still marked as being placed when it's over (it failed, or was taken back meanwhile): not now.
-  function unplace(id, list) {
+  // (Only this flow's own marks: another may have marked one since.)
+  function unplace(id, list, flow) {
     for (const x of list) {
-      placingNow.delete(`${id}:${x.k}`)
-      try { const { items } = work.itemsOf(id); const it = items.find((i) => i.workKey === x.k || i.key === x.k); if (it?.work?.handed?.to === 'placing') meetings.setWork(id, x.k, { handed: null }) } catch { /* gone */ }
+      if (placingNow.get(`${id}:${x.k}`) === flow) placingNow.delete(`${id}:${x.k}`)
+      try { const { items } = work.itemsOf(id); const it = items.find((i) => i.workKey === x.k || i.key === x.k); if (it?.work?.handed?.to === 'placing' && it.work.handed.flow === flow) meetings.setWork(id, x.k, { handed: null }) } catch { /* gone */ }
     }
   }
   async function placeAll(m, list, answers = []) {
@@ -312,7 +317,7 @@ export function makeMeetItems({ on, you, meetings, work, tasks, delegate, decide
     let asks = 0
     for (const [i, x] of list.entries()) {
       const e = picks.get(i + 1)
-      const out = await one(`${m.id}:${x.k}`, () => applyPick(m.id, x.k, e, { agents, projs })).catch((err) => ({ to: 'ask', error: err.message }))
+      const out = await one(`${m.id}:${x.k}`, () => applyPick(m.id, x.k, e, { agents, projs, flow: x.flow })).catch((err) => ({ to: 'ask', error: err.message }))
       if (out?.to === 'ask' || out?.held) asks++
     }
     changed()
@@ -320,10 +325,10 @@ export function makeMeetItems({ on, you, meetings, work, tasks, delegate, decide
   }
   // One pick, checked: an agent from the list (one that may work without asking first waits for your
   // OK), a helper in its own folder or a project from the list, a question, or left with you.
-  async function applyPick(id, k, e, { agents, projs }) {
+  async function applyPick(id, k, e, { agents, projs, flow }) {
     const found = foundOf(id, k)
     // (Taken back, placed or ticked meanwhile: as it is. Its task closed meanwhile: it shows so.)
-    if (!found || (found.w.handed && found.w.handed.to !== 'placing') || found.w.agent || doneOrTicked(found.it)) return null
+    if (!found || (found.w.handed && !(found.w.handed.to === 'placing' && (!flow || found.w.handed.flow === flow))) || found.w.agent || doneOrTicked(found.it)) return null
     const task = ownTask(found.w)
     if (!task || task.status === 'done') return null
     const ask = (question) => setAsk(found, task, question, 'chief')
@@ -374,9 +379,9 @@ export function makeMeetItems({ on, you, meetings, work, tasks, delegate, decide
       const t = found && ownTask(found.w)
       if (!t) throw Object.assign(new Error(`Task ${clean(taskId, 12)} isn't on your list any more`), { status: 404 })
       const h = found.w.handed
-      if (h?.to === 'placing') throw Object.assign(new Error(`Task ${t.id} is being placed by Bridge AI now.`), { status: 409 })
+      if (isPlacing(h)) throw Object.assign(new Error(`Task ${t.id} is being placed by Bridge AI now.`), { status: 409 })
       if (h?.to === 'ask') throw Object.assign(new Error(`Task ${t.id} waits on ${you()}'s answer. Once they answer, Bridge AI places it with what they said.`), { status: 409 })
-      if (h) throw Object.assign(new Error(`Task ${t.id} is already ${placedSaid(h)}. Only ${you()} can move it now, from the meeting (Undo or Redirect).`), { status: 409 })
+      if (h && h.to !== 'placing') throw Object.assign(new Error(`Task ${t.id} is already ${placedSaid(h)}. Only ${you()} can move it now, from the meeting (Undo or Redirect).`), { status: 409 })
       if (found.w.agent) throw Object.assign(new Error(`Task ${t.id} already has an agent ${you()} started on it.`), { status: 409 })
       if (t.status === 'done' || doneOrTicked(found.it)) throw Object.assign(new Error(`Task ${t.id} is done.`), { status: 409 })
       const to = String(b.to || '')
@@ -490,7 +495,7 @@ export function makeMeetItems({ on, you, meetings, work, tasks, delegate, decide
         const a = agents.find((x) => x.paneId === helper.paneId) || (helper.sessionId && agents.find((x) => x.sessionId === helper.sessionId && x.kind === helper.kind)) || null
         if (a) {
           try { await closePane(a.paneId) } catch (e) { throw new Error(`Its helper couldn't be stopped: ${e.message}. Close it in Agents.`) }
-        }
+        } else if (helper.state === 'working') throw new Error('Its helper couldn\'t be found to stop it (another session, or it just moved): close it in Agents, or try again in a moment')
         await delegate.cancel(task.id)
         out.stopped = true
       }
@@ -534,19 +539,20 @@ export function makeMeetItems({ on, you, meetings, work, tasks, delegate, decide
       const again = itemOf(id, key)
       const task = newTask(again.m, again.it)
       const at = new Date().toISOString()
-      meetings.setWork(id, again.k, { text: again.it.text, chief: { task: String(task.id), title: task.title, at, ...(to === 'chief' ? { auto: true } : {}) }, ...(to === 'chief' ? { handed: { to: 'placing', at } } : {}) })
-      if (to === 'chief') placingNow.add(`${id}:${again.k}`)
+      const flow = flowId()
+      meetings.setWork(id, again.k, { text: again.it.text, chief: { task: String(task.id), title: task.title, at, ...(to === 'chief' ? { auto: true } : {}) }, ...(to === 'chief' ? { handed: { to: 'placing', at, flow } } : {}) })
+      if (to === 'chief') placingNow.set(`${id}:${again.k}`, flow)
       const now = { ...itemOf(id, key), m: meetings.get(id) }
       if (to === 'agent') { const x = await toAgent(now, { pane: String(b.pane).trim(), note: null, by: 'you', task }); return { ...out, ...x } }
       if (to === 'helper') { const x = await toHelper(now, { role: b.role || 'helper', note: null, by: 'you', task }); return { ...out, ...x } }
-      return { ...out, task, k: again.k }
+      return { ...out, task, k: again.k, flow }
     })
     if (to !== 'chief') { changed(); return r }
     // Chief of Staff again: placed afresh, by the model with no tools.
-    const { task, k, ...out } = r
+    const { task, k, flow, ...out } = r
     const m = meetings.get(id)
-    const list = [{ it: itemOf(id, key).it, k, task: taskOf(task.id) || task }]
-    try { await placeAll(m, list) } catch (e) { const found = itemOf(id, key); await one(lockOf(found), () => setAsk(found, task, `Where should this go? It couldn't be placed (${clean(e.message, 200)}).`, 'chief')) } finally { unplace(id, list) }
+    const list = [{ it: itemOf(id, key).it, k, task: taskOf(task.id) || task, flow }]
+    try { await placeAll(m, list) } catch (e) { const found = itemOf(id, key); await one(lockOf(found), () => setAsk(found, task, `Where should this go? It couldn't be placed (${clean(e.message, 200)}).`, 'chief')) } finally { unplace(id, list, flow) }
     const after = itemOf(id, key).w.handed
     return { ...out, to: 'chief', placed: after ? { to: after.to, label: after.label || null, role: after.role || null, question: after.question || null, held: !!after.held } : null }
   }
@@ -582,20 +588,21 @@ export function makeMeetItems({ on, you, meetings, work, tasks, delegate, decide
       const h = found.w.handed
       const task = ownTask(found.w)
       if (h?.to !== 'ask' || !task || task.status !== 'waiting') throw Object.assign(new Error('Chief of Staff isn\'t waiting on you about this one'), { status: 409 })
-      meetings.setWork(id, found.k, { handed: { to: 'placing', at: new Date().toISOString() } })
-      placingNow.add(`${id}:${found.k}`)
+      const flow = flowId()
+      meetings.setWork(id, found.k, { handed: { to: 'placing', at: new Date().toISOString(), flow } })
+      placingNow.set(`${id}:${found.k}`, flow)
       tasks.update(task.id, { status: 'open' })
-      return { task, k: found.k, question: h.question }
+      return { task, k: found.k, question: h.question, flow }
     })
     const m = meetings.get(id)
-    const list = [{ it: itemOf(id, key).it, k: prep.k, task: taskOf(prep.task.id) || prep.task }]
+    const list = [{ it: itemOf(id, key).it, k: prep.k, task: taskOf(prep.task.id) || prep.task, flow: prep.flow }]
     try {
       await placeAll(m, list, [{ n: 1, question: prep.question, answer: said }])
     } catch (e) {
       const found = itemOf(id, key)
       await one(lockOf(found), () => setAsk(found, prep.task, prep.question, 'chief'))
       throw new Error(`It couldn't be placed (${clean(e.message, 200)}). Send your answer again to try once more.`)
-    } finally { unplace(id, list) }
+    } finally { unplace(id, list, prep.flow) }
     const after = itemOf(id, key).w.handed
     return { ok: true, placed: after ? { to: after.to, label: after.label || null, role: after.role || null, question: after.question || null, held: !!after.held } : null }
   }
