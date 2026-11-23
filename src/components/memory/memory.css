@@ -49,6 +49,33 @@
 .mm-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .mm-by { min-width: 0; margin-left: auto; }
 
+/* Pointers (Pointers.jsx): what you mean by "that", a line each with what it points to and who added it. */
+.mm-pt-add { margin-left: auto; }
+.mm-pt-what { line-height: 1.45; }
+.mm-pt-list { display: grid; gap: 2px; max-height: 420px; overflow: auto; margin: 0 -6px; }
+.mm-pt { display: grid; gap: 3px; padding: 6px; border-radius: 8px; min-width: 0; }
+.mm-pt:hover { background: var(--pane); }
+.mm-pt-line { display: flex; align-items: flex-start; gap: 4px; min-width: 0; }
+.mm-pt-words { flex: 1; min-width: 0; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
+.mm-pt-words b { font-weight: 600; }
+.mm-pt-to { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mm-pt-pin { flex: none; color: var(--ink-3); }
+.mm-pt-pin.on { color: var(--accent); }
+.mm-pt-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12px; }
+.mm-pt-tags .mm-kind { display: inline-flex; align-items: center; gap: 4px; }
+.mm-pt-note { overflow-wrap: anywhere; }
+.mm-pt-keep { margin-left: auto; }
+.mm-pt-more { justify-self: start; }
+.mm-pt-tidied { display: flex; align-items: flex-start; gap: 6px; line-height: 1.4; }
+.mm-pt-tidied svg { flex: none; margin-top: 2px; }
+.mm-pt-edit { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 8px; padding: 8px; border-radius: 10px; background: var(--pane); border: 1px solid var(--line); }
+.mm-pt-edit label:not(.st-check) { display: grid; gap: 3px; min-width: 0; font-size: 11.5px; color: var(--ink-3); }
+.mm-pt-edit .mm-pt-ref, .mm-pt-edit .mm-pt-bots, .mm-pt-edit .error-text, .mm-pt-edit .mm-edit-acts { grid-column: 1 / -1; }
+.mm-pt-edit :is(input:not([type=checkbox]), select) { height: 32px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane-2); color: var(--ink); font: 13px var(--font); outline: none; min-width: 0; }
+.mm-pt-edit :is(input, select):focus { border-color: color-mix(in srgb, var(--accent) 50%, var(--line-2)); }
+.mm-pt-edit .error-text { margin: 0; }
+.mm-pt-bots { font-size: 12.5px; }
+
 /* What there is to look over: a line each until it's opened. */
 .mm-looks { display: grid; gap: 8px; }
 .mm-look { gap: 10px; padding: 0; }
@@ -117,11 +144,12 @@
   .mm-main > .mm-add { order: 0; margin-top: 0; }
   .mm-main > .mm-tools { order: 1; position: static; padding: 0; box-shadow: none; }
   .mm-side > .mm-you { order: 2; }
+  .mm-side > .mm-points { order: 2; }
   .mm-side > .mm-looks { order: 3; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); align-items: start; }
   .mm-look-go { margin-left: auto; }
   .mm-side > .mm-how { order: 9; margin-top: 8px; }
   .mm-you-text.clamp { -webkit-line-clamp: 3; }
-  .mm-page.finding :is(.mm-you, .mm-looks, .mm-how) { display: none; }
+  .mm-page.finding :is(.mm-you, .mm-points, .mm-looks, .mm-how) { display: none; }
 }
 /* The list's own width (it's narrower than the page with About You beside it): Edit beside the name
    and its tags under it, before Edit would wrap onto a line of its own. */
@@ -137,9 +165,13 @@
 }
 /* On a phone: whole targets, and fields iOS doesn't zoom into. */
 .app.narrow .mm-page { padding-bottom: 96px; }
-.app.narrow .mm-view :is(.mt-search, .mm-add input, .mm-add select, .mm-edit input, .mm-edit select, .mm-you-edit) { font-size: 16px; }
-.app.narrow .mm-view :is(.mt-search, .mm-add input, .mm-add select, .mm-edit input, .mm-edit select) { height: 40px; }
-.app.narrow .mm-view :is(.btn, .ghost-btn, .link-btn, .mt-places button, .seg button, .mt-fold-head, .mt-mem-meeting, .mm-switch, .mm-tidy-row, .mm-look-head) { min-height: 40px; }
+.app.narrow .mm-view :is(.mt-search, .mm-add input, .mm-add select, .mm-edit input, .mm-edit select, .mm-you-edit, .mm-pt-edit input, .mm-pt-edit select) { font-size: 16px; }
+.app.narrow .mm-view :is(.mt-search, .mm-add input, .mm-add select, .mm-edit input, .mm-edit select, .mm-pt-edit input:not([type=checkbox]), .mm-pt-edit select) { height: 40px; }
+.app.narrow .mm-view :is(.btn, .ghost-btn, .link-btn, .mt-places button, .seg button, .mt-fold-head, .mt-mem-meeting, .mm-switch, .mm-tidy-row, .mm-look-head, .mm-pt-bots) { min-height: 40px; }
+.app.narrow .mm-view :is(.mm-pt-pin, .mm-pt .mm-pen, .mm-pt-keep) { min-width: 44px; justify-content: center; }
+.app.narrow .mm-view .mm-pt-keep { display: inline-flex; align-items: center; }
+.app.narrow .mm-view .mm-pt-list { max-height: none; }
+.app.narrow .mm-view .mm-pt-to { white-space: normal; overflow-wrap: anywhere; }
 .app.narrow .mm-view .mm-find .seg.small-seg { display: flex; width: 100%; }
 .app.narrow .mm-view .mm-find .seg.small-seg button { flex: 1 1 0; justify-content: center; }
 .app.narrow .mm-view :is(.mm-pen, .mm-switch) { min-width: 44px; justify-content: center; }

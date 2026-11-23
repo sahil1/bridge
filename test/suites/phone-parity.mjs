@@ -94,6 +94,7 @@ const PATHS = {
   'a:usage': { phone: 'More › Usage', shows: '.m-more-view .ustats' },
   'a:stats': { phone: 'More › Usage', shows: '.m-more-view .ustats' },
   'a:tour': { phone: 'Search › Take the tour' },
+  'a:help': { phone: 'More › Help', shows: '.modal.manual' },
   // Settings' sections and their tabs (Settings.jsx SECTIONS); a tab's id opens its section at it.
   'settings:features': { phone: 'Settings › Your Features' },
   'settings:you': { phone: 'Settings › You' },

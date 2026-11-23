@@ -24,6 +24,7 @@ import * as accounts from '../accounts.js'
 import { firstRun, knows } from '../firstrun.js'
 import { lineAnsi, SCROLLBACK, watchModes, wheelBytes } from './screen.js'
 import * as host from './hostlink.js'
+import * as agentNote from '../agentnote.js'
 import { noBackupRightsFirst } from '../winpriv.js'
 
 const { Terminal } = headless
@@ -116,6 +117,8 @@ async function spawnPane({ paneId, tabId, workspaceId, kind, cwd, sessionId, res
     if (model && a.model) args = [...a.model(model), ...args]
     if (effort && a.effort) args = [...a.effort(effort), ...args]
     if (access && a.access) args = [...a.access(access, { dirs }), ...args]
+    // (Told it runs in Bridge AI, where its manual is and what "that" means: agentnote.js. Not a bot's run.)
+    args = [...agentNote.flags({ kind, access, cwd }), ...args]
   }
   // (A bot's run that changes files, on Windows: its terminal takes Windows' backup and restore
   // rights out of its own token before it starts the agent, so the agent never has them: winpriv.js.)

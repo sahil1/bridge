@@ -120,6 +120,10 @@ export function ChiefOfStaff({ s, save, agents, children }) {
           <span><b>{t('Helpers may edit in their own work folder')}</b> <span className="muted small">{t('Off: they ask before each change, as agents do.')} <More>{t('A helper the Chief of Staff starts in its task\'s own folder (work/<task> in its folder) changes files there without asking. A helper working in one of your folders still asks before each change. For helpers on {agents}; others always ask.', { agents: canEdit.join(', ') })}</More></span></span>
         </label>
       )}
+      <label className="st-check" data-setting="tidy-sessions">
+        <input type="checkbox" checked={eff.chief?.tidy !== false} onChange={(e) => save({ chief: { tidy: e.target.checked } })} />
+        <span><b>{t('Tidy Long Sessions While Idle')}</b> <span className="muted small">{t('So a long conversation isn\'t held up compacting in the middle of an answer.')} <More>{t('Once a session of Chief of Staff\'s, a helper\'s or a bot\'s is past about 100,000 tokens and has been idle for 15 minutes, Claude Code is asked to compact it then, keeping your asks, your standing rules and where the work is, rather than by itself in the middle of a turn. Never while it\'s working or something is typed in its box. Its chat (a bot\'s, its record) says each time, or why it wasn\'t.')}</More></span></span>
+      </label>
       {children}
     </section>
   )

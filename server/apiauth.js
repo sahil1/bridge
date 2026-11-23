@@ -6,6 +6,9 @@
 //     bin/bridge, `bridge-ai mcp`, the desktop app's main process, and the relay, which runs a
 //     paired phone's or another of your computers' requests here (relay.js, inbox.js) once that
 //     device has shown its own key: pairing and linking are as they were;
+//   - the agents' key, made from the key (apitoken.js agentKeyOf), for three routes only: an agent
+//     you start adding a pointer to what you meant, finding pointers and searching Bridge AI's manual
+//     (agentcli.mjs);
 //   - the cookie made from the key: a window of the desktop app (its main process sets it before
 //     any window opens), or a browser tab let in by a one-time link (below), your phone's through
 //     Tailscale too (Use on your phone: the code Settings shows holds one).
@@ -31,7 +34,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { cookieName, cookieValue, same } from './apitoken.js'
+import { cookieName, cookieValue, agentKeyOf, same } from './apitoken.js'
 import { placeEn } from '../shared/places.js'
 
 const SITE = /^(\/m\/[A-Za-z0-9_-]{1,20})?\/api\/agents\/([^/]+)\/site\/~([A-Za-z0-9_-]{16,64})\//
@@ -68,6 +71,10 @@ export function makeAuth({ port, token, ui, viaTailnet = () => false }) {
   }
   const keyed = (req) => same(bearer(req), token()) || same(cookieOf(req), cookieValue(token()))
   const allowed = (req) => keyed(req)
+  // The agents' key (agentnote.js): only adding a pointer, finding pointers and searching the manual,
+  // the request marked as an agent's (req.byAgent), whatever it says it is.
+  const AGENTS = { 'POST /api/pointers/learn': true, 'GET /api/pointers/find': true, 'GET /api/manual/search': true }
+  const agents = (req) => AGENTS[`${req.method} ${req.path}`] === true && same(bearer(req), agentKeyOf(token()))
   const siteKey = (pane) => crypto.createHmac('sha256', token()).update(`site\n${pane}`).digest('base64url').slice(0, 32)
 
   const isPublic = (req) => (req.method === 'GET' || req.method === 'HEAD') && (PUBLIC_API.has(req.path) || builtFile(ui(), req.path))
@@ -117,6 +124,7 @@ export function makeAuth({ port, token, ui, viaTailnet = () => false }) {
       return next()
     }
     if (allowed(req) || isPublic(req)) return next()
+    if (agents(req)) { req.byAgent = true; return next() }
     if (page(req)) {
       // Followed from another site, where the cookie stays behind: sent on from here, once.
       if (/^(cross-site|same-site)$/i.test(h(req, 'site'))) return again(res)

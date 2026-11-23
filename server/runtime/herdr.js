@@ -15,6 +15,7 @@ import { paneKey, inView } from '../scope.js'
 import { DATA, dataFile, writeFileAtomic } from '../paths.js'
 import { blanked } from '../botenv.js'
 import { providerEnv } from '../providers.js'
+import * as agentNote from '../agentnote.js'
 
 export const name = 'herdr'
 export const caps = { liveView: true, reorder: true, splits: true }
@@ -276,7 +277,7 @@ async function launchNow({ kind = 'claude', cwd, label, workspaceId, newSpace, p
   const env = { ...(kept ? blanked(kind, { ...process.env, ...providerEnv() }) : {}), ...envFor(kind, account), ...extraEnv } // a second account's config folder, if one was picked
   const a = adapter(kind)
   const resumed = fork && a.fork ? a.fork(fork, a.sessionId === 'assign' ? newSessionId() : undefined) : resume && a.resume ? a.resume(resume) : []
-  const allowed = [...(access && a.access ? a.access(access, { dirs }) : []), ...(effort && a.effort ? a.effort(effort) : [])] // how much it may do without asking, and how hard it thinks
+  const allowed = [...(access && a.access ? a.access(access, { dirs }) : []), ...(effort && a.effort ? a.effort(effort) : []), ...agentNote.flags({ kind, access, cwd })] // how much it may do without asking, how hard it thinks, and that it runs in Bridge AI (agentnote.js)
   const extra = [...allowed, ...(pinModel && model && a.model && a.herdr ? [...a.model(model), ...resumed] : resumed)]
   const setupError = setup ? await runSetup(setup) : null
   const name = `ba-${Date.now().toString(36)}`

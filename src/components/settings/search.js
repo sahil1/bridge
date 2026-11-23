@@ -39,6 +39,7 @@ export const SETTINGS = [
     ['chief', tx('Chief of Staff runs on'), 'chief of staff agent'],
     ['chief-helpers', tx('Helpers at once'), 'chief of staff helpers delegate parallel queue queued at once', { near: 'chief' }],
     ['chief-helpers-edit', tx('Helpers may edit in their own work folder'), 'chief of staff helpers edit permission ask work folder', { near: 'chief' }],
+    ['tidy-sessions', tx('Tidy Long Sessions While Idle'), 'compact compaction long session context tokens stall idle tidy chief of staff helpers bots summarize', { near: 'chief' }],
     ['scheduled-routines', tx('Scheduled Routines'), 'routines schedule scheduled every weekday run by itself time history commands'],
     ['consult', tx('Your Chief of Staff can consult'), 'consult second opinion bridge ask models', { near: 'chief' }],
     ['agent-list', tx('Install an agent'), 'agents install sign in claude codex gemini copilot cursor opencode cli'],

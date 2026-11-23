@@ -5,6 +5,7 @@ import { api, usePoll, refetch, machineId } from '../../api.js'
 import { t, tx } from '../../i18n/index.js'
 import { Fold, MEM_BY, memGroups, shortDay } from '../meetings/tools.jsx'
 import { memoryAll, setMemoryAll } from './open.js'
+import Pointers from './Pointers.jsx'
 import { openMeeting } from '../meetings/recording.jsx'
 import { openDictations } from '../dictations/shared.jsx'
 import { useMachines } from '../Machines.jsx'
@@ -19,7 +20,8 @@ import './memory.css'
 // Meeting Insights on, the people you meet, who come from meetings), Organizations, Projects &
 // Products and Terms, each name with how it's misheard, its note, and the meetings and dictations it
 // came up in (each opens). Beside them (under them, on a phone): About You (a few lines made from
-// all of memory, in either place, or as you wrote them, on or off) and what there is to look over,
+// all of memory, in either place, or as you wrote them, on or off), Pointers (what you mean by
+// "that", which Chief of Staff, your agents and your bots read: Pointers.jsx) and what there is to look over,
 // what looks the same (merged, or kept apart) and what looks like it adds little. In a window that
 // shows another of your computers, it's that computer's memory, and it says so.
 const COLLECTIONS = [['all', tx('All'), 'book'], ['person', tx('People'), 'users'], ['org', tx('Organizations'), 'layers'], ['project', tx('Projects & Products'), 'shapes'], ['term', tx('Terms'), 'quote']]
@@ -176,6 +178,7 @@ export default function Memory({ from = 'meetings' }) {
         {data && (
           <div className="mm-side">
             <AboutYou a={data.aboutYou} me={data.me} elsewhere={elsewhere} scoped={!all} onChange={refresh} />
+            <Pointers elsewhere={elsewhere} />
             {(same.length > 0 || little.length > 0) && (
               <div className="mm-looks">
                 {same.length > 0 && <Same pairs={same} byId={byId} act={act} />}

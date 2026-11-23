@@ -68,7 +68,8 @@ const titleOf = (brief) => {
 // own). held(paneId): how many messages wait in the queue for it. changed(): the board has news.
 // setupOf(agent): the first-run screen its terminal shows ({ step, keys }, firstrun.js), for a
 // runtime that doesn't say. press(paneId, keys): keys to its terminal. labelOf(kind): its CLI's name.
-export function makeDelegate({ cfg, dir, tasks, you = () => 'the user', resolve, launch, link, tell, said, replied = () => false, held = () => 0, changed = () => {}, setupOf = async () => null, press = async () => {}, labelOf = (k) => k }) {
+// paused(paneId): it's being tidied (compact.js), so what it does now isn't its turn.
+export function makeDelegate({ cfg, dir, tasks, you = () => 'the user', resolve, launch, link, tell, said, replied = () => false, held = () => 0, changed = () => {}, setupOf = async () => null, press = async () => {}, labelOf = (k) => k, paused = () => false }) {
   let data = { next: 1, helpers: [] }
   try { data = { ...data, ...JSON.parse(fs.readFileSync(FILE, 'utf8')) } } catch { /* none yet */ }
   // Starting when the server stopped: it goes again (its launch may not have happened). A report
@@ -265,6 +266,9 @@ export function makeDelegate({ cfg, dir, tasks, you = () => 'the user', resolve,
           continue
         }
         if (h.missing) { delete h.missing; dirty = true }
+        // (Being tidied while it was idle, compact.js: its working and stopping again is that, not its
+        // turn, which goes in once it's done.)
+        if (paused(a.paneId)) continue
         if (a.paneId !== h.paneId) { h.paneId = a.paneId; mark(h, { pane: a.paneId }); dirty = true }
         if (a.sessionId && a.sessionId !== h.sessionId) { h.sessionId = a.sessionId; dirty = true }
         const asking = a.status === 'blocked' || !!a.asking

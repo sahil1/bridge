@@ -48,6 +48,7 @@ import { isQuiet } from '../shared/focus.js'
 import AgentMap from './components/AgentMap.jsx'
 import NeedsHome, { Everything, useHome, needCount, editHome } from './components/NeedsHome.jsx'
 import More from './components/More.jsx'
+import Manual from './components/Manual.jsx'
 import RemoteAgent from './components/RemoteAgent.jsx'
 import ScreenView from './components/remote/ScreenView.jsx'
 import { RemoteHere, ScreenLive } from './components/remote/Here.jsx'
@@ -378,6 +379,7 @@ function App() {
   const theme = look.mode
   const setTheme = (mode) => saveLook({ mode })
   const [settings, setSettings] = useState(null) // null = closed, else where it opens: 'all' (Settings itself) or a section
+  const [manual, setManual] = useState(null) // Help, Bridge AI's manual: null = closed, else { at: a part of it }
   const [screenOf, setScreenOf] = useState(null) // another computer's screen, seen here: { machine, name } (remote/ScreenView.jsx)
   const [L, setL] = usePersisted('cc-layout', LAYOUT)
   const [W, setW] = usePersisted('cc-ws', WS)
@@ -748,6 +750,12 @@ function App() {
     window.addEventListener('bridge-open-settings', on)
     return () => window.removeEventListener('bridge-open-settings', on)
   }, [])
+  // ...or Help, at a part of the manual (⌘K's answers to a question: Palette.jsx).
+  useEffect(() => {
+    const on = (e) => { setSettings(null); setManual({ at: e.detail?.at || null }) }
+    window.addEventListener('bridge-open-manual', on)
+    return () => window.removeEventListener('bridge-open-manual', on)
+  }, [])
   // ...or another computer's screen (View screen, in Settings and the devices menu), over everything.
   useEffect(() => {
     const on = (e) => { setSettings(null); setScreenOf({ machine: e.detail?.machine || null, name: e.detail?.name || '' }) }
@@ -1023,12 +1031,13 @@ function App() {
     { id: 'a:usage', label: t('Show usage'), icon: 'gauge', keywords: 'quota tokens cost', run: () => (wide ? showCard('gauge') : phoneUsage()) },
     { id: 'a:stats', label: t('Usage stats and history'), icon: 'gauge', keywords: 'stats heatmap tokens cost models projects', run: () => (wide ? openToday('usage') : phoneUsage()) },
     { id: 'a:tour', label: t('Take the tour'), icon: 'sparkle', keywords: 'help guide walkthrough intro getting started how', run: takeTour },
+    { id: 'a:help', label: t('Help'), sub: t('Bridge AI\'s manual'), icon: 'help', keywords: 'help manual how do i where is guide docs documentation question faq shortcut keyboard setting explain', run: () => setManual({}) },
   ].filter(Boolean)
   // The phone's Cloud agents: only what it has.
   const actions = cloudOnly ? [
     ...paletteActions.filter((a) => ['a:cloud', 'a:history'].includes(a.id)),
     { id: 'a:settings', label: t('Cloud agent keys…'), icon: 'settings', keywords: 'settings key cursor copilot jules claude', run: () => setSettings('cloud') },
-    ...paletteActions.filter((a) => ['a:appearance', 'a:theme'].includes(a.id)),
+    ...paletteActions.filter((a) => ['a:appearance', 'a:theme', 'a:help'].includes(a.id)),
   ] : paletteActions
   const closeSettings = () => { setSettings(null); if (cloudOnly) refetch('/cloud') }
   // The agent on screen, whose message box dictation fills when nothing else has the focus.
@@ -1047,6 +1056,7 @@ function App() {
       {screenOf && <ErrorBoundary name="Remote screen" resetKey={screenOf.machine}><ScreenView key={screenOf.machine || 'here'} machine={screenOf.machine} name={screenOf.name} onClose={() => setScreenOf(null)} /></ErrorBoundary>}
       {palette && <Palette fleet={fleet} activeId={wide ? W.active : mobileAgent} onClose={() => setPalette(false)} onOpen={openAgent} onOpenFile={openFiles} actions={actions} />}
       {settings && <Settings section={settings} onClose={closeSettings} onOpenAgent={openAgent} />}
+      {manual && <Manual at={manual.at} onClose={() => setManual(null)} />}
       {(fleet?.agents || []).filter((a) => a.chief && a.setup).map((a) => <FirstRunAnswers key={a.paneId} agent={a} />)}
       <CallPrompt />
       {!cloudOnly && <Quiet name="Crash notice"><CrashNotice /></Quiet>}
@@ -1303,6 +1313,7 @@ function App() {
       { id: 'needs', icon: 'bell', label: t('Needs You'), hint: t("What's waiting on you, on every device"), count: waiting, run: () => setInbox({}) },
       { id: 'history', icon: 'clock', label: t('History'), hint: t('Every conversation, and closed agents'), run: () => setHistory(true) },
       { id: 'settings', icon: 'settings', label: t('Settings'), hint: t('Devices, voice, appearance and more'), run: () => setSettings('all') },
+      { id: 'help', icon: 'help', label: t('Help'), hint: t('Bridge AI\'s manual: how to do anything in it'), run: () => setManual({}) },
     ].filter(Boolean)
     return (
       <div className="app narrow">
