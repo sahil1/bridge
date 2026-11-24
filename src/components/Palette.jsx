@@ -4,12 +4,14 @@ import { tildePath } from './Rail.jsx'
 import { api, cloudOnly, usePoll } from '../api.js'
 import { t, locale } from '../i18n/index.js'
 import { findable, placeOf } from './settings/search.js'
+import { loadManual, findIn } from './manualData.js'
 
 // A chief of staff's thread other than Main goes by its topic.
 const chiefName = (a) => (a.thread && !a.thread.main ? `${t('Chief of Staff')} · ${a.title}` : t('Chief of Staff'))
 
 // ⌘K: jump to any agent or tab, run a routine, open a file in the current agent's
-// folder, run an action, or open one setting (Settings opens at it, Advanced too: search.js).
+// folder, run an action, or open one setting (Settings opens at it, Advanced too: search.js), or
+// the parts of Bridge AI's manual that answer what's typed (Help opens at the one picked).
 // Fuzzy, keyboard-first; full screen on the phone.
 function score(q, text) {
   if (!q) return 1
@@ -37,6 +39,7 @@ export default function Palette({ fleet, activeId, onClose, onOpen, onOpenFile, 
   const [routines, setRoutines] = useState([])
   const [files, setFiles] = useState([])
   const [flash, setFlash] = useState(null)
+  const [man, setMan] = useState(null) // the manual, once something's typed (manualData.js)
   const inputRef = useRef(null)
   const listRef = useRef(null)
   const conf = usePoll(cloudOnly ? null : '/config', 10 * 60 * 1000).data
@@ -50,6 +53,7 @@ export default function Palette({ fleet, activeId, onClose, onOpen, onOpenFile, 
   })()
 
   useEffect(() => { inputRef.current?.focus(); api('/routines').then((d) => setRoutines(d.routines || [])).catch(() => {}) }, [])
+  useEffect(() => { if (q.trim().length >= 3 && !man) loadManual().then(setMan, () => {}) }, [q, man])
   useEffect(() => {
     if (!active || q.length < 2) { setFiles([]); return }
     const t = setTimeout(() => api(`/agents/${encodeURIComponent(active.paneId)}/find?q=${encodeURIComponent(q)}`).then((d) => setFiles((d.files || []).slice(0, 6))).catch(() => setFiles([])), 120)
@@ -85,13 +89,21 @@ export default function Palette({ fleet, activeId, onClose, onOpen, onOpenFile, 
       out.push(...found.map((it) => ({ ...it, score: score(ql, it.text) })).filter((it) => it.score > 0).sort((a, b) => b.score - a.score).slice(0, 6))
     }
     for (const f of files) out.push({ id: `f:${f}`, group: active?.label ? t('Files in {name}', { name: active.label }) : t('Files in folder'), label: f.split('/').pop(), sub: f, icon: 'file', text: f, score: 30, run: () => onOpenFile(active.id, f) })
+    // The manual's parts that answer it, a few words or more typed: Help opens at the one picked.
+    // (Settings' own lines are the Settings group's already.)
+    if (ql.length >= 3 && man) {
+      for (const { part, score: s } of findIn(man, ql, 8).filter((h) => !h.part.setting).slice(0, 3)) {
+        out.push({ id: `m:${part.id}`, group: t('Manual'), label: part.path.join(' › '), sub: part.text.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/[*_`#>|]/g, '').replace(/\s+/g, ' ').trim().slice(0, 110), icon: 'help', score: 50 + Math.min(20, s),
+          run: () => window.dispatchEvent(new CustomEvent('bridge-open-manual', { detail: { at: part.id } })) })
+      }
+    }
     const scored = out.map((it) => ({ ...it, s: it.score ?? score(ql, it.text) })).filter((it) => it.s > 0)
     if (!ql) return scored.slice(0, 60)
     // Keep each group together; groups with the best match come first.
     const best = {}
     for (const it of scored) best[it.group] = Math.max(best[it.group] || 0, it.s)
     return scored.sort((a, b) => (best[b.group] - best[a.group]) || (a.group === b.group ? b.s - a.s : a.group.localeCompare(b.group))).slice(0, 40)
-  }, [fleet, routines, files, q, actions, conf]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fleet, routines, files, q, actions, conf, man]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { setSel(0) }, [q])
   useEffect(() => { listRef.current?.querySelector('.pal-item.on')?.scrollIntoView({ block: 'nearest' }) }, [sel])

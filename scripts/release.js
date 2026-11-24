@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Start a release: npm run release
 //
-// Checks that nothing personal is in the repo (scripts/check-private.js), that main has your code, the version in package.json has a CHANGELOG.md section, and its
+// Checks that nothing personal is in the repo (scripts/check-private.js), that Bridge AI's manual is up to date (scripts/manual.js), that main has your code, the version in package.json has a CHANGELOG.md section, and its
 // tag doesn't exist yet, then pushes the tag (v<version>). GitHub Actions (.github/workflows/
 // release.yml) then builds the app on macOS, Windows and Linux, smoke-tests each build, and
 // publishes the release with that changelog section as the notes.
@@ -83,6 +83,8 @@ if (notesFile) {
 // Local: check, then push the tag.
 const notes = notesFor(version)
 try { execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'check-private.js')], { stdio: 'inherit' }) } catch { fail('personal data found in the repo (above); remove it before releasing') }
+// Bridge AI's manual, for Chief of Staff, your agents and your bots, never shipped stale (scripts/manual.js).
+try { execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'manual.js'), '--check'], { stdio: 'inherit' }) } catch { fail('Bridge AI\'s manual (shared/manual.md) is out of date (above): run node scripts/manual.js, look it over and commit it') }
 if (git('status', '--porcelain', '--untracked-files=no')) fail('you have uncommitted changes; commit them first')
 git('fetch', '-q', 'origin', 'main', '--tags')
 const head = git('rev-parse', 'HEAD')

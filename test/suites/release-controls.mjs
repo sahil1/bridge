@@ -107,7 +107,8 @@ else {
   const repo = path.join(dir, 'repo')
   const other = path.join(dir, 'other')
   const origin = path.join(dir, 'origin.git')
-  for (const f of ['scripts/release.js', 'scripts/check-private.js', 'shared/private.js', 'shared/version.js', 'shared/rollout.js']) {
+  // (And what the manual's check reads: a release checks it's up to date, scripts/manual.js.)
+  for (const f of ['scripts/release.js', 'scripts/check-private.js', 'shared/private.js', 'shared/version.js', 'shared/rollout.js', 'scripts/manual.js', 'shared/manual.md', 'shared/places.js', 'README.md', 'src/components/Settings.jsx', 'src/components/settings/search.js', 'src/trials.js']) {
     fs.mkdirSync(path.dirname(path.join(repo, f)), { recursive: true })
     fs.copyFileSync(path.join(ROOT, f), path.join(repo, f))
   }

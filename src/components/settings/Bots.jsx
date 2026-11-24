@@ -1612,6 +1612,8 @@ const fromSaid = (e) => (e.device ? t('on {device}', { device: e.device }) : e.v
 const valueOf = (v) => { const s = v == null || v === '' ? '—' : typeof v === 'string' ? v : JSON.stringify(v); return s.length > 80 ? `${s.slice(0, 79)}…` : s }
 // One event of a conversation, as a line of its timeline. A change made on another of your devices
 // (your phone, another computer) says which.
+// A session's size, in thousands of tokens (its tidy lines).
+const kTokens = (n) => (Number(n) >= 1000 ? `${Math.round(Number(n) / 1000)}k` : String(n ?? '?'))
 function eventLine(e) {
   const who = e.person?.name || e.person?.id || t('Someone')
   const by = e.by || t('you')
@@ -1662,6 +1664,14 @@ function eventLine(e) {
     case 'session.ended': return e.by ? t('{name} ended its session', { name: e.by }) : t('Its session ended: {why}', { why: e.why || '' })
     case 'session.steered': return t('{name} stepped in', { name: by })
     case 'session.held': return t('Its session was held for you: {why}', { why: e.why || '' })
+    // (Tidied while it was idle, compact.js: compacted then, rather than in the middle of a turn.)
+    case 'session.tidied': return e.after ? t('Its session was tidied while it was idle: {before} tokens down to {after}', { before: kTokens(e.before), after: kTokens(e.after) }) : t('Its session was tidied while it was idle, at {before} tokens', { before: kTokens(e.before) })
+    case 'session.tidy.failed': return t('Its session couldn\'t be tidied while it was idle: {why}', { why: e.why || '' })
+    case 'session.tidy.skipped': return t('Its session wasn\'t tidied while it was idle: {why}', { why: e.why || '' })
+    // (What some words meant, from its answer's POINTER: line: pointers.js.)
+    case 'pointer.learned': return t('Noted that “{words}” means {path}', { words: e.words || '', path: e.path || '' })
+    case 'pointer.refused': return t('Didn\'t note what “{words}” means: {why}', { words: e.words || '', why: e.why || '' })
+    case 'route.skipped': return t('Didn\'t answer from {name}\'s conversation: {why}', { name: e.name || '', why: e.why || '' })
     case 'push.requested': return t('Asked to push its work: “{title}”', { title: e.title || '' })
     case 'push.moved': return t('Its branch moved on before the push was approved: asked again')
     case 'push.approved': return t('{name} approved the push', { name: by }) + (e.pr?.url ? ` (${e.pr.url})` : '')

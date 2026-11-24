@@ -12,6 +12,7 @@
 //     [ask]                                  first asks for permission to write the file; 1 goes ahead
 //     [exit]                                 ends at once, as an agent that crashed or was closed
 //                                            would, having said nothing
+//                                            Each start (the Chief's too) goes in ~/claude-starts.log ({ args, cwd }).
 //                                            Each start goes in ~/helpers-started.log ({ args, cwd,
 //                                            message, secrets: the names of any Slack token, or test Discord or Teams secret, in its
 //                                            environment }). A follow-up typed in once it's done works a
@@ -19,6 +20,7 @@
 //   claude ... "<a bot's brief>"             an answering agent (its brief marks off a question from
 //                                            someone), as it was started; by what the question says:
 //     [answer <text>]                        reads what's in its folder, then answers that
+//     [pointer <words> => <path>]            ends its answer with POINTER: <words> => <path>
 //     [noanswer]                             says NO ANSWER, and why
 //     [notforme]                             says NOT FOR ME
 //     [work <s>]                             takes that many seconds (2 if not said)
@@ -148,6 +150,13 @@
 //                                            refused)
 //     Each in ~/answer-tries.log (run, run-write, fetch, push, hand, ask).
 //   Esc while it works interrupts it: no answer, back at its prompt (each in ~/interrupts.log).
+//   Each answer's tokens in its log (message.usage), as Claude Code writes them: its conversation's
+//   size, what ~/claude-context.json says ({ tokens }), else 8,000. Keys typed one at a time (not a
+//   paste) show in its message box, as a draft left there would. /compact <what to keep> typed in:
+//   noted in ~/compacts.log ({ session, text }), it shows Compacting conversation… for a moment
+//   (~/claude-compact.json { ms }, else 1.5 s), then logs a compact boundary (preTokens, postTokens)
+//   and the summary, its size 18,000 after; with { fail: true } there, it says Claude Code's error
+//   instead and logs nothing.
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
@@ -237,6 +246,8 @@ const given = flagSettings ? loaded.findLast((x) => x.file === flagSettings)?.s 
 // (The names in its environment that hold a key, or set its temporary folder, git's settings or the
 // credential scrub, with those values that aren't keys: what a bot's agent is started with.)
 const envSaid = Object.fromEntries(Object.keys(process.env).filter((k) => /KEY|TOKEN|SECRET|PASSWORD|SCRUB|TMPDIR|GIT_CONFIG|SESSION_MARK/.test(k)).map((k) => [k, /KEY|TOKEN|SECRET|PASSWORD/.test(k) ? '(set)' : process.env[k]]))
+// (Every start, the Chief of Staff's too, with how it was started: ~/claude-starts.log.)
+note('claude-starts.log', { args, cwd: process.cwd() })
 if (message) note('helpers-started.log', { args, cwd: process.cwd(), message, secrets, settings: loaded.map((x) => x.file), given, env: envSaid, ...(pointed ? { briefFile: pointed[1] } : {}) })
 // (On Windows, a run that changes files: whether it has Windows' backup and restore rights on, which
 // make a file past any folder's access list, in ~/rights.log, each as whoami says it, beside the
@@ -281,7 +292,18 @@ const w = (o) => {
   fs.writeSync(log, JSON.stringify(e) + '\n')
 }
 const user = (text) => w({ type: 'user', message: { role: 'user', content: text } })
-const reply = (text) => w({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } })
+// (Its conversation's size, as its last answer's tokens in and out say it.)
+const CONTEXT = path.join(home, 'claude-context.json')
+const sizeNow = () => { try { return Number(JSON.parse(fs.readFileSync(CONTEXT, 'utf8')).tokens) || 8000 } catch { return 8000 } }
+let compacted = null // its size since it was last compacted ({ tokens, at }), until claude-context.json says otherwise
+const usage = () => {
+  let at = 0
+  try { at = fs.statSync(CONTEXT).mtimeMs } catch { /* none */ }
+  if (compacted && at > compacted.at) compacted = null
+  const n = compacted ? compacted.tokens : sizeNow()
+  return { input_tokens: 12, cache_creation_input_tokens: 400, cache_read_input_tokens: Math.max(0, n - 600), output_tokens: 188, service_tier: 'standard' }
+}
+const reply = (text) => w({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }], usage: usage() } })
 const tool = (name, input) => w({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: `toolu_${Math.random().toString(36).slice(2, 8)}`, name, input }] } })
 
 const rule = '─'.repeat(60)
@@ -291,13 +313,40 @@ const trustRows = () => [' Accessing workspace:', '', ` ${process.cwd()}`, '', '
 const signinRows = () => [' Claude Code can be used with your Claude subscription or billed based on API usage through your Console account.', '', ' Select login method:', '', ' ❯ 1. Claude account with subscription · Pro, Max, Team, or Enterprise', '', '   2. Anthropic Console account · API usage billing', '']
 let said = 'Ready.'
 let began = 0
+let doing = 'Pondering' // what its working line says
+// (What shows in its box: keys typed a few at a time, as someone typing in its terminal leaves them.)
+let shownBox = ''
 const draw = () => {
   const head = state === 'trust' ? trustRows() : state === 'signin' ? signinRows() : state === 'asking'
     ? ['✻ Brewed for 2s', '', rule, ' Create file', '', `   ${file}`, '', ' Do you want to proceed?', ' ❯ 1. Yes', '   2. Yes, allow all edits during this session (shift+tab)', '   3. No, and tell Claude what to do differently (esc)']
-    : [`⏺ ${said}`, '', state === 'working' ? `✻ Pondering… (${Math.round((Date.now() - began) / 1000)}s · esc to interrupt)` : '✻ Brewed for 3s', rule, '❯ \x1b[7m \x1b[27m', rule, '  ⏵⏵ auto mode on']
+    : [`⏺ ${said}`, '', state === 'working' ? `✻ ${doing}… (${Math.round((Date.now() - began) / 1000)}s · esc to interrupt)` : '✻ Brewed for 3s', rule, `❯ ${shownBox}\x1b[7m \x1b[27m`, rule, '  ⏵⏵ auto mode on']
   process.stdout.write(`\x1b[2J\x1b[H${'\r\n'.repeat(Math.max(0, (process.stdout.rows || 24) - head.length - 1))}${head.join('\r\n')}`)
 }
 setInterval(() => { if (state === 'working') draw() }, 1000)
+
+// /compact: its conversation summed up, as Claude Code's own compaction logs it, or its error.
+function compact(text) {
+  note('compacts.log', { session: id, text })
+  let how = {}
+  try { how = JSON.parse(fs.readFileSync(path.join(home, 'claude-compact.json'), 'utf8')) } catch { /* as usual */ }
+  const before = usage().cache_read_input_tokens + 600
+  state = 'working'
+  doing = 'Compacting conversation'
+  began = Date.now()
+  draw()
+  setTimeout(() => {
+    doing = 'Pondering'
+    if (how.fail) { said = 'Error during compaction: Conversation too long. Press esc twice to go up a few messages and try again.'; state = 'idle'; draw(); return }
+    const args = text.replace(/^\/compact\s*/, '')
+    w({ type: 'user', message: { role: 'user', content: `<command-name>/compact</command-name>\n<command-message>compact</command-message>\n<command-args>${args}</command-args>` } })
+    w({ type: 'system', subtype: 'compact_boundary', content: 'Conversation compacted', compactMetadata: { trigger: 'manual', preTokens: before, postTokens: 18000 } })
+    w({ type: 'user', isCompactSummary: true, message: { role: 'user', content: `This session is being continued from a previous conversation. Summary, keeping: ${args.slice(0, 200)}` } })
+    compacted = { tokens: 18000, at: Date.now() }
+    said = 'Compacted. ctrl+o to see full summary'
+    state = 'idle'
+    draw()
+  }, Number(how.ms) || 1500)
+}
 
 const secs = Number((/\[work (\d+)\]/.exec(message) || [])[1] || 2)
 const file = (/\[file ([\w.-]+)\]/.exec(message) || [])[1] || 'result.md'
@@ -592,10 +641,12 @@ function answerTurn(text) {
       } else out.push('I couldn\'t read the file.')
     }
     const remember = [...q.matchAll(/\[remember ([^\]]+)\]/g)].map((m) => `REMEMBER: ${m[1]}`).concat([...q.matchAll(/\[remember-me ([^\]]+)\]/g)].map((m) => `REMEMBER about ${(/----- question from (.*?) -----/.exec(text) || [])[1] || 'them'}: ${m[1]}`))
+    // (What some words meant, as its brief asks it to say: POINTER: <words> => <path>.)
+    const pointing = [...q.matchAll(/\[pointer ([^\]=]+?) => ([^\]]+)\]/g)].map((m) => `POINTER: ${m[1].trim()} => ${m[2].trim()}`)
     const a = /\[answer ([^\]]+)\]/.exec(q)
     const long = /\[long\]/.test(q) ? `\n\n${Array.from({ length: 60 }, (_, i) => `Point ${i + 1}: the details of this part of the answer, said at some length.`).join('\n\n')}` : ''
     const hand = (/reply with HAND TO and that bot's name/.test(text) || /reply with HAND TO and that bot's name/.test(opening)) && /\[hand ([^\]]+)\]/.exec(q)
-    const answer = hand ? `HAND TO ${hand[1]}` : /\[noanswer\]/.test(q) ? 'NO ANSWER\nNothing in this folder says.' : /\[notforme\]/.test(q) ? 'NOT FOR ME' : [[...out, a ? a[1] : 'Here is what I found.', ...(sign ? [sign] : [])].join(' ') + long, ...files, ...remember, ...(attachLines.length ? [attachLines.join('\n')] : [])].join('\n\n')
+    const answer = hand ? `HAND TO ${hand[1]}` : /\[noanswer\]/.test(q) ? 'NO ANSWER\nNothing in this folder says.' : /\[notforme\]/.test(q) ? 'NOT FOR ME' : [[...out, a ? a[1] : 'Here is what I found.', ...(sign ? [sign] : [])].join(' ') + long, ...files, ...remember, ...pointing, ...(attachLines.length ? [attachLines.join('\n')] : [])].join('\n\n')
     said = answer
     reply(answer)
     state = 'idle'
@@ -639,6 +690,7 @@ const endCut = (t) => { for (let i = Math.max(0, t.length - 5); i < t.length; i+
 process.stdin.on('data', (d) => {
   let s = carry + String(d)
   carry = ''
+  const typedKeys = !s.includes('\x1b[200~') && !pasting && s.length <= 8
   if (state === 'trust') {
     for (const k of s.match(/\x1b\[[AB]|[\r\n]|\x1b|./g) || []) {
       if (k === '\x1b[B') pick = 1
@@ -678,15 +730,17 @@ process.stdin.on('data', (d) => {
       if (c === '\r' || c === '\n') {
         let text = box.trim()
         box = ''
+        if (shownBox) { shownBox = ''; draw() }
         if (!text) continue
+        if (/^\/compact(\s|$)/.test(text) && state === 'idle') { compact(text); continue }
         if (!message) note('chief-got.log', { session: id, text })
         // (A bot's session's next turn, or one pointed to in a file: answered as its brief was.)
         const next = /^Your next message is in (.+?\.md)\. Read it first/.exec(text)
         if (next) { try { if ([process.cwd(), ...added].some((d) => path.resolve(next[1]).startsWith(path.resolve(d) + path.sep))) text = fs.readFileSync(next[1], 'utf8') } catch { /* not there */ } }
         if (/----- question from/.test(text)) { note('turns.log', { session: id, cwd: process.cwd(), text }); answerTurn(text); continue }
         turn(text, message ? `Followed up: ${text.split('\n')[0]}` : 'Noted.', 1000, null)
-      } else if (c === '\x7f' || c === '\b') box = Array.from(box).slice(0, -1).join('')
-      else if (c >= ' ') box += c
+      } else if (c === '\x7f' || c === '\b') { box = Array.from(box).slice(0, -1).join(''); if (shownBox) { shownBox = box; draw() } }
+      else if (c >= ' ') { box += c; if (typedKeys && state === 'idle') { shownBox = box; draw() } }
     }
   }
 })

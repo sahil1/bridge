@@ -15,7 +15,7 @@ import { ttyHandler } from './tty.js'
 import { attachHandler } from './attach.js'
 import { makeGuard } from './guard.js'
 import { makeAuth } from './apiauth.js'
-import { localKey } from './apitoken.js'
+import { localKey, agentKeyOf } from './apitoken.js'
 import * as machinePages from './machinepages.js'
 import { makeRemote } from './remote.js'
 import { makeLetIn } from './letin.js'
@@ -58,7 +58,7 @@ import { makeMacro } from './macro.js'
 import * as slash from './commands.js'
 import * as mentions from './mentions.js'
 import { MEETING_KEYS } from '../shared/mentions.js'
-import { promptSafe, draftIn } from './promptsafe.js'
+import { promptSafe, draftIn, typeIn } from './promptsafe.js'
 import { rewindAndSend, codexRewindAndSend, undoReply, btwAnswer } from './rewind.js'
 import { makeNews } from './news.js'
 import { pickRuntime, fellBack } from './runtime/index.js'
@@ -164,6 +164,10 @@ import * as home from './home.js'
 import * as engagedJs from './engaged.js'
 import { blocking, isQuiet } from '../shared/focus.js'
 import { placeEn } from '../shared/places.js'
+import * as pointers from './pointers.js'
+import * as manual from './manual.js'
+import * as agentNote from './agentnote.js'
+import { makeTidy } from './compact.js'
 
 ensureDir(DATA)
 // Meetings, transcripts, settings and keys: for you only, not other people with an account on this
@@ -185,6 +189,25 @@ let TZ = cfg.location?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZ
 const CHIEF_DIR = expand(cfg.chief?.path) || prepareChief(cfg)
 // Its own task list (state/tasks.md): the Tasks panel and its `bridge task` commands.
 const chiefTasks = makeTasks(CHIEF_DIR, () => String(cfg.name || '').trim() || 'the user')
+// Bridge AI's manual (manual.js) and what you mean by "that" (pointers.js), for Chief of Staff (copies
+// in its folder, when it's Bridge AI's own), your agents (for-agents/ in the data folder, agentnote.js,
+// with the agents' key, which can only add and find pointers and search the manual) and your bots (in
+// their briefs, frontdesk.js).
+const CHIEF_OWN = cfg.chief?.path ? null : CHIEF_DIR
+pointers.configure(cfg, { chief: CHIEF_OWN, changed: () => { try { pushFleet() } catch { /* the server isn't up yet: nothing to tell */ } } })
+agentNote.configure({
+  chief: CHIEF_DIR, you: () => String(cfg.name || '').trim() || 'the user',
+  reach: () => ({ url: `http://127.0.0.1:${cfg.port || 7420}`, key: agentKeyOf(localKey()) }),
+  // (Each start: the copies as Bridge AI made them, whatever an agent did to them.)
+  refresh: () => { manual.writeCopies(CHIEF_OWN).catch(() => {}); pointers.files().catch(() => {}) },
+})
+pointers.useCli(agentNote.CLI)
+manual.writeCopies(CHIEF_OWN).catch(() => {})
+pointers.start().catch(() => {})
+agentNote.writeFiles()
+// Long sessions tidied while you're idle (compact.js, made once the bots' desk is): Chief of Staff's
+// threads, helpers and bots' sessions. What they do while it's under way isn't news, nor a turn.
+let tidy = null
 // Its threads: more chiefs in the same folder, each its own conversation (threads.js).
 const threads = makeThreads()
 // Main, the chief you get by default (requests from the Tasks panel and the ideas go to it).
@@ -205,6 +228,7 @@ const delegate = makeDelegate({
   setupOf: async (a) => (knows(a.kind) ? firstRun(a.kind, plainScreen(await rt.read(a.paneId, 60))) : null),
   press: (paneId, keys) => rt.keys(paneId, keys),
   labelOf: (k) => adapter(k).label || k,
+  paused: (paneId) => !!tidy?.busy(paneId),
 })
 // Bridge AI's own Claude Code settings for a bot's runs (agents.js keptFlags), there before any run
 // it starts again now finds them missing.
@@ -530,7 +554,9 @@ app.get('/api/agents/:pane/subagents', wrap(async (req) => {
   // The terminal's footer says which shells and monitors are still running, and shows subagents its logs don't.
   return listSubagents(a.sessionId ? locate('claude', a.sessionId, a.cwd) : null, () => rt.read(req.params.pane, 60).catch(() => ''))
 }))
-app.get('/api/agents/:pane/transcript', wrap(async (req) => transcript(await findAgent(req.params.pane))))
+// (With Bridge AI's own notes on it among its messages: tidied while you were idle, or why not, compact.js.)
+const withTidy = (t, a) => (tidy && a?.sessionId ? tidy.withNotes(t, a.sessionId) : t)
+app.get('/api/agents/:pane/transcript', wrap(async (req) => { const a = await findAgent(req.params.pane); return withTidy(transcript(a), a) }))
 app.get('/api/agents/:pane/transcript/earlier', wrap(async (req) => earlier(await findAgent(req.params.pane), Number(req.query.before), String(req.query.after || '') || null, Math.min(200, Number(req.query.want) || 60))))
 // One reply's own file changes as diffs, by the ids of its edit calls (Chat's "Changed 3 files").
 app.get('/api/agents/:pane/transcript/diffs', wrap(async (req) => replyDiffs(await findAgent(req.params.pane), String(req.query.calls || '').split(',').filter(Boolean))))
@@ -550,7 +576,7 @@ app.get('/api/agents/:pane/transcript/live', (req, res) => {
     try {
       const a = await findAgent(req.params.pane)
       if (!last && opened) touched(a.paneId, a)
-      const out = JSON.stringify(transcript(a))
+      const out = JSON.stringify(withTidy(transcript(a), a))
       if (out !== last) { res.write(`${last ? '' : 'id: 1\n'}data: ${out}\n\n`); last = out }
       const f = a.sessionId && caps(a.kind).chat ? locate(a.kind, a.sessionId, a.cwd) : null
       if (f !== file) {
@@ -2486,6 +2512,11 @@ app.post('/api/memory/merge', wrap((req) => meetMemory.merge(String(req.body?.in
 app.post('/api/memory/apart', wrap((req) => meetMemory.apart(String(req.body?.a || ''), String(req.body?.b || ''))))
 app.post('/api/memory/tidy', wrap((req) => ({ ...meetMemory.removeMany([].concat(req.body?.remove || []).slice(0, 2000)), ...meetMemory.keep([].concat(req.body?.keep || []).slice(0, 2000)) })))
 app.post('/api/memory/about', wrap((req) => memoryView.setAboutYou(req.body || {})))
+// Memory › Pointers: what you mean by "that" (pointers.js), for you on any of your devices, and what
+// Chief of Staff and your agents add and find (bin/bridge pointer). Bridge AI's manual, searched
+// (bin/bridge manual).
+pointers.routes(app, wrap)
+manual.routes(app, wrap)
 app.post('/api/memory/people/keep', wrap((req) => memoryView.keepPerson(String(req.body?.id || ''))))
 // Where notes are saved (Settings › Voice & Meetings), the example it shows, and meetings saved elsewhere.
 app.get('/api/meetings/saving', wrap(() => {
@@ -3938,6 +3969,8 @@ function applyConfig() {
   routines.scheduling(featureOn('routines'))
   weather = makeWeather(cfg)
   prepareChief(cfg)
+  pointers.files().catch(() => {}) // its copies, with your name as it is now
+  agentNote.writeFiles() // and where your agents start (agentnote.js)
   desk.sync() // the bots connected while their beta feature is on, and not while it's off
   memoryView.sync() // About you in Chief of Staff's folder, as About you is
   // The herdr session in view (the sidebar's session menu, Settings), at once.
@@ -4688,7 +4721,18 @@ const desk = makeFrontDesk({
   synced: () => hubs.sync(),
   // (A request to a bot that changes files, read by AI Assist's model before it starts: botwrite.js.)
   screenAsk: (system, prompt) => setupAsk(system, prompt),
+  // (A session being tidied while it's idle: its next turn waits for that, compact.js.)
+  tidy: { busy: (paneId) => !!tidy?.busy(paneId), settled: (paneId) => tidy?.settled(paneId) || Promise.resolve() },
 })
+tidy = makeTidy({
+  rt, fleet: fleetView, locate: (a) => locate(a.kind, a.sessionId, a.cwd),
+  onPane, typeIn: (paneId, text, agent) => typeIn(rt, paneId, text, agent), draftIn,
+  queued: (paneId) => (queue.all()[paneId] || []).length, sentAt: (paneId) => wentIn.get(paneId) || 0,
+  botOf: (a) => desk.sessionAt(a.paneId), recordBot: (bot, type, fields) => desk.sessionNote(bot, type, fields),
+  on: () => cfg.chief?.tidy !== false, changed: () => pushFleet(),
+})
+notify.quietWhile((paneId) => tidy.quiet(paneId))
+tidy.start()
 // Connections (connections.js): each one app on Slack, Discord or Teams, its connector running while a
 // bot on it listens (connhub.js); a shared one says which bot each question is for, with AI Assist's
 // model when nothing else does. Teams' listener has a port of its own for each connection (a bot's
