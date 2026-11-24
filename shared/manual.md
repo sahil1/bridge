@@ -662,6 +662,7 @@ Its Phone tab:
 - [From anywhere](#setting-relay): Settings › Devices & Access › Phone › From anywhere. Found by: relay phone cloudflare pair a device remote away.
 - [Tailscale](#setting-tailscale): Settings › Devices & Access › Phone › Tailscale. Found by: tailscale phone access vpn.
 - [Keep this computer awake while your phone can reach it](#setting-keep-awake): Settings › Devices & Access › Phone › Keep this computer awake while your phone can reach it. Found by: awake sleep lid.
+- [AI Providers](#setting-ai-providers): Settings › Devices & Access › Phone › AI Providers. Found by: ai providers consent allow allowed privacy anthropic openai google send sent phone permission take back revoke.
 
 Its Computers tab:
 
