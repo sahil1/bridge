@@ -42,7 +42,8 @@ export function serve(backend) {
       data = await backend.request({ method, path: pathOf(u), query: u.searchParams, body })
     } catch (e) {
       status = e.status || 400
-      data = { error: e.message }
+      // (With its code, and what came with it: the provider a refusal for your OK names.)
+      data = { error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}), ...(e.data && typeof e.data === 'object' ? e.data : {}) }
     }
     return new Response(JSON.stringify(data ?? {}), { status, headers: { 'Content-Type': 'application/json' } })
   }

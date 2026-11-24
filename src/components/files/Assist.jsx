@@ -14,6 +14,7 @@ import Icon from '../Icon.jsx'
 import { AssistHead } from '../AiAssist.jsx'
 import PermissionFix from '../PermissionFix.jsx'
 import { BASE, machineId } from '../../api.js'
+import { consentAsked, settleConsent } from '../../aiconsent.js'
 import { onComputer, REVEAL, fileOp } from '../FileExtras.jsx'
 import { fmtSize as sizeOf } from './fsapi.js'
 import { t, tx, locale } from '../../i18n/index.js'
@@ -22,10 +23,15 @@ import './assist.css'
 
 const enc = encodeURIComponent
 // The computer the folder is on: this one (or the one this window shows), or another through it.
-async function call(machine, p, { method = 'GET', body } = {}) {
+// From a phone, a look that would go to a model elsewhere not allowed yet: asked first (aiconsent.js).
+async function call(machine, p, { method = 'GET', body, asked = [] } = {}) {
   const base = machine && machine !== machineId ? `/m/${enc(machine)}` : BASE
   const res = await fetch(`${base}/api${p}`, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
   const data = await res.json().catch(() => ({}))
+  if (consentAsked(res.status, data, asked)) {
+    await settleConsent(`${base}/api${p}`, data)
+    return call(machine, p, { method, body, asked: [...asked, data.consent.provider.id] })
+  }
   if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), { status: res.status, code: data.code || null, trial: data.trial || null })
   return data
 }

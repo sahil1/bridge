@@ -64,6 +64,8 @@ export const SETTINGS = {
   'meeting-insights': ['meetings', 'Meeting Insights'],
   tidy: ['dictation', 'Tidy what I say'],
   'enter-key': ['you', 'Enter Key'],
+  // The AI providers a phone may send to (aiconsent.js).
+  'ai-providers': ['phone', 'AI Providers'],
 }
 
 // Places outside Settings a message names, as names from the top: Bots' tabs (the sidebar's Bots,

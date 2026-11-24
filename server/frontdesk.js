@@ -4539,6 +4539,10 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
   }
 
   return {
+    // Who a bot's next answer would go to: the first in its list that can answer now ({ kind:
+    // 'agent', agent } or { kind: 'model', model }), or null. For the OK a phone asks first
+    // (index.js, aiconsent.js).
+    async firstAnswerer(bot) { return (await answerersOf(bot)).list.find((x) => !x.why) || null },
     // A bot's live session in a pane, for tidying it while it's idle (compact.js): which bot and session,
     // whether a turn of it is under way, and when it last had one. null for any other pane.
     sessionAt(paneId) {

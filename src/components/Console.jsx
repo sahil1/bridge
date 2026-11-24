@@ -810,7 +810,9 @@ function AgentConsole({ agent, variant = 'focus', simple = false, controls = {},
       // Your computer's answer, for what says how it went (Ask out loud: queued or asked).
       return r || true
     } catch (e) {
-      setFlash(e.message === 'agent_blocked' || /blocked/.test(e.message) ? t('Agent is waiting on an answer; use the keys first') : e.message)
+      // Not Now on the sheet asking for your OK for its provider: the sheet's own line says nothing
+      // was sent (AiConsent.jsx), and the message stays in the box.
+      if (e.code !== 'consentDeclined') setFlash(e.message === 'agent_blocked' || /blocked/.test(e.message) ? t('Agent is waiting on an answer; use the keys first') : e.message)
       return false
     }
   }

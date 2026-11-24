@@ -259,8 +259,13 @@ try {
     ok(dl?.suggestedFilename() === 'Harbor-Desk.bridge-bot.json' && bundle?.name === 'Harbor Desk' && !leaked(body).length, 'Export: the bot\'s file downloaded to the phone, with no token in it', { name: dl?.suggestedFilename(), bot: bundle?.name, leaked: leaked(body) })
     ok(/Downloading Harbor-Desk\.bridge-bot\.json to this device\./.test(await sec('slack-export').innerText()), 'and says so', await sec('slack-export').innerText())
 
-    // A test session: its session, opened on the phone, answered on Desk.
+    // A test session: its session, opened on the phone, answered on Desk. From a phone, its answerer's
+    // provider is asked about first (the sheet, AiConsent.jsx), and allowed here as you would.
+    const sheet = f.locator('.aic-sheet')
+    const allowing = until(async () => { if (!(await sheet.count())) return false; const said = await sheet.innerText(); await sheet.locator('button', { hasText: 'Allow' }).click(); return said }, 25000, 150)
     const tried = await askOnce(f, 'What do seats cost? [answer Seats are $40 a month.]')
+    const asked = await allowing
+    ok(/Send this to /.test(asked || ''), 'a test session on the phone: its answerer\'s provider is asked about first, and allowed', asked)
     const draft = await until(async () => { const x = await answerIn(tried); return /\$40 a month/.test(x) && x }, 40000)
     ok(!!draft, 'a test session on the phone: its answer, from Desk', draft || await tried.innerText().catch(() => ''))
     // (Back to its page from the session: its bot, over the Thread.)
@@ -348,8 +353,14 @@ try {
     ok(zip.status === 200, 'its Teams app, downloaded through the link', zip.status)
     r = await ask('POST', `/bots/${id}/settings`, { owners: { discord: { id: 'discord:2004', name: 'Tester' }, teams: { id: 'teams:aad-tester-0004', name: 'Tester' } } })
     ok(okay(r) && r.json.settings.owners?.discord?.id === 'discord:2004' && r.json.settings.owners?.teams?.id === 'teams:aad-tester-0004', 'You in Discord and You in Teams, from the phone', r.json?.settings?.owners)
-    // Try It, its memory.
+    // Try It, its memory. From a phone, the bot's answerer's provider is asked about first
+    // (server/aiconsent.js): refused until it's allowed, then allowed here as the sheet's Allow does.
     r = await ask('POST', `/bots/${id}/try`, { text: 'Is the launch on? [answer Yes, on the 3rd.]' })
+    if (r.status === 409 && r.json?.code === 'consent') {
+      ok(!!r.json.consent?.provider?.name, `Try It, from the phone: ${r.json.consent?.provider?.name} is asked about first`, r.json)
+      await ask('POST', '/ai-consent', { provider: r.json.consent.provider, feature: r.json.consent.feature })
+      r = await ask('POST', `/bots/${id}/try`, { text: 'Is the launch on? [answer Yes, on the 3rd.]' })
+    }
     const answered = r.json?.q && await until(async () => { const x = (await ask('GET', `/bots/${id}/try/${encodeURIComponent(r.json.q)}`)).json; return x?.item?.draft && x }, 40000)
     ok(okay(r) && /on the 3rd/.test(answered?.item?.draft || ''), 'Try It, from the phone: answered', answered?.item || r.json)
     r = await ask('POST', `/bots/${id}/memory`, { kind: 'bot', text: 'Prices are in euros' })

@@ -8,10 +8,14 @@ import { ADAPTERS } from '../../shared/cloud/index.js'
 import { follow } from '../../shared/cloud/follow.js'
 import { cloudApi, NOT_CLOUD } from '../standalone/cloud.js'
 import { call, appFetch, standIn } from './native.js'
+import { pageConsent, pageGate, NOT_CONSENT } from '../standalone/consent.js'
+import { ofAgent, ofModel, ofCloud } from '../../shared/aiproviders.js'
 
 const fail = (msg, status = 400) => { throw Object.assign(new Error(msg), { status }) }
 const PLACE = { keys: 'on this phone', settings: 'Settings › Cloud Agents' }
 const PROVIDERS = Object.keys(ADAPTERS)
+// Each cloud agent's provider by the company that gets your task (shared/aiproviders.js ofCloud).
+const CLOUD_OF = { anthropic: 'claude', github: 'copilot', google: 'jules', cursor: 'cursor' }
 
 // What's kept for one provider: its agents (without what's only for now) and what its adapter remembers.
 const LOCAL = ['readAt']
@@ -139,6 +143,21 @@ export function createPhone({ check = false } = {}) {
   }
   const cloudReq = cloudApi(cloud, { keys, mute: (t, on) => { t.muted = on; save(); changed(); return { ok: true, muted: on } } })
 
+  // Your OK before a task goes to a provider, straight from this phone (src/standalone/consent.js):
+  // asked once for each, and kept with what's kept for that provider here (its memo, in the app's
+  // own storage, out of backups), so removing its key forgets it too.
+  const consentOf = (id) => (CLOUD_OF[id] ? `${CLOUD_OF[id]}:consent` : null)
+  const consent = pageConsent({
+    kept: {
+      get: (id) => (consentOf(id) && memo[consentOf(id)]) || null,
+      set: (id, v) => { if (consentOf(id)) { memo[consentOf(id)] = v; save() } },
+      del: (id) => { if (consentOf(id)) { delete memo[consentOf(id)]; save() } },
+      all: () => Object.keys(CLOUD_OF).map((id) => [id, memo[consentOf(id)]]).filter(([, v]) => v),
+    },
+    device: 'this phone',
+  })
+  const aiGoes = pageGate({ agentOf: () => null, assist: null, ofAgent, ofModel, ofCloud })
+
   // ---------- The rest of the app ----------
   function fleet() {
     const rank = { blocked: 0, done: 1, working: 2, idle: 3 }
@@ -173,6 +192,10 @@ export function createPhone({ check = false } = {}) {
   async function request({ method, path, query, body }) {
     await ready
     const route = path.replace(/\/$/, '') || '/'
+    const said = consent.route(method, route, body)
+    if (said !== NOT_CONSENT) return said
+    const goes = aiGoes(method, route, body)
+    if (goes) consent.check(goes.provider, goes.feature)
     const out = await cloudReq(method, route, query, body)
     if (out !== NOT_CLOUD) return out
     if (method === 'GET' && route === '/search') { const results = cloud.search(query.get('q')); return { results, total: results.length } }

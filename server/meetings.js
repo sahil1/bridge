@@ -2417,6 +2417,15 @@ async function choose(m, model, job, text, o = {}) {
   const r = await helpers.pickFor(job, { text, ...o })
   return { id: r.id, anywhere: !r.kept, auto: r, own, passed: r.passed || [], job }
 }
+// The model a meeting's job would go to now (body: the one asked for), for a phone's request whose
+// work runs after it's answered: index.js asks for your OK for its provider up front (aiconsent.js).
+// id null: a job not tied to one meeting. null when there's none to write with.
+export async function modelFor(id, job, model = null) {
+  let m = null
+  try { m = id ? meta(id) : null } catch { /* gone */ }
+  const text = m && job === 'notes' ? `${transcriptText(id)}\n${readText(path.join(dirOf(id), 'notes.md'))}` : null
+  return (await choose(m, model, job, text).catch(() => null))?.id || null
+}
 // What replyAny goes on with from a pick.
 const how = (pick) => ({ anywhere: !!pick?.anywhere, own: pick?.own || null, passed: pick?.passed || [], job: pick?.job || null, picked: pick?.id || null })
 
@@ -2441,7 +2450,7 @@ async function replyAny(use, msgs, { anywhere = false, own = null, passed = [], 
       try { const r = await helpers.reply(id, msgs, { ...o, ...more }); return { ...r, model: r.retired?.instead || id } } catch (e) {
         // A model on this computer that ran out of time was working, not cut off: no second go.
         // At its usage limit (on every account it has): not something a few seconds fix.
-        if (i >= 2 || !passing(e) || e.code === 'too_long' || e.code === 'limit' || (isLocal(id) && /Timeout|Abort/.test(e.name))) throw e
+        if (i >= 2 || !passing(e) || e.code === 'too_long' || e.code === 'limit' || e.code === 'consent' || (isLocal(id) && /Timeout|Abort/.test(e.name))) throw e
         await new Promise((r) => setTimeout(r, RETRY_MS * (i + 1)))
       }
     }
@@ -2452,6 +2461,8 @@ async function replyAny(use, msgs, { anywhere = false, own = null, passed = [], 
     const failed = modelList.failed(use, first)
     const rest = modelList.after(own, use)
     if (first.code === 'too_long' && (rest || !(anywhere && isLocal(use)))) { ran({ passed: [...before, failed], error: failed.why }); throw first }
+    // A phone's request that needs your OK for this model's provider first: asked, not tried around.
+    if (first.code === 'consent') throw first
     const all = (await helpers.models?.().catch(() => [])) || []
     const others = rest || all.filter((id) => id !== use && (anywhere || !isLocal(use) || isLocal(id))).slice(0, 3)
     try {
@@ -2547,7 +2558,7 @@ async function jsonReply(use, msgs, o, { schema, check, schemaFirst = false }) {
   const r = await replyAny(use, msgs, first ? { ...o, json: schema } : o)
   const v = parsed(r.text, check)
   if (v) return { ...r, value: v }
-  const again = await replyAny(r.model, msgs, first ? o : { ...o, json: schema }).catch((e) => { if (e.code === 'too_long') throw e; return null })
+  const again = await replyAny(r.model, msgs, first ? o : { ...o, json: schema }).catch((e) => { if (e.code === 'too_long' || e.code === 'consent') throw e; return null })
   const w = again && parsed(again.text, check)
   return w ? { ...again, value: w } : { ...r, value: null }
 }

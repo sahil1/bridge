@@ -225,6 +225,8 @@ export function suggest(raw, { again = false } = {}) {
       if (!v) entry.error = `${entry.label} answered, but not in a form Bridge AI can read. Try again.`
       else if (!entry.items.length) entry.error = `${entry.label} found nothing to suggest from what there is.`
     } catch (x) {
+      // A phone's request that needs your OK for the model's provider first: asked there, not kept.
+      if (x.code === 'consent') throw x
       entry.error = x.message || String(x)
     }
     keep(key, entry)

@@ -134,6 +134,7 @@ export const SETTINGS = [
     ['relay', tx('From anywhere'), 'relay phone cloudflare pair a device remote away'],
     ['tailscale', tx('Tailscale'), 'tailscale phone access vpn'],
     ['keep-awake', tx('Keep this computer awake while your phone can reach it'), 'awake sleep lid', { near: 'relay' }],
+    ['ai-providers', tx('AI Providers'), 'ai providers consent allow allowed privacy anthropic openai google send sent phone permission take back revoke'],
   ]),
   ...at('machines', [
     ['machines', tx('Your Devices'), 'devices computers other computers'],

@@ -156,7 +156,7 @@ export async function draft(root, { base, route = null, reply = null } = {}) {
   let here = null
   let own = null
   if (route) {
-    try { here = await route(prompt) } catch (e) { return { ...plain, note: `${e.message} So this is from your commits.` } }
+    try { here = await route(prompt) } catch (e) { if (e.code === 'consent') throw e; return { ...plain, note: `${e.message} So this is from your commits.` } }
     if (here?.picked && here.id && reply) own = here
     else if (here?.where === 'local' && here.id) pick = ['local', here.id]
     else here = null
@@ -172,6 +172,8 @@ export async function draft(root, { base, route = null, reply = null } = {}) {
     if (!title) throw new Error('it came back empty')
     return { ...plain, title, body: uncredit(lines.join('\n').replace(/^\s*(description|body):\s*/i, '')), via: own && a.model && a.model !== own.id ? a.model : label }
   } catch (e) {
+    // From a phone, the model's provider not yet allowed there: asked, not written around (aiconsent.js).
+    if (e.code === 'consent') throw e
     return { ...plain, note: `${label} couldn't write it (${e.message.slice(0, 120)}), so this is from your commits` }
   }
 }
