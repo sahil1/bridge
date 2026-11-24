@@ -8,6 +8,7 @@ import { useTrial } from '../trials.js'
 import { viewScreen, canReach } from './remote/remote.js'
 import { useControl } from './remote/Settings.jsx'
 import { canScan, scan } from '../scan.js'
+import { whyNot } from './machineWhy.js'
 
 // Your other devices (server/machines.js): Macs, Windows and Linux computers running Bridge AI,
 // linked to this one. The top bar's machine menu switches the window to one (its own Bridge AI,
@@ -195,9 +196,10 @@ export function MachineMenu({ phone = false, elsewhere = null }) {
   }
   const go = (m) => { const c = pairedTo(m); if (c && m.id !== machineId) { setOpen(false); setGoing(m.name); relayComputers.open(c.relay) } else pick(m.id) }
   // screen: its View screen (a linked computer's, and on a phone the one it's connected to).
-  const row = (key, name, sub, on, here, onClick, id, screen = !!id && canReach(id)) => (
+  // tip: why it isn't reachable, in full (a linked computer's error).
+  const row = (key, name, sub, on, here, onClick, id, screen = !!id && canReach(id), tip = null) => (
     <div key={key} className={`mc-row ${here ? 'on' : ''}`}>
-      <button type="button" role="menuitem" className="mc-item" onClick={onClick}>
+      <button type="button" role="menuitem" className="mc-item" onClick={onClick} title={tip || undefined}>
         <span className={`mc-dot ${on === true ? 'on' : on == null ? 'unknown' : ''}`} />
         <span className="mc-text"><b>{name}</b><small>{sub}</small></span>
         {here && <Icon name="check" size={13} />}
@@ -219,7 +221,7 @@ export function MachineMenu({ phone = false, elsewhere = null }) {
         <div className={`menu left mc-menu ${phone ? 'phone' : ''}`} role="menu" aria-label={t('Your Devices')}>
           <div className="mc-head">{t('Your Devices')}</div>
           {row('here', data.here.name, `${OS_LABEL[data.here.os] || ''}${machineId ? '' : ` · ${t('this one')}`}`, true, !machineId, () => pick(null), null, viaRelay && !machineId)}
-          {linked.map((m) => row(m.id, m.name, [OS_LABEL[m.os], m.notLetIn ? t('Not let in') : m.online ? counts(m.counts) || t('Online') : m.lastSeen ? t('Offline, seen {when}', { when: ago(m.lastSeen) }) : t('Offline')].filter(Boolean).join(' · '), m.online, m.id === machineId, () => go(m), m.id))}
+          {linked.map((m) => row(m.id, m.name, [OS_LABEL[m.os], m.notLetIn ? t('Not let in') : m.online ? counts(m.counts) || t('Online') : whyNot(m) || (m.lastSeen ? t('Offline, seen {when}', { when: ago(m.lastSeen) }) : t('Offline'))].filter(Boolean).join(' · '), m.online, m.id === machineId, () => go(m), m.id, undefined, m.online ? null : m.error))}
           {paired.filter((c) => !linked.some((m) => bare(m.relay) === bare(c.relay))).map((c) => row(c.relay, c.name, t('Paired on this phone'), null, false, close(() => relayComputers.open(c.relay))))}
           <div className="menu-sep" />
           <button type="button" role="menuitem" className="menu-item" onClick={close(openMap)}>
@@ -291,10 +293,10 @@ export function RailMachines() {
         return (
           <div key={m.id || 'here'} className={`rmc ${m.online ? '' : 'off'}`}>
             <div className="rmc-top">
-              <button type="button" className="rmc-head" onClick={() => goMachine(m.id)} title={m.online ? t('Show {name}', { name: m.name }) : t('{name} is offline', { name: m.name })}>
+              <button type="button" className="rmc-head" onClick={() => goMachine(m.id)} title={m.online ? t('Show {name}', { name: m.name }) : m.error || t('{name} is offline', { name: m.name })}>
                 <span className={`mc-dot ${m.online ? 'on' : ''}`} />
                 <span className="rmc-name">{m.name}</span>
-                <span className="rmc-sub muted">{m.online ? counts(m.counts) || (total ? (total === 1 ? t('{n} agent', { n: total }) : t('{n} agents', { n: total })) : t('No agents')) : t('Offline')}</span>
+                <span className="rmc-sub muted">{m.online ? counts(m.counts) || (total ? (total === 1 ? t('{n} agent', { n: total }) : t('{n} agents', { n: total })) : t('No agents')) : whyNot(m) || t('Offline')}</span>
               </button>
               {m.online && <button type="button" className="rmc-win" onClick={() => goMachine(m.id, { own: true })} aria-label={t('Open {name} in a window of its own', { name: m.name })} title={t('Open {name} in a window of its own, beside this one', { name: m.name })}><Icon name="popout" size={12} /></button>}
             </div>
@@ -609,7 +611,7 @@ export function MachinesSettings({ embedded = false, focus = false }) {
                 <b>{m.name}</b>
                 <small className="muted">
                   {[OS_LABEL[m.os], m.version && `Bridge AI ${m.version}`,
-                    m.state === 'linked' ? (m.online ? counts(m.counts) || t('Online') : m.lastSeen ? t('Offline, seen {when}', { when: ago(m.lastSeen) }) : t('Offline'))
+                    m.state === 'linked' ? (m.online ? counts(m.counts) || t('Online') : whyNot(m) || (m.lastSeen ? t('Offline, seen {when}', { when: ago(m.lastSeen) }) : t('Offline')))
                       : m.state === 'asking' ? t('Waiting for you to allow it there')
                         : m.state === 'denied' ? t('Turned down there')
                           : m.state === 'removed' ? t('It unlinked this device') : m.state === 'changed' ? t('Its key changed') : m.state === 'expired' ? t('The ask expired') : t('Linking…')].filter(Boolean).join(' · ')}
@@ -617,6 +619,7 @@ export function MachinesSettings({ embedded = false, focus = false }) {
                 {m.state === 'asking' && m.code && <small>{tn('On {name}, allow it if it shows {code}.', { name: m.name, code: <b className="ask-code">{m.code}</b> })}</small>}
                 {m.error && m.state === 'linked' && !m.online && !fixes[m.id] && <small className="muted" title={m.unreachable?.detail || undefined}>{m.unreachable ? t("Can't reach {host}, the relay {name} uses. Check its address, this computer's network, or that the relay is up.", { host: m.unreachable.host, name: m.name }) : m.error}</small>}
                 {m.notLetIn && m.state === 'linked' && m.online && <small className="muted"><Icon name="lock" size={11} /> {t('{name} hasn\'t let {here} in. On {name}: {place}.', { place: where('remote-devices'), name: m.name, here: data.here.name })}</small>}
+                {m.reach && m.state === 'linked' && m.online && <small className="muted mch-reach"><Icon name="alert" size={11} /> {t("{name} can't reach {here}, though {here} reaches it. {name} says: {why} On {name}, Fix next to {here} tries each step again.", { name: m.name, here: data.here.name, why: m.reach.error })}</small>}
                 {m.state === 'changed' && <small className="muted">{t('{name} doesn\'t have the key it was linked with: it was set up again, or something is in between. On {name}, choose Pair a device and paste its link in Link a device below, to check it\'s really {name}.', { name: m.name })}</small>}
                 {m.state === 'removed' && <small className="muted">{t('{name} forgot this device. Link again asks it; allow it there after checking both show the same six digits.', { name: m.name })}</small>}
                 {newOf(m) && <small className="muted">{t('Linked with this device\'s code. Keep it if it\'s yours, and it meets your other computers too.')}</small>}

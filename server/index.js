@@ -3585,7 +3585,7 @@ app.get('/api/agent-map', wrap(async (req) => {
   const f = await fleetView()
   const here = { id: null, name: relay.thisName(), os: machines.OS, version: VERSION, runtime: rt.name, here: true, online: true, at: new Date().toISOString(), agents: f.down ? [] : await runs.agents(f, { cloudSaid: cloud.previews() }) }
   const linked = machines.list({ for: req.headers['x-bridge-relay'] || null }).filter((m) => m.state === 'linked')
-    .map((m) => ({ id: m.id, name: m.name, os: m.os, version: m.version, runtime: m.about?.runtime || null, online: !!m.online, lastSeen: m.lastSeen, at: m.at, agents: Array.isArray(m.agents) ? m.agents : [], ...(m.notLetIn ? { notLetIn: true } : {}) }))
+    .map((m) => ({ id: m.id, name: m.name, os: m.os, version: m.version, runtime: m.about?.runtime || null, online: !!m.online, lastSeen: m.lastSeen, at: m.at, agents: Array.isArray(m.agents) ? m.agents : [], ...(m.notLetIn ? { notLetIn: true } : {}), ...(!m.online && m.why ? { why: m.why, error: m.error } : {}) }))
   return { devices: [here, ...linked] }
 }))
 

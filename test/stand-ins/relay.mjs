@@ -20,6 +20,9 @@
 //                        hears it end, even when the computer gives up on it), and it can't connect
 //                        again until POST /_test/back. Then, as a real network does, a connection the
 //                        computer still has carries on, and one it closed meanwhile is heard closing
+//   POST /_test/hush     each phone and device connected now is told the computer isn't there, though
+//                        it is (a relay that got it wrong, or its word that the computer came back
+//                        that never arrived): their connections stay open, and nothing else is said
 //   POST /_test/tamper?name=…&kind=…&relay=…   a relay that rewrites what a hello says in the clear
 //                        (a phone's or a device's, every one from now on)
 //   POST /_test/forge?as=refuse&why=not-paired   a relay that answers every hello itself, in the
@@ -174,6 +177,7 @@ const server = http.createServer(async (req, res) => {
         if (was !== 3 || sockets.has(w)) hub.webSocketClose(w, w.closedAs).catch(() => {}).finally(() => sockets.delete(w))
       }
     }
+    else if (what === 'hush') for (const w of ctx.getWebSockets('phone')) try { w.send(JSON.stringify({ host: false, seen: Date.now() })) } catch { /* gone */ }
     else if (what.startsWith('tamper')) tamper = Object.fromEntries(new URL(req.url, 'http://x').searchParams)
     else if (what.startsWith('forge')) { const q = new URL(req.url, 'http://x').searchParams; forge = { as: q.get('as') || 'refuse', why: q.get('why') || 'not-paired' } }
     else if (what === 'honest') { tamper = null; forge = null }
