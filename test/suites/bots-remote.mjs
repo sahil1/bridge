@@ -348,8 +348,14 @@ try {
     ok(zip.status === 200, 'its Teams app, downloaded through the link', zip.status)
     r = await ask('POST', `/bots/${id}/settings`, { owners: { discord: { id: 'discord:2004', name: 'Tester' }, teams: { id: 'teams:aad-tester-0004', name: 'Tester' } } })
     ok(okay(r) && r.json.settings.owners?.discord?.id === 'discord:2004' && r.json.settings.owners?.teams?.id === 'teams:aad-tester-0004', 'You in Discord and You in Teams, from the phone', r.json?.settings?.owners)
-    // Try It, its memory.
+    // Try It, its memory. From a phone, the bot's answerer's provider is asked about first
+    // (server/aiconsent.js): refused until it's allowed, then allowed here as the sheet's Allow does.
     r = await ask('POST', `/bots/${id}/try`, { text: 'Is the launch on? [answer Yes, on the 3rd.]' })
+    if (r.status === 409 && r.json?.code === 'consent') {
+      ok(!!r.json.consent?.provider?.name, `Try It, from the phone: ${r.json.consent?.provider?.name} is asked about first`, r.json)
+      await ask('POST', '/ai-consent', { provider: r.json.consent.provider, feature: r.json.consent.feature })
+      r = await ask('POST', `/bots/${id}/try`, { text: 'Is the launch on? [answer Yes, on the 3rd.]' })
+    }
     const answered = r.json?.q && await until(async () => { const x = (await ask('GET', `/bots/${id}/try/${encodeURIComponent(r.json.q)}`)).json; return x?.item?.draft && x }, 40000)
     ok(okay(r) && /on the 3rd/.test(answered?.item?.draft || ''), 'Try It, from the phone: answered', answered?.item || r.json)
     r = await ask('POST', `/bots/${id}/memory`, { kind: 'bot', text: 'Prices are in euros' })
