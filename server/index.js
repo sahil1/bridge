@@ -83,6 +83,7 @@ import * as llm from './llm.js'
 import * as modelJobs from './modeljobs.js'
 import * as modelList from './modellist.js'
 import * as meetings from './meetings.js'
+import * as meetFiles from './meetfiles.js'
 import * as meetVideo from './meetvideo.js'
 import * as boards from './boards.js'
 import * as meetBoard from './meetboard.js'
@@ -1963,12 +1964,8 @@ async function openSetupTab(label, command, done, hours = 1) {
 }
 const setupTab = async (label, command, done) => (await openSetupTab(label, command, done)).openId
 // One-time setup, the first time you use the mic: the speech model's download (progress in
-// /api/voice), and for a Whisper model whisper.cpp too, in a terminal tab you can watch.
-app.post('/api/voice/setup', wrap(async () => {
-  const s = await voice.setup()
-  const openId = s.install ? await setupTab('Install whisper.cpp', s.install) : null
-  return { ...s, openId }
-}))
+// /api/voice).
+app.post('/api/voice/setup', wrap(() => voice.setup()))
 // ---------- What macOS asks you to allow (fixes.js) ----------
 // device: this computer's name, for "Allow it on <name>" when it's shown on another device or a phone.
 app.get('/api/fix', wrap(async () => ({ ...(await fixes.status()), device: relay.thisName() })))
@@ -2116,6 +2113,9 @@ sights.configure(cfg)
 // Used once, Who spoke in a room turns telling voices apart on for the meetings after.
 voices.setSaver(async (p) => afterChange(settings.patch({ meetings: p })))
 meetings.recover()
+// Files being transcribed when Bridge AI closed: again from their start (meetfiles.js).
+meetFiles.configure(cfg)
+meetFiles.recover()
 if (cfg.setupDone) projects.upgrading()
 // The model notes are written with when you haven't picked one: your Claude sign-in first (no key
 // needed), then another sign-in, a key, your cloud, a model on this computer (your own Ollama's or
@@ -2257,16 +2257,12 @@ meetings.setHelpers({
 // A meeting's action items as agents and Chief of Staff's tasks (meetwork.js).
 meetWork.configure(cfg)
 meetWork.setHelpers({ fleet: () => (lastFleet ? Promise.resolve(lastFleet) : fleetView()), projects: () => projects.list(), tasks: () => chiefTasks.list(), pr: (dir, branch) => pr.status(dir, { branch }), tree: (folder) => worktrees.describe(folder), kindLabel: (k) => adapter(k).label || k, launch: (body) => launchFrom(body) })
-// Speech engines (speech.js): what Settings › Voice & Meetings shows, models to download, whisper.cpp to install.
+// Speech engines (speech.js): what Settings › Voice & Meetings shows, and models to download.
 app.get('/api/speech', wrap(async () => ({ ...(await speech.status(cfg)), callAudio: cfg.meetings?.callAudio !== false, canRecordCall: !!meetings.tapBin(), canWatchCalls: !!calls.watchBin(), folder: meetings.folder(), voices: await voices.status() })))
 app.post('/api/speech/models/:id', wrap(async (req) => { speech.fetchModel(req.params.id); return speech.status(cfg) }))
 app.delete('/api/speech/models/:id', wrap(async (req) => { await speech.removeModel(req.params.id); return speech.status(cfg) }))
-app.post('/api/speech/install', wrap(async (req) => {
-  onComputer(req)
-  const s = await speech.status(cfg)
-  if (!s.local.installCommand) throw new Error(s.local.program ? 'whisper.cpp is already installed' : `Install Homebrew first (brew.sh), or pick a service in ${placeEn('meetings')}`)
-  return { openId: await setupTab('Install whisper.cpp', s.local.installCommand) }
-}))
+// What earlier versions downloaded for whisper.cpp, which nothing uses now: removed when you say.
+app.delete('/api/speech/earlier', wrap(async () => { await speech.removeEarlier(); return speech.status(cfg) }))
 // The list without each meeting's pictures and files (counts only): they can be long.
 app.get('/api/meetings', wrap(() => {
   const list = meetings.list()
@@ -2330,6 +2326,19 @@ app.post('/api/meetings/bulk', wrap(async (req) => {
 app.get('/api/meetings/voices', wrap(() => voices.status()))
 app.post('/api/meetings/voices/forget', wrap(() => voices.forget()))
 app.post('/api/meetings/voices/download', wrap(async () => { if (!(await voices.status()).offered) throw new Error((await voices.status()).why || 'Telling voices apart can\'t run on this computer'); speech.fetchModel(speech.VOICE.id); return voices.status() }))
+// Transcribe a file or a folder (meetfiles.js): the files' lines (from a phone too), files added
+// with how to transcribe them, each one's pieces as they come and that it's all there, its sound
+// sent again when this computer can't read its kind (read-here), and a line stopped or put away.
+const wrapFiles = (fn) => async (req, res) => {
+  try { res.json(await fn(req, res)) } catch (e) { res.status(e.status >= 400 && e.status < 600 ? e.status : 502).json({ error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}), ...(e.have != null ? { have: e.have } : {}) }) }
+}
+app.get('/api/meetings/files', wrapFiles(() => meetFiles.list()))
+app.post('/api/meetings/files', wrapFiles((req) => meetFiles.add({ files: req.body?.files, with: req.body?.with || {}, by: req.body?.by === 'app' && fromHere(req) ? 'app' : 'page' })))
+app.put('/api/meetings/files/:id', express.raw({ type: () => true, limit: meetFiles.PIECE + 1024 * 1024 }), wrapFiles((req) => meetFiles.piece(req.params.id, Number(req.query.at), Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0), req.headers['x-sha256'] || null)))
+app.post('/api/meetings/files/:id/done', wrapFiles(async (req) => { const x = await meetFiles.done(req.params.id); if (x.state === 'queued') counts.add('meetings.filesTranscribed'); return x }))
+app.post('/api/meetings/files/:id/again', wrapFiles((req) => meetFiles.again(req.params.id, { size: req.body?.size, failed: ['decode', 'big'].includes(req.body?.failed) ? req.body.failed : null })))
+app.delete('/api/meetings/files/:id', wrapFiles((req) => meetFiles.drop(req.params.id)))
+app.post('/api/meetings/files/clear', wrapFiles(() => meetFiles.clear()))
 // Meeting Insights and the people you meet (meetinsights.js; meetings.insights): your meetings added
 // up by week and kind, and everyone you've met, with merging and splitting people by hand.
 meetInsights.configure(cfg)
@@ -2675,6 +2684,16 @@ app.get('/api/meetings/:id/export/:format', (req, res) => {
     res.download(file, path.basename(file), { dotfiles: 'allow' })
   } catch (e) { res.status(404).json({ error: e.message }) }
 })
+// The transcript as text, Markdown or subtitles (txt, md, srt, vtt): to this device (a phone, a
+// browser elsewhere), or saved on this computer beside the meeting's note.
+app.get('/api/meetings/:id/transcript/:format', (req, res) => {
+  try {
+    const r = meetings.transcriptFile(req.params.id, req.params.format)
+    res.set({ 'Content-Type': r.type, 'Content-Disposition': `attachment; filename="${r.name.replace(/[^\x20-\x7e]|["\\]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(r.name)}`, 'Content-Security-Policy': "default-src 'none'; sandbox", 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store' })
+    res.send(r.text)
+  } catch (e) { res.status(404).json({ error: e.message }) }
+})
+app.post('/api/meetings/:id/transcript/:format', wrap((req) => meetings.saveTranscriptFile(req.params.id, req.params.format)))
 app.post('/api/meetings/:id/retry', wrap((req) => meetings.retry(req.params.id)))
 // What was on the screen: pictures taken while it records, or pasted into your notes.
 app.post('/api/meetings/:id/captures', express.raw({ type: () => true, limit: '16mb' }), wrap((req) => meetings.addCapture(req.params.id, req.body, { kind: String(req.query.kind || 'screen'), t: req.query.t, note: req.query.note, source: req.query.source })))
@@ -4020,8 +4039,8 @@ app.post('/api/setup/install/:kind', wrap(async (req) => {
 // What's left to set up on this computer, each with whether it's done: Node.js (for the agents that
 // come through npm), on a Mac without them Apple's command line developer tools (so git runs
 // without macOS stopping to ask), Homebrew and what it brings (icalBuddy for the calendar where
-// Bridge AI has no calendar helper of its own, and whisper.cpp when a Whisper model is picked), the
-// speech model, and what macOS asks you to allow (your calendars, Mail). Run: Node.js first, as
+// Bridge AI has no calendar helper of its own), the speech model, and what macOS asks you to allow
+// (your calendars, Mail). Run: Node.js first, as
 // installing an agent waits for it; then the speech model's download here, and the programs in one
 // terminal tab you can watch (scripts/setup-mac.sh: your Mac's password once, at its start, when
 // the developer tools or Homebrew need it); what macOS asks about is left for you to allow, one
@@ -4029,7 +4048,7 @@ app.post('/api/setup/install/:kind', wrap(async (req) => {
 // Each run remembers what it set out to do (ids), for the top bar's "Setting up · 3 of 6".
 let setupRun = null // { level, at, ids, fetched: Map (download -> when), queued: Set (after Node.js), term: Set (in the terminal tab), openId, paneId }
 let devtoolsWereMissing = false // so the list keeps them, as Ready, once they're installed
-const SETUP_PKGS = { whisper: 'whisper-cpp', ical: 'ical-buddy' }
+const SETUP_PKGS = { ical: 'ical-buddy' }
 const SETUP_MAC = path.join(ROOT, 'scripts', 'setup-mac.sh')
 const setupTabOpen = async () => !!setupRun?.openId && ((await rt.fleet().catch(() => null))?.tabs || []).some((t) => `tab:${t.tabId}` === setupRun.openId)
 // What the Set up Bridge AI tab says: that it stopped (setup-mac.sh's last words when something
@@ -4080,14 +4099,13 @@ async function setupPlan() {
   // Apple's developer tools: only on a Mac without them (and kept, as Ready, once they're in).
   if (IS_MAC && (!dev || devtoolsWereMissing)) items.push({ id: 'devtools', state: state(dev, 'devtools'), error: stopped('devtools') })
   // Meeting notes: ready (macOS's own speech, a service, or a speech model here), else what's
-  // missing: the model, and whisper.cpp for a Whisper one. Voice notes the same, without services.
-  const whisperFor = (w, needs) => (w === 'whisper' || w === 'brew' ? [needs] : [])
-  const meetNeeds = sp.ready ? [] : [...whisperFor(sp.needs, 'whisper'), ...(!meetModel?.have ? ['model'] : [])]
-  const voNeeds = vo.ready ? [] : [...whisperFor(vo.needs, 'whisper-cli'), ...(!vo.model.have ? ['model'] : [])]
+  // missing: the model. Voice notes the same, without services.
+  const meetNeeds = sp.ready || meetModel?.have ? [] : ['model']
+  const voNeeds = vo.ready || vo.model.have ? [] : ['model']
   // Homebrew: when it's here, or something it brings isn't.
-  if (IS_MAC && (brew || meetNeeds.includes('whisper') || voNeeds.includes('whisper-cli') || needIcal)) items.push({ id: 'homebrew', state: state(!!brew, 'homebrew'), error: stopped('homebrew') })
-  items.push({ id: 'meetings', state: state(sp.ready, 'meetings', meetModel?.downloading?.error), error: meetModel?.downloading?.error || stopped('meetings'), parts: meetingModel.runtime === 'whisper' ? ['whisper', 'model'] : ['model'], needs: meetNeeds, engine: sp.engine, model: meetingModel.id, downloading: meetModel?.downloading && !meetModel.downloading.error ? meetModel.downloading : null, after: after('meetings'), canRun: IS_MAC || !meetNeeds.includes('whisper') })
-  items.push({ id: 'voice', state: state(vo.ready, 'voice', vo.error), error: vo.error || stopped('voice'), parts: vo.model.runtime === 'whisper' ? ['whisper-cli', 'model'] : ['model'], needs: voNeeds, model: vo.model.id, mb: vo.model.mb, downloading: vo.downloading, after: after('voice'), canRun: IS_MAC || !voNeeds.includes('whisper-cli') })
+  if (IS_MAC && (brew || needIcal)) items.push({ id: 'homebrew', state: state(!!brew, 'homebrew'), error: stopped('homebrew') })
+  items.push({ id: 'meetings', state: state(sp.ready, 'meetings', meetModel?.downloading?.error), error: meetModel?.downloading?.error || stopped('meetings'), parts: ['model'], needs: meetNeeds, engine: sp.engine, model: meetingModel.id, downloading: meetModel?.downloading && !meetModel.downloading.error ? meetModel.downloading : null, after: after('meetings') })
+  items.push({ id: 'voice', state: state(vo.ready, 'voice', vo.error), error: vo.error || stopped('voice'), parts: ['model'], needs: voNeeds, model: vo.model.id, mb: vo.model.mb, downloading: vo.downloading, after: after('voice') })
   if (IS_MAC) {
     items.push({ id: 'calendar', state: needIcal ? state(false, 'calendar') : cal?.state === 'ok' ? 'done' : 'allow', error: stopped('calendar'), pane: 'calendars', via: calHelper ? null : 'icalBuddy' })
     items.push({ id: 'mail', state: disk?.state === 'ok' ? 'done' : disk?.state === 'restart' ? 'restart' : 'allow', pane: 'full-disk' })
@@ -4123,11 +4141,7 @@ app.post('/api/setup/run', wrap(async (req) => {
     const fetch = (id) => { try { speech.fetchModel(id) } catch { /* can't run here: the item says so */ } }
     const models = []
     if (vo?.needs.includes('model')) { models.push(vo.model); run.queued.add('voice') }
-    if (meet?.needs.includes('model')) {
-      models.push(meet.model)
-      if (speech.localModel(cfg).runtime === 'whisper') models.push('vad')
-      run.queued.add('meetings')
-    }
+    if (meet?.needs.includes('model')) { models.push(meet.model); run.queued.add('meetings') }
     if (models.length) {
       afterNode(() => {
         for (const id of new Set(models)) fetch(id)
@@ -4141,7 +4155,6 @@ app.post('/api/setup/run', wrap(async (req) => {
     if (IS_MAC) {
       const dev = todo('devtools')
       const pkgs = new Set()
-      if (meet?.needs.includes('whisper') || vo?.needs.includes('whisper-cli')) pkgs.add(SETUP_PKGS.whisper)
       if (todo('calendar')) pkgs.add(SETUP_PKGS.ical)
       if (dev || pkgs.size) {
         const brew = pkgs.size ? await fixes.tool('brew') : null
@@ -4150,9 +4163,8 @@ app.post('/api/setup/run', wrap(async (req) => {
           : quoteCommand('/bin/bash', [SETUP_MAC, ...(dev ? ['devtools'] : []), ...(homebrew ? ['homebrew'] : []), ...(brew ? [`brew=${brew}`] : []), ...pkgs])
         if (dev) run.term.add('devtools')
         if (homebrew) run.term.add('homebrew')
-        if (pkgs.has(SETUP_PKGS.whisper)) { if (meet) run.term.add('meetings'); if (vo) run.term.add('voice') }
         if (pkgs.has(SETUP_PKGS.ical)) run.term.add('calendar')
-        const names = { [SETUP_PKGS.whisper]: 'whisper-cli', [SETUP_PKGS.ical]: 'icalBuddy' }
+        const names = { [SETUP_PKGS.ical]: 'icalBuddy' }
         const done = async () => (!dev || await devTools()) && (await Promise.all([...pkgs].map((p) => fixes.tool(names[p])))).every(Boolean)
         Object.assign(run, await openSetupTab('Set up Bridge AI', line, done, dev ? 3 : 1))
       }

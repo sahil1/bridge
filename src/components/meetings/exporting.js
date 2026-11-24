@@ -9,7 +9,7 @@
 // share sheet (Save to Files); the Android app can't save a file from a page yet, so there it's kept
 // on the computer, as from a computer.
 import { api, apiUrl, viaRelay, onThisComputer } from '../../api.js'
-import { iosApp, androidApp, download, toIphone } from '../../download.js'
+import { iosApp, androidApp, download, toIphone, toPhone, canDownload } from '../../download.js'
 import { t } from '../../i18n/index.js'
 
 const TYPES = { docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', pdf: 'application/pdf' }
@@ -106,6 +106,18 @@ export async function exportMeeting(id, format) {
   if (!res.ok) throw Object.assign(new Error(out.error || `HTTP ${res.status}`), { saving: true })
   if (viaRelay && iosApp) { await toIphone(apiUrl(`/meetings/${e}/export/${format}`), name); return { name, phone: true, lost, pictured } }
   return { file: out.file, lost, pictured }
+}
+
+// The transcript alone, as text, Markdown or subtitles (txt, md, srt, vtt; the server writes it:
+// meetings.js transcriptFile): saved on the computer beside the meeting's note, with Show in Finder
+// there; on another device (a phone, a browser elsewhere), to that device. What happened, as
+// { text, act } for the page to say.
+export async function saveTranscript(id, format) {
+  const e = encodeURIComponent(id)
+  if (!onThisComputer() && canDownload) return { text: await toPhone(apiUrl(`/meetings/${e}/transcript/${format}`), `transcript.${format}`) }
+  const r = await api(`/meetings/${e}/transcript/${format}`, { method: 'POST' })
+  if (!onThisComputer()) return { text: t('Saved on your computer to {path}', { path: tilde(r.file) }) }
+  return { text: t('Saved to {path}', { path: tilde(r.file) }), act: { label: revealLabel(), run: () => api(`/meetings/${e}/reveal`, { method: 'POST', body: { format } }).catch(() => {}) } }
 }
 
 // Save as Word or PDF from a menu, saying what it's doing, then where it went (with Show in Finder

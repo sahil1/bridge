@@ -591,6 +591,30 @@ span.mt-when { cursor: default; }
 .mt-view.tight > .pane-head .seg span { display: none; }
 .mt-view.tight > .pane-head .seg button { padding: 0 8px; }
 
+/* Transcribe a file or a folder (TranscribeFiles.jsx): the lines of the files going and done, the
+   dialog's list of names, and the sign while audio or video is dragged over the window. */
+.tf-panel { display: grid; gap: 6px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line-2); background: var(--pane); }
+.tf-panel > header { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.tf-panel > header > svg { color: var(--accent); flex: none; }
+.tf-panel ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.tf-item { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 4px 0; }
+.tf-item + .tf-item { border-top: 1px solid var(--line); }
+.tf-main { display: grid; gap: 3px; flex: 1; min-width: 0; }
+.tf-main b { font-weight: 550; font-size: 13px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-main .vs-bar { max-width: 320px; }
+.tf-item .ghost-btn { flex: none; min-width: 32px; min-height: 32px; }
+.tf-note { color: var(--ink-2); }
+.tf-note.warn { color: var(--warning); }
+.tf-names { display: grid; gap: 2px; margin: 0; padding: 0 0 0 16px; color: var(--ink-2); overflow-wrap: anywhere; }
+.app.narrow .tf-item { min-height: 44px; }
+.app.narrow .tf-item .ghost-btn, .app.narrow .tf-item .btn { min-width: 40px; min-height: 40px; }
+.app.narrow .tf-btn { min-width: 40px; justify-content: center; }
+.app.narrow .tf-panel > header .link-btn { min-width: 40px; min-height: 40px; padding: 0 6px; }
+/* (The dialog is on the page itself, outside .app.narrow.) */
+@media (pointer: coarse), (max-width: 560px) { .tf-ask .st-check { min-height: 40px; align-items: center; } .tf-ask select { height: 40px; } }
+.app.narrow .tf-main b { white-space: normal; overflow-wrap: anywhere; }
+.mt-row-file { flex: none; color: var(--ink-3); }
+
 /* Speech to text not set up yet (SpeechSetup.jsx) */
 .mt-setup { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border-radius: 10px; background: color-mix(in srgb, var(--warning) 10%, var(--pane)); border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent); color: var(--ink); }
 .mt-setup > svg { flex: none; margin-top: 2px; color: var(--warning); }

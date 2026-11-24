@@ -11,39 +11,32 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
-import { IS_MAC, brewInstall } from './paths.js'
 import { tool } from './fixes.js'
 import * as speech from './speech.js'
 import * as memory from './meetmemory.js'
-import { placeEn } from '../shared/places.js'
 
 let cfg = {}
 export const configure = (c) => { cfg = c || {} }
 
-// What voice notes use and need, for the mic and Settings › Voice & Meetings. The fields the page has always
-// read (ready, model, modelMB, missing, installCommand, needsBrew, downloading, error) are kept.
+// What voice notes use and need, for the mic and Settings › Voice & Meetings: ready, model,
+// modelMB, downloading, error.
 export async function status() {
   const s = await speech.voiceStatus(cfg)
   const m = s.model
-  const brew = IS_MAC && s.needs ? await tool('brew') : null
   const dl = m.downloading
   return {
     ...s,
     modelMB: m.mb,
-    missing: s.needs === 'whisper' || s.needs === 'brew' ? ['whisper-cli'] : [],
-    installCommand: (s.needs === 'whisper' || s.needs === 'brew') && brew ? brewInstall(brew, 'whisper-cpp') : null,
-    needsBrew: s.needs === 'brew',
     downloading: dl && !dl.error ? { percent: dl.percent } : null,
     error: dl?.error || null,
   }
 }
 
-// The one step voice notes need: the model's download (with progress in status()), or for a
-// Whisper model, whisper.cpp too (its install command, for a terminal tab).
+// The one step voice notes need: the model's download (with progress in status()).
 export async function setup() {
   const s = await status()
   if (!s.model.have) speech.fetchModel(s.model.id)
-  return { ...(await status()), install: s.installCommand }
+  return status()
 }
 
 // ---------- The recording, as 16 kHz mono 16-bit PCM in a WAV ----------
@@ -122,19 +115,19 @@ async function viaFfmpeg(audio, type) {
 // is, and what to download (the page offers it in one click, then sends the recording again).
 function notYet(s) {
   const m = s.model
-  if (s.needs === 'model') return Object.assign(new Error(`Speech to text needs a one-time download: ${m.label}, ${m.mb} MB. It stays on this computer, and so does what you say.`), { code: 'needs-model', status: 409, model: m })
-  return Object.assign(new Error(`${m.label} needs whisper.cpp, which isn't on this computer. Set it up in ${placeEn('voice')}, or pick Parakeet there.`), { code: s.needs === 'brew' ? 'needs-brew' : 'needs-whisper', status: 409, model: m })
+  if (!m.usable) return Object.assign(new Error(`${m.label} can't run on this computer.`), { status: 409, model: m })
+  return Object.assign(new Error(`Speech to text needs a one-time download: ${m.label}, ${m.mb} MB. It stays on this computer, and so does what you say.`), { code: 'needs-model', status: 409, model: m })
 }
 
 // The names Parakeet listens for in a voice note, besides yours: the agents' and what they work in.
 const WORDS = ['Claude', 'Claude Code', 'Codex', 'Gemini', 'Cursor', 'Copilot', 'GitHub', 'worktree']
 const HINT = 'chief of staff, Claude, Codex, Gemini, Cursor, Grok, Copilot, GitHub, worktree, PR, repo'
 
-// So names come out right: whisper takes a hint (words it's likely to hear), Parakeet names to
-// listen for (speech.js adds meeting memory's). Both have Bridge AI's words (or your own:
-// voice.prompt) and the words in Settings › Voice & Meetings; whisper's also meeting memory's names (yours
-// first, then the ones that come up most), as a meeting's has, and Parakeet's the names Bridge AI
-// knows (more). { prompt, words }.
+// So names come out right: an engine that takes a hint gets one (words it's likely to hear),
+// Parakeet names to listen for (speech.js adds meeting memory's); Whisper takes neither. Both have
+// Bridge AI's words (or your own: voice.prompt) and the words in Settings › Voice & Meetings; the
+// hint also meeting memory's names (yours first, then the ones that come up most), as a meeting's
+// has, and Parakeet's the names Bridge AI knows (more). { prompt, words }.
 export function listenFor(more = []) {
   const own = cfg.voice?.prompt ? String(cfg.voice.prompt) : null
   const vocab = String(cfg.meetings?.vocabulary || '').split(',').map((w) => w.trim()).filter(Boolean)

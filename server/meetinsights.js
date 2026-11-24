@@ -140,6 +140,7 @@ export function digests() {
     for (const m of all) {
       if (m.archived) { archived++; continue }
       if (m.parts) continue // a combined meeting: its meetings are counted themselves
+      if (m.file) continue // a file you transcribed: not a meeting you were in
       if (['recording', 'paused'].includes(m.status)) { recording++; continue }
       const sig = sigOf(m)
       let hit = cache[m.id]

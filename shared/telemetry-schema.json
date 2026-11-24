@@ -65,6 +65,7 @@
     "chief.tasks": "Tasks added to Chief of Staff's list",
     "voice.transcribed": "Times speech was turned into text (voice notes and dictation)",
     "meetings.recorded": "Meetings recorded",
+    "meetings.filesTranscribed": "Audio and video files transcribed",
     "setup.simple": "Setup finished with the simple layout",
     "setup.everything": "Setup finished with everything shown",
     "errors.window": "Times a part of the window broke and showed its error",

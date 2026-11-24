@@ -10,7 +10,6 @@ import { keyLabel } from '../../shared/dictation/keys.js'
 import { LiveWords } from '../dictation/Pill.jsx'
 import { useDictation, registerBox, noteBoxFocus, press, release, finish, cancel, dismiss, retry, settings, keysPlatform, dictationKey, listeningHint, eventTime } from '../dictation/controller.js'
 import { useBusy } from '../busy.js'
-import { where as placeIn } from './settings/search.js'
 import { useEnter, SendKeys } from './EnterHint.jsx'
 import { modKey } from '../enter.js'
 
@@ -55,21 +54,19 @@ export function carryDraft(from, to) {
 // desktop app's dictation window). The speech model: what it is and its size, in the server's
 // words, one button to download it with progress, then what you said, kept meanwhile
 // (initial.audio: dictation/controller.js holds it), turned into text by onReady, which sends it
-// again. whisper.cpp (a Whisper model picked in Settings › Voice & Meetings): installed in a terminal tab, with
-// Homebrew first on a Mac that has none.
+// again.
 export function VoiceSetup({ initial, onReady, onClose }) {
   const [v, setV] = useState(initial)
   const [started, setStarted] = useState(!!initial.downloading)
   const [err, setErr] = useState(null)
-  const [brewing, setBrewing] = useState(false) // Homebrew installing, in a terminal tab
   const audio = !!initial.audio && !!onReady // what you said, waiting for the model
   const sent = useRef(false)
   useEffect(() => {
     if (v.ready && !audio) { const t = setTimeout(onClose, 5000); return () => clearTimeout(t) }
-    if ((!started && !brewing) || v.error || v.ready) return
+    if (!started || v.error || v.ready) return
     const t = setInterval(() => api('/voice').then(setV).catch(() => {}), 1000)
     return () => clearInterval(t)
-  }, [v.ready, v.error, started, brewing, audio, onClose])
+  }, [v.ready, v.error, started, audio, onClose])
   // The model's here: what you said, now.
   useEffect(() => {
     if (!v.ready || !audio || sent.current) return
@@ -80,24 +77,13 @@ export function VoiceSetup({ initial, onReady, onClose }) {
     setErr(null)
     try { setV(await api('/voice/setup', { method: 'POST' })); setStarted(true) } catch (e) { setErr(e.message) }
   }
-  const installBrew = async () => {
-    setErr(null)
-    try { await api('/fix/install', { method: 'POST', body: { what: 'homebrew' } }); setBrewing(true) } catch (e) { setErr(e.message) }
-  }
   const model = v.model || {}
-  const whisper = v.needs === 'whisper' || v.needs === 'brew'
   const touch = matchMedia('(pointer: coarse)').matches
   let text, actions = null
   if (v.ready && audio) text = t('Turning what you said into text…')
   else if (v.ready) text = t('Voice notes are ready. Tap the mic and talk.')
   else if (v.error) { text = t("The speech model didn't download: {error}", { error: v.error }); actions = <button className="btn small primary" onClick={setup}>{t('Try again')}</button> }
   else if (v.downloading) text = audio ? t("Downloading {model}… {percent}%. What you said is kept, and turned into text when it's done.", { model: model.label, percent: v.downloading.percent }) : t('Downloading {model}… {percent}%', { model: model.label, percent: v.downloading.percent })
-  else if (whisper && brewing && v.installCommand) { text = t('Homebrew is in. One more step: whisper.cpp.'); actions = <button className="btn small primary" onClick={() => { setBrewing(false); setup() }}>{t('Set up')}</button> }
-  else if (whisper && brewing) text = t('Installing Homebrew in a terminal tab, in the Setup space. It asks for your Mac password there.')
-  else if (whisper && started && v.installCommand) text = t('Installing whisper.cpp in a terminal tab, in the Setup space. If it asks for your password, answer it there.')
-  else if (whisper && v.needsBrew) { text = t("{model} needs whisper.cpp, which comes from Homebrew, and Homebrew isn't on this Mac yet. Or pick Parakeet in {place}: nothing to install.", { place: placeIn('voice'), model: model.label }); actions = <button className="btn small primary" onClick={installBrew}>{t('Install Homebrew')}</button> }
-  else if (whisper && !v.installCommand) text = t('{model} needs whisper.cpp: install whisper-cli on your computer, then tap the mic again. Or pick Parakeet in {place}: nothing to install.', { place: placeIn('voice'), model: model.label })
-  else if (whisper) { text = t('{model} needs whisper.cpp, a free program. It installs in a minute.', { model: model.label }); actions = <button className="btn small primary" onClick={setup}>{t('Install it')}</button> }
   else {
     // In your language from what's needed; else the server's own words from its answer.
     text = model.label ? t('Speech to text needs a one-time download: {model}, {mb} MB. It stays on this computer, and so does what you say.', { model: model.label, mb: model.mb }) : initial.ask || t('Speech to text needs a one-time download.')

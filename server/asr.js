@@ -1,4 +1,4 @@
-// sherpa-onnx, the engine that runs Parakeet on this computer: in a process of its own
+// sherpa-onnx, the engine that runs Parakeet and Whisper on this computer: in a process of its own
 // (asr-worker.js, on the app's own Node), so loading a model and turning speech into text never
 // runs on the server's thread, and a crash there leaves the server standing. The model stays loaded
 // for a few minutes after the last use (about 2 GB of memory for Parakeet), then the process ends
@@ -61,29 +61,32 @@ function send(msg, tries = 1) {
     const secs = (msg.pcm?.length || 0) / 16000
     const timer = setTimeout(() => { me.killed = 'timeout'; try { me.proc.kill() } catch { /* gone */ } }, 60_000 + secs * 1000)
     me.pending.set(id, { resolve, reject, msg, tries, timer })
-    me.model = msg.model?.key || me.model
+    me.model = msg.model?.id || msg.model?.key || me.model
     me.last = Date.now()
     clearTimeout(me.idle)
     me.proc.send(full)
   })
 }
 
-// Speech to text: { text, ms, decodeMs } for 16 kHz mono 16-bit PCM (ms with loading the model,
-// decodeMs without). model: { key, dir, files: { encoder, decoder, joiner, tokens }, hotwords }. A
-// long recording is cut into pieces of a minute or less, each at its quietest moment near the end,
-// so memory stays small and nothing is cut mid-word.
+// Speech to text: { text, ms, decodeMs, lang } for 16 kHz mono 16-bit PCM (ms with loading the
+// model, decodeMs without; lang: the language Whisper heard). model: { key, dir, files: { encoder,
+// decoder, joiner, tokens }, hotwords, whisper: { language } for a Whisper model }. A long
+// recording is cut into pieces of a minute or less (Whisper's of 28 seconds: it hears 30 at most),
+// each at its quietest moment near the end, so memory stays small and nothing is cut mid-word.
 export async function recognize(model, pcm, { hotwords = [] } = {}) {
-  const parts = split(pcm)
+  const parts = split(pcm, model.whisper ? WHISPER_MAX : MAX)
   const texts = []
   let ms = 0
   let decodeMs = 0
+  let lang = null
   for (const p of parts) {
     const r = await send({ model, pcm: p, hotwords, threads: threads() })
     if (r.text) texts.push(r.text)
+    lang ||= r.lang || null
     ms += r.ms + (r.loadMs || 0)
     decodeMs += r.ms
   }
-  return { text: texts.join(' ').replace(/\s+/g, ' ').trim(), ms, decodeMs }
+  return { text: texts.join(' ').replace(/\s+/g, ' ').trim(), ms, decodeMs, ...(lang ? { lang } : {}) }
 }
 
 // How a voice sounds (voices.js): { v: Float32Array, ms } for 16 kHz mono PCM, from the speaker
@@ -92,14 +95,15 @@ export async function recognize(model, pcm, { hotwords = [] } = {}) {
 export const embed = (voice, pcm, { threads: n = 1 } = {}) => send({ type: 'embed', voice, pcm, threads: n })
 
 const MAX = 60 * 16000
-export function split(pcm) {
+const WHISPER_MAX = 28 * 16000
+export function split(pcm, max = MAX) {
   const out = []
   let at = 0
-  while (pcm.length - at > MAX) {
+  while (pcm.length - at > max) {
     // The quietest tenth of a second in the last ten seconds before the limit.
-    let best = at + MAX
+    let best = at + max
     let low = Infinity
-    for (let s = at + MAX - 10 * 16000; s + 1600 <= at + MAX; s += 800) {
+    for (let s = at + max - 10 * 16000; s + 1600 <= at + max; s += 800) {
       let e = 0
       for (let i = s; i < s + 1600; i++) e += Math.abs(pcm[i])
       if (e < low) { low = e; best = s + 800 }

@@ -9,10 +9,11 @@
 // pdf-lib and pdf.js: its pages, the words on the first and the last, every picture in it and none
 // drawn wider than the page; the line in Japanese is a picture of its words, and it says so. The page
 // keeps going while a long one is made. Show in Finder shows the file. The open meeting's download
-// button offers the same three as ⋯, and saves each as ⋯ does. On a phone, paired through the relay
-// (stand-ins/relay.mjs), Save as PDF downloads it to the phone. In the iPhone app (its bridgeNative
-// and user agent stood in for), Save as Word and Save as PDF go to the app's own save instead, which
-// takes the file kept on the computer over the link, and nothing downloads in the page. A picture
+// button offers the same as ⋯ (and the transcript as text or subtitles), and saves each as ⋯ does.
+// On a phone, paired through the relay (stand-ins/relay.mjs), Save as PDF downloads it to the
+// phone, and so do subtitles. In the iPhone app (its bridgeNative and user agent stood in for), Save
+// as Word and Save as PDF go to the app's own save instead, which takes the file kept on the
+// computer over the link, and nothing downloads in the page. A picture
 // that can't be read is left out and said; a folder that can't be written says why; Save as
 // Markdown still writes its note with the pictures beside it.
 import fs from 'node:fs'
@@ -160,7 +161,7 @@ try {
   const dlMenu = p.locator('.pane-head .mt-hb .menu .menu-item')
   await dlButton.click({ timeout: 10000 })
   const offered = (await dlMenu.allInnerTexts().catch(() => [])).map((x) => x.trim())
-  ok(offered.join('|') === 'Save as Markdown|Save as Word (.docx)|Save as PDF', "the open meeting's download button offers Markdown, Word (.docx) and PDF, as ⋯ does", offered)
+  ok(offered.join('|') === 'Save as Markdown|Save as Word (.docx)|Save as PDF|Save the transcript as text (.txt)|Save the transcript as Markdown (.md)|Save as subtitles (.srt)|Save as subtitles (.vtt)', "the open meeting's download button offers Markdown, Word (.docx) and PDF, and the transcript as text or subtitles, as ⋯ does", offered)
   await shot(p, `${tag}export-download-menu`)
   const wordBefore = docx && fs.existsSync(docx) ? fs.statSync(docx).mtimeMs : 0
   const madeWord = p.waitForResponse((r) => r.request().method() === 'POST' && /\/export\?format=docx$/.test(r.url()), { timeout: 60000 }).catch(() => null)
@@ -207,6 +208,13 @@ try {
       ok(d?.suggestedFilename() === 'Pricing review-summary.pdf' && got?.subarray(0, 5).toString('latin1') === '%PDF-' && (await PDFDocument.load(got)).getPageCount() >= 60, 'on the phone, Save as PDF downloads the whole PDF to the phone', { name: d?.suggestedFilename(), size: got?.length })
       ok(/Downloading Pricing review-summary\.pdf to this device\.$/.test(said5 || ''), 'and says so', said5)
       await shot(phone, `${tag}export-phone`)
+      // The transcript as subtitles: to the phone too, made by the computer.
+      await f.locator('.pane-head button[aria-label="More actions"]').click({ timeout: 15000 })
+      const dl2 = phone.waitForEvent('download', { timeout: 60000 }).catch(() => null)
+      await f.locator('.menu .menu-item', { hasText: 'Save as subtitles (.srt)' }).click()
+      const d2 = await dl2
+      const srt = d2 && await d2.path().then((x) => fs.readFileSync(x, 'utf8'), () => null)
+      ok(d2?.suggestedFilename() === 'Pricing review.srt' && /^1\n00:00:\d\d,\d{3} --> /.test(srt || ''), 'on the phone, Save as subtitles downloads the transcript as subtitles to the phone', { name: d2?.suggestedFilename(), head: srt?.slice(0, 80) })
     }
     await pctx.close()
   } catch (e) { ok(false, `the phone: ${String(e.message).split('\n')[0]}`) }

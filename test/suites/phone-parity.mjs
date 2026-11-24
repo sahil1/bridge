@@ -51,6 +51,9 @@ const PATHS = {
   'a:new': { phone: 'Agents › New › More options', shows: '.modal.new-agent' },
   'a:record': { phone: 'Meetings', shows: '.m-meetings button:has-text("Start recording")' },
   'a:meetings': { phone: 'Meetings', shows: '.m-meetings' },
+  // Transcribe a file: Meetings' own button, which opens the phone's picker (several files at once).
+  'a:transcribe': { phone: 'Meetings', shows: '.m-meetings .tf-btn' },
+  'a:transcribe-folder': { none: 'A phone picks files, not folders: Meetings › Transcribe a file takes several at once' },
   'a:insights': { phone: 'Meetings › Insights', shows: '.m-meetings :is(.mi, .mi-empty)' },
   'a:people': { phone: 'Meetings › People', shows: '.m-meetings .mi-people' },
   'a:dictations': { phone: 'Meetings › Dictations', shows: '.dc-home, .dc-empty, .dc-body' },
