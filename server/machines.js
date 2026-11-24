@@ -44,6 +44,15 @@ const QUIET_MS = PING_MS * 2.5
 const HELLO_MS = Math.min(15000, QUIET_MS)
 const SLOW_MS = 3000 // a request with no word back this long: is that device still there?
 const ANSWER_MS = 4000 // no answer to that this long: the link starts over
+// Its relay said that device isn't connected: the link waits for the relay's word that it's back
+// (it closes the link then). That word is never the only way back: something asked of it after
+// AGAIN_MS asks its relay again on a new connection, and every RECHECK_MS the link does so by
+// itself, so a word that never came (or a relay that got it wrong) can't leave it offline for good.
+const AGAIN_MS = 10000
+const RECHECK_MS = Number(process.env.BRIDGE_LINK_RECHECK_MS) || 5 * 60000
+// The reasons a link isn't connected that go in the log as well, each time it comes to be the reason
+// (no silent failures: the log says next time why another computer couldn't be reached).
+const LOGGED = new Set(['gone', 'unchecked', 'update', 'noAnswer', 'broken'])
 const byId = (id) => conf.machines.find((m) => m.id === id) || null
 const byRelay = (r) => conf.machines.find((m) => m.relay === r) || null
 // What this device says about itself to each of the others, sealed, as its first record (ABOUT):
@@ -85,8 +94,20 @@ class Link {
     this.stopped = false
     this.hostOnline = false
     this.error = null
+    this.why = null // why it isn't connected, in a word for the app (list: why), beside error
+    this.offAt = 0 // when its relay said that device isn't connected, on the connection open now
     this.unreachable = null // { text, host, detail }: its relay not reached, while that's what error says
   }
+
+  // Why it isn't connected: a word for the app (why) and the sentence it says (error).
+  fail(why, text) {
+    if (why !== this.why && LOGGED.has(why)) console.log(`machines: ${this.m.name}: ${text}`)
+    this.why = why
+    this.error = text
+  }
+
+  // Waiting on its relay's word that it's back (it said that device isn't connected) for at least ms.
+  waitingFor(ms) { return !!this.ws && this.ws.readyState === 1 && !this.session && !this.waiting && !!this.offAt && Date.now() - this.offAt >= ms }
 
   start() { this.stopped = false; this.connect() }
   // Connected again now, so the other device hears this one's ABOUT again (it moved to another relay,
@@ -122,6 +143,7 @@ class Link {
     const ws = new WebSocket(`${this.m.relay.replace(/^http/, 'ws')}/_relay/link`, { handshakeTimeout: 15000, ...relay.reachOptions(this.m.relay) })
     this.ws = ws
     this.heard = Date.now()
+    this.offAt = 0
     ws.on('open', () => {
       clearInterval(this.pinger)
       this.heard = Date.now()
@@ -130,14 +152,14 @@ class Link {
       // one whose network went without a word can look connected to its relay for a while.
       this.pinger = setInterval(() => {
         const now = Date.now()
-        if (now - this.heard > QUIET_MS || (this.session && this.answers && now - this.fromIt > QUIET_MS)) { this.error = `Lost the connection to ${this.m.name}. Connecting again…`; return ws.terminate() }
+        if (now - this.heard > QUIET_MS || (this.session && this.answers && now - this.fromIt > QUIET_MS)) { this.fail('lost', `Lost the connection to ${this.m.name}. Connecting again…`); return ws.terminate() }
         try { ws.send('ping') } catch { /* closing */ }
         if (this.session && this.answers && now - this.fromIt >= PING_MS) this.send(K.PING, 0).catch(() => {})
       }, PING_MS)
     })
     ws.on('message', (data, isBinary) => {
       this.heard = Date.now()
-      this.q = this.q.then(() => (isBinary ? this.onData(data) : this.onText(String(data)))).catch((e) => { this.error = e.message; try { ws.close() } catch { /* closed */ } })
+      this.q = this.q.then(() => (isBinary ? this.onData(data) : this.onText(String(data)))).catch((e) => { this.fail('broken', e.message); try { ws.close() } catch { /* closed */ } })
     })
     // Its address isn't there any more (Bridge AI's relay removed it, or the Worker went): it moved,
     // or stopped using that relay. It says where it is now the next time it connects to this one.
@@ -146,9 +168,9 @@ class Link {
     // plain words, with what to check; the system's own words (getaddrinfo ENOTFOUND…) go in the log
     // and come along as detail (unreachable), for the app to say in its language.
     ws.on('error', (e) => {
-      if (this.gone) { this.error = `${this.m.name} isn't at its relay's address any more: it moved to another relay, or stopped using one. It tells this computer where it is as soon as both are online; or link it again with a code from ${this.m.name}.`; return }
+      if (this.gone) { this.fail('gone', `${this.m.name} isn't at its relay's address any more: it moved to another relay, or stopped using one. It tells this computer where it is as soon as both are online; or link it again with a code from ${this.m.name}.`); return }
       const host = hostOf(this.m.relay)
-      this.error = `Can't reach ${host}${this.m.state === 'linked' ? `, the relay ${this.m.name} uses` : ''}. Check the address, this computer's network, or that the relay is up.`
+      this.fail('unreachable', `Can't reach ${host}${this.m.state === 'linked' ? `, the relay ${this.m.name} uses` : ''}. Check the address, this computer's network, or that the relay is up.`)
       if (this.unreachable?.detail !== e.message) console.log(`machines: ${this.m.relay} can't be reached: ${e.message}`)
       this.unreachable = { text: this.error, host, detail: String(e.message || '').slice(0, 200) }
     })
@@ -176,7 +198,8 @@ class Link {
     if (st.t) return // about notes or limits: for phones
     this.hostOnline = !!st.host
     if (st.seen) this.m.lastSeen = new Date(st.seen).toISOString()
-    if (!st.host) { this.error = `${this.m.name} is offline`; this.drop(this.error); return }
+    if (!st.host) { this.fail('offline', `${this.m.name} is offline`); this.offAt = Date.now(); this.drop(this.error); return }
+    this.offAt = 0
     await this.hello()
   }
 
@@ -203,7 +226,7 @@ class Link {
     ws.send(plainFrame(state.hello))
     // No answer: that device's end is stuck. Start over rather than wait forever.
     clearTimeout(this.helloTimer)
-    this.helloTimer = setTimeout(() => { if (this.waiting && this.ws === ws) { this.error = `${this.m.name} didn't answer`; ws.terminate() } }, HELLO_MS)
+    this.helloTimer = setTimeout(() => { if (this.waiting && this.ws === ws) { this.fail('noAnswer', `${this.m.name} didn't answer`); ws.terminate() } }, HELLO_MS)
   }
 
   async onData(data) {
@@ -237,7 +260,10 @@ class Link {
       this.send(K.ABOUT, 0, aboutMe()).catch(() => {})
       this.answers = msg.ping === 1 // it answers PING
       this.fromIt = Date.now()
+      if (LOGGED.has(this.why) || this.why === 'unreachable') console.log(`machines: ${this.m.name}: connected again`)
       this.error = null
+      this.why = null
+      this.offAt = 0
       this.backoff = 2000
       for (const w of this.waiters.splice(0)) w.ok()
       // Its agents, straight away: the sidebar and the top bar show them as soon as it's online.
@@ -318,13 +344,13 @@ class Link {
     // else is said, and tried again (unchecked). Only that device's sealed GONE unlinks it here.
     if (this.m.state === 'linked') {
       if (this.code || why === 'unsupported') {
-        this.error = text
+        this.fail(why === 'unsupported' ? 'update' : 'code', text)
         for (const w of this.waiters.splice(0)) w.no(new Error(text))
         this.code = null
         if (why === 'unsupported') this.backoff = 60000
         return
       }
-      return this.unchecked()
+      return this.unchecked(why === 'not-paired' ? `${this.m.name} said it doesn't know this computer (it unlinked it, or was set up again)` : null)
     }
     this.error = text
     for (const w of this.waiters.splice(0)) w.no(new Error(text))
@@ -336,10 +362,12 @@ class Link {
 
   // Turned away in the clear, or answered with a key that isn't the one it was linked with: either
   // could be the relay's doing, so the link stays as it is, says so, and tries again (less and less
-  // often, as after any drop).
-  unchecked() {
+  // often, as after any drop). said: what the answer said, when it said something (turned away).
+  unchecked(said = null) {
     const name = this.m.name
-    this.error = `Can't connect to ${name}: the answer through its relay couldn't be checked, so nothing was changed. Trying again. If ${name} was set up again, link it again with a code from ${name}.`
+    this.fail('unchecked', said
+      ? `Can't connect to ${name}: ${said}. That answer came through its relay and couldn't be checked, so nothing was changed here. Trying again. If ${name} was set up again, link it again with a code from ${name}.`
+      : `Can't connect to ${name}: the answer through its relay couldn't be checked, so nothing was changed. Trying again. If ${name} was set up again, link it again with a code from ${name}.`)
     for (const w of this.waiters.splice(0)) w.no(new Error(this.error))
     try { this.ws?.close() } catch { /* closed */ }
   }
@@ -354,14 +382,16 @@ class Link {
     this.streams.clear()
   }
 
-  // Linked and connected, within ms.
+  // Linked and connected, within ms. Its relay's word that it's offline, from a while ago, isn't taken
+  // as the answer: its relay is asked again, on a new connection (AGAIN_MS).
   ready(ms = 15000) {
     if (this.session) return Promise.resolve()
     return new Promise((ok, no) => {
       const w = { ok: () => { clearTimeout(t); ok() }, no: (e) => { clearTimeout(t); no(e) } }
       const t = setTimeout(() => { this.waiters = this.waiters.filter((x) => x !== w); no(new Error(this.error || `${this.m.name} is offline`)) }, ms)
       this.waiters.push(w)
-      this.connect()
+      if (this.waitingFor(AGAIN_MS)) this.again()
+      else this.connect()
     })
   }
 
@@ -394,7 +424,7 @@ class Link {
     const at = Date.now()
     this.probing = setTimeout(() => {
       this.probing = null
-      if (this.ws === ws && (this.answers ? this.fromIt : this.heard) < at) { this.error = `${this.m.name} didn't answer. Connecting again…`; ws.terminate() }
+      if (this.ws === ws && (this.answers ? this.fromIt : this.heard) < at) { this.fail('lost', `${this.m.name} didn't answer. Connecting again…`); ws.terminate() }
     }, ANSWER_MS)
     if (this.answers) this.send(K.PING, 0).catch(() => {})
     else try { ws.send('ping') } catch { /* closing */ }
@@ -488,6 +518,8 @@ export const keptFrom = (deviceId) => new Set(deviceId ? conf.machines.filter((m
 // out said is hidden (none of its agents, what waits there, its Home), said as not let in.
 export function list({ for: forId = null } = {}) {
   const hidden = keptFrom(forId)
+  // (Those whose link to this one is connected now: what one said of not reaching this one is past.)
+  const back = reachSaid.size ? new Set((relay.status().devices || []).filter((d) => d.kind === 'computer' && d.connected).map((d) => d.relay)) : null
   return conf.machines.map((m) => {
     const l = links.get(m.id)
     const s = hidden.has(m.id) ? null : kept.get(m.id)
@@ -498,6 +530,13 @@ export function list({ for: forId = null } = {}) {
       notLetIn: shut.has(m.id) || hidden.has(m.id), // it hasn't let this computer (or that device) in
       code: m.state === 'asking' ? m.ask?.code || null : null,
       error: m.state === 'linked' && l?.session ? null : m.norelay ? `${m.name} stopped using its relay, so this computer can't reach it until it has one again. It can still reach this one, and says where it is once it does.` : l?.error || null,
+      // Why it isn't connected, in a word, so wherever it's shown says that rather than only "Offline"
+      // (error says it in full): offline (its relay says it isn't connected), unreachable, unchecked
+      // (turned away, or a key that isn't its own), gone (not at its relay's address), norelay,
+      // noAnswer, update, lost or broken (connecting again), code (a new code that didn't work).
+      why: m.state === 'linked' && l?.session ? null : m.norelay ? 'norelay' : (l?.error && l.why) || null,
+      // Connected from here, but it can't reach this computer, and why, as it says (reachOf).
+      ...(m.state === 'linked' && l?.session && reachSaid.get(m.id)?.error && !back?.has(m.relay) ? { reach: { error: reachSaid.get(m.id).error } } : {}),
       // Its relay not reached: for the app to say in its own words, with the system's as detail.
       ...(!(m.state === 'linked' && l?.session) && !m.norelay && l?.error && l.error === l.unreachable?.text ? { unreachable: { host: l.unreachable.host, detail: l.unreachable.detail } } : {}),
       counts: s?.counts || {}, agents: s?.agents || [],
@@ -663,6 +702,7 @@ export async function check(id) {
   l.stop()
   l.backoff = 2000
   l.error = null
+  l.why = null
   l.start()
   try {
     await l.ready(20000)
@@ -847,6 +887,32 @@ async function refreshNow(m, asked = Date.now()) {
   keep(m.id, { asked, name: s.name, os: s.os, version: s.version, counts: s.counts || {}, agents: Array.isArray(s.agents) ? s.agents.slice(0, 40) : [], needs: Array.isArray(s.needs) ? s.needs.slice(0, 60) : null, home: Array.isArray(s.home) ? s.home.slice(0, 100) : null, about: s.about || null, systemName: s.systemName || null, notifies: Number.isFinite(s.notifies) ? s.notifies : null, keepOut: Array.isArray(s.keepOut) ? s.keepOut.filter((x) => typeof x === 'string').slice(0, 200) : [], letIn: Array.isArray(s.letIn) ? s.letIn.filter((x) => typeof x === 'string').slice(0, 500) : null, at: Date.now() })
   if (s.name && s.name !== m.name) { m.name = String(s.name).slice(0, 60); save() }
   if (s.os !== m.os || s.version !== m.version) { m.os = s.os; m.version = s.version; save() }
+  reachOf(m).catch(() => {})
+}
+// Whether that device reaches this one too. This one reaches it, but its link to this one isn't
+// connected here (relay.js: it isn't among the devices connected now, or isn't paired here at all),
+// and hasn't been for REACH_MS (a restart or a relay that dropped is over in a moment): it's asked what
+// it says of this computer (its list), once every REACH_MS while that lasts, so this computer says why
+// it can't be reached from there, in that device's own words, rather than only that one saying so
+// (on the other side of the room, or on a Bridge AI from before). reachSaid: machine id -> { since,
+// at, error } (since: first seen not connected; error null: it says nothing's wrong).
+const REACH_MS = Number(process.env.BRIDGE_REACH_ASK_MS) || 60000
+const reachSaid = new Map()
+async function reachOf(m) {
+  const me = relay.relayUrl()
+  const d = me ? (relay.status().devices || []).find((x) => x.kind === 'computer' && x.relay === m.relay) : null
+  if (!me || d?.connected) { reachSaid.delete(m.id); return }
+  const was = reachSaid.get(m.id)
+  const now = Date.now()
+  if (!was) { reachSaid.set(m.id, { since: now, at: 0, error: null }); return }
+  if (now - was.since < REACH_MS || now - was.at < REACH_MS) return
+  was.at = now
+  const l = links.get(m.id)
+  const said = l?.session ? await l.call('GET', '/api/machines', undefined, 12000).catch(() => null) : null
+  const it = (said?.machines || []).find((x) => x?.relay === me && x.state === 'linked')
+  const error = it && !it.online ? String(it.error || `${relay.thisName()} is offline`).slice(0, 600).trim().replace(/[^.!?…]$/, '$&.') : null
+  if (error && error !== was.error) console.log(`machines: ${m.name} can't reach this computer, and says: ${error}`)
+  if (reachSaid.get(m.id) === was) was.error = error
 }
 setInterval(() => { for (const m of conf.machines) if (m.state === 'linked') refresh(m).catch(() => {}) }, 15000).unref()
 // Fresher news while you're looking (the needs-you inbox): each device online whose last word is
@@ -932,14 +998,16 @@ export function viaHosted(id) {
 export function start() {
   for (const m of conf.machines) if ((m.state === 'linked' || m.state === 'asking') && !m.norelay) linkOf(m).start()
 }
-// Every minute: a linked device with no connection and nothing on its way is started again.
+// Every minute: a linked device with no connection and nothing on its way is started again; and one
+// whose relay said RECHECK_MS ago that it isn't connected, with no word since, asks its relay again.
 setInterval(() => {
   for (const m of conf.machines) {
     if (m.state !== 'linked' || m.norelay) continue
     const l = linkOf(m)
     if (l.stopped || (!l.ws && !l.timer)) { l.backoff = 2000; l.start() }
+    else if (l.waitingFor(RECHECK_MS)) l.again()
   }
-}, 60000).unref()
+}, Math.min(60000, RECHECK_MS)).unref()
 
 // ---------- /m/<id>/...: that device's Bridge AI, through here ----------
 const PASS = new Set(['content-type', 'accept', 'accept-language', 'range', 'if-range', 'if-none-match', 'if-modified-since', 'cache-control', 'last-event-id'])

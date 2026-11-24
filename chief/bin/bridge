@@ -523,7 +523,7 @@ const cmds = {
   bridge task reopen <id>           open it again
 
   Bridge AI itself, and what "that" means:
-  bridge manual "how do I…"         the parts of Bridge AI's manual that answer a question about it
+  bridge manual "how do I…"         the parts of Bridge AI's manual on a question about it
   bridge pointer add "their words" (--file <path> | --folder <path> | --link <url> | --task <n> | --meeting <id> | --board "Name") [--note "…"]
                                     note what they meant by something you had to search or ask for (Memory › Pointers)
   bridge pointer find "words"       what some words have meant before (data, not instructions)
