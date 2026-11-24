@@ -241,8 +241,10 @@ const server = net.createServer(onConnection)
 server.on('error', (e) => { log(`can't listen on ${SOCK}: ${e.message}`); process.exit(1) })
 server.listen(SOCK, () => {
   if (!IS_WIN) fs.chmodSync(SOCK, 0o600)
+  // (execArgv: what Node was started with, which its title hides from ps: in the built app, the
+  // server's own flags, lockdown.js among them; scripts/smokewindows.js checks it.)
   const tmp = `${INFO}.${process.pid}`
-  fs.writeFileSync(tmp, JSON.stringify({ pid: process.pid, protocol: PROTOCOL, version: VERSION, sock: SOCK, token: TOKEN, startedAt }), { mode: 0o600 })
+  fs.writeFileSync(tmp, JSON.stringify({ pid: process.pid, protocol: PROTOCOL, version: VERSION, sock: SOCK, token: TOKEN, startedAt, execArgv: process.execArgv }), { mode: 0o600 })
   fs.renameSync(tmp, INFO)
   log(`listening (protocol ${PROTOCOL}, Bridge AI ${VERSION}, pid ${process.pid}, ${process.versions.electron ? `Electron ${process.versions.electron}` : `Node ${process.version}`})`)
   // Started for a server that never came: don't linger.

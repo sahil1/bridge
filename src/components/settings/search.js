@@ -39,6 +39,8 @@ export const SETTINGS = [
     ['chief', tx('Chief of Staff runs on'), 'chief of staff agent'],
     ['chief-helpers', tx('Helpers at once'), 'chief of staff helpers delegate parallel queue queued at once', { near: 'chief' }],
     ['chief-helpers-edit', tx('Helpers may edit in their own work folder'), 'chief of staff helpers edit permission ask work folder', { near: 'chief' }],
+    ['chief-meeting-items', tx('Hand on action items when a meeting ends'), 'chief of staff meeting meetings action items hand on by itself automatically helpers agents to do', { near: 'chief' }],
+    ['tidy-sessions', tx('Tidy Long Sessions While Idle'), 'compact compaction long session context tokens stall idle tidy chief of staff helpers bots summarize', { near: 'chief' }],
     ['scheduled-routines', tx('Scheduled Routines'), 'routines schedule scheduled every weekday run by itself time history commands'],
     ['consult', tx('Your Chief of Staff can consult'), 'consult second opinion bridge ask models', { near: 'chief' }],
     ['agent-list', tx('Install an agent'), 'agents install sign in claude codex gemini copilot cursor opencode cli'],
@@ -119,6 +121,10 @@ export const SETTINGS = [
     ['find-a-time-more', tx('Kept clear around meetings'), 'buffer travel how many times offer'],
     ['mail-read-only', tx('Read-Only'), 'mail never changes send'],
   ]),
+  ...at('studio', [
+    ['signatures', tx('Your Signatures'), 'signature signatures initials sign pdf draw trackpad phone default studio'],
+    ['ask-before-signing', tx('Ask Before Signing'), 'touch id password pin windows hello confirm sign signing signature security studio'],
+  ]),
   ...at('bots', [
     ['bots-beta', tx('Bots'), 'beta bots slack discord teams bot'],
     ['bots-open', tx('Open Bots'), 'bots connections who can ask instructions reads from answers limits channels scheduled posts export activity memory pause tokens socket mode manifest'],
@@ -128,6 +134,7 @@ export const SETTINGS = [
     ['relay', tx('From anywhere'), 'relay phone cloudflare pair a device remote away'],
     ['tailscale', tx('Tailscale'), 'tailscale phone access vpn'],
     ['keep-awake', tx('Keep this computer awake while your phone can reach it'), 'awake sleep lid', { near: 'relay' }],
+    ['ai-providers', tx('AI Providers'), 'ai providers consent allow allowed privacy anthropic openai google send sent phone permission take back revoke'],
   ]),
   ...at('machines', [
     ['machines', tx('Your Devices'), 'devices computers other computers'],
@@ -163,6 +170,7 @@ export const SETTINGS = [
   ...at('backup', [
     ['backup', tx('Back Up & Move'), 'backup back up restore move new computer migrate transfer passphrase bots connections tokens'],
     ['backup-what', tx('What Goes'), 'what goes backup included keys settings', { near: 'backup' }],
+    ['backup-signatures', tx('With your signatures'), 'backup move signatures initials studio', { near: 'backup' }],
   ]),
   ...at('about', [
     ['version', tx('Check for new versions'), 'version update check'],

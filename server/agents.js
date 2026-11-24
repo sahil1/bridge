@@ -155,9 +155,15 @@ export function writeKeptSettings() {
   return KEPT_FILE
 }
 
+// An agent's models for the message box's menu (models.js), with the ones picked before. Claude
+// Code's by its own short names, which follow the newest of each kind, and Fable 5.2 by name (its
+// "fable" is Fable 5 in some sessions: code.claude.com/docs/en/model-config). Codex's, the ones its
+// docs recommend (learn.chatgpt.com/docs/models, November 2026), GPT-6.2 Sol first.
+const CODEX_MODELS = ['gpt-6.2-sol', 'gpt-6.2-astra', 'gpt-6.1-terra', 'gpt-6-luna']
+
 export const AGENTS = [
   {
-    kind: 'claude', label: 'Claude Code', model: (m) => ['--model', m], models: ['opus', 'sonnet', 'haiku', 'claude-fable-5-1'],
+    kind: 'claude', label: 'Claude Code', model: (m) => ['--model', m], models: ['opus', 'sonnet', 'haiku', 'claude-fable-5-2'],
     // --effort is for that session only: unlike /effort typed in it, it's never kept in Claude Code's settings.
     effort: (lvl) => ['--effort', lvl],
     // Its own /model (code.claude.com/docs/en/model-config): "default" clears the override.
@@ -218,7 +224,7 @@ export const AGENTS = [
   {
     // Its installer ends by asking "Start Codex now? [y/N]", which waits forever in an install tab
     // nobody is looking at: CODEX_NON_INTERACTIVE says no.
-    kind: 'codex', label: 'Codex', model: (m) => ['--model', m], models: [], install: { unix: 'curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh', win: '$env:CODEX_NON_INTERACTIVE=\'1\'; powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"', npm: '@openai/codex', brew: '--cask codex' }, bin: ['codex'], herdr: 'codex', usage: 'codex',
+    kind: 'codex', label: 'Codex', model: (m) => ['--model', m], models: CODEX_MODELS, install: { unix: 'curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh', win: '$env:CODEX_NON_INTERACTIVE=\'1\'; powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"', npm: '@openai/codex', brew: '--cask codex' }, bin: ['codex'], herdr: 'codex', usage: 'codex',
     sessionId: 'discover',
     start: ({ prompt }) => (prompt ? [prompt] : []), promptArg: true,
     resume: (id) => ['resume', id],

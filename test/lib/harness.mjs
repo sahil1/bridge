@@ -289,7 +289,7 @@ export async function startKit(name, { env = {}, config = {}, node = process.exe
   if (IS_WIN) Object.assign(base, { USERPROFILE: home, APPDATA: path.join(home, 'AppData', 'Roaming'), LOCALAPPDATA: path.join(home, 'AppData', 'Local'), SystemRoot: process.env.SystemRoot, ComSpec: process.env.ComSpec, PATHEXT: process.env.PATHEXT, TEMP: os.tmpdir(), TMP: os.tmpdir(), PSModuleAnalysisCachePath: path.join(os.tmpdir(), 'bridge-tests-ModuleAnalysisCache') })
   else base.BRIDGE_SHELL = base.SHELL = '/bin/sh'
   const log = fs.openSync(path.join(dir, 'server.log'), 'w')
-  const more = typeof env === 'function' ? env({ bin, data, home, PATH }) : env
+  const more = typeof env === 'function' ? env({ bin, data, home, PATH, port }) : env
   // GitHub turned away (stand-ins/no-github.mjs), before what the test loads itself.
   const NODE_OPTIONS = [`--import=${pathToFileURL(path.join(TEST, 'stand-ins', 'no-github.mjs')).href}`, more.NODE_OPTIONS].filter(Boolean).join(' ')
   githubLogs.set(`${name}-${port}`, more.BRIDGE_TEST_GITHUB_LOG || base.BRIDGE_TEST_GITHUB_LOG)
@@ -673,11 +673,41 @@ export const changeAnswer = (ctx, url, change, { orElse } = {}) => ctx.route(url
   }
 })
 export const noServiceWorker = (ctx) => ctx.addInitScript(() => { try { delete Navigator.prototype.serviceWorker } catch { /* none */ } })
+
+// ---------- The desktop app's own window (server/appkeys.js, windowkey.js) ----------
+// What the app hands the server it starts on fd 3 (its window secret, the signatures' key, this
+// start's secret, what it last heard of the signatures' list), given to a kit's server by a file of
+// the test's own instead (BRIDGE_TEST_WINDOW_FILE, read again at each start: the tests only). In a
+// kit's env(): const keys = appKeysFor(bin); return { BRIDGE_TEST_WINDOW_FILE: keys.file }.
+// keys.write(more): the file again, changed (another start's secret, a state, none of it).
+// testHeader (on unless more says not): its browser pages may send "test.<secret>" (asWindow below).
+export function appKeysFor(bin, more = {}) {
+  const keys = { window: crypto.randomBytes(32).toString('base64url'), key: crypto.randomBytes(32).toString('base64'), launch: crypto.randomBytes(32).toString('base64url'), testHeader: true, ...more }
+  const file = path.join(bin, 'app-keys.json')
+  const write = (o = keys) => fs.writeFileSync(file, typeof o === 'string' ? o : JSON.stringify(o))
+  write()
+  return { ...keys, file, write }
+}
+// The MAC a window's request carries, made as the app makes it (desktop/windowauth.js).
+const windowAuth = createRequire(import.meta.url)('../../desktop/windowauth.js')
+// body: what the request sends (a string or bytes), in the MAC as its SHA-256.
+export const windowHeader = (secret, method, url, body = null) => windowAuth.windowHeader(secret, method, url, { body: body == null ? '' : crypto.createHash('sha256').update(body).digest('hex') })
+// A page as the app's own window. The app adds a MAC to each of its windows' requests outside the
+// page (desktop/main.js); a test's page can't do that once the app's service worker has it (WebKit
+// shows a test no request it handles), so it sends "test.<secret>", which the server takes in the
+// tests only, for a kit whose keys say so (appKeysFor's testHeader). The MAC itself is checked with
+// windowFetch and windowHeader (sign-security, studio-pdf).
+export const asWindow = (ctx, secret) => ctx.setExtraHTTPHeaders({ 'x-bridge-window': `test.${secret}` })
+// fetch as the app's window: (url, init) with the key (the harness's fetch) and the window's MAC.
+export const windowFetch = (secret) => (url, init = {}) => fetch(url, { ...init, headers: { ...(init.headers || {}), 'x-bridge-window': windowHeader(secret, init.method || 'GET', url, init.body ?? null) } })
 // The phone page (relay/web) on its way to Bridge AI, for a test to say how far it got when Bridge AI
 // didn't open in it: phoneNotes(ctx) before the page opens notes, from its start (ms), when its
 // service worker took it over, each request the worker handed it to send to the computer (Bridge
 // AI's own page first), each address its frame was given and each load there; phoneSaw(page) adds
-// what's there now: the worker's state, the frame's address, and which screen the page shows.
+// what's there now: the worker's state (registered: whether the browser has its registration at
+// all), the frame's address, which screen the page shows, and from the relay stand-in, which of the
+// page's own files were asked for, how long ago and how they were answered (asked: whether the
+// worker's script, /sw.js, and the one it imports, /link-sw.js, ever were).
 export const phoneNotes = (ctx) => ctx.addInitScript(() => {
   if (window !== window.top || !navigator.serviceWorker) return
   const notes = window.__phoneNotes = []
@@ -697,11 +727,18 @@ export const phoneNotes = (ctx) => ctx.addInitScript(() => {
   }
   frame()
 })
-export const phoneSaw = (p) => p.evaluate(async () => {
-  const r = await navigator.serviceWorker?.getRegistration().catch(() => null)
-  const shown = ['pair', 'wait', 'home', 'away', 'bar'].filter((id) => document.getElementById(id) && !document.getElementById(id).hidden).map((id) => `${id}: ${document.getElementById(id).innerText.trim().slice(0, 80)}`)
-  return { worker: { controls: !!navigator.serviceWorker?.controller, active: r?.active?.state || null, installing: r?.installing?.state || null, waiting: r?.waiting?.state || null }, frame: document.getElementById('app')?.getAttribute('src') ?? null, shown, notes: window.__phoneNotes || null }
-}).catch((e) => e.message)
+export async function phoneSaw(p) {
+  const saw = await p.evaluate(async () => {
+    const r = await navigator.serviceWorker?.getRegistration().catch(() => null)
+    const shown = ['pair', 'wait', 'home', 'away', 'bar'].filter((id) => document.getElementById(id) && !document.getElementById(id).hidden).map((id) => `${id}: ${document.getElementById(id).innerText.trim().slice(0, 80)}`)
+    return { worker: { registered: !!r, controls: !!navigator.serviceWorker?.controller, active: r?.active?.state || null, installing: r?.installing?.state || null, waiting: r?.waiting?.state || null }, frame: document.getElementById('app')?.getAttribute('src') ?? null, shown, notes: window.__phoneNotes || null }
+  }).catch((e) => e.message)
+  // (Asked here, not by the page, whose worker would take the request to the computer.)
+  const asked = await fetch(new URL('/_test/state', p.url())).then((x) => x.json()).then((j) => (j.asked || []).slice(-8).map((a) => `${a.p} ${Date.now() - a.at} ms ago: ${a.status ?? 'unanswered'}${a.ms != null ? ` in ${a.ms} ms` : ''}`), () => null)
+  if (typeof saw === 'string') return { saw, asked }
+  const { notes, ...rest } = saw
+  return { ...rest, asked, notes }
+}
 // The time a test runs at: now, or what BRIDGE_TEST_CLOCK names, a time today ("21:30") or a weekday
 // and a time ("Sat 00:30": that weekday nearest today), so a test can be tried at any hour on any day.
 // The clock flows on from there as the real one does.
@@ -805,29 +842,41 @@ export const solid = async (p, sel) => {
 }
 
 // Speech models from this computer instead of Hugging Face: a small fake model's files (for
-// Parakeet and Parakeet English, the natural voice's (voice), and one file for Whisper base,
-// English), served with ranges, and
-// the file (BRIDGE_SPEECH_MODELS) that gives the server their sizes and checksums. Whisper's has
-// the wrong checksum, so its download is thrown away. env: what a kit needs to use them (with no Mac speech standing in,
-// and the stand-in engine's log in the kit's folder: sherpa.log). cut: the next encoder download
-// stops after that many bytes, as a dropped connection would. slow: ms between pieces, so progress
-// shows. asked: each request, { model, name, range }.
+// Parakeet and Parakeet English, the natural voice's (voice), the speaker model's, and Whisper's:
+// large turbo and base, and whisper.cpp's Base English with Silero, for a computer where sherpa-onnx
+// can't run), served with ranges, and the file (BRIDGE_SPEECH_MODELS) that gives the
+// server their sizes and checksums. Whisper small's has the wrong checksum, so its download is
+// thrown away. env: what a kit needs to use them (with no Mac speech standing in, and the stand-in
+// engine's log in the kit's folder: sherpa.log). cut: the next encoder download stops after that
+// many bytes, as a dropped connection would. slow: ms between pieces, so progress shows. asked:
+// each request, { model, name, range }.
 export async function startSpeechModels(name) {
   const fake = (n, seed) => { const b = Buffer.alloc(n); for (let i = 0; i < n; i++) b[i] = (i * 31 + seed * 7) & 255; return b }
   const files = { 'tokens.txt': Buffer.from('<unk> 0\n▁the 1\n▁work 2\n'), 'decoder.int8.onnx': fake(40_000, 1), 'joiner.int8.onnx': fake(30_000, 2), 'encoder.int8.onnx': fake(1_500_000, 3) }
   // And the natural voice that reads answers aloud (Supertonic 3), in files of its own names.
   const voice = { 'tts.json': Buffer.from('{}'), 'unicode_indexer.bin': fake(2_000, 5), 'voice.bin': fake(3_000, 6), 'duration_predictor.int8.onnx': fake(20_000, 7), 'text_encoder.int8.onnx': fake(200_000, 8), 'vocoder.int8.onnx': fake(150_000, 9), 'vector_estimator.int8.onnx': fake(600_000, 10) }
-  const whisper = fake(300_000, 4)
+  // Whisper's three files, named as each model's are (turbo-encoder.int8.onnx…).
+  const whisperFiles = (stem, seed) => ({ [`${stem}-tokens.txt`]: Buffer.from('<|endoftext|> 0\nthe 1\n'), [`${stem}-decoder.int8.onnx`]: fake(60_000, seed), [`${stem}-encoder.int8.onnx`]: fake(400_000, seed + 1) })
+  const whisper = { ...whisperFiles('turbo', 11), ...whisperFiles('base', 13), ...whisperFiles('small', 15) }
+  const speaker = { '3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx': fake(50_000, 17) }
+  // whisper.cpp's Base English and Silero, for a computer where sherpa-onnx can't run.
+  const ggml = { 'ggml-base.en-q5_1.bin': fake(300_000, 19), 'ggml-silero-v6.2.0.bin': fake(20_000, 21) }
   const sha = (b) => crypto.createHash('sha256').update(b).digest('hex')
   const list = (o) => Object.entries(o).map(([n, b]) => ({ name: n, bytes: b.length, sha256: sha(b) }))
+  const pick = (stem) => Object.fromEntries(Object.entries(whisper).filter(([n]) => n.startsWith(`${stem}-`)))
   const sherpa = list(files)
   const catalog = path.join(OUT, 'kits', `${name}-speech-models.json`)
   fs.mkdirSync(path.dirname(catalog), { recursive: true })
-  fs.writeFileSync(catalog, JSON.stringify({ 'parakeet-v3': { files: sherpa }, 'parakeet-en': { files: sherpa }, 'supertonic-3': { files: list(voice) }, 'base.en-q5_1': { files: [{ name: 'ggml-base.en-q5_1.bin', bytes: whisper.length, sha256: '0'.repeat(64) }] } }))
-  const me = { asked: [], cut: 0, slow: 0, files, voice, sha }
+  fs.writeFileSync(catalog, JSON.stringify({
+    'parakeet-v3': { files: sherpa }, 'parakeet-en': { files: sherpa }, 'supertonic-3': { files: list(voice) }, voices: { files: list(speaker) },
+    'whisper-turbo': { files: list(pick('turbo')) }, 'whisper-base': { files: list(pick('base')) },
+    'whisper-small': { files: list(pick('small')).map((f) => (f.name.includes('encoder') ? { ...f, sha256: '0'.repeat(64) } : f)) },
+    'base.en-q5_1': { files: list({ 'ggml-base.en-q5_1.bin': ggml['ggml-base.en-q5_1.bin'] }) }, vad: { files: list({ 'ggml-silero-v6.2.0.bin': ggml['ggml-silero-v6.2.0.bin'] }) },
+  }))
+  const me = { asked: [], cut: 0, slow: 0, files, voice, whisper, speaker, ggml, sha }
   const srv = http.createServer(async (req, res) => {
     const [, model, file] = req.url.split('/')
-    const body = files[file] || voice[file] || (file === 'ggml-base.en-q5_1.bin' ? whisper : null)
+    const body = files[file] || voice[file] || whisper[file] || speaker[file] || ggml[file] || null
     me.asked.push({ model, name: file, range: req.headers.range || null })
     if (!body) { res.writeHead(404); res.end(); return }
     const m = /bytes=(\d+)-/.exec(req.headers.range || '')

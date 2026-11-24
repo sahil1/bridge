@@ -31,6 +31,7 @@ import { Threads, SAY, useAuthor } from '../doccomments.jsx'
 import { useSheetThreads, commentKey } from '../sheetcomments.jsx'
 import { where } from '../../settings/search.js'
 import '../sheet.css'
+import { assistKept } from '../../../counts.js'
 
 // A sheet: Univer (Apache-2.0, what GenOffice's Sheets is built on too) with its ribbon, formula
 // bar, sheet tabs, number formats, freeze, sort, filter, conditional formatting, data validation,
@@ -544,6 +545,7 @@ function AskPanel({ hidden, preset, onShow, file, univer, sel, dark, onDirty, on
     } catch (x) { setErr({ message: t("Couldn't show {name}'s change: {error}", { name: asked.name, error: x.message }) }); return false }
   }
   const keep = (s) => {
+    assistKept('studio', true)
     lit.current.delete(s.id)
     const chart = keepChange(s, onChart)
     if (chart) onDirty(true)
@@ -551,6 +553,7 @@ function AskPanel({ hidden, preset, onShow, file, univer, sel, dark, onDirty, on
     return chart
   }
   const putBack = (s) => {
+    assistKept('studio', false)
     lit.current.delete(s.id)
     putBackChange(univer.current, s)
     setList((l) => l.filter((x) => x.id !== s.id))
@@ -823,8 +826,8 @@ function MakePanel({ hidden, preset, file, univer, onDirty, onMade, onShow, onCl
     } catch (x) { if (live.current) setErr({ message: x.message, noModel: x.code === 'noModel' }) } finally { if (live.current) setBusy(false) }
   }
   useEffect(() => { if (preset?.text) { setText(preset.text); make(preset.text) } }, [preset?.n]) // eslint-disable-line react-hooks/exhaustive-deps
-  const keep = () => { unmarkBook(made.made); setMade(null); setText(''); setNote(t('Kept. Save to write it to the file; undo takes it back.')); onMade(true) }
-  const discard = () => { takeBook(univer.current, made.made); setMade(null); onDirty(false); onMade(false) }
+  const keep = () => { assistKept('studio', true); unmarkBook(made.made); setMade(null); setText(''); setNote(t('Kept. Save to write it to the file; undo takes it back.')); onMade(true) }
+  const discard = () => { assistKept('studio', false); takeBook(univer.current, made.made); setMade(null); onDirty(false); onMade(false) }
   const goes = !model ? '' : model.via === 'local' ? t('What you say stays on this computer ({model}).', { model: model.label }) : t('What you say goes to {model} ({provider}). Nothing else leaves this computer.', { model: model.label, provider: model.provider || model.label })
   return (
     <aside className="sh-side sh-ask sh-make" aria-label={t('Make a sheet')} hidden={hidden}>

@@ -331,7 +331,7 @@ try {
     await laptop.api('/remote/devices', { id: POCKET, allowed: false })
     const v = pk.socket(`/m/${S.id}${V}`)
     await v.wait((s) => msg(s, 'error'))
-    ok(msg(v, 'error')?.code === 'device' && /Laptop doesn't let Pocket connect/.test(msg(v, 'error').why) && !msg(v, 'password'), 'Pocket, unticked at Laptop, can\'t reach Studio\'s screen through it', msg(v, 'error'))
+    ok(msg(v, 'error')?.code === 'device' && msg(v, 'error').at === 'Laptop' && /Laptop doesn't let Pocket connect/.test(msg(v, 'error').why) && !msg(v, 'password'), 'Pocket, unticked at Laptop, can\'t reach Studio\'s screen through it, told so as Laptop\'s (at, for its viewer to name Laptop)', msg(v, 'error'))
     ok(!(await studio.api('/remote')).log.some((e) => e.for === 'Pocket'), 'it never reached Studio')
     await laptop.api('/remote/devices', { id: POCKET, allowed: true })
     // First seen at Studio through Laptop, with Studio's password set: New there, let in at Studio.
@@ -376,7 +376,7 @@ try {
     ok(!!seen && seen.by.name === 'Laptop', 'Studio\'s sessions say both: Laptop, for Pocket', seen && { by: seen.by.name, for: seen.for })
     await laptop.api('/remote/devices', { id: POCKET, allowed: false })
     await w.wait((s) => msg(s, 'error') && s.closed, 5000)
-    ok(msg(w, 'error')?.code === 'device' && !!(await idle()), 'unticked at Laptop while it looks: its session through Laptop ends', msg(w, 'error'))
+    ok(msg(w, 'error')?.code === 'device' && msg(w, 'error').at === 'Laptop' && !!(await idle()), 'unticked at Laptop while it looks: its session through Laptop ends, told so as Laptop\'s', msg(w, 'error'))
     await laptop.api('/remote/devices', { id: POCKET, allowed: true })
   })
 

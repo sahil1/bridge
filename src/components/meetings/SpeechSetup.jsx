@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Icon from '../Icon.jsx'
-import { api, usePoll, viaRelay } from '../../api.js'
+import { api, usePoll } from '../../api.js'
 import PermissionFix, { useRecheck } from '../PermissionFix.jsx'
 import { appSide } from '../../permissions.js'
 import { CalendarSetup } from '../Agenda.jsx'
@@ -13,58 +13,37 @@ import { where } from '../settings/search.js'
 // the whole setup instead, Granola style: speech to text, the mic, who writes the notes and the
 // calendar, each a tick or one button.
 const settings = (section) => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section } }))
-const showTab = (paneId) => window.dispatchEvent(new CustomEvent('bridge-open-agent', { detail: { paneId } }))
 
-// What speech to text needs, in a sentence, and the buttons that do it. Install whisper.cpp also
-// fetches the speech model once it's in, so it's one step.
+// What speech to text needs, in a sentence, and the buttons that do it.
 function useSpeechStep(d, refresh) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
-  const [tab, setTab] = useState(null) // { id, what }: the terminal tab an install runs in
-  const fetched = useRef(false)
   const model = d?.local?.models?.find((x) => x.id === d.local.model)
   const dl = model?.downloading
-  // An install that's done: its note goes (Homebrew in, whisper.cpp is next; or all set).
-  useEffect(() => { if ((tab?.what === 'homebrew' && d && d.needs !== 'brew') || (tab && d?.ready)) setTab(null) }, [tab, d])
-  useEffect(() => {
-    if (tab?.what !== 'whisper' || d?.needs !== 'model' || dl || fetched.current || !model) return
-    fetched.current = true
-    api(`/speech/models/${model.id}`, { method: 'POST' }).then(refresh, (e) => setErr(e.message))
-  }, [tab, d?.needs, dl, model, refresh])
   if (!d) return null
-  const run = async (what, fn) => {
+  const run = async (fn) => {
     setBusy(true); setErr(null)
-    try { const r = await fn(); if (r?.openId) setTab({ id: r.openId, what }); refresh() } catch (e) { setErr(e.message) } finally { setBusy(false) }
+    try { await fn(); refresh() } catch (e) { setErr(e.message) } finally { setBusy(false) }
   }
   const service = d.services?.find((x) => x.id === d.engine)
-  const older = d.mac && !d.apple?.available && d.engine === 'local' && d.apple?.why ? `${t("This Mac doesn't transcribe on its own ({why}).", { why: d.apple.why.replace(/^\w/, (c) => c.toLowerCase()) })} ` : ''
   const label = model?.label
   const mb = model?.mb
   const what = {
-    whisper: `${older}${t('whisper.cpp turns speech into text on this computer, free and private. It installs in a minute.')}`,
-    brew: d.mac
-      ? `${older}${t("whisper.cpp turns speech into text on this Mac, free and private. It installs with Homebrew, which isn't on this Mac yet.")}`
-      : t('whisper.cpp turns speech into text on this computer, free and private. Install whisper-cpp with your package manager, or use a speech service.'),
     model: dl && !dl.error ? t('The speech model ({model}) is downloading: {percent}%.', { model: model.label, percent: dl.percent })
       : label ? (mb ? t('The speech model ({model}, {mb} MB) downloads once.', { model: label, mb }) : t('The speech model ({model}) downloads once.', { model: label }))
         : mb ? t('The speech model ({mb} MB) downloads once.', { mb }) : t('The speech model downloads once.'),
     apple: d.apple?.why ? t("The Mac's own speech isn't available here ({why}).", { why: d.apple.why.replace(/^\w/, (c) => c.toLowerCase()) }) : t("The Mac's own speech isn't available here."),
     key: service?.label ? t('{service} needs its key, in {place}.', { place: where('providers-speech'), service: service.label }) : t('That service needs its key, in {place}.', { place: where('providers-speech') }),
   }[d.needs] || t("Speech to text isn't set up yet.")
-  const here = !viaRelay
   const actions = (
     <>
-      {here && d.needs === 'whisper' && <button type="button" className="btn small primary" disabled={busy || tab?.what === 'whisper'} onClick={() => run('whisper', () => api('/speech/install', { method: 'POST' }))}>{tab?.what === 'whisper' ? t('Installing…') : t('Install whisper.cpp')}</button>}
-      {here && d.needs === 'brew' && d.mac && <button type="button" className="btn small primary" disabled={busy || tab?.what === 'homebrew'} onClick={() => run('homebrew', () => api('/fix/install', { method: 'POST', body: { what: 'homebrew' } }))}>{tab?.what === 'homebrew' ? t('Installing…') : t('Install Homebrew')}</button>}
-      {d.needs === 'model' && !(dl && !dl.error) && model && <button type="button" className="btn small primary" disabled={busy} onClick={() => run('model', () => api(`/speech/models/${model.id}`, { method: 'POST' }))}>{dl?.error ? t('Try again') : t('Download it')}</button>}
+      {d.needs === 'model' && !(dl && !dl.error) && model && <button type="button" className="btn small primary" disabled={busy} onClick={() => run(() => api(`/speech/models/${model.id}`, { method: 'POST' }))}>{dl?.error ? t('Try again') : t('Download it')}</button>}
       {d.needs === 'key' && <button type="button" className="btn small primary" onClick={() => settings('providers')}>{t('Add the key')}</button>}
       <button type="button" className="btn small" onClick={() => settings('meetings')} title={t('A speech service is quicker on an older computer, and costs a little per hour of audio')}>{d.needs === 'key' || d.needs === 'apple' ? t('Other ways') : t('Use a speech service')}</button>
     </>
   )
   const note = (
     <>
-      {!here && (d.needs === 'whisper' || d.needs === 'brew') && <span className="muted small">{t('Install it in Bridge AI on your computer.')}</span>}
-      {tab && <span className="muted small">{tab.what === 'homebrew' ? t('Installing Homebrew in a terminal tab. It asks for your Mac password there, then whisper.cpp is next.') : t("Installing in a terminal tab. The speech model downloads when it's done.")} <button type="button" className="link-btn" onClick={() => showTab(tab.id)}>{t('Show it')}</button></span>}
       {dl?.error && <span className="error-text small">{dl.error}</span>}
       {err && <span className="error-text small">{err}</span>}
     </>

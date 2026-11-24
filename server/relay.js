@@ -60,9 +60,11 @@ import { loginPath, which } from './agents.js'
 import { bundle } from '../relay/build.js'
 import { computerWelcome, computerShareWelcome, newPairCode, splitCode, formatCode, plainFrame, readPlain, b64u, boxId, K, pack, unpack, json, utf8, CHUNK, moreOf } from '../relay/web/link.js'
 import * as inbox from './inbox.js'
+import * as counts from './counts.js'
 import * as shares from './shares.js'
 import { LIMITS as SHARE_LIMITS } from '../shared/shares.js'
 import { authHeaders, localKey } from './apitoken.js'
+import { HEADER as PROOF, proofOf } from './relayproof.js'
 import { plainName } from '../shared/remote.js'
 import { placeEn } from '../shared/places.js'
 
@@ -249,6 +251,8 @@ export function start(serverBase) {
   if (!conf.url) setTimeout(maybeAuto, 20000).unref()
 }
 
+// Usage stats: the relay down, counted once until it connects again (fail.relay).
+let relayDown = false
 function connect() {
   clearTimeout(retry)
   if (!conf.url || !conf.token) return
@@ -272,10 +276,13 @@ function connect() {
   const ws = new WebSocket(`${conf.url.replace(/^http/, 'ws').replace(/\/$/, '')}/_relay/host`, { headers: { Authorization: `Bearer ${conf.token}`, ...(conf.hosted ? { 'X-Bridge-Version': VERSION, 'X-Relay-Token': relayToken } : {}) }, handshakeTimeout: 15000, ...(onThisComputer(conf.url) ? { lookup: loopback } : {}) })
   link = ws
   failed = null
+  let opened = false // (usage stats: a try that never connected, once each time the relay is down)
   let heard = Date.now() // when the relay last sent anything
   let asked = 0 // when the last ping went out
   ws.on('open', () => {
     online = true
+    opened = true
+    relayDown = false
     lastError = null
     limit = null
     backoff = FIRST_TRY
@@ -329,6 +336,7 @@ function connect() {
   })
   ws.on('close', () => {
     if (link !== ws) return
+    if (!opened && failed && !relayDown) { relayDown = true; counts.add('fail.relay').catch(() => {}) }
     online = false
     clearInterval(pinger)
     for (const c of conns.values()) c.end()
@@ -450,6 +458,30 @@ const cleanName = (s) => plainName(s)
 const HELLO_WINDOW = 10000
 const HELLO_MAX = 60
 const STRANGER_MAX = 12
+// A computer's hello turned away (not paired here, a code that didn't work, too many at once): said
+// in the log, so another of your computers that "can't reach" this one says why here too. Once an
+// hour for each key and answer, and at most ten an hour in all (anyone can send a hello saying it's
+// a computer, with any name: what it says goes in the log only as a name, its key never).
+const awaySaid = new Map()
+function turnedAway(msg, why) {
+  if (msg?.kind !== 'computer' || typeof msg.d !== 'string') return
+  const now = Date.now()
+  for (const [k, at] of awaySaid) if (at < now - 3600000) awaySaid.delete(k)
+  const k = `${msg.d}:${why}`
+  if (awaySaid.has(k) || awaySaid.size >= 10) return
+  const known = (conf.devices || []).find((d) => d.key === msg.d)
+  if (why === 'busy' && !known) return // (a stranger's: nothing to say)
+  awaySaid.set(k, now)
+  const name = known?.name || cleanName(msg.name) || 'A computer'
+  const what = {
+    'not-paired': `it isn't linked with ${computerName()} any more (it was unlinked here, or ${computerName()} was set up again). Link it again from either one.`,
+    'code-expired': 'the code it came with didn\'t work (used, expired or mistyped).',
+    busy: 'too many devices were connecting at once. It tries again by itself.',
+    denied: `it was turned down here when it asked; it can ask again in an hour.`,
+  }[why] || `${String(why).slice(0, 200).replace(/\.$/, '')}.`
+  console.log(`relay: ${name} (computer${known ? ', linked here' : ''}) was turned away: ${what}`)
+}
+
 // (Share Links' pages are counted by link, apart from these: shares.js helloRoom.)
 const hellos = { all: [], strangers: [] }
 function helloRoom(known) {
@@ -542,7 +574,7 @@ class Conn {
     const devices = conf.devices || []
     // Hellos are counted: past a few a second (fewer from keys not paired here), the rest are let go
     // unanswered, so no one can keep this computer working out keys for them.
-    if (!helloRoom(typeof msg?.d === 'string' && !msg.pair && devices.some((d) => d.key === msg.d))) { this.close(); return }
+    if (!helloRoom(typeof msg?.d === 'string' && !msg.pair && devices.some((d) => d.key === msg.d))) { turnedAway(msg, 'busy'); this.close(); return }
     // The phone's code, or a one-time code for another of your devices.
     const code = (pid) => (pairing && pairing.id === pid && pairing.expires > Date.now() && pairing.uses < PAIR_USES && pairing.tries < 5 ? pairing : null)
       || invites.find((p) => p.id === pid && p.expires > Date.now() && p.uses < 1 && p.tries < 5)
@@ -572,6 +604,7 @@ class Conn {
       // that didn't work gets one answer whatever was wrong with it (used, expired or mistyped), so
       // nothing tells a guess at one from another.
       const a = r.refuse === 'not-paired' && msg?.ask && msg.kind === 'computer' ? await askFrom(msg) : { why: r.refuse === 'wrong-code' ? 'code-expired' : r.refuse }
+      if (a.why !== 'asked') turnedAway(msg, a.why)
       this.via.send(OP.DATA, this.id, plainFrame({ t: 'refuse', why: a.why, ...(a.why === 'asked' ? { h: b64u((await key()).public), n: a.n } : {}) }))
       setTimeout(() => this.close(), 500)
       return
@@ -770,6 +803,8 @@ class Conn {
     if (p?.code) p.code.paired = { id: device.id, name: device.name, kind: device.kind || 'phone', at: Date.now() }
     this.device = device
     device.lastSeen = new Date().toISOString()
+    // Usage stats: a phone's visit (a linked computer's link isn't one).
+    if (device.kind !== 'computer') counts.phoneVisit(device.id).catch(() => {})
     // Since this computer moved: one that reached the address it left is told the new one (MOVE);
     // one seen here has moved, and once all have, the old address goes.
     const m = conf.moved
@@ -821,8 +856,10 @@ class Conn {
         let res
         if (this.view) res = await shares.answer(this.view, { m, u, h: Array.isArray(h) ? h.filter((x) => Array.isArray(x) && x.length === 2) : [], body: s.body ? Buffer.concat(s.body) : null, content: c === 1 })
         else {
-          const headers = Object.fromEntries((h || []).filter(([k]) => !DROP.has(k.toLowerCase()) && !/^(sec-|x-bridge-relay$|authorization$)/i.test(k) && (computer || !FOR.test(k))))
+          const headers = Object.fromEntries((h || []).filter(([k]) => !DROP.has(k.toLowerCase()) && !/^(sec-|x-bridge-relay$|x-bridge-relay-proof$|x-bridge-window$|authorization$)/i.test(k) && (computer || !FOR.test(k))))
           headers['x-bridge-relay'] = this.device.id
+          // (And that it's the relay saying so: relayproof.js.)
+          headers[PROOF] = proofOf(this.device.id)
           Object.assign(headers, authHeaders(localKey()))
           res = await fetch(target, { method: m || 'GET', headers, body: s.body ? Buffer.concat(s.body) : undefined, signal: abort.signal, redirect: 'manual' })
         }
@@ -876,7 +913,7 @@ class Conn {
     const target = new URL(String(u || '/'), base)
     if (target.origin !== new URL(base).origin) return this.send(K.WS_CLOSE, sid, { c: 1008, r: 'Not allowed' })
     const said = this.device?.kind === 'computer' ? (Array.isArray(h) ? h : []).filter(([k, v]) => FOR.test(String(k)) && typeof v === 'string').map(([k, v]) => [String(k).toLowerCase(), v.slice(0, 200)]) : []
-    const ws = new WebSocket(target.href.replace(/^http/, 'ws'), { headers: { ...Object.fromEntries(said), 'x-bridge-relay': this.device.id, ...authHeaders(localKey()) } })
+    const ws = new WebSocket(target.href.replace(/^http/, 'ws'), { headers: { ...Object.fromEntries(said), 'x-bridge-relay': this.device.id, [PROOF]: proofOf(this.device.id), ...authHeaders(localKey()) } })
     this.streams.set(sid, { ws, ...forOf(said) })
     ws.on('open', () => this.send(K.WS_OPENED, sid))
     ws.on('message', (data, isBinary) => {

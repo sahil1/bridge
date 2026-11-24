@@ -358,7 +358,7 @@ async function command(line) {
     say(model ? `Talking to ${describe(model, list)}.` : 'No model picked yet.')
     if (!list.length) say(NONE)
     list.forEach((m, i) => say(`  ${i + 1}. ${m.id}  ${dim(`${m.label}, ${m.provider}${PROJECT && !canUseTools(m.id) ? ', talk only' : ''}`)}`))
-    say('Switch with /model <number or name>. Any model a provider has works by name, e.g. /model openai:gpt-5-mini')
+    say('Switch with /model <number or name>. Any model a provider has works by name, e.g. /model openai:gpt-6-luna')
   } else if (cmd === '/model') {
     const list = await models().catch(() => [])
     const pickd = /^\d+$/.test(arg) ? list[Number(arg) - 1]?.id : arg.includes(':') ? arg : list.find((m) => m.label.toLowerCase() === arg.toLowerCase() || m.id.endsWith(`:${arg}`))?.id

@@ -32,11 +32,14 @@
     "computers": "other computers linked to this one, as one of values.computers",
     "installAge": "how long Bridge AI has been on this computer: week 1, 2-4 weeks, 5-12 weeks or 13+ weeks",
     "daysActive": "on how many days of the week something was counted, 0 to 7",
+    "recentWeeks": "of the last four weeks, this one included, on how many Bridge AI was used: 1 to 4 (said by this computer, which keeps the weeks it was used, never sent; nothing ties two reports together)",
     "activeTime": "how long Bridge AI was in use that week (a window of it in front on this computer, with you typing, clicking, scrolling or touching it in the last two minutes; not phones), as one of timeRanges",
     "openTime": "how long Bridge AI was running that week, used or not, as one of timeRanges",
     "features": "the features on, each as one of its values under features (only those)",
     "agents": "the coding agents installed on this computer, each one of agents",
     "counts": "each counter below that isn't 0, as a bucket",
+    "amounts": "each amount below (amounts) that isn't 0, as one of the ranges it names: tokens, hours of meetings recorded, words dictated, and time in use in each part of Bridge AI",
+    "totals": "each amount marked total (amounts) that isn't 0, as its number rounded to two significant figures (3,417,882 tokens go as 3,400,000; time in minutes): the server adds it to the week's total for that name and keeps nothing else of it",
     "nonce": "random, new for each report, so a report sent twice is counted once; it says nothing about you or this computer"
   },
   "counters": {
@@ -65,6 +68,7 @@
     "chief.tasks": "Tasks added to Chief of Staff's list",
     "voice.transcribed": "Times speech was turned into text (voice notes and dictation)",
     "meetings.recorded": "Meetings recorded",
+    "meetings.filesTranscribed": "Audio and video files transcribed",
     "setup.simple": "Setup finished with the simple layout",
     "setup.everything": "Setup finished with everything shown",
     "errors.window": "Times a part of the window broke and showed its error",
@@ -76,6 +80,65 @@
     "dictations.saved": "Dictations saved",
     "meetings.toAgents": "A meeting's action item handed to an agent",
     "whiteboards.drawn": "Whiteboards drawn by a model",
+    "chief.delegated": "Tasks the Chief of Staff handed to a helper",
+    "routines.run": "Routines run, on their schedule or by hand",
+    "agents.handedOff": "Conversations handed off to another agent",
+    "studio.made.document": "Documents made in Studio (Word or Markdown)",
+    "studio.made.sheet": "Sheets made in Studio (Excel or CSV)",
+    "studio.made.deck": "Decks made in Studio",
+    "studio.made.other": "Other files made in Studio (a web page)",
+    "pdfs.signed": "PDFs signed in Studio",
+    "fail.agent.notInstalled": "Agents that couldn't start: not installed",
+    "fail.agent.signIn": "Agents that couldn't start: signing in was needed",
+    "fail.agent.other": "Agents that couldn't start, for another reason",
+    "fail.model.key": "Answers Bridge AI asked a model for that failed: the key or sign-in was refused",
+    "fail.model.limit": "Answers Bridge AI asked a model for that failed: a usage or rate limit",
+    "fail.model.timeout": "Answers Bridge AI asked a model for that failed: it took too long",
+    "fail.model.other": "Answers Bridge AI asked a model for that failed, for another reason",
+    "fail.speech": "Speech that couldn't be turned into text",
+    "fail.relay": "Times the relay couldn't connect (once each time it was down, not each try)",
+    "fail.update": "Updates that couldn't download or install",
+    "limits.claude": "Times Claude Code stopped at its plan's usage limit",
+    "limits.codex": "Times Codex stopped at its plan's usage limit",
+    "limits.gemini": "Times Gemini CLI stopped at its plan's usage limit",
+    "limits.other": "Times another agent stopped at its plan's usage limit",
+    "accounts.switched.manual": "Agents moved to another account by hand",
+    "accounts.switched.auto": "Agents moved to another account by Bridge AI, when theirs was at its limit",
+    "needs.raised": "Times an agent needed you (a permission, a question, a sign-in)",
+    "needs.answered.desktop": "Times that was answered on this computer",
+    "needs.answered.phone": "Times that was answered from a phone",
+    "needs.within.1m": "Times it was answered within a minute",
+    "needs.within.10m": "Times it was answered within ten minutes",
+    "needs.within.1h": "Times it was answered within an hour",
+    "needs.later": "Times it was answered after more than an hour",
+    "phone.sessions": "Times a phone opened Bridge AI on this computer (once a visit)",
+    "phone.approvals": "Permission prompts answered from a phone",
+    "phone.messages": "Messages sent to agents from a phone",
+    "phone.agentsStarted": "Agents started from a phone",
+    "firsts.agent": "On this computer, the first agent started (counted once, the week it happens)",
+    "firsts.meeting": "On this computer, the first meeting recorded (counted once, the week it happens)",
+    "firsts.dictation": "On this computer, the first dictation (counted once, the week it happens)",
+    "firsts.phone": "On this computer, the first phone paired (counted once, the week it happens)",
+    "firsts.chief": "On this computer, the first time with the Chief of Staff (counted once, the week it happens)",
+    "firsts.studio": "On this computer, the first file made in Studio (counted once, the week it happens)",
+    "firsts.bot": "On this computer, the first answer from a bot (counted once, the week it happens)",
+    "assist.accepted.studio": "AI Assist's suggestions kept in Studio (a document, sheet or deck)",
+    "assist.accepted.mail": "AI Assist's suggestions kept in Mail (a draft)",
+    "assist.accepted.meetings": "AI Assist's suggestions kept in a meeting",
+    "assist.accepted.dictation": "AI Assist's suggestions kept in dictation (tidied words)",
+    "assist.accepted.board": "AI Assist's suggestions kept in a whiteboard",
+    "assist.dismissed.studio": "AI Assist's suggestions dismissed in Studio (a document, sheet or deck)",
+    "assist.dismissed.mail": "AI Assist's suggestions dismissed in Mail (a draft)",
+    "assist.dismissed.meetings": "AI Assist's suggestions dismissed in a meeting",
+    "assist.dismissed.dictation": "AI Assist's suggestions dismissed in dictation (tidied words)",
+    "assist.dismissed.board": "AI Assist's suggestions dismissed in a whiteboard",
+    "bots.answered.slack": "Answers bots posted in Slack",
+    "bots.answered.discord": "Answers bots posted in Discord",
+    "bots.answered.teams": "Answers bots posted in Microsoft Teams",
+    "bots.answered.other": "Answers bots posted in another platform",
+    "bots.drafts.approved": "Bots' answers you approved as they were",
+    "bots.drafts.edited": "Bots' answers you edited, then sent",
+    "bots.drafts.rejected": "Bots' answers you turned down",
     "models.claude-opus": "Answers from Claude Opus models that Bridge AI asked itself (chat, AI Assist, meeting notes, dictation…)",
     "models.claude-sonnet": "Answers from Claude Sonnet models that Bridge AI asked itself (chat, AI Assist, meeting notes, dictation…)",
     "models.claude-haiku": "Answers from Claude Haiku models that Bridge AI asked itself (chat, AI Assist, meeting notes, dictation…)",
@@ -142,6 +205,193 @@
     "agents.model.other": "Agents started on, or switched to, a model not on this list models",
     "agents.model.default": "Agents started on their own default model (none picked)"
   },
+  "amounts": {
+    "about": "How much, not how often (a week's report, amounts): each amount that isn't 0, as one of the ranges it names, never the number. Tokens are what a model read and wrote, what it read from its cache included, as its provider counts them. Time in a part of Bridge AI is time in use (activeTime) in the part you last typed, clicked or scrolled in. One marked total also goes as its number, rounded to two significant figures, in totals: the server adds it to the week's total and keeps nothing else of it.",
+    "tokens.agents.claude": {
+      "about": "Tokens Claude Code used for Bridge AI: in its agents while Bridge AI ran them, and in the answers Bridge AI asked it for (a meeting's notes, a question), from Claude Code's own logs on this computer",
+      "ranges": "tokenRanges",
+      "total": true
+    },
+    "tokens.agents.codex": {
+      "about": "Tokens Codex used for Bridge AI: in its agents while Bridge AI ran them, and in the answers Bridge AI asked it for, from Codex's own logs on this computer",
+      "ranges": "tokenRanges",
+      "total": true
+    },
+    "tokens.models": {
+      "about": "Tokens in the answers Bridge AI got from a model itself (a chat, AI Assist, meeting notes, dictation…) with a key, through a cloud, from a model server on this computer or from its built-in model. One through an agent's sign-in is in that agent's tokens.",
+      "ranges": "tokenRanges",
+      "total": true
+    },
+    "tokens.vendor.anthropic": {
+      "about": "Tokens for Bridge AI (its agents' and its own answers, as above) from Anthropic (Claude) models, by the vendors list",
+      "ranges": "tokenRanges",
+      "total": true
+    },
+    "tokens.vendor.openai": {
+      "about": "Tokens for Bridge AI (its agents' and its own answers, as above) from OpenAI (GPT, o-series, Codex) models, by the vendors list",
+      "ranges": "tokenRanges",
+      "total": true
+    },
+    "tokens.vendor.google": {
+      "about": "Tokens for Bridge AI (its agents' and its own answers, as above) from Google (Gemini, Gemma) models, by the vendors list",
+      "ranges": "tokenRanges",
+      "total": true
+    },
+    "tokens.vendor.xai": {
+      "about": "Tokens for Bridge AI (its agents' and its own answers, as above) from xAI (Grok) models, by the vendors list",
+      "ranges": "tokenRanges",
+      "total": true
+    },
+    "tokens.vendor.open": {
+      "about": "Tokens for Bridge AI (its agents' and its own answers, as above) from open-weight models (Llama, Qwen, Mistral, DeepSeek, Kimi, GLM, Phi, gpt-oss) models, by the vendors list",
+      "ranges": "tokenRanges",
+      "total": true
+    },
+    "tokens.vendor.other": {
+      "about": "Tokens for Bridge AI (its agents' and its own answers, as above) from a model not on the list models, by the vendors list",
+      "ranges": "tokenRanges",
+      "total": true
+    },
+    "time.meetings": {
+      "about": "Hours of meetings recorded",
+      "ranges": "timeRanges",
+      "total": true
+    },
+    "words.dictated": {
+      "about": "Words dictated: how many, never the words",
+      "ranges": "wordRanges",
+      "total": true
+    },
+    "time.speech.parakeet": {
+      "about": "Minutes of speech turned into text by Parakeet, on this computer (meetings, dictation, voice notes)",
+      "ranges": "timeRanges",
+      "total": true
+    },
+    "time.speech.whisper": {
+      "about": "Minutes of speech turned into text by Whisper, on this computer (meetings, dictation, voice notes)",
+      "ranges": "timeRanges",
+      "total": true
+    },
+    "time.speech.apple": {
+      "about": "Minutes of speech turned into text by the Mac's own speech recognition (meetings, dictation, voice notes)",
+      "ranges": "timeRanges",
+      "total": true
+    },
+    "time.speech.openai": {
+      "about": "Minutes of speech turned into text by OpenAI (meetings, dictation, voice notes)",
+      "ranges": "timeRanges",
+      "total": true
+    },
+    "time.speech.groq": {
+      "about": "Minutes of speech turned into text by Groq (meetings, dictation, voice notes)",
+      "ranges": "timeRanges",
+      "total": true
+    },
+    "time.speech.mistral": {
+      "about": "Minutes of speech turned into text by Mistral (Voxtral) (meetings, dictation, voice notes)",
+      "ranges": "timeRanges",
+      "total": true
+    },
+    "time.speech.together": {
+      "about": "Minutes of speech turned into text by Together AI (meetings, dictation, voice notes)",
+      "ranges": "timeRanges",
+      "total": true
+    },
+    "time.speech.deepgram": {
+      "about": "Minutes of speech turned into text by Deepgram (meetings, dictation, voice notes)",
+      "ranges": "timeRanges",
+      "total": true
+    },
+    "time.speech.elevenlabs": {
+      "about": "Minutes of speech turned into text by ElevenLabs (meetings, dictation, voice notes)",
+      "ranges": "timeRanges",
+      "total": true
+    },
+    "time.speech.assemblyai": {
+      "about": "Minutes of speech turned into text by AssemblyAI (meetings, dictation, voice notes)",
+      "ranges": "timeRanges",
+      "total": true
+    },
+    "time.speech.gemini": {
+      "about": "Minutes of speech turned into text by Google Gemini (meetings, dictation, voice notes)",
+      "ranges": "timeRanges",
+      "total": true
+    },
+    "time.speech.other": {
+      "about": "Minutes of speech turned into text by another service (meetings, dictation, voice notes)",
+      "ranges": "timeRanges",
+      "total": true
+    },
+    "time.area.home": {
+      "about": "Time in use on Home (Needs You, Everything, New)",
+      "ranges": "timeRanges"
+    },
+    "time.area.agents": {
+      "about": "Time in use in an agent (its Chat, Terminal, Files or Changes), a terminal tab or the Agent Map",
+      "ranges": "timeRanges"
+    },
+    "time.area.chief": {
+      "about": "Time in use with the Chief of Staff",
+      "ranges": "timeRanges"
+    },
+    "time.area.meetings": {
+      "about": "Time in use in Meetings (a meeting, Insights, People, Memory)",
+      "ranges": "timeRanges"
+    },
+    "time.area.dictations": {
+      "about": "Time in use in Dictations",
+      "ranges": "timeRanges"
+    },
+    "time.area.studio": {
+      "about": "Time in use in Studio (documents, sheets, decks, PDFs, whiteboards, folders)",
+      "ranges": "timeRanges"
+    },
+    "time.area.today": {
+      "about": "Time in use in the Today panel's overview or Markets",
+      "ranges": "timeRanges"
+    },
+    "time.area.mail": {
+      "about": "Time in use in Mail",
+      "ranges": "timeRanges"
+    },
+    "time.area.calendar": {
+      "about": "Time in use in Calendar",
+      "ranges": "timeRanges"
+    },
+    "time.area.usage": {
+      "about": "Time in use in Usage",
+      "ranges": "timeRanges"
+    },
+    "time.area.bots": {
+      "about": "Time in use in Bots",
+      "ranges": "timeRanges"
+    },
+    "time.area.settings": {
+      "about": "Time in use in Settings",
+      "ranges": "timeRanges"
+    },
+    "time.area.other": {
+      "about": "Time in use anywhere else (before anything above was used)",
+      "ranges": "timeRanges"
+    }
+  },
+  "tokenRanges": [
+    "0",
+    "under 100K",
+    "100K-1M",
+    "1-10M",
+    "10-100M",
+    "100M-1B",
+    "1B+"
+  ],
+  "wordRanges": [
+    "0",
+    "under 100",
+    "100-1K",
+    "1K-5K",
+    "5K-20K",
+    "20K+"
+  ],
   "timeRanges": [
     "0",
     "under 1 hour",
@@ -186,6 +436,41 @@
     "kimi": "kimi|moonshot",
     "glm": "glm",
     "phi": "(^|[/:-])phi"
+  },
+  "vendors": {
+    "about": "Which vendor each model family is (tokens.vendor.*); a family on no list is other.",
+    "anthropic": [
+      "claude-opus",
+      "claude-sonnet",
+      "claude-haiku",
+      "claude-fable",
+      "claude-other"
+    ],
+    "openai": [
+      "gpt-5",
+      "gpt-4",
+      "o-series",
+      "codex"
+    ],
+    "google": [
+      "gemini-pro",
+      "gemini-flash",
+      "gemini-other",
+      "gemma"
+    ],
+    "xai": [
+      "grok"
+    ],
+    "open": [
+      "gpt-oss",
+      "llama",
+      "qwen",
+      "mistral",
+      "deepseek",
+      "kimi",
+      "glm",
+      "phi"
+    ]
   },
   "crashReports": {
     "about": "Unless you turn off Send crash reports by themselves (at most five a day, the same crash once), and when you click Send to Bold Bridge on a crash's report, Bridge AI sends that report: the same text Report on GitHub shows, with names, folders, emails and keys taken out on your computer, and taken out again on the server.",
@@ -420,6 +705,14 @@
         "mint",
         "sky",
         "custom"
+      ]
+    },
+    "botsAuto": {
+      "about": "whether any bot answers without asking you first",
+      "values": [
+        "on",
+        "off",
+        "none"
       ]
     }
   },

@@ -44,7 +44,7 @@ for (const f of fs.readdirSync(path.join(OUT, 'dist', 'assets'))) if (f.endsWith
 
 // The call-sound helper for meeting notes (native/calltap.swift), built here on a Mac with Xcode's
 // tools; without it, meetings record the mic only.
-if (process.platform === 'darwin') spawnSync(process.execPath, [path.join(REPO, 'scripts', 'calltap.js'), path.join(OUT, 'native', 'bin')], { stdio: 'inherit' })
+if (process.platform === 'darwin') spawnSync(process.execPath, [path.join(REPO, 'scripts', 'calltap.js'), path.join(OUT, 'native', 'bin'), '--release'], { stdio: 'inherit' })
 
 // The local model's runtime (server/llm.js): llama.cpp's llama-server, the pinned build for each chip
 // this app is made for (both on a Mac; x64 and Arm on Windows; x64 on Linux), fetched now and checked
@@ -140,3 +140,24 @@ if (fs.existsSync(prebuilds)) for (const d of fs.readdirSync(prebuilds)) {
   const h = path.join(prebuilds, d, 'spawn-helper')
   if (fs.existsSync(h)) fs.chmodSync(h, 0o755)
 }
+
+// What electron-builder leaves out as it copies (its excludedNames: .gitkeep, .npmignore, …, and ._
+// files) left out here too, so the list below is what the app has, every file of it.
+{
+  const names = new Set(require('app-builder-lib/out/fileMatcher').excludedNames.split(','))
+  const drop = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name)
+      if (names.has(e.name) || e.name.startsWith('._')) fs.rmSync(p, { recursive: true, force: true })
+      else if (e.isDirectory()) drop(p)
+    }
+  }
+  drop(OUT)
+}
+
+// Every file of the copy, with its SHA-256 (rootlist.js), into the app's own archive: the app checks
+// its copy against it before it starts the server or opens its keys.
+require('./rootlist.js').make(OUT).then((text) => {
+  fs.writeFileSync(path.join(__dirname, 'app-root.list'), text)
+  console.log(`Listed ${text.split('\n').length - 1} files of the copy (app-root.list).`)
+}, (e) => { console.error(`Couldn't list the copy's files: ${e.message}`); process.exit(1) })

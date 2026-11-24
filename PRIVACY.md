@@ -21,9 +21,10 @@ transcripts on your computer and types into them for you.
 The outside requests Bridge AI makes itself are for what it shows you: the weather (Open-Meteo,
 with only the coordinates you picked), market prices and news headlines (Yahoo Finance, the Federal
 Reserve and public news feeds), speech models when you download one, the first time you use the
-mic or a meeting or from Settings › Voice & Meetings (one download each from Hugging Face; what you say is
-turned into text on your computer and never sent anywhere, unless you pick a speech service for
-meetings), a local model (Gemma 4 E2B, 2.8 GB; E4B, 4.6 GB; or 26B-A4B, 14.6 GB, as fits your
+mic, a meeting or a file you transcribe, or from Settings › Voice & Meetings
+(one download each from Hugging Face; what you say, and the files you transcribe, are turned into
+text on your computer and never sent anywhere, unless you pick a speech service for meetings or
+for those files), a local model (Gemma 4 E2B, 2.8 GB; E4B, 4.6 GB; or 26B-A4B, 14.6 GB, as fits your
 computer) only when you click Download for it in Settings › Model Providers or where Tidy what I
 say needs one (one download from Hugging Face; what you give it is read on your computer by
 llama.cpp, which runs there and answers only Bridge AI, and is never sent anywhere), a check on
@@ -54,8 +55,9 @@ under GitHub's terms. Unless you turn crash reports off
 How much of your plan is left is off until you turn it on (the Usage card, or Settings › General).
 Then Bridge AI asks each agent's own provider, with the sign-in that agent uses on your computer,
 through quota-axi. If you add an API key for a model provider (Settings › Model Providers),
-Bridge AI uses it to check the key and, when you or the chief of staff ask, to put a question to
-that model. Both go straight from your computer to that provider.
+Bridge AI uses it to check the key and the provider's list of models (asked again every few hours)
+and, when you or the chief of staff ask, to put a question to that model.
+Both go straight from your computer to that provider.
 
 Who said what in a room (a meeting with your mic only) is worked out on your computer by a small
 voice model you download from Hugging Face the first time you ask for it. What it works out from
@@ -394,9 +396,24 @@ names, sizes and dates (never what's in a file) to the model you pick for it, an
 and where it runs first. A model on your computer keeps them there.
 
 AI Assist's Sign this (Sign PDFs, in Studio) keeps the
-signature and initials you draw as two pictures in `~/.bridge-ai/studio/signatures`, readable by you
-only; they're never sent to a model or anywhere else, and removing one deletes it from the disk. A
-PDF you sign is read on your computer to find where to sign. Only when you press Explain it does the
+signatures and initials you draw in `~/.bridge-ai/studio/signatures`, readable by you only and
+encrypted (AES-256-GCM) with a key the desktop app keeps in your computer's keychain (the Mac's
+Keychain, Windows' DPAPI, a Linux secret service) and gives only to the server it starts; a server
+started without the app keeps a key file beside them, readable by you only, and Settings › Studio
+says so. That keeps them from a copy of the folder read anywhere else; programs running as you are
+kept from them by Bridge AI itself, which uses them only in its own windows and your phones
+(SECURITY.md says how far that goes). They're never sent to a model, a bot, an MCP client, a Share Link or a crash report,
+and removing one deletes it from the disk. Back Up & Move carries them only when you tick them and
+confirm it's you (Touch ID, your password or Windows Hello, or your signing PIN where the computer has none of these), inside its own sealed file or encrypted link. Signing on the trackpad reads
+where your finger is on it only while the pad is listening, on your computer. Sign on Phone sends
+the request to your own phones paired with this computer through your relay (and a notification to
+them), and what you draw there comes back the same way, end-to-end encrypted. Ask Before Signing asks
+macOS for Touch ID or your password (or Windows Hello) on your computer; Bridge AI only learns
+whether you confirmed, and keeps your signing PIN as a salted hash. Each signing is noted in the
+document's versions, on your computer: which of your devices, how it was confirmed, the places, the
+time and the fingerprints (SHA-256) of the original and the signed copy; the signed copy itself
+isn't copied into Bridge AI's data folder, wherever it's moved. A signed copy carries a mark in its
+own information (BridgeAISigned) that says it is one. A PDF you sign is read on your computer to find where to sign. Only when you press Explain it does the
 PDF's text go to the model you pick, as any other request to that model does (one on your computer
 keeps it there); a scan with no text in it is read on a Mac first, on your computer. The signed copy
 is a new file in a `_signed` folder beside the PDF, and the PDF itself isn't changed.
@@ -466,7 +483,28 @@ Two reports go to the project's server, `counts.boldbridge.ai`, run on Cloudflar
   (an agent's sign-in, a key, a cloud, a model server on your computer, or the local model built
   in) and which part of Bridge AI asked; and for agents, the family of the model each started on or
   was switched to, or that none was picked. Never a model's name, and nothing from a prompt or an
-  answer.
+  answer. And amounts, each as a range: the tokens Claude Code and Codex used for Bridge AI ("1-10M":
+  read from their own logs on your computer, only for the conversations Bridge AI ran and while it
+  ran them), the tokens in the answers Bridge AI got from a model itself, the hours of meetings
+  recorded, how many words were dictated (never the words), and how long it was in use in each part
+  of Bridge AI (Home, an agent, the chief of staff, Meetings, Dictations, Studio, Today, Mail,
+  Calendar, Usage, Bots, Settings), as the part you last typed, clicked or scrolled in; the tokens
+  by the vendor of the model (Anthropic, OpenAI, Google, xAI, open-weight models, other), and the
+  minutes of speech turned into text by each engine (Parakeet or Whisper on your computer, the
+  Mac's own, or a service such as Deepgram). The tokens, hours, words and minutes of speech also go
+  as numbers rounded to two significant figures (3,417,882 tokens as 3,400,000), so the project can
+  see totals: the server only adds each to that week's total for its name and keeps nothing else of
+  it. Among the counts are also: what didn't work, by why (an agent that couldn't start because it
+  wasn't installed, needed signing in or was at its limit; an answer refused for its key, at a
+  limit or too slow; speech, the relay or an update that failed), an agent stopping at its plan's
+  limit and agents moved to another account, how often an agent needed you and how fast it was
+  answered (within a minute, ten, an hour, or later) and whether on this computer or a phone, what
+  was done from a phone (visits, approvals, messages, agents started; counted by this computer, the
+  phone apps still send nothing), whether AI Assist's suggestions were kept or dismissed, bots'
+  answers by platform and whether you approved, edited or turned them down, and first times on this
+  computer (the first agent, meeting, dictation, phone paired, Chief of Staff, Studio file, bot
+  answer), each counted once. And how many of the last four weeks Bridge AI was used (1 to 4): your
+  computer keeps the weeks it was used to say so, and never sends them.
 - **Once a day**, after the day is over: the version it ran, the one it updated from that day if it
   did, its update channel, rollout bucket and account's id as above, the operating system and
   how it's installed, how many times it started (a range), whether something crashed, and how long
@@ -486,7 +524,8 @@ copy of each report sent is kept in `~/.bridge-ai/telemetry/sent`.
 
 The server sees your IP address when a report arrives, as any website does; it doesn't read or
 store it, and its logs are off. It keeps only totals: how many reports said each thing (a version, a
-system, a feature on, a count's range), each answer counted on its own rather than together (the
+system, a feature on, a count's range), the week's sum of each number sent as a total and how many
+reports sent one, each answer counted on its own rather than together (the
 update channel, tester and rollout bucket are kept with the version, and with whether it crashed
 that day, and nothing else), never a report as it came, and each report's random number for ten weeks, so one sent twice counts once.
 Because reports carry no ID, one already sent can't be found again to delete. If the project stops
@@ -706,6 +745,9 @@ and, through it, end to end to your computer.
   meeting. The sound goes end-to-end encrypted to your computer, which turns it into text there
   (or, for a meeting, with the speech service you picked on it). The phone asks for the microphone
   the first time you use one of them.
+- **AI providers**: what you send an agent from the phone, and what AI Assist works on there, goes on
+  from your computer to that agent's or model's provider, once you've allowed it on the phone (AI
+  providers and your phone, below).
 - **Lock screen**: the agents notification on Android and the Live Activity on iPhone are made on
   the phone from what your computer sends over the encrypted link.
 
@@ -719,6 +761,8 @@ computer, with keys you add on the phone.
   Keystore, which can't be taken off the phone, and leaves them out of backups and transfers. The
   page you see in the app never gets a key: the app adds it to each request itself, and only to
   requests for that provider's own address.
+- **Asked first**: before the first task to each provider, the app says what goes to it and asks you
+  (AI providers and your phone, below).
 - **Where things go**: the app talks to each provider directly, over HTTPS: Cursor
   (api.cursor.com), GitHub (api.github.com), Jules (jules.googleapis.com) and Anthropic
   (api.anthropic.com). Nothing goes through your relay, your computer or the project. A provider
@@ -733,6 +777,84 @@ computer, with keys you add on the phone.
   the app checks on your agents about every 15 minutes while it's closed, talking only to those
   providers, and tells you when one finishes, fails or needs you. Remove your keys and it stops.
   The iPhone app checks only while it's open.
+
+## AI providers and your phone
+
+Bridge AI works with AI services that other companies run: the coding agents you install and sign
+in to on your computer (Claude Code, Codex, Gemini CLI and the others), the model providers you add
+a key for, and a speech service if you pick one for meetings. When you use Bridge AI from a phone
+(the iPhone or Android app, or the relay's page in a phone's browser), some of what you do there
+goes to one of those services. This part says what goes, how, what for and to whom, and how your
+phone asks you first.
+
+**What is sent, and what for.** Only what you give Bridge AI for the thing you asked, and only to do
+it:
+
+- A message you write to an agent or to the Chief of Staff, and the files and photos you attach to
+  it: to that agent's provider, for the agent to work on.
+- An agent, chat or thread started with something to do; a handoff to another kind of agent; a task,
+  an idea, a routine or a meeting's action item sent to an agent or the Chief of Staff: to that
+  agent's provider, for the same.
+- For AI Assist, the text it works on and what you ask of it: a meeting's transcript and your notes
+  (its notes, your questions, who said what, live suggestions and the live board), an email you're
+  answering, a document or the part of it you picked in Studio, the names and text of the files it
+  looks at, a dictation it tidies, and Insights' summary of what your agents worked on lately: to
+  the model you picked for that task (Settings › Agents & Models › Which Model Does What), or for a
+  question about something current, the question alone to Perplexity, when you've added a key for it.
+- A meeting you record on your phone: its sound, to the speech service you picked for meetings, if
+  you picked one (otherwise it's turned into text on your computer); and its transcript and your
+  notes, to the model that writes its notes and cleans up its transcript, unless you turned those
+  off.
+- Cloud Agents on the phone: the task you write and the repository and branch you pick, straight
+  from the phone to Cursor, GitHub, Jules or Anthropic (above).
+
+**How it's collected and how it goes.** You type, say or attach it on your phone. It goes end-to-end
+encrypted, through your relay, to your computer (Your relay, above), and your computer sends it to
+the provider over HTTPS, with your own sign-in or key, into your account there. The answer comes back
+the same way. Neither the project nor Bold Bridge receives any of it, and Bridge AI sends it nowhere
+else: the usage stats (above) count how often things are used, never what was in them.
+
+**Who receives it**, each only when you use something that goes to it, and each under its own terms
+and privacy policy, which you agreed to when you signed up or made your key, and which say how it
+protects what it receives:
+
+- Anthropic (Claude Code, the Anthropic API, Claude Managed Agents):
+  https://www.anthropic.com/legal/privacy
+- OpenAI (Codex, the OpenAI API and its speech to text): https://openai.com/policies/privacy-policy/
+- Google (Gemini CLI, Antigravity CLI, the Gemini API, Vertex AI, Jules):
+  https://policies.google.com/privacy
+- xAI (Grok): https://x.ai/legal/privacy-policy
+- Microsoft (Azure OpenAI): https://privacy.microsoft.com/privacystatement
+- Amazon Web Services (Bedrock): https://aws.amazon.com/privacy/
+- GitHub (GitHub Copilot CLI and its coding agent):
+  https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement
+- Cursor (Cursor Agent and its cloud agents): https://cursor.com/privacy
+- Hugging Face: https://huggingface.co/privacy
+- The others you can add in Settings › Model Providers or pick for meetings, each under the privacy
+  policy on its own website: Meta, Mistral AI, Groq, DeepSeek, Perplexity, OpenRouter, Moonshot AI,
+  Together AI, Fireworks AI, Cerebras, Cohere, Z.ai, Sourcegraph (Amp), Alibaba Cloud (Qwen Code),
+  AssemblyAI, Deepgram and ElevenLabs. OpenCode, Aider, Goose and Crush send it on to whichever model
+  provider you set each one up with.
+
+A model that runs on your computer (Ollama, LM Studio, the local model built into Bridge AI, the
+Mac's own speech) isn't a third party: what it reads stays on your computer, and nothing is asked.
+
+**Asked first.** The first time something from your phone would go to a provider, the phone says
+what will be sent, who gets it and how, links this policy and the provider's, and asks: **Allow** or
+**Not Now**. Not Now sends nothing, and the phone says so. Your computer keeps your answer for that
+provider (in your settings, `~/.bridge-ai/config.json`, with when and from which device), so each
+provider is asked once, and it refuses anything from your phone for a provider you haven't allowed.
+The demo asks the same way and keeps its answers only until it's closed. Cloud Agents asks before the
+first task to each provider and keeps the answer on the phone, with that provider's key.
+
+**Taking it back.** Settings › Devices & Access › Phone › AI Providers lists each provider you
+allowed, with when and from which device, and **Take Back**. Nothing more goes to it from your phone
+until you allow it again. In Cloud Agents, removing a provider's key takes it back too. What a
+provider already received stays with it, in your account there, under its terms: ask that provider
+to delete it.
+
+On your computer itself nothing is asked: you installed and signed in to those agents, and added
+those keys, there.
 
 ## Notifications from the Home Screen page
 

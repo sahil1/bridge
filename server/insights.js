@@ -23,6 +23,7 @@ import { CLAUDE_EDITS, codexPatch, codexFailed } from './edits.js'
 import { adapter } from './agents.js'
 import * as accounts from './accounts.js'
 import * as consult from './consult.js'
+import * as aiConsent from './aiconsent.js'
 import { attributor, STEP_MS } from './usagesplit.js'
 import { placeEn } from '../shared/places.js'
 
@@ -543,6 +544,16 @@ export async function writers() {
     const acct = kind && accounts.supports(kind) ? accounts.nameOf(kind, accounts.activeId(kind)) : null
     return { id: c.id, label: c.via === 'cli' ? `${labelOf(kind)}${acct ? ` (${acct})` : ''}` : `${c.label}, ${c.route}`, via: c.via }
   })
+}
+
+// Who a run with this writer would send your sessions to (aiconsent.js: a phone asks first), or
+// null for a model on this computer.
+export async function writerOf(who) {
+  const all = await writers()
+  const w = all.find((x) => x.id === who) || all[0]
+  const c = w && consult.CONSULTANTS.find((x) => x.id === w.id)
+  if (!c) return null
+  return w.via === 'cli' ? aiConsent.ofAgent(c.cli) : c.api === 'local' ? null : aiConsent.ofModel(`${c.api}:${c.api}`)
 }
 
 let job = null // { who, label, since } while one is being written

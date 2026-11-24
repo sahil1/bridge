@@ -23,8 +23,11 @@ const SELF = ['bridge:tile-drag', 'bridge:tile-close']
 // smb: and other schemes can mount a network share or start a program.
 const OUTSIDE = new Set(['http:', 'https:', 'mailto:', 'message:'])
 
-// port: the app's page's. ports(): each linked computer's, by its id ({ id: port }).
-function create(port, { ports = () => ({}) } = {}) {
+// port: the app's page's. ports(): each linked computer's, by its id ({ id: port }). proven(): whether
+// what answers at that address is the server the app started (servergate.js); while it isn't, no page
+// there is the app's own: no message from one is taken, nothing is permitted it, and nothing it links
+// to is opened.
+function create(port, { ports = () => ({}), proven = () => true } = {}) {
   const parse = (u) => { try { const x = new URL(u); return x.protocol === 'http:' && LOOPBACK.has(x.hostname) ? x : null } catch { return null } }
   const machineAt = (p) => Object.entries(ports()).find(([, q]) => q === p)?.[0] || null
   // What a page at u is: { kind: 'own' | 'machine', machine } or null.
@@ -48,6 +51,7 @@ function create(port, { ports = () => ({}) } = {}) {
   // /m/<id>/api/...); another computer's window only that computer's, as it reaches nothing else
   // of this one's.
   const opens = (u, at) => {
+    if (!proven()) return null
     let x
     try { x = new URL(u) } catch { return null }
     if (!local(u)) return OUTSIDE.has(x.protocol) ? 'outside' : null
@@ -59,7 +63,7 @@ function create(port, { ports = () => ({}) } = {}) {
     return file[1] === page.machine && (p === port || machineAt(p) === page.machine) ? 'browser' : null
   }
   // The page an IPC message came from, if it's the main frame of its window.
-  const from = (e) => { const f = e?.senderFrame; return f && !f.parent ? of(f.url) : null }
+  const from = (e) => { const f = e?.senderFrame; return f && !f.parent && proven() ? of(f.url) : null }
   const own = (e) => from(e)?.kind === 'own'
   // ipcMain as main.js and dictation.js use it: every message checked first. machine: the channels a
   // window showing another computer may use too (MACHINE); self: ones that check their sender
@@ -77,10 +81,19 @@ function create(port, { ports = () => ({}) } = {}) {
   // it: a project's app in Preview, another computer's agent in a tab, nor a window showing another
   // computer, whose permissions are that computer's). Copying, for any page of the app's server.
   const ASK = new Set(['media', 'display-capture', 'notifications', 'geolocation', 'clipboard-read'])
-  const permits = (perm, { url, mainFrame = true } = {}) => (perm === 'clipboard-sanitized-write' ? local(url) : ASK.has(perm) && mainFrame !== false && of(url)?.kind === 'own')
+  const permits = (perm, { url, mainFrame = true } = {}) => (!proven() ? false : perm === 'clipboard-sanitized-write' ? local(url) : ASK.has(perm) && mainFrame !== false && of(url)?.kind === 'own')
   // Another computer's page, for a window: asked of the app's address, which sends it to its port.
   const machineUrl = (id, rest = '/') => `http://127.0.0.1:${port}/m/${id}${rest}`
-  return { of, local, opens, from, own, guard, permits, machineUrl }
+  // A redirect while a window's page loads (Electron's will-redirect: details, url): one out of the
+  // app (another program at another name for this computer, a site a linked computer's page sends it
+  // to) refused and handed to out(), which opens it in its own app as a link is; one that a frame in
+  // the window asked for refused. A page the app opens itself has no initiator.
+  const redirect = (e, url, out = () => {}) => {
+    if (e?.isMainFrame === false) return
+    const to = String(e?.url || url || '')
+    if (!local(to)) { e.preventDefault(); out(to) } else if (e?.initiator?.parent) e.preventDefault()
+  }
+  return { of, local, opens, from, own, guard, permits, machineUrl, redirect }
 }
 
 module.exports = { create, MACHINE, SELF, OUTSIDE }

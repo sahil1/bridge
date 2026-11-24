@@ -18,10 +18,10 @@ export const CAPS = {
   opencode: {},
 }
 export const LABELS = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI', opencode: 'OpenCode' }
-export const MODELS = { claude: ['opus', 'sonnet', 'haiku', 'claude-fable-5-1'], codex: ['gpt-6.1-sol', 'gpt-6-luna'] }
+export const MODELS = { claude: ['opus', 'sonnet', 'haiku', 'claude-fable-5-2'], codex: ['gpt-6.2-sol', 'gpt-6-luna'] }
 // What each agent is on, for the message box's model chip, and what Claude's aliases stand for.
-export const MODEL_ON = { claude: 'claude-opus-5-5', codex: 'gpt-6.1-sol' }
-export const MODEL_IDS = { opus: 'claude-opus-5-5', sonnet: 'claude-sonnet-5-5', haiku: 'claude-haiku-5-5', fable: 'claude-fable-5-1', default: 'claude-opus-5-5' }
+export const MODEL_ON = { claude: 'claude-opus-5-5', codex: 'gpt-6.2-sol' }
+export const MODEL_IDS = { opus: 'claude-opus-5-5', sonnet: 'claude-sonnet-5-5', haiku: 'claude-haiku-5-5', fable: 'claude-fable-5-2', default: 'claude-opus-5-5' }
 export const modelName = (id) => { const m = /^claude-(\w+)-(\d+)-(\d+)$/.exec(id); return m ? `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}.${m[3]}` : id }
 export const kinds = () => Object.keys(CAPS).map((kind) => ({ kind, label: LABELS[kind], path: `/opt/homebrew/bin/${kind}`, caps: CAPS[kind] }))
 export const catalog = () => [
@@ -222,19 +222,19 @@ export function makeMeetings() {
     },
   ]
 }
-// Settings › Voice & Meetings on the made-up computer: whisper.cpp ready, with the best model.
+// Settings › Voice & Meetings on the made-up computer, with the best model.
 // The speech models, as Settings › Voice & Meetings shows them (server/speech.js status).
 const EU25 = ['bg', 'hr', 'cs', 'da', 'nl', 'en', 'et', 'fi', 'fr', 'de', 'el', 'hu', 'it', 'lv', 'lt', 'mt', 'pl', 'pt', 'ro', 'sk', 'sl', 'es', 'sv', 'ru', 'uk']
 export const speechModels = () => [
   { id: 'parakeet-v3', runtime: 'sherpa', label: 'Parakeet', short: 'Parakeet', mb: 670, best: true, languages: EU25, license: 'CC-BY-4.0', by: 'NVIDIA', note: 'Accurate and quick on any computer. English and 24 more European languages, which it tells apart itself.', have: true, usable: true, downloading: null },
   { id: 'parakeet-en', runtime: 'sherpa', label: 'Parakeet, English', short: 'Parakeet, English', mb: 663, best: false, languages: ['en'], license: 'NVIDIA Open Model License', by: 'NVIDIA', note: 'The best at tool names and jargon (worktree, Claude Code).', have: false, usable: true, downloading: null },
-  { id: 'large-v3-turbo-q5_0', runtime: 'whisper', label: 'Whisper large turbo', short: 'Large turbo', mb: 574, best: false, languages: 'auto', license: 'MIT', by: 'OpenAI', note: 'For the languages Parakeet doesn\'t hear. Accurate and still quick.', have: false, usable: false, downloading: null },
-  { id: 'small.en-q5_1', runtime: 'whisper', label: 'Whisper small, English', short: 'Small, English', mb: 190, best: false, languages: ['en'], license: 'MIT', by: 'OpenAI', note: 'Light and quick.', have: false, usable: false, downloading: null },
+  { id: 'whisper-turbo', runtime: 'sherpa', whisper: true, label: 'Whisper large turbo', short: 'Large turbo', mb: 1037, best: false, languages: 'auto', license: 'MIT', by: 'OpenAI', note: 'For the languages Parakeet doesn\'t hear. Accurate and still quick.', have: false, usable: true, downloading: null },
+  { id: 'whisper-small', runtime: 'sherpa', whisper: true, label: 'Whisper small', short: 'Small', mb: 375, best: false, languages: 'auto', license: 'MIT', by: 'OpenAI', note: 'Light and quick.', have: false, usable: true, downloading: null },
 ]
 export const speech = () => ({
   engine: 'local', auto: false, ready: true, needs: null, standIn: null, language: 'auto', callAudio: true, canRecordCall: true, folder: '~/Documents/Meeting notes',
   apple: { available: false, installed: false, locale: null, why: null },
-  local: { ready: true, runtime: 'sherpa', program: null, installCommand: null, model: 'parakeet-v3', default: 'parakeet-v3', vad: false, models: speechModels() },
+  local: { ready: true, runtime: 'sherpa', model: 'parakeet-v3', default: 'parakeet-v3', models: speechModels(), earlier: { files: 0, mb: 0 } },
   fellBack: null, hidden: [],
   services: [['openai', 'OpenAI', 'gpt-transcribe', '$0.27'], ['groq', 'Groq', 'whisper-large-v3-turbo', '$0.04'], ['mistral', 'Mistral (Voxtral)', 'voxtral-mini-latest', '$0.18'], ['together', 'Together AI', 'openai/whisper-large-v3', '$0.09'], ['deepgram', 'Deepgram', 'nova-3', '$0.26'], ['elevenlabs', 'ElevenLabs Scribe', 'scribe_v2', '$0.22'], ['assemblyai', 'AssemblyAI', 'default', '$0.21'], ['gemini', 'Google Gemini', 'gemini-2.5-flash', 'about $0.12']]
     .map(([id, label, model, price]) => ({ id, label, ready: false, model, models: [model], price: { [model]: price }, custom: false }))

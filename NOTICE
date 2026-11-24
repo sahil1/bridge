@@ -27,8 +27,8 @@ built on the same open parts as GenOffice (https://github.com/genspark-ai/genoff
 it isn't affiliated with Genspark or GenOffice, whose names belong to Mainfunc, Inc.
 
 Whiteboards are drawn with Excalidraw (https://github.com/excalidraw/excalidraw, MIT License), which
-turns Mermaid into shapes with mermaid-to-excalidraw (MIT) and Mermaid
-(https://github.com/mermaid-js/mermaid, MIT). Excalidraw's fonts are included as it ships them:
+turns Mermaid into shapes with mermaid-to-excalidraw (MIT), Pele (https://github.com/obsidianmd/pele,
+MIT) and Mermaid (https://github.com/mermaid-js/mermaid, MIT). Excalidraw's fonts are included as it ships them:
 Excalifont, Virgil, Nunito, Lilita One, Assistant, Cascadia Code and Liberation Sans under the SIL
 Open Font License 1.1, and Comic Shanns under the MIT License. Diagrams are laid out with dagre
 (https://github.com/dagrejs/dagre, MIT, in the dagre-d3-es form Mermaid uses, MIT, with lodash-es,
@@ -48,8 +48,10 @@ is downloaded from Hugging Face when you ask for it, under its own license. Para
 is by NVIDIA, under CC-BY-4.0 (https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3); Parakeet
 unified EN 0.6B is by NVIDIA, under the NVIDIA Open Model License
 (https://huggingface.co/nvidia/parakeet-unified-en-0.6b); both in the ONNX form made by the
-sherpa-onnx project. The Whisper models are by OpenAI, under the MIT License, in whisper.cpp's
-form. Telling voices apart in a room uses ERes2Net, by Alibaba's 3D-Speaker project, under the
+sherpa-onnx project. The Whisper models are by OpenAI, under the MIT License
+(https://github.com/openai/whisper), in the int8 ONNX form made by the sherpa-onnx project
+(https://huggingface.co/csukuangfj), or in whisper.cpp's form on a computer where sherpa-onnx can't
+run and whisper.cpp is installed. Telling voices apart in a room uses ERes2Net, by Alibaba's 3D-Speaker project, under the
 Apache License 2.0 (https://www.modelscope.cn/models/iic/speech_eres2net_sv_en_voxceleb_16k), in the
 ONNX form made by the sherpa-onnx project, downloaded when you first ask for it. The natural voice
 that reads answers aloud is Supertonic 3, by Supertone, under the BigScience OpenRAIL-M License

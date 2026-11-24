@@ -47,7 +47,7 @@ self.addEventListener('push', (e) => {
       badge: '/icon-512.png',
       data: { url: n.url || '/', actions },
       ...(actions.length ? { actions: actions.map(({ action, title }) => ({ action, title })) } : {}),
-      requireInteraction: n.kind === 'needs-you' || n.kind === 'screen', // (a screen being viewed: stays until seen)
+      requireInteraction: n.kind === 'needs-you' || n.kind === 'screen' || n.kind === 'sign', // (a screen being viewed, or your computer asking you to sign: stays until seen)
     })
   })())
 })

@@ -68,7 +68,7 @@ try {
   await fetch(`${kit.url}/api/dictation/live/serverlive01`, { method: 'DELETE' })
 
   // Whisper picked: hidden.
-  await kit.api('/settings', { speech: { model: 'base.en-q5_1' } }, 'PATCH')
+  await kit.api('/settings', { speech: { model: 'whisper-base' } }, 'PATCH')
   const w = await kit.api('/dictation/live')
   ok(w.can === false && w.why === 'whisper' && (await feed('serverlive02', tone(1))).live === false, 'with Whisper picked: not offered (it hears a recording whole)', w)
   await kit.api('/settings', { speech: null }, 'PATCH')

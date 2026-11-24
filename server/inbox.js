@@ -17,6 +17,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { dataFile, ensureDir } from './paths.js'
 import { authHeaders, localKey } from './apitoken.js'
+import { HEADER as PROOF, proofOf } from './relayproof.js'
 import { parseScreen } from '../src/components/questionParse.js'
 import { openNote, sealNote, unb64u, NOTE_DAYS } from '../relay/web/link.js'
 import { placeEn } from '../shared/places.js'
@@ -107,7 +108,7 @@ const pick = ({ ok, why, text, held }) => (ok ? { ok, ...(held ? { held } : {}) 
 // Through this server, as the phone: the same routes, with the phone's own device id.
 async function deliver(plain, device, base) {
   const call = async (m, u, body) => {
-    const res = await fetch(new URL(u, base), { method: m, headers: { 'content-type': 'application/json', 'x-bridge-relay': device.id, ...authHeaders(localKey()) }, body: body ? JSON.stringify(body) : undefined })
+    const res = await fetch(new URL(u, base), { method: m, headers: { 'content-type': 'application/json', 'x-bridge-relay': device.id, [PROOF]: proofOf(device.id), ...authHeaders(localKey()) }, body: body ? JSON.stringify(body) : undefined })
     return { status: res.status, json: await res.json().catch(() => ({})) }
   }
   const u = String(plain?.u || '')
@@ -143,6 +144,8 @@ async function deliver(plain, device, base) {
     r = await call('POST', `/api/panes/${encodeURIComponent(pane)}/input`, { steps })
     if (r.status < 300) return { ok: true }
   }
+  // Its agent's provider not yet allowed from a phone (aiconsent.js): sent again from the phone, it asks.
+  if (r.json?.code === 'consent') return fail('consent', `${r.json.consent?.provider?.name || 'its AI provider'} needs your OK first. Send it again from the agent, and Bridge AI asks`)
   return /^No (agent|pane)/.test(r.json?.error || '') ? fail('gone') : fail('error', r.json?.error || `your computer answered ${r.status}`)
 }
 

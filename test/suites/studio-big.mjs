@@ -293,13 +293,22 @@ try {
   }
 
   // ---------- on a computer ----------
-  // What a test turns on: the PDF's parts not coming (the link dropped), a version that can't be put back.
-  const fail = { ranges: false, restore: false }
+  // What a test turns on: the PDF's parts not coming (the link dropped), a version that can't be put
+  // back, a save's answer held back (written, the page still saving: a slow disk takes seconds to
+  // keep a 97 MB deck's version after writing it, as GitHub's Linux machine did).
+  const fail = { ranges: false, restore: false, saved: null }
   // (No service worker, whose fetches WebKit's routes don't see.)
   const dk = await page(b, kit.url, { width: 1440, height: 900, before: async (c) => {
     await noServiceWorker(c)
     await c.route(/\/raw\?path=Decks%2FSite%20survey\.pdf/, (r) => (fail.ranges && r.request().headers().range ? r.abort('failed') : r.continue()))
     await c.route(/\/api\/studio\/restore/, (r) => (fail.restore ? r.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ error: 'No such version' }) }) : r.continue()))
+    await c.route(/\/api\/studio\/file\?/, async (r) => {
+      const held = fail.saved
+      if (!held || r.request().method() !== 'PUT') return r.continue()
+      const res = await r.fetch()
+      await held
+      await r.fulfill({ response: res })
+    })
   } })
   contexts.push(dk.ctx)
   const p = dk.p
@@ -316,7 +325,10 @@ try {
   if (heap) say(`the page's memory with the 97 MB deck open: ${(heap / MB).toFixed(0)} MB`)
   const title = await p.locator('.sd-file .pane-head h2 .mid-name').evaluate((n) => ({ title: n.getAttribute('title'), tail: n.dataset.tail, text: n.closest('h2').innerText })).catch(() => null)
   ok(title?.title === NAME && title.tail === ' v5.pptx' && title.text === NAME, 'on a computer, its title in the header: cut in the middle where it must be, the whole name its tooltip', title)
-  // Typed in slide 2's title and saved: the file changes there, its photos as they were.
+  // Typed in slide 2's title and saved: the file changes there, its photos as they were. (The save's
+  // answer held until a version's picked below.)
+  let letSave
+  fail.saved = new Promise((r) => { letSave = r })
   await p.locator('.sd-strip .sd-thumb').nth(1).locator('.sd-thumb-btn').click()
   const objs = p.locator('.px-canvas .px-draw > .px-slide > [data-o]')
   const tb = await objs.nth(0).boundingBox()
@@ -333,13 +345,23 @@ try {
   const note = await p.locator('.sd-panel .sd-v-note').innerText().catch(() => '')
   ok(/This file is big \(9\d\.\d MB\), so Studio keeps its last 6 versions, not 60\./.test(note), 'its versions say how many a file this big keeps', note)
   await shot(p, `${tag}studio-big-desktop-deck`)
-  // A version that can't be put back (gone meanwhile, its computer away): said, the file as it was.
+  // A version that can't be put back (gone meanwhile, its computer away), picked while the save is
+  // still on its way: the save waited for, with no "your unsaved changes here are lost" (they're
+  // being saved, and kept as a version); then said, the file as it was.
   fail.restore = true
   const fileWas = sha(fs.readFileSync(file))
+  const asked = []
+  const answer = (d) => { asked.push(d.message()); d.dismiss().catch(() => {}) }
+  p.on('dialog', answer)
+  const whileSaving = await p.locator('.sd-file .sd-save-state').innerText().catch(() => '')
   await p.locator('.sd-panel button', { hasText: 'Restore' }).first().click()
+  await sleep(500)
+  letSave()
+  fail.saved = null
   const notRestored = await p.locator('.sd-note-bar[role="alert"]').innerText({ timeout: 8000 }).catch(() => '')
   fail.restore = false
-  ok(/Couldn't restore that version: No such version/.test(notRestored) && sha(fs.readFileSync(file)) === fileWas && !dk.errors.some((y) => /No such version/.test(y)), 'a version that can\'t be restored: "Couldn\'t restore that version", the file as it was', { said: notRestored, errors: dk.errors.slice(0, 2) })
+  p.off('dialog', answer)
+  ok(/Saving/.test(whileSaving) && !asked.length && /Couldn't restore that version: No such version/.test(notRestored) && sha(fs.readFileSync(file)) === fileWas && !dk.errors.some((y) => /No such version/.test(y)), 'a version that can\'t be restored, picked while it saves: nothing asked, the save waited for, then "Couldn\'t restore that version", the file as it was', { whileSaving, asked, said: notRestored, errors: dk.errors.slice(0, 2) })
   await p.locator('.sd-panel button[aria-label="Close"]').first().click()
   // Export › This slide as a picture: the slide whole, its photo in it, on the PNG (WebKit drew it
   // in the top left quarter, without its photo).

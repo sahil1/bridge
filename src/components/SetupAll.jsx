@@ -23,7 +23,7 @@ const ITEMS = {
 // The calendar through Bridge AI's own helper: nothing to install, only your yes.
 const CALENDAR_OWN = tx('Bridge AI asks macOS to see your calendars. Your events stay on this Mac.')
 // What an item still needs, by name (the programs keep theirs).
-const PART = { whisper: 'whisper.cpp', 'whisper-cli': 'whisper.cpp', model: tx('the speech model') }
+const PART = { model: tx('the speech model') }
 const listOf = (names) => new Intl.ListFormat(locale(), { type: 'conjunction' }).format([...new Set(names)])
 const name = (id) => t(ITEMS[id]?.[0] || id)
 const about = (i) => t(i.id === 'calendar' && !i.via ? CALENDAR_OWN : ITEMS[i.id]?.[1] || '')

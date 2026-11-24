@@ -45,6 +45,17 @@ export function patch(p) {
   return changedKeys(before, next)
 }
 
+// One key set whole, not merged (null removes it), for a list where taking one out must stick (the
+// AI providers a phone may send to, aiconsent.js). The keys that changed.
+export function setKey(key, value) {
+  const before = readUser()
+  const next = { ...before }
+  if (value == null) delete next[key]
+  else next[key] = value
+  writeUser(next)
+  return changedKeys(before, next)
+}
+
 // Replace the whole file with text you edited. It must be a JSON object.
 export function replaceRaw(text) {
   let obj

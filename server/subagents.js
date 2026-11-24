@@ -39,14 +39,21 @@ function noticeText(e) {
   return typeof c === 'string' ? c : Array.isArray(c) ? c.filter((b) => b.type === 'text').map((b) => b.text).join('\n') : ''
 }
 
-function notices(c, text) {
+// A subagent whose own turn is over while work it started still runs (Claude Code 2.1.311 and
+// later) is said as "completed" too, and goes on once that work reports: still at work, not done.
+const WAITING = /is waiting on its own background work|stopped with background work of its own still running/
+
+function notices(c, text, ts) {
   for (let m; (m = NOTE.exec(text));) {
     const b = m[1]
     const id = /<task-id>(\w+)<\/task-id>/.exec(b)?.[1]
     if (!id) continue
     const use = /<tool-use-id>(\w+)<\/tool-use-id>/.exec(b)?.[1]
     const status = /<status>(\w+)<\/status>/.exec(b)?.[1]
-    if (status) { c.ends.set(id, status); if (use) c.ends.set(use, status) }
+    const keys = [id, use || c.uses.get(id)].filter(Boolean)
+    if (use) c.uses.set(id, use)
+    if (status && WAITING.test(b)) for (const k of keys) { c.ends.delete(k); c.waiting.add(k) }
+    else if (status) for (const k of keys) { c.ends.set(k, status); c.endAt.set(k, Date.parse(ts) || 0); c.waiting.delete(k) }
     const summary = /<summary>([\s\S]*?)<\/summary>/.exec(b)?.[1]
     if (summary && status) c.notes.set(id, summary.trim().slice(0, 600))
     const event = /<event>([\s\S]*?)<\/event>/.exec(b)?.[1]
@@ -64,7 +71,7 @@ function take(c, text) {
     if (!note && !CALLS.test(line)) continue
     let e
     try { e = JSON.parse(line) } catch { continue }
-    if (note) notices(c, noticeText(e))
+    if (note) notices(c, noticeText(e), e.timestamp)
     if ((e.type !== 'assistant' && e.type !== 'user') || !Array.isArray(e.message?.content)) continue
     for (const b of e.message.content) {
       if (e.type === 'assistant' && b.type === 'tool_use') {
@@ -89,7 +96,7 @@ function take(c, text) {
   }
 }
 
-const fresh = () => ({ offset: 0, carry: Buffer.alloc(0), ends: new Map(), notes: new Map(), events: new Map(), calls: new Map(), plain: [], tasks: new Map(), stops: new Set(), busy: null })
+const fresh = () => ({ offset: 0, carry: Buffer.alloc(0), ends: new Map(), endAt: new Map(), uses: new Map(), waiting: new Set(), notes: new Map(), events: new Map(), calls: new Map(), plain: [], tasks: new Map(), stops: new Set(), busy: null })
 
 // Brings what's known of a transcript (the session's, or a subagent's) up to date. One read at a
 // time per file.
@@ -166,7 +173,7 @@ async function recentSteps(file, size) {
   return s
 }
 
-async function subagents(mainFile, ends, now) {
+async function subagents(mainFile, { ends, endAt, waiting }, now) {
   const dir = path.join(mainFile.replace(/\.jsonl$/, ''), 'subagents')
   let names
   try { names = await fs.promises.readdir(dir) } catch { return [] }
@@ -181,10 +188,14 @@ async function subagents(mainFile, ends, now) {
     if (now - st.mtimeMs > RECENT_MS) break // sorted newest first: the rest are older still
     let meta = {}
     try { meta = JSON.parse(await fs.promises.readFile(metaFile, 'utf8')) } catch { /* partial write */ }
-    const end = ends.get(id.replace(/^agent-/, '')) || (meta.toolUseId && ends.get(meta.toolUseId))
+    const key = [id.replace(/^agent-/, ''), meta.toolUseId].find((k) => k && (ends.has(k) || waiting.has(k)))
+    // Said done, then written to since: sent a message and at work again.
+    const at = endAt.get(key)
+    const end = key && ends.has(key) && !(at && st.mtimeMs > at + 5000) ? ends.get(key) : null
     let status = end ? (end === 'completed' ? 'done' : end) : 'running'
-    // No word from the session but nothing written for a while: it isn't running any more.
-    if (status === 'running' && now - st.mtimeMs > 20 * 60 * 1000) status = 'stopped'
+    // No word from the session but nothing written for a while: it isn't running any more. (One
+    // waiting on work of its own writes nothing till that work reports, which can be an hour.)
+    if (status === 'running' && !waiting.has(key) && now - st.mtimeMs > 20 * 60 * 1000) status = 'stopped'
     const recent = await recentSteps(file, st.size)
     const result = status !== 'running' ? [...recent].reverse().find((s) => s.kind === 'text')?.text || null : null
     const b = await brief(file)
@@ -309,7 +320,7 @@ export async function listSubagents(mainFile, screen = '') {
   let found = []
   if (mainFile) {
     const c = await scan(mainFile)
-    const subs = await subagents(mainFile, c.ends, now)
+    const subs = await subagents(mainFile, c, now)
     items = subs.map((s) => s.item)
     const theirs = await Promise.all(subs.map(async ({ file, item }) => tasksOf(await scan(file), now, item.description).catch(() => [])))
     found = [...(await tasksOf(c, now, null)), ...theirs.flat()]
@@ -342,7 +353,7 @@ async function summaryOf(file, screen) {
   let items = []
   if (file) {
     const c = await scan(file)
-    items = (await subagents(file, c.ends, now)).map((s) => s.item)
+    items = (await subagents(file, c, now)).map((s) => s.item)
   }
   items = withFooter(items, footerOf(await screenOf(screen))).sort(byState)
   const on = items.filter((i) => i.status === 'running')

@@ -5,7 +5,9 @@
 // A report is checked against the public list (shared/telemetry-schema.json): a name that isn't on
 // it, or a value that isn't one of its ranges, is dropped, never kept. What's kept is only totals
 // per week, in D1: how many reports said each thing (version, system, layout, how long installed,
-// days used) and how many said each count was in each range. A report as it came is never stored,
+// days used) and how many said each count, and each amount (tokens, hours, words), was in each range;
+// and for the amounts marked total, the week's sum of the numbers reports gave (rounded to two
+// significant figures by Bridge AI, and again here), and how many gave one: never a report's own. A report as it came is never stored,
 // and neither is anything about who sent it: the IP address isn't read, and the Worker's logs are
 // off (wrangler.toml). The report's nonce, random and new for each report, is kept for ten weeks so
 // a report sent twice (its answer lost on the way) counts once.
@@ -24,6 +26,11 @@ import { scrub } from '../shared/crashreport.js'
 const NAMES = new Set(Object.keys(SCHEMA.counters))
 const BUCKETS = new Set(SCHEMA.buckets.filter((b) => b !== '0'))
 const DAY_TIMES = new Set(SCHEMA.dayTimeRanges || [])
+// Each amount's ranges (tokenRanges, timeRanges, wordRanges), but 0, which isn't sent.
+const AMOUNTS = Object.fromEntries(Object.entries(SCHEMA.amounts || {}).filter(([k]) => k !== 'about').map(([k, v]) => [k, new Set((SCHEMA[v.ranges] || []).filter((x) => x !== '0'))]))
+// The amounts that also go as a number (totals), and the most a week's can be: past it, a number
+// is dropped rather than added (tokens, minutes, words).
+const TOTALS = new Map(Object.entries(SCHEMA.amounts || {}).filter(([k, v]) => k !== 'about' && v.total).map(([k, v]) => [k, v.ranges === 'tokenRanges' ? 1e12 : v.ranges === 'timeRanges' ? 1e5 : 1e7]))
 // What a report may say about the install; anything else is kept as "other".
 const ONE_OF = {
   os: ['mac', 'windows', 'linux'],
@@ -53,6 +60,8 @@ export const TABLES = [
   // Each other answer a week's report gives (system version, chip, memory, cores, phones, computers,
   // each feature, each agent installed), as its own total: never the answers together.
   'CREATE TABLE IF NOT EXISTS dims (week TEXT NOT NULL, dim TEXT NOT NULL, value TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (week, dim, value))',
+  // The week's sum of each total the reports gave (tokens, minutes, words), and how many gave one.
+  'CREATE TABLE IF NOT EXISTS totals (week TEXT NOT NULL, name TEXT NOT NULL, total REAL NOT NULL, reports INTEGER NOT NULL, PRIMARY KEY (week, name))',
   // A day's reports: installs that ran each version that day, by system and whether they crashed,
   // and the updates that day, from which version.
   'CREATE TABLE IF NOT EXISTS daily (day TEXT NOT NULL, app TEXT NOT NULL, os TEXT NOT NULL, install TEXT NOT NULL, crashed INTEGER NOT NULL, starts TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (day, app, os, install, crashed, starts))',
@@ -130,11 +139,23 @@ export function check(r, now = new Date()) {
     if (NAMES.has(k) && BUCKETS.has(v)) counts[k] = v
     else dropped++
   }
+  // Amounts, kept as counts are (their names are apart): each with the range it was in.
+  for (const [k, v] of Object.entries(r.amounts && typeof r.amounts === 'object' && !Array.isArray(r.amounts) ? r.amounts : {})) {
+    if (AMOUNTS[k]?.has(v)) counts[k] = v
+    else dropped++
+  }
+  // Totals: a number, rounded to two significant figures again, only added to the week's sum.
+  const totals = {}
+  for (const [k, v] of Object.entries(r.totals && typeof r.totals === 'object' && !Array.isArray(r.totals) ? r.totals : {})) {
+    if (TOTALS.has(k) && typeof v === 'number' && Number.isFinite(v) && v > 0 && v <= TOTALS.get(k)) totals[k] = Number(v.toPrecision(2))
+    else dropped++
+  }
   // The rest, each kept as its own total (dims).
   const dims = []
   for (const k of ['memory', 'cores', 'phones', 'computers']) if (r[k] != null) dims.push([k, VALUES[k]?.includes(r[k]) ? r[k] : 'other'])
   if (r.osVersion != null) dims.push(['osVersion', textOf(r.osVersion)])
   if (r.chip != null) dims.push(['chip', textOf(r.chip)])
+  if (r.recentWeeks != null) dims.push(['recentWeeks', Number.isInteger(r.recentWeeks) && r.recentWeeks >= 0 && r.recentWeeks <= 4 ? String(r.recentWeeks) : 'other'])
   for (const [k, v] of Object.entries(r.features && typeof r.features === 'object' && !Array.isArray(r.features) ? r.features : {})) {
     if (FEATURES[k]?.values?.includes(v)) dims.push([`feature.${k}`, v])
     else dropped++
@@ -143,7 +164,7 @@ export function check(r, now = new Date()) {
     if (AGENTS.has(k)) dims.push(['agent', k])
     else dropped++
   }
-  return { week: r.week, nonce: r.nonce, about, counts, dims, dropped, channel: channelOf(r) }
+  return { week: r.week, nonce: r.nonce, about, counts, totals, dims, dropped, channel: channelOf(r) }
 }
 // A system's version or a chip's family, as the app writes them, or "other".
 const textOf = (v) => (typeof v === 'string' && /^[A-Za-z][\w .,()+-]{0,39}$/.test(v) ? v : 'other')
@@ -185,6 +206,7 @@ async function take(req, env) {
     ...Object.entries(r.counts).map(([name, bucket]) => db.prepare(`INSERT INTO counts (week, name, bucket, os, install_age, n)
       VALUES (?, ?, ?, ?, ?, 1) ON CONFLICT DO UPDATE SET n = n + 1`).bind(r.week, name, bucket, a.os, a.installAge)),
     ...r.dims.map(([dim, value]) => db.prepare('INSERT INTO dims (week, dim, value, n) VALUES (?, ?, ?, 1) ON CONFLICT DO UPDATE SET n = n + 1').bind(r.week, dim, value)),
+    ...Object.entries(r.totals).map(([name, v]) => db.prepare('INSERT INTO totals (week, name, total, reports) VALUES (?, ?, ?, 1) ON CONFLICT DO UPDATE SET total = total + excluded.total, reports = reports + 1').bind(r.week, name, v)),
     db.prepare('INSERT INTO channels (week, app, channel, tester, rollout, n) VALUES (?, ?, ?, ?, ?, 1) ON CONFLICT DO UPDATE SET n = n + 1')
       .bind(r.week, a.app, r.channel.channel, r.channel.tester, r.channel.rollout),
   ])

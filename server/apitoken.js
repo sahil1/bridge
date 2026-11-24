@@ -51,6 +51,9 @@ export const localKey = () => mine || (mine = ensureToken())
 // and not per port (a second Bridge AI on another port keeps its own).
 export const cookieName = (port) => `bridge-ai-${port}`
 export const cookieValue = (token) => crypto.createHmac('sha256', String(token)).update('bridge-ai browser').digest('base64url')
+// The agents' key (agentnote.js, agentcli.mjs): made from the key, and good only for what an agent
+// you start may do with Bridge AI: add a pointer, find pointers, search the manual (apiauth.js).
+export const agentKeyOf = (token) => crypto.createHmac('sha256', String(token)).update('bridge-ai agents: pointers and the manual').digest('base64url')
 
 // Equal, taking as long whatever they hold.
 export function same(a, b) {

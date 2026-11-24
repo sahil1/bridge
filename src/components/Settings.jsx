@@ -15,9 +15,11 @@ import About from './settings/About.jsx'
 import Account from './settings/Account.jsx'
 import Meetings from './settings/Meetings.jsx'
 import Mail from './settings/Mail.jsx'
+import StudioSettings from './settings/Studio.jsx'
 import Voice, { Spoken } from './settings/Voice.jsx'
 import Dictation from './settings/Dictation.jsx'
 import CloudKeys from './settings/CloudKeys.jsx'
+import AiProviders from './settings/AiProviders.jsx'
 import BackUp from './settings/BackUp.jsx'
 import { RemoteAccess } from './remote/Settings.jsx'
 import ErrorBoundary from './ErrorBoundary.jsx'
@@ -50,6 +52,7 @@ export const SECTIONS = [
   { id: 'meetings-voice', label: tx('Meetings & Voice'), icon: 'mic', hint: tx('Meetings, dictation, the speech models that listen and the voice that answers'),
     tabs: [{ id: 'meetings', label: tx('Meetings') }, { id: 'dictation', label: tx('Dictation') }, { id: 'voice', label: tx('Speech Models') }, { id: 'spoken', label: tx('Spoken Answers') }] },
   { id: 'mail', label: tx('Mail & Calendar'), icon: 'mail', hint: tx('How You Write, and the hours AI Assist offers times in'), mac: true },
+  { id: 'studio', label: tx('Studio'), icon: 'signature', hint: tx('Your signatures and initials, and Ask Before Signing') },
   { id: 'bots', label: tx('Bots'), icon: 'chat', hint: tx('Turned on here, then made and run in Bots, in the sidebar'), beta: true },
   { id: 'devices', label: tx('Devices & Access'), icon: 'laptop', hint: tx('Your phone, your other computers, who may see this screen, and Share Links'),
     tabs: [{ id: 'phone', label: tx('Phone') }, { id: 'machines', label: tx('Computers') }, { id: 'remote', label: tx('Remote Access') }, { id: 'sharing', label: tx('Share Links') }] },
@@ -162,6 +165,7 @@ export default function Settings({ section = 'all', onClose, onOpenAgent }) {
     {at === 'voice' && <Voice />}
     {at === 'spoken' && <Spoken />}
     {at === 'mail' && <Mail />}
+    {at === 'studio' && <StudioSettings />}
     {at === 'bots' && <Bots onClose={onClose} />}
     {(at === 'phone' || at === 'machines') && <Phone tab={at} focus={section === 'machines' ? 'machines' : null} />}
     {at === 'remote' && <RemoteAccess />}
@@ -171,6 +175,7 @@ export default function Settings({ section = 'all', onClose, onOpenAgent }) {
     {at === 'backup' && <BackUp />}
     {at === 'about' && <About />}
     {at === 'cloud' && <CloudKeys focus="cloud" bare />}
+    {at === 'cloud' && cloudOnly && <AiProviders local />}
     </AdvancedFrame>
     </ErrorBoundary>
     </SettingsAt.Provider>
@@ -220,7 +225,7 @@ export default function Settings({ section = 'all', onClose, onOpenAgent }) {
 
   return (
     <div className="modal-backdrop settings-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="modal settings" role="dialog" aria-label={t('Settings')}>
+      <div className="modal settings" data-area="settings" role="dialog" aria-label={t('Settings')}>
         <nav className="st-nav" aria-label={t('Settings sections')}>
           <div className="st-nav-title">{t('Settings')}</div>
           {sections.map((s) => (

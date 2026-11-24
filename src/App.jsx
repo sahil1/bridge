@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import SoundButton from './components/SoundButton.jsx'
 import StatusMenu, { UsageChip, UsageGlance, WeatherChip, ClockChip } from './components/StatusMenu.jsx'
 import Icon, { StatusDot } from './components/Icon.jsx'
@@ -17,6 +17,8 @@ import { sessionTitle } from './components/bots/sessions.js'
 import Home from './components/Home.jsx'
 import { FirstRunAnswers } from './components/FirstRun.jsx'
 import { MeetingsProvider, RecordingPill, CallPrompt, useMeetings } from './components/meetings/recording.jsx'
+import TranscribeHost from './components/meetings/transcribehost.jsx'
+import { pick as pickToTranscribe, canPickFolder } from './components/meetings/transcribefiles.js'
 import { memoryTab, meetingsAt } from './components/memory/open.js'
 import { openLink } from './pwa.js'
 import NewAgent from './components/NewAgent.jsx'
@@ -37,7 +39,7 @@ import { NextMeetingChip } from './components/Agenda.jsx'
 import { TodayTabs, TodayBody, openToday } from './components/Dock.jsx'
 import { mailDo } from './components/today.js'
 import { Handle, usePersisted, useMedia, useHotkey, useWidth, useShared, store } from './components/layout.jsx'
-import { api, useFleet, usePoll, relayActivity, cloudOnly, refetch, viaRelay, machineId } from './api.js'
+import { api, useFleet, usePoll, relayActivity, cloudOnly, refetch, viaRelay, machineId, signsLive } from './api.js'
 import { takeReturn } from './permissions.js'
 import { takeEarlyLink } from './earlyLink.js'
 import CloudHome from './components/CloudHome.jsx'
@@ -48,9 +50,11 @@ import { isQuiet } from '../shared/focus.js'
 import AgentMap from './components/AgentMap.jsx'
 import NeedsHome, { Everything, useHome, needCount, editHome } from './components/NeedsHome.jsx'
 import More from './components/More.jsx'
+import Manual from './components/Manual.jsx'
 import RemoteAgent from './components/RemoteAgent.jsx'
 import ScreenView from './components/remote/ScreenView.jsx'
 import { RemoteHere, ScreenLive } from './components/remote/Here.jsx'
+import AiConsent from './components/AiConsent.jsx'
 import Dictation from './dictation/Dictation.jsx'
 import BackForward from './components/BackForward.jsx'
 import { start as navStart, stop as navStop, seen as navSeen, recheck as navRecheck, usePlaces, placeOf, placeLabel, showPlaceIn, replacedWith, renamedTab, slotOf } from './backForward.js'
@@ -243,6 +247,8 @@ async function placeGone(id) {
   return api(ask).then(() => false, notThere)
 }
 const isView = (id) => typeof id === 'string' && id.startsWith('view:')
+// The part of Bridge AI a view is, for usage stats' time in each (activeTime.js).
+const viewArea = (id) => (id === 'view:map' ? 'agents' : id.startsWith('view:meeting') ? 'meetings' : id.startsWith('view:studio') ? 'studio' : id.startsWith(BOT_VIEW) || id.startsWith(BOTS_VIEW) || id.startsWith(SESSION_VIEW) ? 'bots' : 'home')
 // Whiteboards are one of Studio's kinds: its Files lists them and one opens in its Preview, so they
 // have no page or tab of their own. Folders is Studio's home, every file on your computers. Whatever
 // still asks for an old place (a tab kept from before, a link, ⌘K, Home, a meeting's board, an agent)
@@ -343,6 +349,16 @@ function placesMoved() {
 }
 placesMoved()
 
+// Sign on Phone, on a phone: the pad over the whole screen when your computer asks this phone to
+// sign (PhoneSign.jsx), loaded only once there's a request (the feed's event: sign, or a
+// notification's ?sign=).
+const PhoneSign = lazy(() => import('./components/studio/pdf/PhoneSign.jsx'))
+function SignHere() {
+  const [on, setOn] = useState(() => signsLive.get().length > 0 || !!signsLive.opened())
+  useEffect(() => signsLive.subscribe((l) => { if (l.length || signsLive.opened()) setOn(true) }), [])
+  return on ? <Suspense fallback={null}><PhoneSign /></Suspense> : null
+}
+
 // The recording of a meeting lives above everything else, so it goes on while you move around.
 export default function Root() {
   return <MeetingsProvider><App /></MeetingsProvider>
@@ -378,6 +394,7 @@ function App() {
   const theme = look.mode
   const setTheme = (mode) => saveLook({ mode })
   const [settings, setSettings] = useState(null) // null = closed, else where it opens: 'all' (Settings itself) or a section
+  const [manual, setManual] = useState(null) // Help, Bridge AI's manual: null = closed, else { at: a part of it }
   const [screenOf, setScreenOf] = useState(null) // another computer's screen, seen here: { machine, name } (remote/ScreenView.jsx)
   const [L, setL] = usePersisted('cc-layout', LAYOUT)
   const [W, setW] = usePersisted('cc-ws', WS)
@@ -748,6 +765,12 @@ function App() {
     window.addEventListener('bridge-open-settings', on)
     return () => window.removeEventListener('bridge-open-settings', on)
   }, [])
+  // ...or Help, at a part of the manual (⌘K's answers to a question: Palette.jsx).
+  useEffect(() => {
+    const on = (e) => { setSettings(null); setManual({ at: e.detail?.at || null }) }
+    window.addEventListener('bridge-open-manual', on)
+    return () => window.removeEventListener('bridge-open-manual', on)
+  }, [])
   // ...or another computer's screen (View screen, in Settings and the devices menu), over everything.
   useEffect(() => {
     const on = (e) => { setSettings(null); setScreenOf({ machine: e.detail?.machine || null, name: e.detail?.name || '' }) }
@@ -979,6 +1002,10 @@ function App() {
     { id: 'a:new', label: t('New agent with all the options…'), icon: 'bot', keywords: 'launch start claude codex gemini copilot opencode project dialog compare account', run: () => setNewAgent({ mode: 'project' }) },
     { id: 'a:record', label: t('Record a meeting'), icon: 'mic', keywords: 'meeting notes transcript record call granola minutes', run: () => meetings?.start().catch(() => openAgent('view:meetings')) },
     { id: 'a:meetings', label: t('Meetings'), icon: 'mic', keywords: 'meeting notes transcripts summaries', run: openMeetings },
+    // Transcribe a file or a folder (meetings/transcribefiles.js): the system's picker, straight
+    // from the pick, so the browser lets it open; then how, and the file's line in Meetings.
+    !cloudOnly && { id: 'a:transcribe', label: t('Transcribe a file…'), sub: t('In Meetings'), icon: 'upload', keywords: 'transcribe transcription audio video file recording mp3 m4a wav mp4 mov podcast interview lecture voice memo subtitles srt vtt captions whisper macwhisper speakers', run: () => pickToTranscribe() },
+    !cloudOnly && canPickFolder() && { id: 'a:transcribe-folder', label: t('Transcribe a folder…'), sub: t('In Meetings'), icon: 'folder', keywords: 'transcribe transcription folder batch many files audio video recordings', run: () => pickToTranscribe({ folder: true }) },
     insightsOn && { id: 'a:insights', label: t('Meeting Insights'), icon: 'trend', keywords: 'meetings stats hours talk time share words week kind', run: () => meetingsTab('insights') },
     insightsOn && { id: 'a:people', label: t('People You Meet'), icon: 'users', keywords: 'people attendees contacts who met meetings together', run: () => meetingsTab('people') },
     { id: 'a:dictations', label: t('Dictations'), sub: t('In Meetings'), icon: 'wave', keywords: 'dictation history voice said typed pasted wispr macwhisper', run: () => openAgent(DICTATIONS) },
@@ -1023,12 +1050,13 @@ function App() {
     { id: 'a:usage', label: t('Show usage'), icon: 'gauge', keywords: 'quota tokens cost', run: () => (wide ? showCard('gauge') : phoneUsage()) },
     { id: 'a:stats', label: t('Usage stats and history'), icon: 'gauge', keywords: 'stats heatmap tokens cost models projects', run: () => (wide ? openToday('usage') : phoneUsage()) },
     { id: 'a:tour', label: t('Take the tour'), icon: 'sparkle', keywords: 'help guide walkthrough intro getting started how', run: takeTour },
+    { id: 'a:help', label: t('Help'), sub: t('Bridge AI\'s manual'), icon: 'help', keywords: 'help manual how do i where is guide docs documentation question faq shortcut keyboard setting explain', run: () => setManual({}) },
   ].filter(Boolean)
   // The phone's Cloud agents: only what it has.
   const actions = cloudOnly ? [
     ...paletteActions.filter((a) => ['a:cloud', 'a:history'].includes(a.id)),
     { id: 'a:settings', label: t('Cloud agent keys…'), icon: 'settings', keywords: 'settings key cursor copilot jules claude', run: () => setSettings('cloud') },
-    ...paletteActions.filter((a) => ['a:appearance', 'a:theme'].includes(a.id)),
+    ...paletteActions.filter((a) => ['a:appearance', 'a:theme', 'a:help'].includes(a.id)),
   ] : paletteActions
   const closeSettings = () => { setSettings(null); if (cloudOnly) refetch('/cloud') }
   // The agent on screen, whose message box dictation fills when nothing else has the focus.
@@ -1047,8 +1075,13 @@ function App() {
       {screenOf && <ErrorBoundary name="Remote screen" resetKey={screenOf.machine}><ScreenView key={screenOf.machine || 'here'} machine={screenOf.machine} name={screenOf.name} onClose={() => setScreenOf(null)} /></ErrorBoundary>}
       {palette && <Palette fleet={fleet} activeId={wide ? W.active : mobileAgent} onClose={() => setPalette(false)} onOpen={openAgent} onOpenFile={openFiles} actions={actions} />}
       {settings && <Settings section={settings} onClose={closeSettings} onOpenAgent={openAgent} />}
+      {manual && <Manual at={manual.at} onClose={() => setManual(null)} />}
       {(fleet?.agents || []).filter((a) => a.chief && a.setup).map((a) => <FirstRunAnswers key={a.paneId} agent={a} />)}
       <CallPrompt />
+      {/* Your OK before what you send goes on to an AI provider (AiConsent.jsx): asked by your
+          computer of a phone, by the demo, and by Cloud Agents, which sends from this phone. */}
+      <Quiet name="AI provider consent"><AiConsent local={cloudOnly} /></Quiet>
+      {!cloudOnly && <TranscribeHost />}
       {!cloudOnly && <Quiet name="Crash notice"><CrashNotice /></Quiet>}
       {inbox && !cloudOnly && <NeedsYouPanel data={ny.data} refresh={ny.refresh} phone={!wide} focus={inbox.focus} onClose={() => setInbox(null)} onOpen={openItem} />}
       {onboarding && <Onboarding onDone={(pane) => { setOnboarding(false); confPoll.refresh(); if (pane) setTimeout(() => openAgent(pane), 800); else openAgent('view:new') }} />}
@@ -1154,19 +1187,19 @@ function App() {
   // Home off says how to turn it on, once the settings say it's off (until they're in, nothing).
   const viewFor = (id, { onBack } = {}) => (
     <ErrorBoundary key={id} name="This view" resetKey={id}>
-      {(id === 'view:home' || id === 'view:everything') && !homeOn ? <section className="pane view-pane">{conf && <TrialOff name={t('Home')} setting="home" />}</section>
-        : id === 'view:home' ? <section className="pane view-pane"><NeedsHome {...homeProps} onEverything={openEverything} /></section>
-        : id === 'view:everything' ? <section className="pane view-pane"><Everything {...homeProps} onOpenAgent={(x) => openOn(x.machine, x.a.paneId, { device: x.device, title: x.a.name || x.a.title, kind: x.a.kind })} onBack={wide ? null : () => setHomeView('home')} /></section>
+      {(id === 'view:home' || id === 'view:everything') && !homeOn ? <section className="pane view-pane" data-area={viewArea(id)}>{conf && <TrialOff name={t('Home')} setting="home" />}</section>
+        : id === 'view:home' ? <section className="pane view-pane" data-area={viewArea(id)}><NeedsHome {...homeProps} onEverything={openEverything} /></section>
+        : id === 'view:everything' ? <section className="pane view-pane" data-area={viewArea(id)}><Everything {...homeProps} onOpenAgent={(x) => openOn(x.machine, x.a.paneId, { device: x.device, title: x.a.name || x.a.title, kind: x.a.kind })} onBack={wide ? null : () => setHomeView('home')} /></section>
         : id === 'view:new' ? <Home fleet={fleet} onLaunched={fromHome} onMore={(init) => setNewAgent(init)} />
-        : id === 'view:map' ? <section className="pane view-pane"><AgentMap phone={!wide} onOpen={(d, a) => openOn(d.id, a.paneId, { device: d.name, title: a.name || a.title, kind: a.kind })}
+        : id === 'view:map' ? <section className="pane view-pane" data-area={viewArea(id)}><AgentMap phone={!wide} onOpen={(d, a) => openOn(d.id, a.paneId, { device: d.name, title: a.name || a.title, kind: a.kind })}
           controls={wide ? { maximized: !!L.max, onMaximize: () => set({ max: L.max ? null : 'main' }) } : null} /></section>
-        : id === 'view:meetings' ? <section className="pane view-pane"><MeetingsHome onOpen={(mid) => openAgent(`view:meeting:${mid}`, wide ? { replace: 'view:meetings' } : {})} /></section>
-        : id === 'view:studio' && StudioHome ? <section className="pane view-pane"><StudioHome onOpen={(f) => openAgent(studioId(f), wide ? { replace: 'view:studio' } : {})} /></section>
-        : id.startsWith(STUDIO) && StudioPage ? <section className="pane view-pane"><StudioPage {...studioOf(id)} onBack={() => openAgent('view:studio', { replace: id })} onOpen={(f, o) => openAgent(studioId(f), o?.replace ? { replace: id } : {})} /></section>
-        : id.startsWith(BOTS_VIEW) ? <section className="pane view-pane">{bots.on ? <BotsHome tab={id.slice(BOTS_VIEW.length)} phone={!wide} onTab={(x) => openAgent(botsView(x), wide ? { replace: id } : {})} /> : conf && <TrialOff name={t('Bots')} />}</section>
-        : id.startsWith(SESSION_VIEW) ? <section className="pane view-pane">{bots.on ? <SessionView key={id} sid={id.slice(SESSION_VIEW.length)} phone={!wide} fleet={fleet} /> : conf && <TrialOff name={t('Bots')} />}</section>
-        : id.startsWith(BOT_VIEW) ? <section className="pane view-pane">{bots.on ? <BotPage id={id.slice(BOT_VIEW.length)} phone={!wide} onOpen={(bid, o) => openAgent(botView(bid), o?.replace ? { replace: id } : {})} onTab={(x) => openAgent(botsView(x), wide ? { replace: id } : {})} onGone={() => { if (wide) closeTab(id); else { phoneBackward(); setMoreView(botsView('bots')) } }} /> : conf && <TrialOff name={t('Bots')} />}</section>
-        : <section className="pane view-pane"><MeetingPage id={id.slice(13)} onBack={onBack || (() => openAgent('view:meetings', { replace: id }))} /></section>}
+        : id === 'view:meetings' ? <section className="pane view-pane" data-area={viewArea(id)}><MeetingsHome onOpen={(mid) => openAgent(`view:meeting:${mid}`, wide ? { replace: 'view:meetings' } : {})} /></section>
+        : id === 'view:studio' && StudioHome ? <section className="pane view-pane" data-area={viewArea(id)}><StudioHome onOpen={(f) => openAgent(studioId(f), wide ? { replace: 'view:studio' } : {})} /></section>
+        : id.startsWith(STUDIO) && StudioPage ? <section className="pane view-pane" data-area={viewArea(id)}><StudioPage {...studioOf(id)} onBack={() => openAgent('view:studio', { replace: id })} onOpen={(f, o) => openAgent(studioId(f), o?.replace ? { replace: id } : {})} /></section>
+        : id.startsWith(BOTS_VIEW) ? <section className="pane view-pane" data-area={viewArea(id)}>{bots.on ? <BotsHome tab={id.slice(BOTS_VIEW.length)} phone={!wide} onTab={(x) => openAgent(botsView(x), wide ? { replace: id } : {})} /> : conf && <TrialOff name={t('Bots')} />}</section>
+        : id.startsWith(SESSION_VIEW) ? <section className="pane view-pane" data-area={viewArea(id)}>{bots.on ? <SessionView key={id} sid={id.slice(SESSION_VIEW.length)} phone={!wide} fleet={fleet} /> : conf && <TrialOff name={t('Bots')} />}</section>
+        : id.startsWith(BOT_VIEW) ? <section className="pane view-pane" data-area={viewArea(id)}>{bots.on ? <BotPage id={id.slice(BOT_VIEW.length)} phone={!wide} onOpen={(bid, o) => openAgent(botView(bid), o?.replace ? { replace: id } : {})} onTab={(x) => openAgent(botsView(x), wide ? { replace: id } : {})} onGone={() => { if (wide) closeTab(id); else { phoneBackward(); setMoreView(botsView('bots')) } }} /> : conf && <TrialOff name={t('Bots')} />}</section>
+        : <section className="pane view-pane" data-area={viewArea(id)}><MeetingPage id={id.slice(13)} onBack={onBack || (() => openAgent('view:meetings', { replace: id }))} /></section>}
     </ErrorBoundary>
   )
 
@@ -1303,6 +1336,7 @@ function App() {
       { id: 'needs', icon: 'bell', label: t('Needs You'), hint: t("What's waiting on you, on every device"), count: waiting, run: () => setInbox({}) },
       { id: 'history', icon: 'clock', label: t('History'), hint: t('Every conversation, and closed agents'), run: () => setHistory(true) },
       { id: 'settings', icon: 'settings', label: t('Settings'), hint: t('Devices, voice, appearance and more'), run: () => setSettings('all') },
+      { id: 'help', icon: 'help', label: t('Help'), hint: t('Bridge AI\'s manual: how to do anything in it'), run: () => setManual({}) },
     ].filter(Boolean)
     return (
       <div className="app narrow">
@@ -1310,6 +1344,7 @@ function App() {
         <RuntimeNotice runtime={conf?.runtime?.name} fellBack={conf?.runtime?.fellBack} />
         <Quiet name="Link requests"><AskBanner /></Quiet>
         <Quiet name="Switched computer"><SwitchedHere /></Quiet>
+      <Quiet name="Sign on Phone"><SignHere /></Quiet>
       <Quiet name="Remote screen"><RemoteHere /></Quiet>
       <Quiet name="Screens being viewed"><ScreenLive /></Quiet>
         <main className="m-body" style={untilAsks}>
@@ -1399,14 +1434,14 @@ function App() {
     if (a.view) return viewFor(id)
     if (a.remote) {
       return (
-        <div className={`group ${split && W.group === group ? 'focused' : ''}`} onMouseDown={() => split && W.group !== group && setW((w) => ({ ...w, group }))}>
+        <div data-area="agents" className={`group ${split && W.group === group ? 'focused' : ''}`} onMouseDown={() => split && W.group !== group && setW((w) => ({ ...w, group }))}>
           <ErrorBoundary key={a.paneId} name="This agent's view" resetKey={a.paneId}><RemoteAgent a={a} /></ErrorBoundary>
         </div>
       )
     }
     const controls = { maximized: L.max === group, onMaximize: () => set({ max: L.max === group ? null : group }) }
     return (
-      <div className={`group ${split && W.group === group ? 'focused' : ''}`} onMouseDown={() => split && W.group !== group && setW((w) => ({ ...w, group }))}>
+      <div data-area={a.chief ? 'chief' : 'agents'} className={`group ${split && W.group === group ? 'focused' : ''}`} onMouseDown={() => split && W.group !== group && setW((w) => ({ ...w, group }))}>
         {a.shellTab
           ? <ShellTab key={sessionKey + a.paneId} tab={a} onOpenInHerdr={openInHerdr} controls={controls} />
           : popped.has(a.paneId)
@@ -1484,6 +1519,7 @@ function App() {
       <RuntimeNotice runtime={conf?.runtime?.name} fellBack={conf?.runtime?.fellBack} />
       <Quiet name="Link requests"><AskBanner /></Quiet>
       <Quiet name="Switched computer"><SwitchedHere /></Quiet>
+      <Quiet name="Sign on Phone"><SignHere /></Quiet>
       <Quiet name="Remote screen"><RemoteHere /></Quiet>
       <Quiet name="Screens being viewed"><ScreenLive /></Quiet>
       <div className="views" style={untilAsks}>

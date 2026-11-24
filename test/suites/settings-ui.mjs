@@ -37,7 +37,7 @@
 // native/callwatch (bin/callwatch.json says whether it's allowed) and tccutil (bin/tcc.log).
 import fs from 'node:fs'
 import path from 'node:path'
-import { startKit, startModel, checks, until, sleep, browser, page, shot, phoneFaults, advanced, withoutCutOff, noServiceWorker, IS_MAC, ROOT } from '../lib/harness.mjs'
+import { startKit, startModel, checks, until, sleep, browser, page, shot, phoneFaults, advanced, withoutCutOff, noServiceWorker, IS_MAC, ROOT, appKeysFor, asWindow as windowPage } from '../lib/harness.mjs'
 import { SECTIONS as PLACE_SECTIONS, TABS as PLACE_TABS, NO_ACCOUNTS, placeEn } from '../../shared/places.js'
 
 const { ok, done } = checks('settings-ui')
@@ -46,8 +46,12 @@ const stand = (bin, name, source) => {
   fs.writeFileSync(path.join(bin, name), `#!/bin/sh\nexec "${process.execPath}" "${path.join(bin, `${name}.cjs`)}" "$@"\n`, { mode: 0o755 })
   return path.join(bin, name)
 }
-// (Home as Bridge AI starts, on: its card and switch are checked as they come.)
-const kit = await startKit('settings-ui', { config: { home: undefined }, env: ({ bin }) => (IS_MAC ? {
+// The pages are the app's own window (its secret, server/windowkey.js), as Settings is in the app:
+// Studio's signatures are listed there, not "signing is done in the app". (Home as Bridge AI starts,
+// on: its card and switch are checked as they come.)
+let keys = null
+const asWindow = (ctx) => windowPage(ctx, keys.window)
+const kit = await startKit('settings-ui', { config: { home: undefined }, env: ({ bin }) => ({ BRIDGE_TEST_WINDOW_FILE: (keys = appKeysFor(bin)).file, ...(IS_MAC ? {
   BRIDGE_CALLWATCH: stand(bin, 'callwatch', `const fs = require('node:fs'), path = require('node:path')
 const read = () => { try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'callwatch.json'), 'utf8')) } catch { return {} } }
 const say = (o) => { process.stdout.write(JSON.stringify(o) + '\\n'); process.exit(0) }
@@ -56,7 +60,7 @@ if (process.argv[2] === 'screen') say({ allowed: !!read().screen })
 setInterval(() => {}, 1000); process.stdout.write('{"input":[]}\\n')`),
   BRIDGE_TCCUTIL: stand(bin, 'tccutil', `require('node:fs').appendFileSync(require('node:path').join(__dirname, 'tcc.log'), process.argv.slice(2).join(' ') + '\\n')`),
   BRIDGE_FIX_BUNDLE_ID: 'dev.bridge-ai.test',
-} : {}) })
+} : {}) }) })
 const model = await startModel('settings-ui')
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
@@ -68,7 +72,7 @@ const TABBED = {
   'Meetings & Voice': TABS,
   'Devices & Access': ['Phone', 'Computers', 'Remote Access', 'Share Links'],
 }
-const SECTIONS = ['Your Features', 'You', 'Agents & Models', 'Meetings & Voice', ...(IS_MAC ? ['Mail & Calendar'] : []), 'Bots', 'Devices & Access', 'Notifications', 'Back Up & Move', 'About & Updates']
+const SECTIONS = ['Your Features', 'You', 'Agents & Models', 'Meetings & Voice', ...(IS_MAC ? ['Mail & Calendar'] : []), 'Studio', 'Bots', 'Devices & Access', 'Notifications', 'Back Up & Move', 'About & Updates']
 const FIRST = {
   'Your Features': ['Home', 'Meetings', 'Meeting Insights', 'Dictation', 'Chief of Staff', 'Scheduled Routines', 'Phone', 'Share Links', 'Notifications', 'Bridge AI as an MCP Server', 'Beta', 'Bots', 'Remote Screen and Preview', 'Set up'],
   You: ['Home', 'Your name', 'Location', 'Layout', 'Enter Key', 'Color Mode', 'Theme', 'Text Size', 'Language'],
@@ -81,13 +85,14 @@ const FIRST = {
   Meetings: ['Live Meeting Board', 'Answers in AI Assist', 'Meeting Insights', 'Transcribe with', 'Language', 'Names and terms', 'Notes are written by', 'Write the summary when a meeting ends', 'Clean up the transcript when a meeting ends', 'Name who spoke on the call', ...(IS_MAC ? ['Prepare for each meeting'] : []), 'Record the other side of calls', 'Notice calls', 'Save every meeting as Markdown'],
   'Mail & Calendar': ['How You Write', 'Learn it again now and then', 'Working days', 'Working hours', 'Read-Only'],
   Bots: ['Bots', /beta/i, 'Open Bots'],
+  Studio: ['Your Signatures', /signatures/i, /initials/i, 'Add a signature', 'Add initials', 'Ask Before Signing', 'Ask that it\'s you before a document is signed', 'Signing PIN'],
   'MCP Servers': ['Bridge AI as an MCP Server', 'Add server'],
   Phone: [/relay|Cloudflare/i],
   Computers: ['Your Devices', 'Link a device'],
   'Remote Access': ['Remote Screen and Preview', 'Which Devices May Connect'],
   'Share Links': ['Share Links', /beta/i, /Nothing is shared now/],
   Notifications: ['Notifications on this device', 'What to notify about', 'An agent needs you', 'Notification sounds', 'Screen Sharing Notifications', 'Needs Remote Screen and Preview on'],
-  'Back Up & Move': ['Back Up to a File', 'Restore From a File'],
+  'Back Up & Move': ['Back Up to a File', 'Restore From a File', 'With your signatures'],
   'About & Updates': ['Version', 'Check for new versions', 'Beta Features', 'Privacy', 'Report a problem'],
 }
 // Every setting there was, by its control's name (kind|name; a name the control's own includes), in
@@ -104,13 +109,14 @@ const ALL = {
   Meetings: ['input|Live Meeting Board', 'input|Answers in AI Assist', 'input|Meeting Insights', 'input|On this computer', 'input|OpenAI', 'input|Groq', 'input|Deepgram', 'input|AssemblyAI', 'input|Another OpenAI-style service', 'button|Speech models', 'select|Meeting language', 'button|Open Memory', 'input|More words to listen for', 'input|Record the other side of calls', 'button|Change it', 'input|Write the summary when a meeting ends', 'input|Clean up the transcript when a meeting ends', 'input|Suggest what to ask, in every meeting', 'select|How often AI Assist suggests something', ...(IS_MAC ? ['input|Prepare for each meeting', "input|Speakers From the Call's Video"] : []), 'input|Name who spoke on the call', 'textarea|Your own instructions for every summary', 'input|Tell voices apart in a room', 'input|Tell voices apart on a call', 'input|Learn my voice', 'input|Remember voices you name', 'select|The key that mentions a meeting', 'input|Notice calls', 'input|Stop by itself when the call ends', 'select|What to save', 'input|Folder', 'input|Subfolders', 'input|File name', 'input|Front matter', 'input|Your mic, as', 'input|The call, as', 'input|Keep saved notes up to date', 'input|Save every meeting as Markdown'],
   'Mail & Calendar': ['input|Learn it again now and then', 'button|Mon', 'button|Sun', 'input|From', 'input|To', 'select|Kept clear around meetings', 'select|Around a meeting somewhere else', 'select|How many times to offer'],
   Bots: ['input|Bots', 'button|Open Bots'],
+  Studio: ['button|Add a signature', 'button|Add initials', 'input|Ask that it\'s you before a document is signed', 'button|Set a PIN'],
   'MCP Servers': ['input|Bridge AI as an MCP Server', 'button|Add server', 'button|Refresh'],
   Phone: ['button|Sign in with Cloudflare', 'button|Use an API token instead', 'button|Check again'],
   Computers: ['button|Details', "input|The other device's link", 'button|Link'],
   'Remote Access': ['input|Remote Screen and Preview'],
   'Share Links': ['input|Share Links'],
   Notifications: ['button|Turn on notifications', 'input|An agent needs you (a question, a permission)', 'input|An agent finished', 'select|Usage running low', 'input|Notification sounds', 'input|Answer buttons for simple questions (yes or no, or two short choices)', "input|Notify my phone even when I'm at the computer", 'input|Screen Sharing Notifications', 'button|Turn On'],
-  'Back Up & Move': ['input|Passphrase', 'button|Back Up', 'button|Choose a Backup'],
+  'Back Up & Move': ['input|Passphrase', 'button|Back Up', 'button|Choose a Backup', 'input|With your signatures'],
   'About & Updates': ['button|Check now', 'input|Check for new versions', 'button|Take the tour', 'a|Report a problem', 'a|Suggest an idea', 'button|Copy details', 'input|Usage Across Every Provider', 'input|Share Links', 'button|Copy path', 'textarea|config.json', 'button|Save', 'button|Effective settings', 'button|Defaults', ...(IS_MAC ? ["input|Speakers From the Call's Video"] : [])],
 }
 // Beta Features: only those still in beta, in order (Studio, Sign PDFs, Comments and @bridge, Make a
@@ -190,7 +196,7 @@ try {
 
   // ---------- Your Features first, then each section: its essentials, Advanced closed; and nothing lost ----------
   {
-    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
+    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky', before: asWindow })
     await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
     await p.locator('button[aria-label="Settings"]').first().click()
     await p.waitForSelector('.st-nav-item', { timeout: 8000 })
@@ -246,7 +252,7 @@ try {
       if (FIRST[name]) ok(!want.length, `${name}: what most people change shows first`, { missing: want.map(String), shown: shown.slice(0, 600) })
       const has = await adv(p).count() && await adv(p).isVisible()
       if (TABBED[section]) ok(await p.locator('.st-head p').count() === 0, `${name}: no line under the section's name, where its tabs are`)
-      if (['Your Features', 'Which Model Does What', 'Speech Models', 'Spoken Answers', 'Computers', 'Remote Access', 'Share Links', 'Bots', 'MCP Servers'].includes(name)) ok(!has, `${name}: nothing under Advanced, so no Advanced`, { has })
+      if (['Your Features', 'Which Model Does What', 'Speech Models', 'Spoken Answers', 'Computers', 'Remote Access', 'Share Links', 'Bots', 'MCP Servers', 'Studio'].includes(name)) ok(!has, `${name}: nothing under Advanced, so no Advanced`, { has })
       else ok(has && (await isOpen(p)) === false, `${name}: the rest under Advanced, at the end, closed`, { has, open: await isOpen(p) })
       // A feature out of beta: its switch here, an ordinary one.
       for (const [id, at] of Object.entries(OUT_AT)) {
@@ -299,7 +305,7 @@ try {
 
   // ---------- Where a link lands: each tab, and the ids that opened a section before it moved ----------
   {
-    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
+    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky', before: asWindow })
     await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
     const at = () => p.evaluate(() => ({ nav: document.querySelector('.st-nav-item.on > span')?.innerText.trim(), tab: document.querySelector('.st-tabs [role="tab"][aria-selected="true"]')?.innerText.trim() || null }))
     const lands = async (section, nav, tab, sel) => {
@@ -332,6 +338,7 @@ try {
     ok(await lands('slack-bot', 'Bots', null, '[data-setting="bots-beta"]'), 'the Bots beta\'s id: Bots', await at())
     ok(await lands('config', 'About & Updates', null, '[data-setting="config-file"]') && await isOpen(p) === true, 'the config file: About & Updates, under Advanced', await at())
     ok(await lands('backup', 'Back Up & Move', null, '[data-setting="backup"]'), 'Back Up & Move', await at())
+    ok(await lands('ask-before-signing', 'Studio', null, '[data-setting="ask-before-signing"]') && await lands('signatures', 'Studio', null, '[data-setting="signatures"]') && await lands('studio', 'Studio', null, '[data-setting="signatures"]'), 'Ask Before Signing and Your Signatures: Studio', await at())
     ok(await lands('setup', 'Your Features', null, '[data-setting="setup"]') && await lands('all', 'Your Features', null, '.ft-grid'), 'Set up, and Settings itself: Your Features', await at())
     await lands('meetings', 'Meetings & Voice', 'Meetings', '.st-meet')
     // The section in the list, with a tab showing: it stays; from another section: the first again.
@@ -385,7 +392,7 @@ try {
 
   // ---------- Advanced: closed until opened, then kept for its section ----------
   {
-    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
+    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky', before: asWindow })
     await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
     const open = async (section) => { await p.evaluate((s) => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: s } })), section); await p.locator('.modal.settings .st-sections').first().waitFor({ timeout: 8000 }); await settled(p) }
     await open('meetings')
@@ -448,7 +455,7 @@ try {
 
   // ---------- What's on and sends what it reads off the computer: never under Advanced ----------
   {
-    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
+    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky', before: asWindow })
     await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
     const at = async (section) => { await p.evaluate((s) => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: s } })), section); await p.locator('.modal.settings .st-sections').first().waitFor({ timeout: 8000 }); await settled(p) }
     const first = async (id) => (await p.locator(`.modal.settings [data-setting="${id}"]`).isVisible()) && !(await p.locator(`.modal.settings .st-adv [data-setting="${id}"]`).count())
@@ -486,7 +493,7 @@ try {
   // stays just where it showed, and ticked then, it ticks.
   {
     const held = []
-    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky', before: async (c) => { await noServiceWorker(c); await c.route(/\/api\/(consult|subscriptions)(\?|$)/, (r) => held.push(r)) } })
+    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky', before: async (c) => { await asWindow(c); await noServiceWorker(c); await c.route(/\/api\/(consult|subscriptions)(\?|$)/, (r) => held.push(r)) } })
     await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
     await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'keep-agents' } })))
     const tick = p.locator('.modal.settings [data-setting="keep-agents"] input')
@@ -517,7 +524,7 @@ try {
       await advanced(p)
       return p.locator('.modal.settings .st-screen-names')
     }
-    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky' })
+    const { ctx, p, errors } = await page(b, kit.url, { mode: 'light', theme: 'sky', before: asWindow })
     await p.waitForSelector('.rail-nav-btn', { timeout: 15000 })
     let row = await go(p)
     const text = () => row.innerText().catch(() => '')
@@ -555,7 +562,7 @@ try {
 
   // ---------- A phone, dark ----------
   {
-    const { ctx, p, errors } = await page(b, kit.url, { mode: 'dark', theme: 'midnight', phone: true })
+    const { ctx, p, errors } = await page(b, kit.url, { mode: 'dark', theme: 'midnight', phone: true, before: asWindow })
     await p.setViewportSize({ width: 375, height: 812 })
     await p.waitForSelector('.tabbar button', { timeout: 15000 })
     await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'meetings' } })))

@@ -17,6 +17,7 @@ import { YourFiles, useYourFiles, kindsHere, KIND_ICON } from './HomeFiles.jsx'
 import Explorer from '../files/Explorer.jsx'
 import AiAssist from '../AiAssist.jsx'
 import { ShareDialog, SharesList } from '../Share.jsx'
+import { signedLine, placesLine } from './pdf/signed.js'
 import { BetaSwitch } from '../settings/Beta.jsx'
 import { useTrial } from '../../trials.js'
 import './studio.css'
@@ -282,7 +283,7 @@ export function StudioHome({ onOpen }) {
       { id: 'recent', icon: 'clock', label: t('Recent'), n: files.found ? files.recentRows.length : null, hint: t('What you opened here, and what was opened or changed in the last 30 days') },
       ...kindsHere.map(([k, label]) => ({ id: `kind:${k}`, icon: KIND_ICON[k], label: t(label), n: files.found ? files.kindCount[k] : null })),
       { id: 'packs', icon: 'palette', label: t('Design Packs'), hint: t('Your colours, fonts and logo, for the decks, documents and pages Studio makes') },
-      { id: 'signature', icon: 'signature', label: t('Your Signature'), hint: t("Your signature and initials, for AI Assist's Sign this on a PDF") },
+      { id: 'signature', icon: 'signature', label: t('Your Signatures'), hint: t("Your signatures and initials, for AI Assist's Sign this on a PDF") },
       { id: 'shared', icon: 'link', label: t('Shared'), hint: t('Share Links you gave people outside your devices: who opened them, and Stop Sharing') },
     ],
     render: (id, { q, tap, keys, focus }) => (id === 'packs' ? <PacksSection packs={packs} />
@@ -305,7 +306,7 @@ export function StudioHome({ onOpen }) {
 // keeps one of its own.
 const SAVES_ITSELF = new Set(['doc'])
 const AUTO_MS = 1200
-const WHO = { you: tx('You'), agent: tx('An agent'), outside: tx('Changed outside Studio'), restored: tx('Restored'), opened: tx('When it was first opened here') }
+const WHO = { you: tx('You'), agent: tx('An agent'), outside: tx('Changed outside Studio'), restored: tx('Restored'), opened: tx('When it was first opened here'), signed: tx('Signed') }
 // Nothing in a Word or an Excel file is lost by saving it here, so neither is warned about before
 // its first save; an editor still says what one change can't keep (warn.text).
 const RISKY = {}
@@ -558,8 +559,9 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
       if (shownFile.current !== f) return
       metaRef.current = { ...metaRef.current, mtime: r.mtime, size: r.size, versions: r.versions, keep: r.keep ?? metaRef.current?.keep }
       setMeta((m) => ({ ...m, mtime: r.mtime, size: r.size, versions: r.versions, keep: r.keep ?? m.keep }))
-      // Changed again while it saved: still unsaved, and saved again in a moment.
-      if (edits.current === n) setDirty(false)
+      // Changed again while it saved: still unsaved, and saved again in a moment. (Known at once, for
+      // a restore waiting on this save.)
+      if (edits.current === n) { dirtyRef.current = false; setDirty(false) }
       else if (SAVES_ITSELF.has(meta.kind)) later()
       setConflict(null)
       if (auto) setNote((x) => (x?.error ? null : x))
@@ -628,7 +630,11 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
     } catch (e) { setNote({ text: app ? t("Couldn't open it in {app}: {error}", { app, error: e.message }) : t("Couldn't open it in its app: {error}", { error: e.message }), bad: true }) }
   }
   const restore = async (id) => {
-    if (dirty && !window.confirm(t('Restore this version? Your unsaved changes here are lost (what\'s in the file now is kept as a version).'))) return
+    // A save on its way (Saving…) is waited for: what it saves is kept as a version, so it isn't
+    // lost, and only changes it doesn't have are asked about. (A big file's save is written, then
+    // kept as a version, for seconds on a slow disk.)
+    while (inFlight.current) await inFlight.current
+    if (dirtyRef.current && !window.confirm(t('Restore this version? Your unsaved changes here are lost (what\'s in the file now is kept as a version).'))) return
     // One that can't be put back (gone from the list meanwhile, its computer away) says why; the
     // file as it was, and the page with it. Put back and not read again: said as a file that didn't open.
     writing.current++
@@ -816,7 +822,7 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
           {!meta || !data ? opening
             : <Suspense fallback={opening}><Editor key={gen} file={{ ...meta, root, path: rel }} data={meta.url ? null : data} onDirty={edited} onStats={setStats} handle={handle} packs={packs.list} onOpen={onOpen} readOnly={readOnly} /></Suspense>}
         </div>
-        {panel === 'versions' && meta && <Versions f={f} ext={meta.ext} versions={meta.versions} keep={meta.keep} size={meta.size} slim={!!meta.parts} name={name} onRestore={restore} onClose={() => setPanel(null)} />}
+        {panel === 'versions' && meta && <Versions f={f} ext={meta.ext} versions={meta.versions} signings={meta.signings} keep={meta.keep} size={meta.size} slim={!!meta.parts} name={name} onRestore={restore} onOpen={onOpen} onClose={() => setPanel(null)} />}
       </div>
       {/* The status line: what the editor counts, what kind of file it is (tapped: what saving keeps),
           how many versions are kept, and whether it's saved. On a phone, Open in its app and Focus here
@@ -849,18 +855,30 @@ const BackBtn = ({ onBack, icon }) => <><button type="button" className="win-btn
 // keep: how many versions Studio keeps of this file (server/studio.js keepFor): fewer of a big one,
 // none of one too big to save; said at the top of the list.
 const KEEP_ALL = 60
+// signings: each time it was signed in Studio (a copy was made: this file stays as it was), with
+// who, where, how it was asked, the places and the copy, to open.
 // slim: a big file opened in parts, compared by its words alone (its versions' XML, not their pictures).
-function Versions({ f, ext, versions, keep = KEEP_ALL, size = 0, slim = false, onRestore, onClose }) {
+function Versions({ f, ext, versions, signings = [], keep = KEEP_ALL, size = 0, slim = false, onRestore, onOpen, onClose }) {
   const [compare, setCompare] = useState(null) // the version compared with the file as it is
   return (<>
     <aside className="sd-panel" aria-label={t('Versions')}>
       <div className="sd-panel-head"><b>{t('Versions')}</b><span className="muted small">{t('{n} kept', { n: versions.length })}</span><span className="sd-grow" /><button type="button" className="win-btn" onClick={onClose} aria-label={t('Close')}><Icon name="x" size={13} /></button></div>
       {keep < KEEP_ALL && <p className="sd-v-note muted small" role="note">{keep === 0 ? t('Studio keeps no versions of a file this big ({size}): it opens here to read only.', { size: sizeOf(size) }) : t('This file is big ({size}), so Studio keeps its last {n} versions, not 60.', { size: sizeOf(size), n: keep })}</p>}
+      {!!signings?.length && (
+        <ol className="sd-versions sd-signings" aria-label={t('Signed copies')}>
+          {signings.map((s) => (
+            <li key={s.id} className="signed">
+              <span className="sd-v-who"><b><Icon name="signature" size={11} /> {signedLine(s)}</b><small className="muted">{when(s.at)}{s.places?.length ? ` · ${placesLine(s.places)}` : ''}</small>{s.verified === false && <small className="sd-v-bad">{t('Changed outside Bridge AI: this line can\'t be trusted')}</small>}{s.copyChanged && <small className="sd-v-bad">{t('The signed copy changed after it was signed')}</small>}</span>
+              {s.copy && onOpen && <span className="sd-v-acts"><button type="button" className="link-btn" onClick={() => onOpen({ root: f.root, path: s.copy })} title={s.copy}>{t('Open the copy')}</button></span>}
+            </li>
+          ))}
+        </ol>
+      )}
       <ol className="sd-versions">
         {versions.map((v, i) => (
-          <li key={v.id} className={i === 0 ? 'now' : ''}>
-            <span className="sd-v-who"><b>{v.by === 'agent' && v.name ? v.name : t(WHO[v.by] || v.by)}</b><small className="muted">{when(v.at)} · {sizeOf(v.size)}</small></span>
-            {i === 0 ? <small className="muted">{t('Now')}</small> : <span className="sd-v-acts">
+          <li key={v.id} className={`${i === 0 ? 'now' : ''}${v.signed ? ' signed' : ''}`}>
+            <span className="sd-v-who"><b>{v.signed ? <><Icon name="signature" size={11} /> {signedLine(v.signed)}</> : v.by === 'agent' && v.name ? v.name : t(WHO[v.by] || v.by)}</b><small className="muted">{when(v.at)} · {v.signed?.places?.length ? `${placesLine(v.signed.places)} · ` : ''}{sizeOf(v.size)}</small>{v.signed?.verified === false && <small className="sd-v-bad">{t('Changed outside Bridge AI: this line can\'t be trusted')}</small>}{v.signed?.copyChanged && <small className="sd-v-bad">{t('The signed copy changed after it was signed')}</small>}</span>
+            {i === 0 ? <small className="muted">{t('Now')}</small> : v.kept === false ? <small className="muted" title={t('A signed copy\'s versions are kept as a line each, never as a copy')}>{t('Not kept')}</small> : <span className="sd-v-acts">
               {comparable(ext) && <button type="button" className="link-btn" onClick={() => setCompare(v)}>{t('Compare')}</button>}
               <a className="link-btn" href={versionUrl(f, v.id)} target="_blank" rel="noreferrer">{t('Open')}</a>
               <button type="button" className="link-btn" onClick={() => onRestore(v.id)}>{t('Restore')}</button>

@@ -20,6 +20,13 @@
     "afterSign": "./notarize-app.js",
     "afterAllArtifactBuild": "./notarize-dmg.js",
     "npmRebuild": false,
+    "electronFuses": {
+      "runAsNode": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true
+    },
     "directories": {
       "output": "dist"
     },
@@ -37,6 +44,13 @@
       "screenpick.js",
       "remote.js",
       "apitoken.js",
+      "windowauth.js",
+      "serverflags.js",
+      "servergate.js",
+      "startgate.js",
+      "rootlist.js",
+      "codesig.js",
+      "app-root.list",
       "package.json",
       "!node_modules/uiohook-napi/{libuiohook,src,binding.gyp}{,/**}"
     ],
@@ -71,7 +85,33 @@
         "NSDesktopFolderUsageDescription": "Bridge AI shows your projects, lets your agents work in the folders you pick, and suggests files you saved for a meeting.",
         "NSDocumentsFolderUsageDescription": "Bridge AI shows your projects, lets your agents work in the folders you pick, and saves meeting notes where you choose.",
         "NSDownloadsFolderUsageDescription": "Bridge AI lets your agents work in the folders you pick, and suggests files you downloaded for a meeting, like a resume or a deck.",
-        "NSAppleEventsUsageDescription": "Bridge AI asks Finder to move a file you discard to the Trash."
+        "NSAppleEventsUsageDescription": "Bridge AI asks Finder to move a file you discard to the Trash.",
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "Audio to transcribe",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": [
+              "public.audio"
+            ]
+          },
+          {
+            "CFBundleTypeName": "Video to transcribe",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": [
+              "public.movie"
+            ]
+          },
+          {
+            "CFBundleTypeName": "Folder of recordings to transcribe",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": [
+              "public.folder"
+            ]
+          }
+        ]
       },
       "hardenedRuntime": true,
       "entitlements": "entitlements.mac.plist",
@@ -165,7 +205,7 @@
     "uiohook-napi": "1.5.5"
   },
   "devDependencies": {
-    "electron": "^45.1.0",
+    "electron": "^45.2.3",
     "electron-builder": "^26.18.0"
   },
   "overrides": {

@@ -4,10 +4,13 @@
 //   This computer: the speech models it can run, Parakeet first and recommended, with their sizes,
 //   languages and licenses, and Whisper (for other languages) folded away; Download with progress,
 //   In use, Use to pick another, Remove; a download that doesn't match its checksum says so.
-//   Whisper models say they need whisper.cpp.
-//   Linux with an old glibc (a server standing in for one): no Parakeet in the list, a quiet line
-//   that other computers are offered more, and a Parakeet picked on another computer says what's
-//   used instead.
+//   Whisper is built in: its models download like Parakeet's, with nothing to install; the Whisper
+//   downloads of earlier versions are offered for removal.
+//   Linux with an old glibc (a server standing in for one): no speech model in the list, a quiet
+//   line that other computers are offered more, and a Parakeet picked on another computer says it
+//   can't run there, nor can another. The same with whisper.cpp installed there (a stand-in
+//   whisper-cli): whisper.cpp's models, Settings saying whisper.cpp is used there and why, and
+//   nothing offering to install anything.
 //   The message box's mic with no model yet (Chromium's fake mic; WebKit has none, so it skips
 //   this): you talk, and the answer offers the one-time download (its name, size, and that it stays
 //   on this computer); one click downloads it with progress, then what you said turns into text in
@@ -40,14 +43,16 @@ try {
     await openVoice(p)
     ok((await p.locator('.st-nav-item.on').innerText().catch(() => '')).trim() === 'Meetings & Voice' && (await p.locator('.st-head .st-tabs [aria-selected="true"]').innerText().catch(() => '')) === 'Speech Models', `${t}: Settings › Meetings & Voice at Speech Models`)
     const ids = await p.locator('.st-voice li[data-model]').evaluateAll((l) => l.map((x) => x.dataset.model))
-    ok(ids[0] === 'parakeet-v3' && ids[1] === 'parakeet-en' && ids.includes('large-v3-turbo-q5_0') && !ids.includes('apple'), `${t}: the models this computer runs, Parakeet first (no Mac speech here)`, ids)
+    ok(ids[0] === 'parakeet-v3' && ids[1] === 'parakeet-en' && ['whisper-turbo', 'whisper-small', 'whisper-base', 'whisper-large'].every((x) => ids.includes(x)) && !ids.includes('apple'), `${t}: the models this computer runs, Parakeet first, then the four Whisper models (no Mac speech here)`, ids)
     // Folded away until it's wanted (later, a Whisper download that failed keeps it open, to say why).
-    if (look.mode === 'light') ok(!(await row(p, 'large-v3-turbo-q5_0').isVisible()) && await p.locator('.st-whisper > summary', { hasText: 'Whisper, for other languages' }).isVisible(), `${t}: Whisper folded away, under its own heading`)
+    if (look.mode === 'light') ok(!(await row(p, 'whisper-turbo').isVisible()) && await p.locator('.st-whisper > summary', { hasText: 'Whisper, for other languages' }).isVisible(), `${t}: Whisper folded away, under its own heading`)
     if (await p.locator('.st-whisper').getAttribute('open') === null) await p.locator('.st-whisper > summary').click()
     const pk = await row(p, 'parakeet-v3').innerText()
     ok(/Parakeet/.test(pk) && /recommended/.test(pk) && /670 MB, 25 languages\. CC-BY-4\.0, by NVIDIA\./.test(pk), `${t}: Parakeet: recommended, its size, languages and license`, pk)
     ok(/663 MB, English only\. NVIDIA Open Model License, by NVIDIA\./.test(await row(p, 'parakeet-en').innerText()), `${t}: Parakeet English likewise`, await row(p, 'parakeet-en').innerText())
-    ok(/Needs whisper\.cpp, a free program/.test(await row(p, 'large-v3-turbo-q5_0').innerText()), `${t}: a Whisper model says it needs whisper.cpp`)
+    const wt = await row(p, 'whisper-turbo').innerText()
+    ok(/Whisper large turbo/.test(wt) && /1\.0 GB, about 100 languages\. MIT, by OpenAI\./.test(wt) && await row(p, 'whisper-turbo').locator('button', { hasText: 'Download' }).isVisible() && !/whisper\.cpp|Install/.test(wt), `${t}: Whisper large turbo: its size, about 100 languages, a Download like Parakeet's, and nothing to install`, wt)
+    ok(/runs in Bridge AI, on this computer: each model is one download, with nothing to install/.test(await p.locator('.st-whisper').innerText()) && (await p.locator('.st-voice button', { hasText: /whisper\.cpp/i }).count()) === 0, `${t}: and Whisper says so`, await p.locator('.st-whisper').innerText())
     ok(/Picked/.test(pk) && await row(p, 'parakeet-v3').locator('button.primary', { hasText: 'Download' }).isVisible(), `${t}: Parakeet is the pick, waiting for its download`)
     ok(await noScroll(p), `${t}: nothing wider than the window`)
     await shot(p, `${tag}voice-${t}`)
@@ -62,9 +67,22 @@ try {
       models.slow = 0
       ok(!!(await until(async () => /In use/.test(await row(p, 'parakeet-v3').innerText()), 15000)), `${t}: then it's in use`, await row(p, 'parakeet-v3').innerText())
       // A download that doesn't match its checksum.
-      await row(p, 'base.en-q5_1').locator('button', { hasText: 'Download' }).click()
-      ok(!!(await until(async () => /didn't match its checksum/.test(await row(p, 'base.en-q5_1').innerText()), 15000)), `${t}: a bad download says so`, await row(p, 'base.en-q5_1').innerText())
-      ok(await row(p, 'base.en-q5_1').locator('button', { hasText: 'Try again' }).isVisible(), `${t}: with Try again`)
+      await row(p, 'whisper-small').locator('button', { hasText: 'Download' }).click()
+      ok(!!(await until(async () => /didn't match its checksum/.test(await row(p, 'whisper-small').innerText()), 15000)), `${t}: a bad download says so`, await row(p, 'whisper-small').innerText())
+      ok(await row(p, 'whisper-small').locator('button', { hasText: 'Try again' }).isVisible(), `${t}: with Try again`)
+      // Whisper base: downloaded as Parakeet is, then Use picks it, with nothing installed.
+      await row(p, 'whisper-base').locator('button', { hasText: 'Download' }).click()
+      await until(async () => (await row(p, 'whisper-base').locator('button', { hasText: 'Use' }).count()) > 0, 15000)
+      await row(p, 'whisper-base').locator('button', { hasText: 'Use' }).click()
+      ok(!!(await until(async () => /In use/.test(await row(p, 'whisper-base').innerText()), 8000)) && (await kit.api('/voice')).ready === true, `${t}: a Whisper model downloads and is used, ready with nothing to install`, await row(p, 'whisper-base').innerText())
+      await row(p, 'parakeet-v3').locator('button', { hasText: 'Use' }).click()
+      await until(async () => /In use/.test(await row(p, 'parakeet-v3').innerText()), 8000)
+      // Earlier versions' Whisper downloads (whisper.cpp's): said with their size, removed on a click.
+      fs.writeFileSync(path.join(kit.data, 'models', 'ggml-large-v3-turbo-q5_0.bin'), Buffer.alloc(2_500_000))
+      const earlier = p.locator('.st-earlier')
+      ok(!!(await until(async () => /Whisper models downloaded by earlier versions \(3 MB\) aren't used any more\./.test(await earlier.innerText().catch(() => '')), 10000)), `${t}: earlier versions' Whisper downloads are said, with their size`, await earlier.innerText().catch(() => ''))
+      await earlier.locator('button', { hasText: 'Remove them' }).click()
+      ok(!!(await until(async () => (await earlier.count()) === 0 && !fs.existsSync(path.join(kit.data, 'models', 'ggml-large-v3-turbo-q5_0.bin')), 8000)), `${t}: Remove them takes them away, and the line goes`)
       // Parakeet English: downloaded, then Use picks it, then back.
       await row(p, 'parakeet-en').locator('button', { hasText: 'Download' }).click()
       await until(async () => (await row(p, 'parakeet-en').locator('button', { hasText: 'Use' }).count()) > 0, 15000)
@@ -84,14 +102,45 @@ try {
   {
     const { ctx, p, errors } = await page(b, old.url, { mode: 'light', theme: 'sky' })
     await openVoice(p)
+    await p.waitForSelector('.st-voice', { timeout: 10000 }).catch(() => {})
     const ids = await p.locator('.st-voice li[data-model]').evaluateAll((l) => l.map((x) => x.dataset.model))
-    ok(ids.length && !ids.some((x) => /^parakeet/.test(x)), 'Linux with glibc 2.31: no Parakeet in the list', ids)
+    ok(!ids.some((x) => /^(parakeet|whisper)/.test(x)), 'Linux with glibc 2.31: no Parakeet or Whisper in the list', ids)
     const text = await p.locator('.st-voice').innerText()
     ok(/More speech models are offered on other computers\./.test(text), 'one quiet line says other computers are offered more', text)
-    ok(/Parakeet can't run on this computer \(sherpa-onnx needs glibc 2\.32 or later.*\), so Whisper large turbo is used here\./.test(text), 'the Parakeet picked on another computer: what\'s used instead, and why', text)
+    ok(/Parakeet can't run on this computer \(sherpa-onnx needs glibc 2\.32 or later.*\), nor can another speech model\. Meetings can use a speech service\./.test(text), 'the Parakeet picked on another computer: that it can\'t run here, nor can another, and why', text)
     await shot(p, `${tag}voice-oldlinux`)
     ok(errors.length === 0, 'no page errors', errors)
     await ctx.close()
+  }
+
+  // ---------- The same, with whisper.cpp installed there already ----------
+  {
+    const cpp = await startKit('voice-ui-whispercpp', {
+      env: ({ bin }) => {
+        fs.writeFileSync(path.join(bin, 'whisper-cli.cjs'), fs.readFileSync(path.join(TEST, 'stand-ins', 'whisper-cli.cjs')))
+        fs.writeFileSync(path.join(bin, 'whisper-cli'), `#!/bin/sh\nexec "${process.execPath}" "${path.join(bin, 'whisper-cli.cjs')}" "$@"\n`, { mode: 0o755 })
+        return models.env({ BRIDGE_MACHINE: JSON.stringify({ platform: 'linux', arch: 'x64', glibc: '2.31', docker: false }) })({ bin })
+      },
+      config: { speech: { model: 'parakeet-v3' } },
+    })
+    try {
+      await cpp.api('/setup', { name: 'Tester' })
+      const { ctx, p, errors } = await page(b, cpp.url, { mode: 'light', theme: 'sky' })
+      await openVoice(p)
+      const ids = await p.locator('.st-voice li[data-model]').evaluateAll((l) => l.map((x) => x.dataset.model))
+      ok(ids.join(',') === 'large-v3-turbo-q5_0,small.en-q5_1,small-q5_1,base.en-q5_1,large-v3-q5_0', 'Linux with glibc 2.31 and whisper.cpp installed: whisper.cpp\'s models', ids)
+      const text = await p.locator('.st-voice').innerText()
+      ok(/Parakeet can't run on this computer \(sherpa-onnx needs glibc 2\.32 or later.*\), so Whisper large turbo \(whisper\.cpp\) is used here\./.test(text) && /Here, whisper\.cpp, which is installed on this computer, turns speech into text\./.test(text), 'the Parakeet picked elsewhere: why it can\'t run, which whisper.cpp model is used instead, and that whisper.cpp turns speech into text here', text)
+      ok(/Here it runs through whisper\.cpp: each model is one download\./.test(text), 'Whisper says it runs through whisper.cpp here', text)
+      ok(!/Install|Homebrew/.test(text) && (await p.locator('.st-voice button', { hasText: /Install/ }).count()) === 0, 'nothing offers to install anything')
+      await shot(p, `${tag}voice-whispercpp`)
+      // With one of its own models picked, nothing fell back: the note says why on its own.
+      await cpp.api('/settings', { speech: { model: 'large-v3-turbo-q5_0' } }, 'PATCH')
+      const said = await until(async () => { const x = await p.locator('.st-engine').innerText().catch(() => ''); return /can't run here/.test(x) && x }, 10000)
+      ok(/Here, whisper\.cpp, which is installed on this computer, turns speech into text: Bridge AI's own engine can't run here \(sherpa-onnx needs glibc 2\.32 or later/.test(said || ''), 'with whisper.cpp\'s own model picked: Settings says whisper.cpp is what\'s used here, and why', said)
+      ok(errors.length === 0, 'no page errors', errors)
+      await ctx.close()
+    } finally { cpp.stop() }
   }
 
   // ---------- The mic, the first time ----------

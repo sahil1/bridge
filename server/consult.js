@@ -20,7 +20,9 @@ import { hiddenAgent, hiddenProvider, hiddenModel, OFF } from './labs.js'
 import * as accounts from './accounts.js'
 import * as usagelog from './usagelog.js'
 import * as counts from './counts.js'
+import * as aiConsent from './aiconsent.js'
 import { placeEn } from '../shared/places.js'
+import { learnGone, unknownModel } from './livemodels.js'
 
 const DIR = () => ensureDir(dataFile('consult'))
 // BRIDGE_ANTHROPIC_URL (tests): a stand-in for Anthropic's API.
@@ -43,10 +45,17 @@ export const CLI = {
 // the answer alone. A version too old for the flag is asked without it from then on. Before the
 // prompt (Codex's after exec), so nothing follows it that isn't the model.
 const SAYS = { claude: ['--output-format', 'json'], codex: ['--json'] }
+// With no tools at all (noTools: what places a meeting's action items, meetitems.js): Claude Code
+// with its tools and MCP servers off. The others run as agents that can act, so they aren't asked.
+export const NO_TOOLS = { claude: ['--tools', '', '--strict-mcp-config'] }
 const refused = new Set()
-const argsFor = (kind, p, m, out) => {
+const argsFor = (kind, p, m, out, o = {}) => {
   const a = CLI[kind](p, m, out)
   if (SAYS[kind] && !refused.has(kind)) a.splice(kind === 'codex' ? 1 : 0, 0, ...SAYS[kind])
+  if (o.noTools) {
+    if (!NO_TOOLS[kind]) throw Object.assign(new Error(`${adapter(kind).label} can't be run with its tools off`), { code: 'tools' })
+    a.push(...NO_TOOLS[kind])
+  }
   return a
 }
 const flagRefused = (kind, stderr) => /unknown option|unexpected argument|unrecognized|unknown argument/i.test(stderr) && SAYS[kind].some((f) => f.startsWith('--') && stderr.includes(f))
@@ -85,20 +94,26 @@ function readRun(kind, stdout, fromFile) {
   return { text: fromFile ?? out, usage: null }
 }
 
-// APIs, with a sensible default model each. Change one with "consult": { "models": { "xai": "..." } }
-// in your config, or pass a model with the request. BRIDGE_PERPLEXITY_URL (tests): a stand-in for
-// Perplexity's API.
+// APIs, with a sensible default model each: the provider's current one, from its own models page
+// (checked 22 November 2026: Groq's llama-3.3-70b-versatile and DeepSeek's deepseek-chat are
+// retired, OpenAI's gpt-5 shuts down 11 December 2026 and Google's gemini-2.5-pro 1 December). also:
+// a few more of its current ones, listed where you pick a model when its own list can't be had
+// (livemodels.js). Change one with "consult": { "models": { "xai": "..." } } in your config, or pass
+// a model with the request; one the provider has retired answers with its default instead
+// (chatmodels.js retiredInfo).
+// BRIDGE_PERPLEXITY_URL (tests): a stand-in for Perplexity's API.
 export const API = {
-  anthropic: { label: 'Anthropic API', key: 'ANTHROPIC_API_KEY', anthropic: true, model: 'claude-opus-5-5' },
-  openai: { label: 'OpenAI API', base: 'https://api.openai.com/v1', key: 'OPENAI_API_KEY', model: 'gpt-5' },
-  xai: { label: 'xAI API', base: 'https://api.x.ai/v1', key: 'XAI_API_KEY', model: 'grok-4' },
+  anthropic: { label: 'Anthropic API', key: 'ANTHROPIC_API_KEY', anthropic: true, model: 'claude-opus-5-5', also: ['claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-2'] },
+  openai: { label: 'OpenAI API', base: 'https://api.openai.com/v1', key: 'OPENAI_API_KEY', model: 'gpt-6.2-sol', also: ['gpt-6.2-astra', 'gpt-6.1-terra', 'gpt-6-luna'] },
+  xai: { label: 'xAI API', base: 'https://api.x.ai/v1', key: 'XAI_API_KEY', model: 'grok-4.7' },
   meta: { label: 'Meta Model API', base: 'https://api.meta.ai/v1', key: 'MODEL_API_KEY', model: 'muse-spark-1.3' },
-  gemini: { label: 'Gemini API', base: 'https://generativelanguage.googleapis.com/v1beta/openai', key: 'GEMINI_API_KEY', alt: 'GOOGLE_API_KEY', model: 'gemini-2.5-pro' },
+  gemini: { label: 'Gemini API', base: 'https://generativelanguage.googleapis.com/v1beta/openai', key: 'GEMINI_API_KEY', alt: 'GOOGLE_API_KEY', model: 'gemini-4-neon', also: ['gemini-4-carbon', 'gemini-4-hydrogen', 'gemini-4-argon'] },
   perplexity: { label: 'Perplexity API', base: String(process.env.BRIDGE_PERPLEXITY_URL || 'https://api.perplexity.ai').replace(/\/+$/, ''), key: 'PERPLEXITY_API_KEY', model: 'sonar-pro' },
-  openrouter: { label: 'OpenRouter', base: 'https://openrouter.ai/api/v1', key: 'OPENROUTER_API_KEY', model: 'openrouter/auto' },
-  deepseek: { label: 'DeepSeek API', base: 'https://api.deepseek.com/v1', key: 'DEEPSEEK_API_KEY', model: 'deepseek-chat' },
-  mistral: { label: 'Mistral API', base: 'https://api.mistral.ai/v1', key: 'MISTRAL_API_KEY', model: 'mistral-large-latest' },
-  groq: { label: 'Groq API', base: 'https://api.groq.com/openai/v1', key: 'GROQ_API_KEY', model: 'llama-3.3-70b-versatile' },
+  // (OpenRouter's router, kept at the top of its list: it picks a model for each question.)
+  openrouter: { label: 'OpenRouter', base: 'https://openrouter.ai/api/v1', key: 'OPENROUTER_API_KEY', model: 'openrouter/auto', keep: true },
+  deepseek: { label: 'DeepSeek API', base: 'https://api.deepseek.com', key: 'DEEPSEEK_API_KEY', model: 'deepseek-flash', also: ['deepseek-v4-pro'] },
+  mistral: { label: 'Mistral API', base: 'https://api.mistral.ai/v1', key: 'MISTRAL_API_KEY', model: 'mistral-large-latest', also: ['mistral-small-latest'] },
+  groq: { label: 'Groq API', base: 'https://api.groq.com/openai/v1', key: 'GROQ_API_KEY', model: 'openai/gpt-oss-120b', also: ['openai/gpt-oss-20b'] },
   // A model on this computer, through chatmodels.js: Ollama at the address set in Settings › Model
   // Providers (or OLLAMA_HOST), LM Studio, or the local model built in once it's downloaded (after
   // your own), and the model picked there (localModel).
@@ -191,29 +206,34 @@ export const isLimit = (text) => String(text || '').length < 600 && LIMIT.test(S
 // so (code 'limit'), never the limit's message passed on as the answer. extraEnv given (a
 // consultant's own settings): as it says, on that alone. { text, usage }: the answer, and what it
 // took when the agent says (SAYS), else null.
-export async function oneShot(kind, prompt, model, extraEnv = {}, signal) {
+export async function oneShot(kind, prompt, model, extraEnv = {}, signal, o = {}) {
+  // Asked for from a phone: not to the agent's provider until you've allowed it there (aiconsent.js).
+  aiConsent.needAgent(kind, o.feature || null)
   const ids = Object.keys(extraEnv).length || !accounts.supports(kind) ? [null] : accounts.forRun(kind)
   let last = null
   for (const id of ids) {
-    try { return await runOnce(kind, prompt, model, { ...(id ? accounts.envFor(kind, id) : {}), ...extraEnv }, signal) } catch (e) {
+    try { return await runOnce(kind, prompt, model, { ...(id ? accounts.envFor(kind, id) : {}), ...extraEnv }, signal, o) } catch (e) {
       if (e.code !== 'limit') throw e
       last = e
+      // Usage stats: on to your next account, because this one's at its limit.
+      if (id !== ids[ids.length - 1]) counts.add('accounts.switched.auto').catch(() => {})
     }
   }
   if (ids.length > 1) throw Object.assign(new Error(`${adapter(kind).label} is at its usage limit on all ${ids.length} of your accounts (${last.said})`), { code: 'limit', said: last.said })
   throw last
 }
 
-function runOnce(kind, prompt, model, extraEnv = {}, signal) {
+function runOnce(kind, prompt, model, extraEnv = {}, signal, o = {}) {
   return new Promise(async (resolve, reject) => {
+    if (o.noTools && !NO_TOOLS[kind]) return reject(Object.assign(new Error(`${adapter(kind).label} can't be run with its tools off`), { code: 'tools' }))
     const bin = (await installed()).find((a) => a.kind === kind)?.path
     if (!bin) return reject(new Error(`${adapter(kind).label} isn't installed`))
     const out = path.join(os.tmpdir(), `bridge-consult-${process.pid}-${Date.now()}.txt`)
     const env = agentEnv(await loginPath(), { ...providerEnv(), ...extraEnv })
     const asked = !!SAYS[kind] && !refused.has(kind)
     const started = Date.now()
-    const child = launch(bin, argsFor(kind, prompt, model, out), { cwd: DIR(), env, timeout: TIMEOUT, maxBuffer: 8 * 1024 * 1024, windowsHide: true, signal }, (err, stdout, stderr) => {
-      if (err && asked && flagRefused(kind, String(stderr || ''))) { refused.add(kind); fs.rmSync(out, { force: true }); return runOnce(kind, prompt, model, extraEnv, signal).then(resolve, reject) }
+    const child = launch(bin, argsFor(kind, prompt, model, out, o), { cwd: DIR(), env, timeout: TIMEOUT, maxBuffer: 8 * 1024 * 1024, windowsHide: true, signal }, (err, stdout, stderr) => {
+      if (err && asked && flagRefused(kind, String(stderr || ''))) { refused.add(kind); fs.rmSync(out, { force: true }); return runOnce(kind, prompt, model, extraEnv, signal, o).then(resolve, reject) }
       let fromFile
       try { fromFile = fs.readFileSync(out, 'utf8'); fs.rmSync(out, { force: true }) } catch { /* none */ }
       const r = readRun(kind, stdout, fromFile)
@@ -239,8 +259,9 @@ function runOnce(kind, prompt, model, extraEnv = {}, signal) {
 async function runApi(id, prompt, model, feature, ms = TIMEOUT) {
   const started = Date.now()
   // What the answer took, on this computer, and its model's family in the usage counts (when shared).
-  const noted = (j, m) => { const usage = usagelog.usageOf(j); usagelog.record({ id: `${id}:${m}`, feature, usage, ms: Date.now() - started }); counts.answered(`${id}:${m}`, feature, usage?.model).catch(() => {}) }
+  const noted = (j, m) => { const usage = usagelog.usageOf(j); usagelog.record({ id: `${id}:${m}`, feature, usage, ms: Date.now() - started }); counts.answered(`${id}:${m}`, feature, usage?.model, usage).catch(() => {}) }
   const a = API[id]
+  if (!a.local) aiConsent.needModel(`${id}:${model || a.model || ''}`, feature)
   if (a.local) {
     const m = await localModel(model)
     if (!m) throw new Error(`No model is running on this computer. Start Ollama or LM Studio, download the local model in ${placeEn('providers')}, or pick another consultant.`)
@@ -248,35 +269,52 @@ async function runApi(id, prompt, model, feature, ms = TIMEOUT) {
     return { text: r.text, model: m.id, route: localRoute(m) }
   }
   const key = keyFor(a)
-  const m = model || a.model
-  if (!m) throw new Error(`No model to use for ${a.label}`)
-  if (a.anthropic) {
-    const r = await fetch(`${anthropicUrl()}/v1/messages`, {
+  const asked = model || a.model
+  if (!asked) throw new Error(`No model to use for ${a.label}`)
+  // One its provider has retired asks the provider's default instead, and so does one it says it
+  // doesn't know when the default then answers (remembered: livemodels.js learnGone). retired: why.
+  const c = await chat()
+  let gone = c.retiredInfo(`${id}:${asked}`)
+  let m = gone ? a.model : asked
+  let out
+  try { out = await once(m) } catch (e) {
+    if (gone || !unknownModel(e) || !a.model || asked === a.model) throw e
+    try { out = await once(a.model) } catch { throw e }
+    learnGone(id, asked, e.message)
+    gone = c.retiredInfo(`${id}:${asked}`)
+    m = a.model
+  }
+  return { ...out, model: m, ...(gone ? { retired: gone } : {}) }
+
+  async function once(m) {
+    if (a.anthropic) {
+      const r = await fetch(`${anthropicUrl()}/v1/messages`, {
+        method: 'POST', signal: AbortSignal.timeout(ms),
+        headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({ model: m, max_tokens: 4096, messages: [{ role: 'user', content: prompt }] }),
+      })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) throw Object.assign(new Error(`${a.label} (${m}): ${j.error?.message || `HTTP ${r.status}`}`), { status: r.status })
+      noted(j, m)
+      return { text: (j.content || []).filter((x) => x.type === 'text').map((x) => x.text).join('\n').trim() }
+    }
+    const r = await fetch(`${a.base}/chat/completions`, {
       method: 'POST', signal: AbortSignal.timeout(ms),
-      headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: m, max_tokens: 4096, messages: [{ role: 'user', content: prompt }] }),
+      headers: { 'content-type': 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}) },
+      body: JSON.stringify({ model: m, messages: [{ role: 'user', content: prompt }] }),
     })
     const j = await r.json().catch(() => ({}))
-    if (!r.ok) throw new Error(`${a.label} (${m}): ${j.error?.message || `HTTP ${r.status}`}`)
+    if (!r.ok) throw Object.assign(new Error(`${a.label} (${m}): ${j.error?.message || j.message || `HTTP ${r.status}`}. Set another model with "consult": { "models": { "${id}": "..." } } in your config.`), { status: r.status })
     noted(j, m)
-    return { text: (j.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n').trim(), model: m }
+    const msg = j.choices?.[0]?.message
+    const said = String(msg?.content || '').trim()
+    let text = said
+    if (Array.isArray(j.citations) && j.citations.length) text += `\n\nSources:\n${j.citations.map((u, i) => `[${i + 1}] ${u}`).join('\n')}`
+    // The pages, in the order the answer numbers them: search_results has their titles too.
+    const found = Array.isArray(j.search_results) && j.search_results.length ? j.search_results.map((s) => ({ url: s?.url, title: s?.title })) : Array.isArray(j.citations) ? j.citations.map((u) => ({ url: u })) : []
+    const links = found.filter((l) => typeof l.url === 'string' && /^https?:\/\/[^\s]+$/i.test(l.url)).slice(0, 8).map((l) => ({ url: l.url, title: typeof l.title === 'string' && l.title.trim() ? l.title.trim().slice(0, 200) : null }))
+    return { text, said, links }
   }
-  const r = await fetch(`${a.base}/chat/completions`, {
-    method: 'POST', signal: AbortSignal.timeout(ms),
-    headers: { 'content-type': 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}) },
-    body: JSON.stringify({ model: m, messages: [{ role: 'user', content: prompt }] }),
-  })
-  const j = await r.json().catch(() => ({}))
-  if (!r.ok) throw new Error(`${a.label} (${m}): ${j.error?.message || j.message || `HTTP ${r.status}`}. Set another model with "consult": { "models": { "${id}": "..." } } in your config.`)
-  noted(j, m)
-  const msg = j.choices?.[0]?.message
-  const said = String(msg?.content || '').trim()
-  let text = said
-  if (Array.isArray(j.citations) && j.citations.length) text += `\n\nSources:\n${j.citations.map((u, i) => `[${i + 1}] ${u}`).join('\n')}`
-  // The pages, in the order the answer numbers them: search_results has their titles too.
-  const found = Array.isArray(j.search_results) && j.search_results.length ? j.search_results.map((s) => ({ url: s?.url, title: s?.title })) : Array.isArray(j.citations) ? j.citations.map((u) => ({ url: u })) : []
-  const links = found.filter((l) => typeof l.url === 'string' && /^https?:\/\/[^\s]+$/i.test(l.url)).slice(0, 8).map((l) => ({ url: l.url, title: typeof l.title === 'string' && l.title.trim() ? l.title.trim().slice(0, 200) : null }))
-  return { text, model: m, said, links }
 }
 
 // ---------- Looking something up on the web ----------
@@ -294,7 +332,7 @@ export async function search(question, { feature = 'assist' } = {}) {
   if (!searchVia()) throw new Error(`No web search is set up: add a Perplexity key in ${placeEn('providers')}.`)
   // (What a refusal says, without consult's tip on picking another model: a key turned down isn't that.)
   const r = await runApi('perplexity', `Answer in one to three plain sentences, from what the web says now: ${q}`, conf.consult?.models?.perplexity, feature, SEARCH_MS)
-    .catch((e) => { throw new Error(String(e.message).replace(/\.? Set another model with [\s\S]*$/, '').replace(/\.?$/, '.')) })
+    .catch((e) => { counts.modelFailed(counts.failReason(e)).catch(() => {}); throw new Error(String(e.message).replace(/\.? Set another model with [\s\S]*$/, '').replace(/\.?$/, '.')) })
   if (!r.said) throw new Error(`${API.perplexity.label} (${r.model}) sent back no answer`)
   return { text: r.said, links: r.links, via: 'Perplexity', model: r.model }
 }
@@ -313,14 +351,15 @@ export async function ask({ who, prompt, model, via, env, feature = 'consult' },
   const useCli = via ? via === 'cli' : opt.via === 'cli'
   const started = Date.now()
   if (useCli && c.cli) {
-    const r = await oneShot(c.cli, q, model, env && typeof env === 'object' ? env : {})
+    // (One that failed is counted in the usage stats, by why; reply() counts its own.)
+    const r = await oneShot(c.cli, q, model, env && typeof env === 'object' ? env : {}).catch((e) => { counts.modelFailed(counts.failReason(e)).catch(() => {}); throw e })
     usagelog.record({ id: `cli:${c.cli}`, feature, usage: r.usage, ms: Date.now() - started })
     counts.answered(`cli:${c.cli}`, feature, r.usage?.model || model).catch(() => {})
     return { who: c.id, via: 'cli', route: opt.route, model: model || null, text: r.text, ms: Date.now() - started }
   }
   if (c.api && (via === 'api' || opt.via === 'api' || !c.cli)) {
-    const r = await runApi(c.api, q, model || cfg.consult?.models?.[c.api], feature)
-    return { who: c.id, via: 'api', route: r.route || API[c.api].label, model: r.model, text: r.text, ms: Date.now() - started }
+    const r = await runApi(c.api, q, model || cfg.consult?.models?.[c.api], feature).catch((e) => { if (!API[c.api].local) counts.modelFailed(counts.failReason(e)).catch(() => {}); throw e })
+    return { who: c.id, via: 'api', route: r.route || API[c.api].label, model: r.model, text: r.text, ms: Date.now() - started, ...(r.retired ? { retired: (await chat()).retiredWhy(r.retired) } : {}) }
   }
   throw new Error(`${c.label} isn't available: ${opt.route}`)
 }

@@ -56,7 +56,7 @@ const SET_BY_YOU = {
   // ...and the ports another of your computers' pages have on it
   'server/machinepages.js': 'self',
   'desktop/senders.js': 'self',
-  'desktop/apitoken.js': 'self', // its cookie, for that address (127.0.0.1 or localhost)
+  'desktop/apitoken.js': 'self', // its cookie, for that address (127.0.0.1; one an older version left at localhost removed)
   'shared/cloud/cursor.js': 'cloudAgents', // a repo's address Cursor gave, read for its name
 }
 // Web addresses in the code that are names, never fetched.

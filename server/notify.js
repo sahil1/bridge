@@ -168,7 +168,7 @@ export async function answer(t, ctx = {}) {
   if (c.x < now) return { ok: false, why: 'expired', url }
   if (used.has(c.i)) return { ok: false, why: 'used', url }
   used.set(c.i, c.x)
-  return { ...(await pick(c.p, { seq: c.s, qid: c.h, n: c.k })), url }
+  return { ...(await pick(c.p, { seq: c.s, qid: c.h, n: c.k })), url, paneId: c.p }
 }
 
 // Type one of a question's simple answers (n), if the agent is still waiting on that same question
@@ -195,6 +195,10 @@ let primed = false
 // Another herdr session in view: its agents are new to us, not news, and the last session's
 // agents only left the view (they didn't finish). Called before the first fleet of that session.
 export function forget() { seen.clear(); primed = false }
+// An agent whose working and stopping isn't news just now: a long session being tidied while you're
+// idle (compact.js).
+let quiet = () => false
+export const quietWhile = (fn) => { quiet = fn }
 export function onFleet(fleet, cfg = {}) {
   const want = cfg.notify || {}
   for (const a of fleet.agents || []) {
@@ -204,7 +208,7 @@ export function onFleet(fleet, cfg = {}) {
     // the first look, so a restart doesn't announce everything again).
     const changed = before ? before.status !== a.status || before.seq !== a.seq : primed
     // (Not the Slack Bot's answering agents: the front desk says when an answer waits, frontdesk.js.)
-    if (!changed || isMuted(a.paneId) || a.helper?.list) continue
+    if (!changed || isMuted(a.paneId) || a.helper?.list || (a.status !== 'blocked' && quiet(a.paneId))) continue
     const label = a.chief ? (a.thread && !a.thread.main ? `Chief of Staff · ${a.thread.name}` : 'Chief of Staff') : a.title || a.tab || a.workspace || 'An agent'
     const where = a.cloud ? [`${a.cloud.label} cloud`, a.cloud.repo].filter(Boolean).join(' · ') : [a.workspace, a.tab && a.tab !== label ? a.tab : null].filter(Boolean).join(' › ')
     if (a.status === 'blocked' && want.needsYou !== false) {

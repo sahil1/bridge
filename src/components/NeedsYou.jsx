@@ -5,6 +5,7 @@ import { hostApi } from '../api.js'
 import { ago } from './Machines.jsx'
 import { t, tx } from '../i18n/index.js'
 import { sentTo } from '../sendbox.js'
+import { consentAsked, settleConsent } from '../aiconsent.js'
 import { guardWhy } from './bots/access.js'
 import { split, reason, isQuiet, activeAt, projectOf, QUIET_DAYS, TOP } from '../../shared/focus.js'
 import { FileRow } from './bots/BotFiles.jsx'
@@ -25,9 +26,15 @@ import './needsyou.css'
 // answer goes to the device the agent is on, at /m/<id>/ through this one (server/machines.js).
 
 const at = (machine) => (machine ? `/m/${encodeURIComponent(machine)}` : '')
-export async function onDevice(machine, path, body) {
+// From a phone, an answer that would go on to an AI provider not allowed yet: asked first, and sent
+// again once allowed (aiconsent.js).
+export async function onDevice(machine, path, body, asked = []) {
   const res = await fetch(`${at(machine)}/api${path}`, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
   const data = await res.json().catch(() => ({}))
+  if (consentAsked(res.status, data, asked)) {
+    await settleConsent(`${at(machine)}/api${path}`, data)
+    return onDevice(machine, path, body, [...asked, data.consent.provider.id])
+  }
   if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), { status: res.status })
   return data
 }

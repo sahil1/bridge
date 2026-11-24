@@ -1,6 +1,6 @@
 // Excalidraw (MIT), loaded the first time a whiteboard is drawn, so it never slows the app's start:
-// its code, its styles and, only when a diagram is turned from Mermaid, Mermaid itself are their own
-// files in the build. Its fonts come from Bridge AI (scripts/whiteboard-assets.js), set here before
+// its code, its styles and, only when a diagram is turned from Mermaid, what lays Mermaid out (Pele,
+// one file for each kind of diagram) are their own files in the build. Its fonts come from Bridge AI (scripts/whiteboard-assets.js), set here before
 // the library first runs.
 let loading = null
 export function loadExcalidraw() {

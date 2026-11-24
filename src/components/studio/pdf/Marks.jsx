@@ -7,7 +7,9 @@ import { sigUrl } from './Signatures.jsx'
 // The places to sign, over the pages: each where it'll be written, with your signature, initials
 // or the date in it as the signed copy will have them (shared/signmarks.js works out both). Drag
 // one to move it, its corner to resize it; picked, the arrow keys move it (⇧ by more), Enter
-// approves it and Delete takes it away. Not approved yet, it's dashed and says what it wants.
+// approves it and Delete takes it away. Not approved yet, it's dashed and says what it wants. Each
+// signature or initials place shows the one it'll get: its own, picked here when you have more than
+// one, else the one Sign this is using (using), else your default.
 export const KIND = { signature: tx('Sign here'), initials: tx('Initials'), date: tx('Date') }
 const KEEP = { signature: 14, initials: 10, date: 8 } // the smallest a box gets, in points
 
@@ -29,7 +31,10 @@ function toPdf(vp, l, tp, r, b) {
 let ruler = null
 const width1 = (text) => { ruler ||= document.createElement('canvas').getContext('2d'); ruler.font = '100px Helvetica, Arial, sans-serif'; return ruler.measureText(text).width / 100 }
 
-export default function Marks({ pdf, layout, marks, setMarks, picked, setPicked, onApprove, dateText, sig }) {
+// The saved one a place gets.
+export const sigFor = (list, m, using) => (m.kind === 'date' ? null : (list || []).find((x) => x.kind === m.kind && x.id === (m.sig || using?.[m.kind])) || (list || []).find((x) => x.kind === m.kind && x.default) || null)
+
+export default function Marks({ pdf, layout, marks, setMarks, picked, setPicked, onApprove, dateText, sig, using }) {
   const viewer = pdf?.viewer
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const boxes = useMemo(() => marks.map((m) => ({ m, r: rectOf(viewer, m) })).filter((x) => x.r), [marks, viewer, layout])
@@ -95,7 +100,8 @@ export default function Marks({ pdf, layout, marks, setMarks, picked, setPicked,
     <div className="sd-marks">
       {boxes.map(({ m, r }) => {
         const on = picked === m.id
-        const meta = m.kind === 'date' ? null : sig?.[m.kind]
+        const meta = sigFor(sig?.list, m, using)
+        const mine = m.kind === 'date' ? [] : (sig?.list || []).filter((x) => x.kind === m.kind)
         const shown = shownSize(m, r.rotation)
         let date = null
         if (m.kind === 'date' && dateText) {
@@ -110,7 +116,7 @@ export default function Marks({ pdf, layout, marks, setMarks, picked, setPicked,
             onPointerDown={(e) => drag(e, m, 'move')} onFocus={() => setPicked(m.id)}>
             {!m.approved && <span className="sd-mark-tag"><Icon name={m.kind === 'date' ? 'calendar' : 'signature'} size={10} /> {t(KIND[m.kind])}</span>}
             {m.approved && <span className="sd-mark-tag ok"><Icon name="check" size={10} /></span>}
-            {meta && <img className={`sd-mark-pic ${m.align}`} src={sigUrl(m.kind, meta.at)} alt="" draggable={false} />}
+            {meta && <img className={`sd-mark-pic ${m.align}`} src={sigUrl(meta.id, meta.at)} alt="" draggable={false} />}
             {date}
             {!meta && m.kind !== 'date' && <span className="sd-mark-empty">{m.kind === 'initials' ? t('Your initials') : t('Your signature')}</span>}
             {on && <span className="sd-mark-size" onPointerDown={(e) => drag(e, m, 'size')} role="presentation" title={t('Drag to resize')} />}
@@ -119,6 +125,11 @@ export default function Marks({ pdf, layout, marks, setMarks, picked, setPicked,
                 {m.approved
                   ? <button type="button" className="btn small" onClick={() => change(m.id, () => ({ approved: false }))}><Icon name="check" size={11} /> {t('Approved')}</button>
                   : <button type="button" className="btn small primary" onClick={() => onApprove(m.id)}><Icon name="check" size={11} /> {t('Approve')}</button>}
+                {mine.length > 1 && (
+                  <select className="sd-mark-sig" value={meta?.id || ''} onChange={(e) => change(m.id, () => ({ sig: e.target.value }))} aria-label={m.kind === 'initials' ? t('Which initials') : t('Which signature')} title={m.kind === 'initials' ? t('Which initials') : t('Which signature')}>
+                    {mine.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                  </select>
+                )}
                 <button type="button" className="btn small" onClick={() => remove(m.id)} aria-label={t('Take this place away')} title={t('Take this place away')}><Icon name="x" size={11} /></button>
               </span>
             )}

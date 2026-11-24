@@ -11,6 +11,8 @@ import { createClouds } from './clouds.js'
 import { ADAPTERS } from '../../shared/cloud/index.js'
 import { follow } from '../../shared/cloud/follow.js'
 import { cloudApi, NOT_CLOUD } from '../standalone/cloud.js'
+import { pageConsent, pageGate, NOT_CONSENT } from '../standalone/consent.js'
+import { ofAgent, ofModel, ofCloud } from '../../shared/aiproviders.js'
 
 // What only a real computer can do. Said calmly, in one line.
 // Made-up month for the Insights card: every agent and account, and a write-up.
@@ -563,6 +565,9 @@ export function createDemo({ everything = true } = {}) {
 
   // Meetings: two made-up ones, read only.
   on('GET', '/meetings', () => ({ meetings: S.meetings.map(({ transcript: _t, notes: _n, summary, ...m }) => ({ ...m, hasSummary: !!summary })), kinds: F.MEETING_KINDS }))
+  // Transcribing a file: nothing going on the made-up computer, and none can be sent to it.
+  on('GET', '/meetings/files', () => ({ items: [], going: false, piece: 2 * 1024 * 1024 }))
+  on('POST', '/meetings/files', () => needs('Transcribing a file'))
   on('GET', '/meetings/search', ({ query }) => {
     const ws = String(query.get('q') || '').toLowerCase().match(/[\p{L}\p{N}']+/gu) || []
     const has = (s) => ws.some((w) => String(s).toLowerCase().includes(w))
@@ -575,7 +580,9 @@ export function createDemo({ everything = true } = {}) {
       }) : [],
     }
   })
-  on('POST', '/meetings/ask', () => needs('Asking about your meetings'))
+  // AI Assist's answers about meetings, once it's allowed (consent, below): made up here, and said so.
+  const DEMO_ANSWER = 'This is the demo, so this answer is made up and nothing was sent anywhere. With Bridge AI on your computer, AI Assist reads the meeting\'s transcript and your notes and answers from them, with the model you picked for it.'
+  on('POST', '/meetings/ask', async () => { await sleep(900); return { answer: DEMO_ANSWER, model: 'openai:gpt-6.2-sol', note: null } })
   // Meeting memory and saving: made up, and read only.
   on('GET', '/meetings/memory', () => ({ terms: [
     { id: 'm1', term: 'Acme', heard: ['Ack me'], note: 'our company', source: 'you', seen: 6, meetings: [], updatedAt: null },
@@ -660,13 +667,12 @@ export function createDemo({ everything = true } = {}) {
   on('GET', '/meetings/:id/events', () => ({ events: [] }))
   on('POST', '/meetings/:id/event', () => needs('Taking people from your calendar'))
   on('DELETE', '/meetings/:id', ({ p }) => { S.meetings = S.meetings.filter((m) => m.id !== p.id); return ok })
-  on('POST', '/meetings/:id/ask', () => needs('Asking about a meeting'))
+  on('POST', '/meetings/:id/ask', async () => { await sleep(900); return { answer: DEMO_ANSWER, model: 'openai:gpt-6.2-sol', note: null } })
   on('POST', '/meetings/:id/summary', () => needs('Writing a summary'))
   on('POST', '/meetings/:id/chief', () => needs('Sending action items to the chief of staff'))
   on('POST', '/meetings/:id/save', () => needs('Saving to your notes folder'))
   on('GET', '/speech', () => F.speech())
   on('POST', '/speech/models/:id', () => needs('Downloading a speech model'))
-  on('POST', '/speech/install', () => needs('Installing whisper.cpp'))
 
   // An agent
   on('GET', '/agents/:pane/transcript', ({ p }) => transcript(agent(p.pane)))
@@ -1353,9 +1359,22 @@ export function createDemo({ everything = true } = {}) {
     }
   }, 1500)
 
+  // Your OK before what you send goes to an AI provider, asked as Bridge AI on a computer asks it of
+  // a phone (src/standalone/consent.js): the first message to each of the demo's agents' providers
+  // (Anthropic for Claude Code, OpenAI for Codex, Google for Gemini CLI, OpenCode; the cloud agents'
+  // too), and AI Assist, which answers here as OpenAI's model would. Kept in memory only: the demo
+  // asks again each time it opens, and nothing is sent anywhere either way.
+  const allowedAi = new Map()
+  const consent = pageConsent({ kept: { get: (id) => allowedAi.get(id) || null, set: (id, v) => allowedAi.set(id, v), del: (id) => allowedAi.delete(id), all: () => [...allowedAi] }, device: 'the demo' })
+  const aiGoes = pageGate({ agentOf: (pane) => S.agents.get(pane) || null, assist: 'openai:gpt-6.2-sol', ofAgent, ofModel, ofCloud })
+
   return {
     async request({ method, path, query, body }) {
       const route = path.replace(/\/$/, '') || '/'
+      const said = consent.route(method, route, body)
+      if (said !== NOT_CONSENT) return said
+      const goes = aiGoes(method, route, body)
+      if (goes) consent.check(goes.provider, goes.feature)
       const fromCloud = await cloudReq(method, route, query, body)
       if (fromCloud !== NOT_CLOUD) return fromCloud
       for (const [m, re, fn] of routes) {

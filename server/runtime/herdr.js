@@ -15,6 +15,7 @@ import { paneKey, inView } from '../scope.js'
 import { DATA, dataFile, writeFileAtomic } from '../paths.js'
 import { blanked } from '../botenv.js'
 import { providerEnv } from '../providers.js'
+import * as agentNote from '../agentnote.js'
 
 export const name = 'herdr'
 export const caps = { liveView: true, reorder: true, splits: true }
@@ -96,10 +97,13 @@ const isOwn = (paneId) => !!own[paneKey(paneId)]
 // The panes Bridge AI started kept to their folders (a bot's answer or session: agents.js access
 // 'read' or 'change'), by pane, kept across Bridge AI starting again: herdr runs them, so what they
 // were started with is said here (fleet: access) for a bot's session to be looked at before a turn is
-// typed into it (frontdesk.js). A pane herdr gives back by another id isn't one of them.
+// typed into it (frontdesk.js). A pane herdr gives back by another id isn't one of them. And the ones
+// started with Full Access (fleet: free).
 const KEPT = dataFile('herdr-kept.json')
-let kept = (() => { try { return JSON.parse(fs.readFileSync(KEPT, 'utf8')) } catch { return {} } })() // pane key -> { access, at }
+let kept = (() => { try { return JSON.parse(fs.readFileSync(KEPT, 'utf8')) } catch { return {} } })() // pane key -> { access, at } or { free, at }
 const saveKept = () => { try { writeFileAtomic(KEPT, JSON.stringify(kept), { mode: 0o600 }) } catch { /* read-only disk */ } }
+// (From launchNow, whose own `kept` says whether that agent is kept to its folders.)
+const keepAs = (paneId, v) => { kept[paneKey(paneId)] = v; saveKept() }
 
 // session: the herdr session in view (the sidebar's session menu). When it isn't running, an
 // empty fleet that says so (down), so the last session's agents don't linger on screen.
@@ -142,6 +146,7 @@ async function readFleet() {
   if (gone) saveKept()
   for (const a of f.agents || []) {
     a.access = kept[paneKey(a.paneId)]?.access || null
+    a.free = kept[paneKey(a.paneId)] ? !!kept[paneKey(a.paneId)].free : true
     if (followed.has(paneKey(a.paneId))) a.sessionId = followed.get(paneKey(a.paneId))
     // herdr doesn't know which account an agent uses: the one it was started on from here.
     a.accountId = accountOf(a.kind, a.paneId, a.sessionId)
@@ -252,7 +257,11 @@ async function moveTabToSpaceNow(tabId, { workspaceId, newSpace, index } = {}) {
     const r = await sock.call('pane.move', { pane_id: id, destination: { type: 'tab', tab_id: pane.tab_id, split: 'right' } })
     if (r?.move_result?.pane) moved[id] = r.move_result.pane.pane_id
   }
-  for (const [from, to] of Object.entries(moved)) movePane(from, to)
+  for (const [from, to] of Object.entries(moved)) {
+    movePane(from, to)
+    // (What it was started with goes with it.)
+    if (kept[paneKey(from)]) { kept[paneKey(to)] = kept[paneKey(from)]; delete kept[paneKey(from)]; saveKept() }
+  }
   if (Number.isInteger(index) && !newSpace) {
     try { await sock.call('tab.move', { tab_id: pane.tab_id, insert_index: index }) } catch { /* left at the end */ }
   }
@@ -276,7 +285,7 @@ async function launchNow({ kind = 'claude', cwd, label, workspaceId, newSpace, p
   const env = { ...(kept ? blanked(kind, { ...process.env, ...providerEnv() }) : {}), ...envFor(kind, account), ...extraEnv } // a second account's config folder, if one was picked
   const a = adapter(kind)
   const resumed = fork && a.fork ? a.fork(fork, a.sessionId === 'assign' ? newSessionId() : undefined) : resume && a.resume ? a.resume(resume) : []
-  const allowed = [...(access && a.access ? a.access(access, { dirs }) : []), ...(effort && a.effort ? a.effort(effort) : [])] // how much it may do without asking, and how hard it thinks
+  const allowed = [...(access && a.access ? a.access(access, { dirs }) : []), ...(effort && a.effort ? a.effort(effort) : []), ...agentNote.flags({ kind, access, cwd })] // how much it may do without asking, how hard it thinks, and that it runs in Bridge AI (agentnote.js)
   const extra = [...allowed, ...(pinModel && model && a.model && a.herdr ? [...a.model(model), ...resumed] : resumed)]
   const setupError = setup ? await runSetup(setup) : null
   const name = `ba-${Date.now().toString(36)}`
@@ -307,7 +316,11 @@ async function launchNow({ kind = 'claude', cwd, label, workspaceId, newSpace, p
   }
   if (space) { try { await cli.renameTabOfPane(out.paneId, label) } catch { /* default tab name */ } }
   notePane(out.paneId, kind, account)
-  if (access === 'read' || access === 'change' || access === 'owner') { kept[paneKey(out.paneId)] = { access, at: Date.now() }; saveKept() }
+  if (access === 'read' || access === 'change' || access === 'owner') keepAs(out.paneId, { access, at: Date.now() })
+  // (Any other: whether it may work without asking first (Full Access), said in the fleet as free,
+  // for a meeting's action item to wait for your OK before it goes to it, meetitems.js. An agent
+  // Bridge AI didn't start, it can't know about: free too.)
+  else keepAs(out.paneId, { free: access === 'full', at: Date.now() })
   return setupError ? { ...out, setupError } : out
 }
 

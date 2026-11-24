@@ -16,7 +16,7 @@ const MODEL = /qwen|qwq|deepseek|kimi|moonshot|(^|[^a-z])glm|zhipu|z-ai\/|minima
 
 export const hiddenAgent = (kind) => !moreOn() && AGENTS.has(kind)
 export const hiddenProvider = (id) => !moreOn() && (PROVIDERS.has(id) || AGENTS.has(id))
-// A model id as chatmodels.js names it, "<route>:<model>" ("deepseek:deepseek-chat",
+// A model id as chatmodels.js names it, "<route>:<model>" ("deepseek:deepseek-flash",
 // "openrouter:qwen/qwen3-coder", "cli:qwen").
 export function hiddenModel(id) {
   if (moreOn()) return false

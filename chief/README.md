@@ -13,6 +13,8 @@ It never edits your projects' files, never answers an agent's permission prompt 
 | `state/ledger.md` | Starter ledger: hand-offs that are open or recently closed. |
 | `state/tasks.md` | Starter task list: work the chief does itself. It's changed through `bin/bridge task`, which the Tasks panel in Bridge AI shares. |
 | `bin/bridge` | The command line the chief uses to see and drive agents. Run `node bin/bridge help`. |
+| `manual.md` (written by Bridge AI) | Bridge AI's own manual, made from its docs and the words in Settings (`shared/manual.md`), for questions about Bridge AI itself. |
+| `pointers.md` (written by Bridge AI) | What you mean by "that": the list in Memory › Pointers, as data for the chief to read. It adds to it with `bin/bridge pointer add`. |
 | `.claude/settings.json` | Lets Claude Code run `bin/bridge` and edit `state/` and `work/` without asking. |
 
 The chief's working folder lives in your Bridge AI data folder, under `chief/`. The instructions and `bin/bridge` are refreshed from this template each time Bridge AI starts; a chief that's already running reads them when it next starts. Your playbook, ledger and task list are copied once (a folder from an older version gets the ones it lacks) and never overwritten, so they stay yours and never land in the repo. What the chief makes for its tasks goes in `work/` there.

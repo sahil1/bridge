@@ -24,7 +24,9 @@ import * as accounts from '../accounts.js'
 import { firstRun, knows } from '../firstrun.js'
 import { lineAnsi, SCROLLBACK, watchModes, wheelBytes } from './screen.js'
 import * as host from './hostlink.js'
+import * as agentNote from '../agentnote.js'
 import { noBackupRightsFirst } from '../winpriv.js'
+import * as counts from '../counts.js'
 
 const { Terminal } = headless
 
@@ -116,6 +118,8 @@ async function spawnPane({ paneId, tabId, workspaceId, kind, cwd, sessionId, res
     if (model && a.model) args = [...a.model(model), ...args]
     if (effort && a.effort) args = [...a.effort(effort), ...args]
     if (access && a.access) args = [...a.access(access, { dirs }), ...args]
+    // (Told it runs in Bridge AI, where its manual is and what "that" means: agentnote.js. Not a bot's run.)
+    args = [...agentNote.flags({ kind, access, cwd }), ...args]
   }
   // (A bot's run that changes files, on Windows: its terminal takes Windows' backup and restore
   // rights out of its own token before it starts the agent, so the agent never has them: winpriv.js.)
@@ -224,7 +228,7 @@ async function adopt(t, s) {
   proc.pid = t.pid
   const kind = s.kind || 'shell'
   const p = {
-    paneId: t.id, tabId: s.tabId, workspaceId: s.workspaceId, kind, cwd: s.cwd, model: s.model || null, effort: s.effort || null, access: s.access === 'read' || s.access === 'change' ? s.access : null, dirs: (s.access === 'read' || s.access === 'change') && s.dirs?.length ? s.dirs : null, sessionId: s.sessionId || null, account: s.account || null, env: s.env || null, proc, remote: true, term: null,
+    paneId: t.id, tabId: s.tabId, workspaceId: s.workspaceId, kind, cwd: s.cwd, model: s.model || null, effort: s.effort || null, access: s.access === 'read' || s.access === 'change' ? s.access : null, startedFull: s.access === 'full' || s.startedFull === true, dirs: (s.access === 'read' || s.access === 'change') && s.dirs?.length ? s.dirs : null, sessionId: s.sessionId || null, account: s.account || null, env: s.env || null, proc, remote: true, term: null,
     title: t.title || '', status: kind === 'shell' ? null : 'idle', seq: 0, seen: true, setupPending: false,
     startedAt: t.startedAt || Date.now(), lastOutput: t.lastOutput || 0, lastInput: 0, clients: new Set(),
   }
@@ -378,6 +382,8 @@ function statusOf(p) {
   const setup = knows(p.kind) && !p.pastSetup ? firstRun(p.kind, screenRows(p)) : null
   const key = setup ? `${setup.step} ${setup.url || ''} ${setup.code || ''}` : null
   if (key !== (p.setupKey ?? null)) { p.setupKey = key; p.seq++ }
+  // Usage stats: an agent that started at its sign-in screen, once.
+  if (setup?.step === 'login' && !p.signInCounted) { p.signInCounted = true; counts.agentFailed('signIn').catch(() => {}) }
   p.setup = setup // its keys follow the pointer, if you move it in the terminal
   let s = 'idle'
   if (setup || ASKING.test(tail)) s = 'blocked'
@@ -411,6 +417,9 @@ export async function fleet() {
     sessionId: p.sessionId, model: p.model, effort: p.effort || null, focused: false, seq: p.seq,
     // (How much it may do, as it was started: a bot's session is looked at before a turn is typed in.)
     access: p.access === 'read' || p.access === 'change' || p.access === 'owner' ? p.access : null,
+    // (Started with Full Access, so it asks before nothing: a meeting's action item waits for your OK
+    // before it goes to it, meetitems.js. Picked up from the host still running so, it still is.)
+    free: p.access === 'full' || p.startedFull === true,
     setup: p.setup?.step || null, setupUrl: p.setup?.url || null, setupKeys: p.setup?.keys || null, setupCode: p.setup?.code || null,
   }))
   const tabList = tabs.map((t) => ({

@@ -51,6 +51,9 @@ const PATHS = {
   'a:new': { phone: 'Agents › New › More options', shows: '.modal.new-agent' },
   'a:record': { phone: 'Meetings', shows: '.m-meetings button:has-text("Start recording")' },
   'a:meetings': { phone: 'Meetings', shows: '.m-meetings' },
+  // Transcribe a file: Meetings' own button, which opens the phone's picker (several files at once).
+  'a:transcribe': { phone: 'Meetings', shows: '.m-meetings .tf-btn' },
+  'a:transcribe-folder': { none: 'A phone picks files, not folders: Meetings › Transcribe a file takes several at once' },
   'a:insights': { phone: 'Meetings › Insights', shows: '.m-meetings :is(.mi, .mi-empty)' },
   'a:people': { phone: 'Meetings › People', shows: '.m-meetings .mi-people' },
   'a:dictations': { phone: 'Meetings › Dictations', shows: '.dc-home, .dc-empty, .dc-body' },
@@ -94,6 +97,7 @@ const PATHS = {
   'a:usage': { phone: 'More › Usage', shows: '.m-more-view .ustats' },
   'a:stats': { phone: 'More › Usage', shows: '.m-more-view .ustats' },
   'a:tour': { phone: 'Search › Take the tour' },
+  'a:help': { phone: 'More › Help', shows: '.modal.manual' },
   // Settings' sections and their tabs (Settings.jsx SECTIONS); a tab's id opens its section at it.
   'settings:features': { phone: 'Settings › Your Features' },
   'settings:you': { phone: 'Settings › You' },
@@ -108,6 +112,7 @@ const PATHS = {
   'settings:voice': { phone: 'Settings › Meetings & Voice › Speech Models' },
   'settings:spoken': { phone: 'Settings › Meetings & Voice › Spoken Answers' },
   'settings:mail': { phone: 'Settings › Mail & Calendar', mac: true },
+  'settings:studio': { phone: 'Settings › Studio', shows: '[data-setting="ask-before-signing"]' },
   // A beta feature's section: there, marked Beta, on or off (its switch is in it).
   'settings:bots': { phone: 'Settings › Bots' },
   'settings:devices': { phone: 'Settings › Devices & Access' },
@@ -315,7 +320,7 @@ try {
 
     // Opened at a section: there, with ‹ Settings back to the list. A link to it (from Meetings, the
     // tour, a fix), ⌘K, a link from inside Settings, and a link to the section it opened at.
-    const deep = [['voice', 'Meetings & Voice'], ['dictation', 'Meetings & Voice'], ['accounts', 'Agents & Models'], ['machines', 'Devices & Access'], ['remote-devices', 'Devices & Access'], ['notify', 'Notifications'], ['permissions', 'You'], ['general', 'You'], ['about', 'About & Updates']]
+    const deep = [['ask-before-signing', 'Studio'], ['voice', 'Meetings & Voice'], ['dictation', 'Meetings & Voice'], ['accounts', 'Agents & Models'], ['machines', 'Devices & Access'], ['remote-devices', 'Devices & Access'], ['notify', 'Notifications'], ['permissions', 'You'], ['general', 'You'], ['about', 'About & Updates']]
     const missed = []
     const open = (section) => ph.p.evaluate((section) => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section } })), section)
     for (const [section, name] of deep) {

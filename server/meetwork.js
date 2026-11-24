@@ -17,7 +17,8 @@ import { notPerson } from './notpeople.js'
 
 let cfg = {}
 export const configure = (c) => { cfg = c || {} }
-// fleet(): the agents now; projects(): yours; tasks(): Chief of Staff's list; pr(dir, branch): the
+// fleet(): the agents now; projects(): yours; tasks(): Chief of Staff's list (each delegated task
+// with its helper, delegate.js board); pr(dir, branch): the
 // pull request for a branch (null: the one dir is on); launch(body): an agent started as New agent
 // does.
 // tree(folder): the repo and branch of a worktree Bridge AI made; kindLabel(kind): "Claude Code".
@@ -200,8 +201,10 @@ export async function start(id, key, { cwd, kind, own = true, prompt, label } = 
 // What became of an item: the agent (working, needs you, finished, closed; its pull request) and
 // Chief of Staff's task (open, doing, waiting on you with what for, done with its outcome).
 // state: done, needs (you), working, review (finished, or a pull request open) or open.
+const STALE_MS = Number(process.env.BRIDGE_HANDOFF_STALE_MS) || 20 * 60 * 1000 // as meetitems.js
+const PLACING_MS = 10 * 60 * 1000 // as meetitems.js
 async function stateOf(w, fleet, tasks) {
-  const out = { done: w?.done || null, agent: null, chief: null }
+  const out = { done: w?.done || null, agent: null, chief: null, handed: null }
   if (w?.agent) {
     const a = w.agent
     const live = (fleet?.agents || []).find((x) => x.paneId === a.paneId && (!a.folder || x.worktree?.folder === a.folder)) || (a.folder && (fleet?.agents || []).find((x) => x.worktree?.folder === a.folder)) || null
@@ -217,8 +220,44 @@ async function stateOf(w, fleet, tasks) {
   if (w?.chief) {
     const t = (tasks || []).find((x) => x.id === String(w.chief.task))
     out.chief = { ...w.chief, status: t ? t.status : 'gone', outcome: t?.outcome || null, needs: t?.needs || null, link: t?.link || null }
+    // Its helper, when the chief (or you) put a helper on it: its role, how it's going.
+    const h = t?.helper
+    if (h) out.chief.helper = { role: h.role, state: h.state, end: h.end, error: h.error, paneId: h.paneId, live: h.live, status: h.status, asking: h.asking, position: h.position }
   }
+  // Where Chief of Staff (or you) placed it, from a meeting handed on by itself (meetitems.js): with
+  // an agent (live or not, working, its message still queued, or waiting for your OK), with a helper,
+  // a question for you, or left with you.
+  if (w?.handed) {
+    const h = w.handed
+    out.handed = { to: h.to, by: h.by || 'chief', at: h.at || null, note: h.note || null }
+    if (h.to === 'agent') {
+      const live = (fleet?.agents || []).find((x) => x.paneId === h.paneId) || null
+      const waits = !!h.queued && (fleet?.queue?.[h.paneId] || []).some((x) => x.id === h.queued)
+      Object.assign(out.handed, { paneId: h.paneId, label: h.label, kindLabel: h.kindLabel || helpers.kindLabel(h.kind), held: !!h.held, live: !!live, status: live ? live.status : 'closed', queued: waits, approved: h.approved || null, ...(h.held ? { brief: h.brief || null } : {}) })
+    } else if (h.to === 'helper') out.handed.role = h.role
+    else if (h.to === 'ask') out.handed.question = h.question
+    else if (h.to === 'skip') out.handed.why = h.why
+  }
+  // (A mark left from a decision that never came back: not being placed any more.)
+  if (out.handed?.to === 'placing' && Date.now() - Date.parse(w.handed.at || 0) > PLACING_MS) out.handed = null
+  if (out.handed?.to === 'placing' && !out.done) { out.state = 'working'; return out }
+  // Put on the list by itself, and its task closed before it was placed (by hand, or by the chief):
+  // it never went anywhere, which needs you.
+  if (w?.chief?.auto && !w.handed && out.chief?.status === 'done' && !out.chief.helper && !out.done) { out.shut = true; out.state = 'needs'; return out }
+  // Told to Chief of Staff by itself, not placed after a while: said, so it isn't left unsaid.
+  if (w?.chief?.auto && !out.handed && out.chief?.status === 'open' && !out.chief.helper && Date.now() - Date.parse(w.chief.at || 0) > STALE_MS) out.unplaced = true
   const pr = out.agent?.pr
+  const ha = out.handed?.to === 'agent' ? out.handed : null
+  if (ha && !out.done) {
+    // With an agent: as the agent is (just sent, its screen may not say so yet).
+    // (Its agent closed with the message still waiting for it: it never got it, and that needs you.
+    // Closed otherwise: whether it did it isn't known here, so it's yours to look at, not done.)
+    if (!ha.live && ha.queued) ha.lost = true
+    out.state = ha.held || ha.lost || ha.status === 'blocked' ? 'needs' : !ha.live ? 'review' : ha.queued || ha.status === 'working' || Date.now() - Date.parse(ha.approved || ha.at || 0) < 15000 ? 'working' : 'review'
+    return out
+  }
+  if (out.handed?.to === 'skip' && !out.done) { out.state = 'open'; return out }
+  if (out.unplaced && !out.done) { out.state = 'needs'; return out }
   // A task gone from the list was done long ago (the list keeps the last 40 done); an agent closed
   // with no pull request open is finished with.
   out.state = out.done || pr?.state === 'MERGED' || ['done', 'gone'].includes(out.chief?.status) || (out.agent && !out.agent.live && pr?.state !== 'OPEN') ? 'done'
@@ -243,10 +282,11 @@ async function described(items) {
   const tasks = (() => { try { return helpers.tasks().items || [] } catch { return [] } })()
   return Promise.all(items.map(async (it) => ({ key: it.key, text: it.text, who: it.who, yours: it.yours, ticked: it.ticked, ...(await stateOf(it.work, fleet, tasks)) })))
 }
+// (With its name and how handing them on by themselves went: meetitems.js runOf.)
 export async function work(id) {
-  const { items } = itemsOf(id)
+  const { m, items } = itemsOf(id)
   const out = await described(items)
-  return { items: out, counts: tally(out) }
+  return { items: out, counts: tally(out), title: m.title, handoff: m.handoff || null }
 }
 // Ticked (or unticked) by you: counted as done, wherever it went.
 export function tick(id, key, on) {
@@ -256,10 +296,10 @@ export function tick(id, key, on) {
   meetings.setWork(id, it.workKey || it.key, { text: it.text, done: on ? new Date().toISOString() : null })
   return { ok: true }
 }
-// The items that haven't gone anywhere yet: no agent, no task, not ticked. What Send action items
-// to Chief of Staff sends, so one already handed on isn't handed on twice.
+// The items that haven't gone anywhere yet: no agent, no task, not placed, not ticked. What Send
+// action items to Chief of Staff sends, so one already handed on isn't handed on twice.
 export function unsent(id) {
-  try { return itemsOf(id).items.filter((x) => !x.ticked && !x.work?.agent && !x.work?.chief && !x.work?.done).map((x) => x.text) } catch { return [] }
+  try { return itemsOf(id).items.filter((x) => !x.ticked && !x.work?.agent && !x.work?.chief && !x.work?.handed && !x.work?.done).map((x) => x.text) } catch { return [] }
 }
 // Sent to Chief of Staff: each item keeps its task's number, so what it did with it shows.
 export function sentToChief(id, pairs) {
@@ -267,8 +307,16 @@ export function sentToChief(id, pairs) {
   try { items = itemsOf(id).items } catch { return }
   for (const { text, task } of pairs) {
     const it = items.find((x) => norm(x.text) === norm(text)) || items.find((x) => like(x.text, text) >= 0.6)
-    if (it) meetings.setWork(id, it.workKey || it.key, { text: it.text, chief: { task: String(task.id), at: new Date().toISOString() } })
+    // (One placed by itself, or where it was put since, keeps its task: meetitems.js.)
+    if (it && !placedOne(it)) meetings.setWork(id, it.workKey || it.key, { text: it.text, chief: { task: String(task.id), at: new Date().toISOString() } })
   }
+}
+// Handed on by itself, or placed since (meetitems.js): not sent to Chief of Staff again by hand.
+const placedOne = (it) => !!(it.work?.chief?.title || it.work?.handed)
+export function placedBy(id) {
+  let items = []
+  try { items = itemsOf(id).items.filter(placedOne) } catch { return () => false }
+  return (text) => items.some((x) => norm(x.text) === norm(text) || like(x.text, text) >= 0.6)
 }
 
 // ---------- Since last time ----------

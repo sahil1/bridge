@@ -2,12 +2,14 @@
 // (src/i18n/<code>.json) is valid and keeps each string's {placeholders} (scripts/i18n.js), and
 // Settings › You offers every pack, named in its own words. Then each language: the page says which it is, the
 // sidebar, Settings' sections and its look (You) are in its words, nothing is wider than the window (or
-// a phone, for the longest), Share Links' Beta switch in its words, with no page errors; Match this computer follows the browser's
+// a phone, for the longest), Studio's signing (Settings › Studio, its pad's ways and buttons) in its
+// words with every string of it in the pack and no button squeezed, Share Links' Beta switch in its
+// words, with no page errors; Match this computer follows the browser's
 // language; and picking one in Settings › You switches to it, in another open window too.
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { startKit, checks, until, browser, page, shot, noServiceWorker, ROOT } from '../lib/harness.mjs'
+import { startKit, checks, until, browser, page, shot, noServiceWorker, ROOT, appKeysFor, asWindow as windowPage } from '../lib/harness.mjs'
 
 const { ok, done } = checks('i18n-ui')
 const I18N = path.join(ROOT, 'src', 'i18n')
@@ -33,7 +35,11 @@ const behind = Object.fromEntries(LANGS.map((l) => {
 }).filter(([, list]) => list.length))
 ok(!Object.keys(behind).length, 'About & Updates, the Account and Phone tabs\' relay, your devices and Remote Screen and Preview: every string in every language', behind)
 
-const kit = await startKit('i18n-ui')
+// The pages are the app's own window (its secret, server/windowkey.js), so Studio's signing is
+// there to see in each language.
+let keys = null
+const kit = await startKit('i18n-ui', { env: ({ bin }) => { keys = appKeysFor(bin); return { BRIDGE_TEST_WINDOW_FILE: keys.file } } })
+const asWindow = (ctx) => windowPage(ctx, keys.window)
 const { b, which } = await browser()
 const tag = which === 'webkit' ? 'webkit-' : ''
 const say = (l, en) => words[l]?.[en] || en
@@ -42,7 +48,7 @@ try {
   for (const l of LANGS) {
     const phone = l === 'de' || l === 'hi'
     const look = l === 'ja' || l === 'hi' ? { mode: 'dark', theme: 'midnight' } : { mode: 'light', theme: 'sky' }
-    const { ctx, p, errors } = await page(b, kit.url, { ...look, store: { 'cc-lang': l } })
+    const { ctx, p, errors } = await page(b, kit.url, { ...look, store: { 'cc-lang': l }, before: asWindow })
     // What the page was doing when the sidebar doesn't come: said, not just a timeout.
     const said = []
     const pending = new Set()
@@ -89,6 +95,20 @@ try {
       return { ok: !!a && Math.abs((a.top + a.bottom) / 2 - (q.top + q.bottom) / 2) < 8 && a.left >= q.right - 1, a: a && [a.left, a.top], q: [q.right, q.top] }
     })
     ok(inline === true || inline.ok, `${l}: and its link in the line`, inline)
+    // Studio's signing, every string of it in this pack: Settings › Studio, and the pad (Add a
+    // signature), its buttons whole in their words.
+    const SIGNING = ['Studio', 'Your Signatures', 'Ask Before Signing', 'Add a signature', 'Add initials', 'Draw', 'Trackpad', 'Phone', 'Keep it', 'Sign on Phone', 'Sign everywhere it asks', 'Sign with Touch ID', 'Signed by you on {computer} ({how})', 'Use', 'Make default', 'Signing PIN: none yet', 'Set a PIN', 'Draw with your finger.', 'Draw with your pen.']
+    ok(SIGNING.every((en) => typeof words[l]?.[en] === 'string' && words[l][en].trim()), `${l}: Studio's signing is in the pack`, SIGNING.filter((en) => !words[l]?.[en]))
+    await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'studio' } })))
+    ok(!!(await until(async () => (await p.locator('[data-setting="ask-before-signing"] h4').innerText().catch(() => '')).trim() === say(l, 'Ask Before Signing'), 8000)) && (await p.locator('.st-nav-item.on').innerText()).trim() === say(l, 'Studio'), `${l}: Settings › Studio, in its words`, await p.locator('[data-setting="ask-before-signing"]').innerText().catch(() => ''))
+    await p.locator('.sd-sig-kind[data-kind="signature"] .sd-sig-kind-head button').click()
+    await p.locator('.sd-pad').waitFor({ timeout: 5000 })
+    const padSays = await p.locator('.sd-sigcard.drawing').innerText()
+    const squeezedHere = await p.locator('.modal.settings .st-scroll').evaluate((root) => [...root.querySelectorAll('button')].filter((x) => x.offsetParent && x.scrollWidth > x.clientWidth + 1).map((x) => x.innerText))
+    // Its look comes with it, though no PDF was opened here: a pad of paper white, its tools on a line.
+    const padLook = await p.locator('.sd-pad-box').evaluate((e) => ({ h: e.getBoundingClientRect().height, bg: getComputedStyle(e).backgroundColor, acts: getComputedStyle(e.closest('.sd-pad').querySelector('.sd-pad-acts')).display }))
+    ok(padSays.includes(say(l, 'Keep it')) && padSays.includes(say(l, 'Draw your signature')) && !squeezedHere.length && padLook.h >= 100 && padLook.bg === 'rgb(255, 255, 255)' && padLook.acts === 'flex', `${l}: the pad in its words and its own look, no button squeezed`, { padSays, squeezedHere, padLook })
+    await shot(p, `${tag}i18n-${l}-signing`)
     // Settings › Devices & Access › Share Links: the beta feature's switch at the top, in its words.
     await p.evaluate(() => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: 'sharing' } })))
     const beta = p.locator('.modal.settings [data-beta="share-links"]')

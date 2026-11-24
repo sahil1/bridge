@@ -1383,8 +1383,13 @@ export function makeRemote({ trialOn, deviceOf, thisName, os, hosted = () => fal
       // Someone here turns it on, and macOS offers Quit & Reopen: the app going (or a new one
       // reporting in), or the page saying it's allowed (asked every few seconds), is what's waited for.
       const feeds = new Set(desktops)
-      const done = () => ws.readyState !== 1 || s.over || readyPage()?.permission === 'ok' || [...desktops].some((fn) => !feeds.has(fn)) || !desktopOpen()
+      const reopened = () => [...desktops].some((fn) => !feeds.has(fn)) || !desktopOpen()
+      const done = () => ws.readyState !== 1 || s.over || readyPage()?.permission === 'ok' || reopened()
       while (Date.now() < end && !(await until(done, Math.min(3000, end - Date.now())))) askSources().catch(() => {})
+      // Reopened: the capture page from before, which said Screen Recording was off, was the app's
+      // that's going, and isn't asked again; the screen waits for the reopened app's own page (whose
+      // app can report in before the page from before has closed).
+      if (reopened() && capture && capture.permission !== 'ok') capture.old = true
       return ws.readyState === 1 && !s.over
     }
     return false

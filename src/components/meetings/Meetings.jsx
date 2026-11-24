@@ -9,7 +9,7 @@ import { usePersisted, Handle, PaneHeader, useMedia, store } from '../layout.jsx
 import { useMeetings, clock, length, ScreenButton, ScreenWhy, SectionButton, openMeeting } from './recording.jsx'
 import { byDay, day, timeOf, useSelection, BulkBar } from './bulk.jsx'
 import { useMeetingMenu, foldersOf, ConfirmDelete, FolderPick, chiefSaid } from './actions.jsx'
-import { exportAndSay } from './exporting.js'
+import { exportAndSay, saveTranscript } from './exporting.js'
 import { AskPanel, md } from './ask.jsx'
 import { FixWord, TranscribeAgain, useChatModels, NOTE_LANGS, Dialog, openMemory } from './tools.jsx'
 import { Menu as AtMenu } from '../FileExtras.jsx'
@@ -28,7 +28,8 @@ import { VideoPane, VideoNotes } from './player.jsx'
 import { useCropping, CropButton } from './cropping.jsx'
 import './meetings.css'
 import SpeechSetup, { MeetingsSetup } from './SpeechSetup.jsx'
-import { ActionItems, SinceLastTime } from './work.jsx'
+import { TranscribeButton, FilesPanel } from './TranscribeFiles.jsx'
+import { ActionItems, HandOn, SinceLastTime } from './work.jsx'
 import { MergePick, MergeHint, Merged } from './merge.jsx'
 import { useFeature } from '../../trials.js'
 import { InsightsView } from './insights.jsx'
@@ -251,6 +252,8 @@ const SETUP = 'cc-meet-setup'
 const HOME_TABS = [['list', 'mic', tx('Meetings')], ['insights', 'trend', tx('Insights')], ['people', 'users', tx('People')], ['memory', 'book', tx('Memory')]]
 const ASK_ALL = [tx('What did I agree to do this week?'), tx("What's still open from this week?"), tx('Write my weekly update from these meetings')]
 const ASK_ONE = [tx('Draft a follow-up email'), tx('What did I agree to do?'), tx("What's still open?")]
+// A file you transcribed: a recording, nobody's meeting.
+const ASK_FILE = [tx('Sum it up in a few lines'), tx('What are the main points?'), tx('What questions were asked?')]
 
 export function MeetingsHome({ onOpen }) {
   const m = useMeetings()
@@ -259,6 +262,7 @@ export function MeetingsHome({ onOpen }) {
   const [err, setErr] = useState(null)
   const next = useNextEvent()
   const narrow = useMedia('(max-width: 560px)') // a phone: the search box's shorter hint fits
+  const touch = useMedia('(pointer: coarse)') // nothing to drop a file from
   // Which meetings: every one that isn't archived, one folder's, or the archived ones.
   const [place, setPlace] = useState('') // '' | a folder's name | ':archived'
   const all = data?.meetings || []
@@ -337,6 +341,7 @@ export function MeetingsHome({ onOpen }) {
           ])}
         </div>
         {!m?.rec && <VideoChoice m={m} hint={false} />}
+        {!m?.rec && tab === 'list' && <TranscribeButton compact={narrow} />}
         {!m?.rec && <button type="button" className="btn small primary" onClick={() => go({})}><Icon name="mic" size={13} /> {t('Start recording')}</button>}
       </PaneHeader>
     {tab === 'memory' ? <Memory from="meetings" /> : <div className="mt-home">
@@ -345,6 +350,7 @@ export function MeetingsHome({ onOpen }) {
       {tab === 'people' && <PeopleView onOpen={onOpen} person={person} setPerson={setPerson} />}
       {tab === 'list' && <>
       {first ? <MeetingsSetup onDone={doneSetup} /> : <SpeechSetup recording={!!m?.rec} />}
+      <FilesPanel />
       {!m?.rec && <VideoAllow m={m} className="mt-video-allow-home" />}
       {next && !m?.rec && (
         <div className="mt-next">
@@ -361,6 +367,7 @@ export function MeetingsHome({ onOpen }) {
           <Icon name="mic" size={22} />
           <p><b>{t('Record a meeting, get notes you can act on.')}</b></p>
           <p className="muted small">{t("Your mic and the call's sound, turned into a transcript as you talk, then a summary with decisions and action items. Write your own notes alongside if you like; they shape the summary.")}</p>
+          <p className="muted small">{touch ? t('Or transcribe a recording on this device: tap Transcribe a file.') : t('Or transcribe a recording you have: drop audio or video here, or use Transcribe a file.')}</p>
         </div>
       )}
       {n > 0 && (
@@ -393,13 +400,14 @@ export function MeetingsHome({ onOpen }) {
               <div key={x.id} className={`mt-row${sel.has(x.id) ? ' picked' : ''}`}>
                 <label className="mt-tick-hit"><input type="checkbox" className="mt-pick" checked={sel.has(x.id)} onChange={(e) => toggle(x.id, { range: e.nativeEvent.shiftKey })} aria-label={t('Pick {title}', { title: x.title })} /></label>
                 <button type="button" className="mt-row-open" onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey) { toggle(x.id, { range: e.shiftKey }); return } onOpen?.(x.id) }} onContextMenu={(e) => menu.open(e, x)}>
+                  {x.file && <span className="mt-row-file" title={t('Transcribed from {name}', { name: x.file.name })}><Icon name="wave" size={13} /></span>}
                   <span className="mt-row-main">
                     <b>{hit?.where === 'title' ? <Marked text={x.title} terms={hits.terms} /> : x.title}</b>
                     <span className="muted small">{timeOf(x.startedAt)} · {x.status === 'recording' ? t('recording') : x.status === 'paused' ? t('paused') : length(x.seconds)}{x.event?.attendees?.length ? ` · ${t('{n} people', { n: x.event.attendees.length })}` : ''}{!place && x.folder ? <span className="mt-in"> · <Icon name="folder" size={10} /> {x.folder}</span> : null}{x.parts ? <span className="mt-in mt-nparts"> · <Icon name="layers" size={10} /> {t('{n} parts', { n: x.parts.length })}</span> : null}{x.mergeHint ? <span className="mt-in mt-rest" title={t('Open it to merge them into one meeting')}> · <Icon name="branch" size={10} /> {t('The rest of {title}', { title: x.mergeHint.title })}</span> : null}</span>
                     {hit?.snippet && <span className="mt-hit small"><b>{hit.where === 'transcript' ? `${hit.who} ${hit.t}` : t(WHERE[hit.where])}</b> <Marked text={hit.snippet} terms={hits.terms} /></span>}
                   </span>
                   {x.status === 'recording' && <span className="rec-dot" aria-label={t('Recording')} />}
-                  {x.status === 'transcribing' && <span className="muted small">{t('finishing…')}</span>}
+                  {x.status === 'transcribing' && <span className="muted small">{x.file ? t('transcribing…') : t('finishing…')}</span>}
                   {x.hasSummary && <Icon name="sparkle" size={13} className="muted" />}
                 </button>
                 {whole && <button type="button" className="mt-partof" onClick={() => onOpen?.(whole.id)} title={t('Part of "{title}", a combined meeting. Click to open it.', { title: whole.title })}><Icon name="layers" size={10} /> <span>{whole.title}</span></button>}
@@ -426,6 +434,9 @@ const markOf = (l) => (l.edited ? [tx('edited'), tx('Heard: {text}')]
     : l.cleaned ? [tx('cleaned up'), tx('Fixed by the cleanup, from what the meeting is about. Heard: {text}')]
       : l.fixed ? [tx('fixed'), tx('Heard: {text}')]
         : l.trimmed ? [tx('trimmed'), tx('Your mic heard the call too, so what they said is left out of your line. Heard: {text}')] : null)
+// Who said a line, as it shows: a name, you, a voice told apart, else Them or You; a file's line
+// nobody's named yet is a speaker's (server/meetings.js speaker).
+const whoSaid = (l, me) => l.name || (l.me ? me || t('You') : l.voice ? t('Speaker {n}', { n: l.voice }) : l.file ? t('Speaker') : l.src === 'them' ? t('Them') : me || t('You'))
 // With a video of the screen (player.jsx): its time plays the video from there (onPlay), and while
 // the video's beside it (playing) so does a click on the line; now: it's being said in the video.
 function Line({ l, id, me, onSaved, onError, onWho, onPlay, playing = false, now = false }) {
@@ -451,7 +462,7 @@ function Line({ l, id, me, onSaved, onError, onWho, onPlay, playing = false, now
       if (l.key) setOpen((o) => !o)
     }}>
       <button type="button" className={`mt-who${l.name ? ' named' : ''}${l.guess ? ' guess' : ''}`} disabled={!l.key || !onWho} onClick={(e) => onWho?.(e, l)}
-        title={l.name ? (l.byVoice ? t('{name}: known by their voice. Click to change', { name: l.name }) : l.guess ? t('{name}: worked out from the meeting. Click to change', { name: l.name }) : t('{name}. Click to change', { name: l.name })) : l.voice && !l.me ? t('Speaker {n}, told apart by voice. Click to name them, once for all their lines', { n: l.voice }) : t('Who said it? Click to name them')}>{l.name || (l.me ? me || t('You') : l.voice ? t('Speaker {n}', { n: l.voice }) : l.src === 'them' ? t('Them') : me || t('You'))}</button>
+        title={l.name ? (l.byVoice ? t('{name}: known by their voice. Click to change', { name: l.name }) : l.guess ? t('{name}: worked out from the meeting. Click to change', { name: l.name }) : t('{name}. Click to change', { name: l.name })) : l.voice && !l.me ? t('Speaker {n}, told apart by voice. Click to name them, once for all their lines', { n: l.voice }) : t('Who said it? Click to name them')}>{whoSaid(l, me)}</button>
       {onPlay
         ? <button type="button" className="mt-t mt-t-play" onClick={() => onPlay(l.t0)} aria-label={t('Play the video from {time}', { time: clock(l.t0) })} title={t('Play the video from {time}', { time: clock(l.t0) })}>{clock(l.t0)}</button>
         : <span className="mt-t">{clock(l.t0)}</span>}
@@ -820,10 +831,19 @@ export function MeetingPage({ id, onBack }) {
   // As one file with its pictures in it, to share: Word or PDF (exporting.js).
   const exportAs = (format) => busy !== 'export' && act('export', () => exportAndSay(data, format, ({ text, error, act: a }) => setMsg({ text, error, act: a })))
   // Every way to save it, the same from the header's download button as from ⋯.
+  // The transcript alone, as text or subtitles (server/meetings.js transcriptFile): saved beside the
+  // note on this computer, or to this device through the relay (a phone).
+  const textAs = (format) => busy !== 'export' && act('export', async () => setMsg(await saveTranscript(id, format)))
+  const said1 = (data?.transcript || []).some((l) => l.text && !l.dropped)
   const saveItems = [
     { icon: 'download', label: t('Save as Markdown'), run: save },
     { icon: 'doc', label: t('Save as Word (.docx)'), run: () => exportAs('docx') },
     { icon: 'file', label: t('Save as PDF'), run: () => exportAs('pdf') },
+    said1 && '-',
+    said1 && { icon: 'file', label: t('Save the transcript as text (.txt)'), run: () => textAs('txt') },
+    said1 && { icon: 'doc', label: t('Save the transcript as Markdown (.md)'), run: () => textAs('md') },
+    said1 && { icon: 'video', label: t('Save as subtitles (.srt)'), run: () => textAs('srt') },
+    said1 && { icon: 'video', label: t('Save as subtitles (.vtt)'), run: () => textAs('vtt') },
   ]
   const copy = async (text, done) => { try { await navigator.clipboard.writeText(text); setMsg({ text: done }) } catch { setMsg({ error: true, text: t("Couldn't copy") }) } }
   const remove = () => setDialog('delete')
@@ -948,7 +968,7 @@ export function MeetingPage({ id, onBack }) {
   const lb = data.liveBoard || null
   const showing = recording
     ? (view && view !== 'mine' && view !== 'video' ? view : data.assist ? 'assist' : lb?.on ? 'board' : 'transcript')
-    : view || (combined || data.summary || data.summarizing || data.summaryError ? 'summary' : 'mine')
+    : view || (combined || data.summary || data.summarizing || data.summaryError ? 'summary' : data.file ? 'transcript' : 'mine')
   // A video of the screen (Record the screen too), once it's recorded: a view of its own, beside the
   // transcript, whose lines play it from their time.
   const videos = data.videos || []
@@ -959,8 +979,10 @@ export function MeetingPage({ id, onBack }) {
   const lines = all.filter((l) => !l.dropped)
   const left = all.length - lines.length
   // Heard by a light model on this computer: Large turbo would hear names and jargon better.
-  const light = lines.find((l) => /^whisper\.cpp (Small|Base)\b/.test(l.engine || ''))?.engine?.replace(/^whisper\.cpp /, '') || null
-  const again = data.status === 'transcribing' && data.again && !data.again.done
+  const light = lines.find((l) => /^(whisper\.cpp (Small|Base)|Whisper (small|base))\b/.test(l.engine || ''))?.engine?.replace(/^whisper\.cpp /, '') || null
+  // A file you transcribed (server/meetfiles.js): no recording to carry on, nobody's meeting to merge.
+  const fromFile = !!data.file
+  const again = data.status === 'transcribing' && ((data.again && !data.again.done) || fromFile)
   // (Their names as the server has them, in English: meetings.js KINDS, each in the packs.)
   const kinds = (list?.kinds || [{ id: 'general', label: KIND_NAMES.general }]).map((k) => ({ ...k, label: t(KIND_NAMES[k.id] || k.label) }))
   const o = opts || { language: 'auto', model: '', kind: 'general' }
@@ -989,7 +1011,7 @@ export function MeetingPage({ id, onBack }) {
     let s = -1
     for (const l of lines.filter((x) => x.text)) {
       while (s + 1 < parts.length && l.t0 >= parts[s + 1].t - 0.5) out.push(`\n## ${parts[++s].title}\n`)
-      out.push(`[${clock(l.t0)}] ${l.name || (l.src === 'them' ? 'Them' : data.me || 'You')}: ${l.text}`)
+      out.push(`[${clock(l.t0)}] ${whoSaid(l, data.me)}: ${l.text}`)
     }
     return out.join('\n').trim()
   }
@@ -1040,7 +1062,9 @@ export function MeetingPage({ id, onBack }) {
     done && lines.length > 0 && { label: data.cleanedAt ? t('Clean up the transcript again') : t('Clean up the transcript'), hint: t('Misheard words and names fixed, and what nobody said left out'), disabled: busy === 'clean', run: cleanUp },
     heard && { label: t('Work out who said each line'), hint: t('From names said, the screen and who was invited'), disabled: busy === 'who', run: nameAll },
     canTell && voiced && { label: t('Work out who each voice is'), hint: t('From names said and who was invited'), disabled: busy === 'who' || !!working, run: nameAll },
-    (lines.length > 0 || data.summary) && { label: t('Ask about this meeting'), hint: t("What was decided, who's doing what, a follow-up email"), run: asking },
+    (lines.length > 0 || data.summary) && (fromFile
+      ? { label: t('Ask about this recording'), hint: t('What was said, by whom, a summary or a list'), run: asking }
+      : { label: t('Ask about this meeting'), hint: t("What was decided, who's doing what, a follow-up email"), run: asking }),
     // Into Studio, where there's one (not the demo or the phone apps' Cloud agents).
     studioHere && done && (data.summary || lines.length > 0) && { label: t('Make a deck'), hint: t('Written by the model that writes your notes, opened in Studio'), disabled: busy === 'deck', run: makeDeck },
   ]
@@ -1054,6 +1078,7 @@ export function MeetingPage({ id, onBack }) {
         : <button type="button" className="sub-where mt-when" disabled={combined} onClick={() => setWhen(localInput(data.startedAt))} title={combined ? t('From its first meeting; how long they were together') : t('When it was. Click to change')}>
           {new Date(data.startedAt).toLocaleString(locale(), { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}{done || data.seconds ? ` · ${length(data.seconds)}` : ''}
         </button>}
+      {fromFile && <span className="path-chip mt-from-file" title={t('Transcribed from {name}', { name: data.file.name })}><Icon name="wave" size={10} /> <span>{data.file.name}</span></span>}
       {combined && <button type="button" className="path-chip mt-nparts" onClick={() => setView('parts')} title={t('The meetings combined in this one')}><Icon name="layers" size={10} /> <span>{t('{n} parts', { n: partList.length })}</span></button>}
       {data.combined && <button type="button" className="path-chip mt-partof-chip" onClick={() => openMeeting(data.combined.id)} title={t('Part of "{title}", a combined meeting. Click to open it.', { title: data.combined.title })}><Icon name="layers" size={10} /> <span>{data.combined.title}</span></button>}
       {combined ? null : people != null
@@ -1084,8 +1109,9 @@ export function MeetingPage({ id, onBack }) {
       </button>
     </>
   )
-  // Resume recording: on a meeting that has ended, not a combined one (it has no recording).
-  const canResume = done && !combined && !!m?.recordAgain
+  // Resume recording: on a meeting that has ended, not a combined one (it has no recording), nor a
+  // file's.
+  const canResume = done && !combined && !fromFile && !!m?.recordAgain
   const recent = Date.now() - Date.parse(data.endedAt || data.startedAt) < RESUME_MS
   const resumeBtn = <button type="button" className="btn small mt-resume" onClick={resumeRec} disabled={busy === 'resume'} title={t('Carry on recording this meeting from where it stopped. Nothing recorded is lost, and the summary is written again when it ends.')}><Icon name="mic" size={12} /> {busy === 'resume' ? t('Starting…') : t('Resume recording')}</button>
   // The meetings that can join a combined one: not recording, archived, combined or in one already.
@@ -1108,7 +1134,7 @@ export function MeetingPage({ id, onBack }) {
       </div>
       {wide && !recording && showing !== side && !watching && <button type="button" className={`win-btn${split ? ' on' : ''}`} onClick={() => setSplit(!split)} aria-pressed={split} aria-label={combined ? (split ? t('Hide the meetings beside it') : t('Show the meetings beside it')) : split ? t('Hide the transcript beside it') : t('Show the transcript beside it')} title={combined ? (split ? t('Hide the meetings beside it') : t('Show the meetings beside it')) : split ? t('Hide the transcript beside it') : t('Show the transcript beside it')}><Icon name="panel-right" size={14} /></button>}
       <span className="menu-anchor mt-hb">
-        <button type="button" className="win-btn" onClick={() => setSaveMenu(!saveMenu)} disabled={busy === 'save' || busy === 'export'} aria-label={t('Save')} aria-haspopup="menu" aria-expanded={saveMenu} title={t('Save as Markdown, Word or PDF')}><Icon name="download" size={14} /></button>
+        <button type="button" className="win-btn" onClick={() => setSaveMenu(!saveMenu)} disabled={busy === 'save' || busy === 'export'} aria-label={t('Save')} aria-haspopup="menu" aria-expanded={saveMenu} title={t('Save as Markdown, Word, PDF or subtitles')}><Icon name="download" size={14} /></button>
         {saveMenu && <Menu onClose={() => setSaveMenu(false)} items={saveItems} />}
       </span>
       <AiAssist className="btn small mt-ai-btn" compact={phone} on={recording && (!!data.assist || !!lb?.on)} items={assists} />
@@ -1120,7 +1146,7 @@ export function MeetingPage({ id, onBack }) {
           atActions(data.summary) && { icon: 'helm', label: t('Send action items to Chief of Staff'), run: toChief },
           '-',
           canResume && { icon: 'mic', label: t('Resume recording'), run: resumeRec },
-          done && !combined && { icon: 'branch', label: t('Merge with…'), run: () => setDialog('merge') },
+          done && !combined && !fromFile && { icon: 'branch', label: t('Merge with…'), run: () => setDialog('merge') },
           combined && { icon: 'plus', label: t('Add a meeting…'), run: () => setDialog('add') },
           !combined && { icon: 'edit', label: t('Fix a word everywhere'), run: () => setFix({ from: '' }) },
           done && !combined && { icon: 'refresh', label: t('Transcribe again…'), run: () => setDialog('again') },
@@ -1133,7 +1159,7 @@ export function MeetingPage({ id, onBack }) {
           !live && data.status !== 'recording' && data.status !== 'paused' && (data.archived
             ? { icon: 'archive', label: t('Unarchive'), run: () => archive(false) }
             : { icon: 'archive', label: t('Archive'), run: () => archive(true) }),
-          combined ? { icon: 'split', label: t('Separate…'), danger: true, run: remove } : { icon: 'trash', label: t('Delete meeting…'), danger: true, run: remove },
+          combined ? { icon: 'split', label: t('Separate…'), danger: true, run: remove } : { icon: 'trash', label: fromFile ? t('Delete transcript…') : t('Delete meeting…'), danger: true, run: remove },
         ]} />}
       </span>
     </PaneHeader>
@@ -1165,7 +1191,7 @@ export function MeetingPage({ id, onBack }) {
   const transcriptPane = combined ? partsPane : (
     <section ref={tRef} className={`mt-transcript${beside || showing === 'transcript' || watching ? '' : ' off'}`} aria-label={t('Transcript')}>
       <div className="mt-thead mt-phead">
-        <span className="muted small">{again ? (data.progress != null ? t('Transcribing again: {n}%', { n: data.progress }) : t('Transcribing again…')) : lines.length ? `${lines.length === 1 ? t('{n} line', { n: lines.length }) : t('{n} lines', { n: lines.length })}${shots.length ? `, ${shots.length === 1 ? t('{n} picture', { n: shots.length }) : t('{n} pictures', { n: shots.length })}` : ''}` : t('Transcript')}</span>
+        <span className="muted small">{again && fromFile && !data.again ? (data.progress != null ? t('Transcribing: {n}%', { n: data.progress }) : t('Transcribing…')) : again ? (data.progress != null ? t('Transcribing again: {n}%', { n: data.progress }) : t('Transcribing again…')) : lines.length ? `${lines.length === 1 ? t('{n} line', { n: lines.length }) : t('{n} lines', { n: lines.length })}${shots.length ? `, ${shots.length === 1 ? t('{n} picture', { n: shots.length }) : t('{n} pictures', { n: shots.length })}` : ''}` : t('Transcript')}</span>
         <span className="mt-grow" />
         {heard && !canTell && <button type="button" className="ghost-btn" onClick={nameAll} disabled={busy === 'who'} aria-label={t('Who spoke')} title={t('Work out who said each line from the call: from names said, the screen and who was invited. Or click Them on a line to name them yourself.')}><Icon name="users" size={12} /><span className="lbl"> {t('Who spoke')}</span></button>}
         {canTell && <button type="button" className="ghost-btn mt-voices-btn" onClick={voiced ? nameAll : tellVoices} disabled={busy === 'who' || !!working} aria-label={t('Who spoke')} title={voiced ? t('Work out who each voice is: from names said and who was invited. Or click Speaker on a line to name them yourself.') : heard ? t('Tell the voices on the call apart, on this computer, then work out who each one is.') : t('Tell the voices in the room apart, on this computer, then work out who each one is.')}><Icon name="users" size={12} /><span className="lbl"> {t('Who spoke')}</span></button>}
@@ -1174,7 +1200,7 @@ export function MeetingPage({ id, onBack }) {
         {lines.length > 0 && <button type="button" className="ghost-btn" onClick={() => copy(said(), t('Copied the transcript.'))} aria-label={t('Copy the transcript')} title={t('Copy the transcript')}><Icon name="copy" size={12} /><span className="lbl"> {t('Copy')}</span></button>}
         {beside && !watching && <button type="button" className="ghost-btn mt-thide" onClick={() => { setSplit(false); setSel(null) }} aria-label={t('Hide the transcript')} title={t('Hide the transcript (the view gets the room)')}><Icon name="panel-right" size={14} /></button>}
       </div>
-      <TalkTime lines={lines} me={data.me} />
+      {!fromFile && <TalkTime lines={lines} me={data.me} />}
       <div className="mt-lines" ref={listRef} onMouseUp={picked} onTouchEnd={picked} onScroll={(e) => { const el = e.currentTarget; pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40; setSel(null) }}>
         {!lines.length && !(recording && data.partial) && <p className="muted small mt-hint">{recording ? t('The transcript appears here as people talk, a few seconds behind.') : data.waiting || again ? t('Transcribing…') : !data.error && data.seconds > 0 ? t('No one was heard speaking in the {time} recorded, so nothing was transcribed.', { time: length(data.seconds) }) : t('Nothing was transcribed.')}{done && !lines.length && <> <button type="button" className="link-btn" onClick={() => setDialog('again')}>{t('Transcribe it again')}</button></>}</p>}
         {timeline.map((x, i) => (x.k === 'line'
@@ -1260,7 +1286,13 @@ export function MeetingPage({ id, onBack }) {
           </div>
           {todo.tail.trim() && <div className="mt-summary md" dangerouslySetInnerHTML={{ __html: md(todo.tail) }} />}
         </>
-      ) : <div className="mt-summary md" dangerouslySetInnerHTML={{ __html: md(data.summary) }} />)
+      ) : (
+        <>
+          <div className="mt-summary md" dangerouslySetInnerHTML={{ __html: md(data.summary) }} />
+          {/* Handed on by themselves, with no action items to hand on: said, not left unsaid. */}
+          {data.handoff && <HandOn id={id} run={data.handoff} onMsg={setMsg} onDone={refresh} />}
+        </>
+      ))
         : !data.summarizing && !data.summaryError && <p className="muted small mt-hint">{combined ? t('No summary yet. Summarize writes an overview across its meetings, from their summaries and notes.') : done ? t('No summary yet. Summarize writes one from the transcript, your notes, the screen and the files.') : t('The summary is written when the meeting ends. Meanwhile, My notes is yours to write in.')}</p>}
       {data.summary && data.summaryFrom && !data.summarizing && <WrittenFrom from={data.summaryFrom} onView={(v) => { setView(v); if (v === 'transcript') setSel(null) }} />}
       {lb?.id && <BoardLink b={lb} onView={() => setView('board')} />}
@@ -1315,7 +1347,7 @@ export function MeetingPage({ id, onBack }) {
           {recording && main}
           {transcriptPane}
         </div>
-        {(lines.length > 0 || data.summary || combined) && <AskPanel key={id} path={`/meetings/${encodeURIComponent(id)}/ask`} placeholder={combined ? t('Ask about these meetings') : t('Ask about this meeting')} suggestions={done ? ASK_ONE : []} />}
+        {(lines.length > 0 || data.summary || combined) && <AskPanel key={id} path={`/meetings/${encodeURIComponent(id)}/ask`} placeholder={combined ? t('Ask about these meetings') : fromFile ? t('Ask about this recording') : t('Ask about this meeting')} suggestions={done ? (fromFile ? ASK_FILE : ASK_ONE) : []} />}
         {fix && <FixWord id={id} from={fix.from} onClose={() => setFix(null)} onDone={(t) => { setMsg({ text: t }); refresh() }} />}
         {dialog === 'again' && <TranscribeAgain ids={[id]} onClose={() => setDialog(null)} onDone={(t) => { setMsg({ text: t }); refresh() }} />}
         {dialog === 'calendar' && (

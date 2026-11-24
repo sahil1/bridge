@@ -97,7 +97,9 @@
 /* Its tabs, then their tools on one row (what doesn't fit under ⋮ at its end), from the left as
    Google Sheets and Excel have them, as a document's and a deck's toolbars are. */
 .sd-univer [data-u-comp="ribbon-header-menu"] > div { justify-content: flex-start; padding-left: 10px; }
-.sd-univer [data-u-comp="ribbon-toolbar"] { justify-content: flex-start; }
+/* (Each on the row's middle: Univer 1.4 puts ⋮ in a box of its own at the row's top, 2 px above
+   the rest.) */
+.sd-univer [data-u-comp="ribbon-toolbar"] { justify-content: flex-start; align-items: center; }
 
 @media (max-width: 700px) {
   .sh-side { position: absolute; left: 0; right: 0; bottom: 0; z-index: 50; width: auto; max-height: 72%; border-left: 0; border-top: 1px solid var(--line); border-radius: 14px 14px 0 0; box-shadow: 0 -8px 28px rgba(0, 0, 0, .18); }

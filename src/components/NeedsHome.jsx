@@ -580,7 +580,7 @@ function TaskWaiting({ it, onOpenChief, onGone, setNote, pin, top = false }) {
     try {
       const r = await onDevice(it.machine, `/chief/tasks/${encodeURIComponent(it.task.id)}/reply`, { text: text.trim() })
       setText(''); setOpen(false)
-      onGone(it, sentTo(r, t('Chief of Staff')))
+      onGone(it, r.placed ? t('Placed with your answer.') : sentTo(r, t('Chief of Staff')))
     } catch (x) { setNote({ id: it.id, text: why(x, it.device) }) } finally { setBusy(false) }
   }
   return (

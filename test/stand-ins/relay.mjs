@@ -20,6 +20,9 @@
 //                        hears it end, even when the computer gives up on it), and it can't connect
 //                        again until POST /_test/back. Then, as a real network does, a connection the
 //                        computer still has carries on, and one it closed meanwhile is heard closing
+//   POST /_test/hush     each phone and device connected now is told the computer isn't there, though
+//                        it is (a relay that got it wrong, or its word that the computer came back
+//                        that never arrived): their connections stay open, and nothing else is said
 //   POST /_test/tamper?name=…&kind=…&relay=…   a relay that rewrites what a hello says in the clear
 //                        (a phone's or a device's, every one from now on)
 //   POST /_test/forge?as=refuse&why=not-paired   a relay that answers every hello itself, in the
@@ -28,7 +31,9 @@
 //   POST /_test/honest   neither, as before
 //   POST /_test/count    start counting again
 //   GET  /_test/state    how many computers and phones are connected, the phones' messages each way
-//                        (up, down and their bytes) and the bytes of the page's files (page)
+//                        (up, down and their bytes) and the bytes of the page's files (page), and
+//                        each of the phone page's own files asked for (asked: its path, when, and
+//                        how it was answered)
 import http from 'node:http'
 import { createECDH } from 'node:crypto'
 import { WebSocketServer } from 'ws'
@@ -172,17 +177,25 @@ const server = http.createServer(async (req, res) => {
         if (was !== 3 || sockets.has(w)) hub.webSocketClose(w, w.closedAs).catch(() => {}).finally(() => sockets.delete(w))
       }
     }
+    else if (what === 'hush') for (const w of ctx.getWebSockets('phone')) try { w.send(JSON.stringify({ host: false, seen: Date.now() })) } catch { /* gone */ }
     else if (what.startsWith('tamper')) tamper = Object.fromEntries(new URL(req.url, 'http://x').searchParams)
     else if (what.startsWith('forge')) { const q = new URL(req.url, 'http://x').searchParams; forge = { as: q.get('as') || 'refuse', why: q.get('why') || 'not-paired' } }
     else if (what === 'honest') { tamper = null; forge = null }
     else if (what === 'count') Object.assign(sent, { up: 0, down: 0, upBytes: 0, downBytes: 0, page: 0 })
     else if (what === 'drop') for (const w of sockets) try { w.real?.terminate() } catch { /* gone */ }
     res.setHeader('content-type', 'application/json')
-    return res.end(JSON.stringify({ frozen, net, sent, computers: ctx.getWebSockets('host').length, phones: ctx.getWebSockets('phone').length }))
+    return res.end(JSON.stringify({ frozen, net, sent, computers: ctx.getWebSockets('host').length, phones: ctx.getWebSockets('phone').length, asked }))
   }
   await serve(req, res, env, port)
 })
+// The phone page's own files as they're asked for and answered (GET /_test/state's asked), for a
+// test to say how far a phone page got that never opened Bridge AI: whether its service worker's
+// script (and the one it imports) was ever asked for.
+const OWN = new Set(['/', '/index.html', '/shell.js', '/sw.js', '/link-sw.js', '/link.js', '/offline.js'])
+const asked = []
 async function serve(req, res, e, at) {
+  const own = OWN.has(new URL(req.url, 'http://x').pathname) ? { p: req.url.slice(0, 40), at: Date.now(), status: null } : null
+  if (own) { asked.push(own); if (asked.length > 60) asked.shift(); res.on('finish', () => { own.status = res.statusCode; own.ms = Date.now() - own.at }) }
   const r = await worker.default.fetch(request(req, at), e)
   const body = Buffer.from(await r.arrayBuffer())
   sent.page += body.byteLength
