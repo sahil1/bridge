@@ -224,7 +224,7 @@ async function adopt(t, s) {
   proc.pid = t.pid
   const kind = s.kind || 'shell'
   const p = {
-    paneId: t.id, tabId: s.tabId, workspaceId: s.workspaceId, kind, cwd: s.cwd, model: s.model || null, effort: s.effort || null, access: s.access === 'read' || s.access === 'change' ? s.access : null, dirs: (s.access === 'read' || s.access === 'change') && s.dirs?.length ? s.dirs : null, sessionId: s.sessionId || null, account: s.account || null, env: s.env || null, proc, remote: true, term: null,
+    paneId: t.id, tabId: s.tabId, workspaceId: s.workspaceId, kind, cwd: s.cwd, model: s.model || null, effort: s.effort || null, access: s.access === 'read' || s.access === 'change' ? s.access : null, startedFull: s.access === 'full' || s.startedFull === true, dirs: (s.access === 'read' || s.access === 'change') && s.dirs?.length ? s.dirs : null, sessionId: s.sessionId || null, account: s.account || null, env: s.env || null, proc, remote: true, term: null,
     title: t.title || '', status: kind === 'shell' ? null : 'idle', seq: 0, seen: true, setupPending: false,
     startedAt: t.startedAt || Date.now(), lastOutput: t.lastOutput || 0, lastInput: 0, clients: new Set(),
   }
@@ -411,6 +411,9 @@ export async function fleet() {
     sessionId: p.sessionId, model: p.model, effort: p.effort || null, focused: false, seq: p.seq,
     // (How much it may do, as it was started: a bot's session is looked at before a turn is typed in.)
     access: p.access === 'read' || p.access === 'change' || p.access === 'owner' ? p.access : null,
+    // (Started with Full Access, so it asks before nothing: a meeting's action item waits for your OK
+    // before it goes to it, meetitems.js. Picked up from the host still running so, it still is.)
+    free: p.access === 'full' || p.startedFull === true,
     setup: p.setup?.step || null, setupUrl: p.setup?.url || null, setupKeys: p.setup?.keys || null, setupCode: p.setup?.code || null,
   }))
   const tabList = tabs.map((t) => ({

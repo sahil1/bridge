@@ -834,7 +834,21 @@ button.mt-from-chip:hover { color: var(--ink); border-color: color-mix(in srgb, 
 .mt-went.pr { color: var(--ink-2); text-decoration: none; padding: 0 7px; height: 20px; border-radius: 999px; border: 1px solid var(--line-2); }
 .mt-went.pr:hover { color: var(--ink); border-color: color-mix(in srgb, var(--accent) 40%, var(--line-2)); }
 .mt-went.pr.pr-merged { color: #8e4ec6; border-color: color-mix(in srgb, #8e4ec6 40%, var(--line-2)); }
-.mt-went.agent[data-status="blocked"], .mt-went.chief[data-status="waiting"] { color: var(--warning); }
+.mt-went.agent[data-status="blocked"], .mt-went.chief[data-status="waiting"], .mt-went.helper[data-status="blocked"], .mt-went.helper[data-status="waiting"] { color: var(--warning); }
+/* Handed on by themselves (Chief of Staff's settings): how it went over the list, and under an item
+   what you can do about where Chief of Staff put it. */
+.mt-handon { display: flex; align-items: flex-start; gap: 6px; margin: 2px 8px 6px; color: var(--ink-2); line-height: 1.45; }
+.mt-handon > svg { flex: none; margin-top: 2px; color: var(--ink-3); }
+.mt-handon > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.mt-handon.bad, .mt-handon.bad > svg { color: var(--warning); }
+.mt-item-moves { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.mt-item-moves .ghost-btn { gap: 4px; font-size: 12px; color: var(--ink-2); }
+.mt-answer { display: flex; gap: 6px; align-items: center; }
+.mt-answer input { flex: 1; min-width: 0; height: 30px; padding: 0 9px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane); color: var(--ink); font: 13px var(--font); }
+.mt-answer input:focus { outline: none; border-color: color-mix(in srgb, var(--accent) 50%, var(--line-2)); }
+.mt-answer .btn { flex: none; }
+/* What an agent that waits for your OK will be told, as it will be told it. */
+.mt-held-brief { margin: 6px 0 0; max-height: 240px; overflow: auto; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--pane-2); color: var(--ink-2); font: 12px/1.5 var(--mono, ui-monospace, monospace); white-space: pre-wrap; overflow-wrap: anywhere; }
 .mt-state-ico { flex: none; color: var(--ink-3); }
 [data-state="done"] > .mt-state-ico { color: var(--good); }
 [data-state="needs"] > .mt-state-ico { color: var(--warning); }
@@ -976,6 +990,13 @@ button.mt-from-chip:hover { color: var(--ink); border-color: color-mix(in srgb, 
 .app.narrow .mt-view .mt-item-acts .btn.small { justify-content: center; padding: 4px 8px; white-space: normal; text-align: center; line-height: 1.2; }
 .app.narrow .mt-view .mt-item-acts .btn.small svg { flex: none; }
 @media (max-width: 400px) { .app.narrow .mt-view .mt-item-acts .btn.small svg { display: none; } } /* the words fit on one line */
+/* Undo and Redirect, whole targets; the answer to Chief of Staff's question as big as the other fields. */
+.app.narrow .mt-view .mt-item-moves { gap: 6px; }
+.app.narrow .mt-view .mt-item-moves .ghost-btn { padding: 0 10px; font-size: 13px; }
+.app.narrow .mt-view .mt-item-moves .btn.small { flex: 1 1 100%; justify-content: center; white-space: normal; }
+.app.narrow .mt-view .mt-answer input { height: 40px; font-size: 16px; }
+.app.narrow .mt-view .mt-redirect .mt-start-dir { height: 40px; font-size: 16px; }
+.app.narrow .mt-view .mt-handon { margin: 2px 4px 6px; }
 
 /* The recording bar: how long and how loud on top, its buttons whole under it. */
 .app.narrow .mt-view .mt-recbar { gap: 8px; padding: 10px 12px; }

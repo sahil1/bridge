@@ -7,6 +7,7 @@ import { api, settingsChanged, refetch } from '../../api.js'
 import { useFeature } from '../../trials.js'
 import { askRestart, useRecheck } from '../PermissionFix.jsx'
 import { Advanced, Line, More } from './Advanced.jsx'
+import { runSaid } from '../meetings/handon.js'
 
 // What every part of Settings shares (useSettings: the settings, and saving a change; SaveNote: what
 // saving said), and the parts of Settings › Agents & Models › Agents that were General's: the
@@ -120,8 +121,27 @@ export function ChiefOfStaff({ s, save, agents, children }) {
           <span><b>{t('Helpers may edit in their own work folder')}</b> <span className="muted small">{t('Off: they ask before each change, as agents do.')} <More>{t('A helper the Chief of Staff starts in its task\'s own folder (work/<task> in its folder) changes files there without asking. A helper working in one of your folders still asks before each change. For helpers on {agents}; others always ask.', { agents: canEdit.join(', ') })}</More></span></span>
         </label>
       )}
+      <MeetingItems on={eff.chief?.meetingItems === true} save={(v) => save({ chief: { meetingItems: v } })} />
       {children}
     </section>
+  )
+}
+
+// A meeting's action items handed on by themselves as it ends (server/meetitems.js), and how the last
+// one went, so it's never left unsaid.
+function MeetingItems({ on, save }) {
+  const [v, set] = useSwitch(on, save)
+  const [st, setSt] = useState(null)
+  useEffect(() => { api('/chief/meeting-items').then(setSt).catch(() => setSt(null)) }, [on])
+  const said = runSaid(st?.last, { title: true })
+  return (
+    <div className="st-meet-items" data-setting="chief-meeting-items">
+      <label className="st-check">
+        <input type="checkbox" checked={v} onChange={(e) => set(e.target.checked)} />
+        <span><b>{t('Hand on action items when a meeting ends')}</b> <span className="muted small">{t('Each one for someone else goes to the agent already on it or a helper, or Chief of Staff asks you. Yours stay on the meeting.')} <More>{t('When a meeting\'s notes are written, its action items that name someone else go on Chief of Staff\'s task list, and each is placed: with the agent already on that work, with a helper, or as a question for you when it can\'t tell. Where each goes is decided by the model that writes your meeting notes, which can\'t run anything, from the agents and projects Bridge AI lists for it. Each item on the meeting says where it went, with Undo and Redirect. Agents and helpers keep their own permissions: changing files outside their folder, sending anything to anyone, spending money or deleting anything still asks you, and an agent that may work without asking first waits for your OK. Off: you send them yourself, with To Chief of Staff.')}</More></span></span>
+      </label>
+      {(v || st?.last) && <p className={said?.bad ? 'st-note warn' : 'muted small st-last'} role="status">{said ? t('Last: {what}', { what: said.text }) : t('Nothing yet: it starts with the next meeting that ends.')}</p>}
+    </div>
   )
 }
 

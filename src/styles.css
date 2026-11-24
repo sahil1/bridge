@@ -3404,6 +3404,11 @@ table.sheet tbody tr:hover td { background: var(--pane-2); }
 .cb-sum { font-size: 12.5px; color: var(--ink-3); }
 .cb-note { display: flex; align-items: center; gap: 6px; margin: 0 0 12px; font-size: 12.5px; color: var(--ink-2); }
 .cb-note.error { color: var(--critical); }
+/* How a meeting's action items were last handed on by themselves. */
+.cb-run { align-items: flex-start; flex-wrap: wrap; line-height: 1.45; }
+.cb-run > .icon, .cb-run > svg { flex: none; margin-top: 2px; color: var(--ink-3); }
+.cb-run > span { flex: 1 1 240px; min-width: 0; overflow-wrap: anywhere; }
+.cb-run.bad, .cb-run.bad > svg { color: var(--warning); }
 .cb-seg { display: none; margin-bottom: 12px; }
 .cb-seg button { gap: 5px; }
 .cb-cols { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: start; }

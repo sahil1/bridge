@@ -43,10 +43,17 @@ export const CLI = {
 // the answer alone. A version too old for the flag is asked without it from then on. Before the
 // prompt (Codex's after exec), so nothing follows it that isn't the model.
 const SAYS = { claude: ['--output-format', 'json'], codex: ['--json'] }
+// With no tools at all (noTools: what places a meeting's action items, meetitems.js): Claude Code
+// with its tools and MCP servers off. The others run as agents that can act, so they aren't asked.
+export const NO_TOOLS = { claude: ['--tools', '', '--strict-mcp-config'] }
 const refused = new Set()
-const argsFor = (kind, p, m, out) => {
+const argsFor = (kind, p, m, out, o = {}) => {
   const a = CLI[kind](p, m, out)
   if (SAYS[kind] && !refused.has(kind)) a.splice(kind === 'codex' ? 1 : 0, 0, ...SAYS[kind])
+  if (o.noTools) {
+    if (!NO_TOOLS[kind]) throw Object.assign(new Error(`${adapter(kind).label} can't be run with its tools off`), { code: 'tools' })
+    a.push(...NO_TOOLS[kind])
+  }
   return a
 }
 const flagRefused = (kind, stderr) => /unknown option|unexpected argument|unrecognized|unknown argument/i.test(stderr) && SAYS[kind].some((f) => f.startsWith('--') && stderr.includes(f))
@@ -191,11 +198,11 @@ export const isLimit = (text) => String(text || '').length < 600 && LIMIT.test(S
 // so (code 'limit'), never the limit's message passed on as the answer. extraEnv given (a
 // consultant's own settings): as it says, on that alone. { text, usage }: the answer, and what it
 // took when the agent says (SAYS), else null.
-export async function oneShot(kind, prompt, model, extraEnv = {}, signal) {
+export async function oneShot(kind, prompt, model, extraEnv = {}, signal, o = {}) {
   const ids = Object.keys(extraEnv).length || !accounts.supports(kind) ? [null] : accounts.forRun(kind)
   let last = null
   for (const id of ids) {
-    try { return await runOnce(kind, prompt, model, { ...(id ? accounts.envFor(kind, id) : {}), ...extraEnv }, signal) } catch (e) {
+    try { return await runOnce(kind, prompt, model, { ...(id ? accounts.envFor(kind, id) : {}), ...extraEnv }, signal, o) } catch (e) {
       if (e.code !== 'limit') throw e
       last = e
     }
@@ -204,16 +211,17 @@ export async function oneShot(kind, prompt, model, extraEnv = {}, signal) {
   throw last
 }
 
-function runOnce(kind, prompt, model, extraEnv = {}, signal) {
+function runOnce(kind, prompt, model, extraEnv = {}, signal, o = {}) {
   return new Promise(async (resolve, reject) => {
+    if (o.noTools && !NO_TOOLS[kind]) return reject(Object.assign(new Error(`${adapter(kind).label} can't be run with its tools off`), { code: 'tools' }))
     const bin = (await installed()).find((a) => a.kind === kind)?.path
     if (!bin) return reject(new Error(`${adapter(kind).label} isn't installed`))
     const out = path.join(os.tmpdir(), `bridge-consult-${process.pid}-${Date.now()}.txt`)
     const env = agentEnv(await loginPath(), { ...providerEnv(), ...extraEnv })
     const asked = !!SAYS[kind] && !refused.has(kind)
     const started = Date.now()
-    const child = launch(bin, argsFor(kind, prompt, model, out), { cwd: DIR(), env, timeout: TIMEOUT, maxBuffer: 8 * 1024 * 1024, windowsHide: true, signal }, (err, stdout, stderr) => {
-      if (err && asked && flagRefused(kind, String(stderr || ''))) { refused.add(kind); fs.rmSync(out, { force: true }); return runOnce(kind, prompt, model, extraEnv, signal).then(resolve, reject) }
+    const child = launch(bin, argsFor(kind, prompt, model, out, o), { cwd: DIR(), env, timeout: TIMEOUT, maxBuffer: 8 * 1024 * 1024, windowsHide: true, signal }, (err, stdout, stderr) => {
+      if (err && asked && flagRefused(kind, String(stderr || ''))) { refused.add(kind); fs.rmSync(out, { force: true }); return runOnce(kind, prompt, model, extraEnv, signal, o).then(resolve, reject) }
       let fromFile
       try { fromFile = fs.readFileSync(out, 'utf8'); fs.rmSync(out, { force: true }) } catch { /* none */ }
       const r = readRun(kind, stdout, fromFile)
