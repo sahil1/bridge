@@ -67,12 +67,13 @@ const aborted = Object.assign(new Error('The user aborted a request.'), { name: 
 ok(list.explain('openai:gpt-5', limit, named2) === limit && list.explain('openai:gpt-5', aborted, named2) === aborted && list.explain('cli:claude', unreached, named2) === unreached, 'anything else as it was: a rate limit, a stop asked for, a sign-in\'s own')
 
 // ---------- The server ----------
-// Anthropic's API here: an answer, or over its limit (busy).
+// Anthropic's API here: its list of models (not counted in asked), an answer, or over its limit (busy).
 const anth = { busy: false, asked: 0 }
 const anthSrv = http.createServer((req, res) => {
   let body = ''
   req.on('data', (c) => { body += c })
   req.on('end', () => {
+    if (req.method === 'GET' && /^\/v1\/models/.test(req.url)) { res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ data: [{ type: 'model', id: 'claude-opus-5-5', display_name: 'Claude Opus 5.5', created_at: '2026-09-21T00:00:00Z', lifecycle: 'active' }], has_more: false })) }
     anth.asked++
     // Down (the connection cut, as a provider not reached is), or turning the key down.
     if (anth.down) return req.socket.destroy()
@@ -106,7 +107,7 @@ const notes = async (title, model) => {
 const own = (job, ids) => kit.api('/settings', { jobModels: { [job]: ids } }, 'PATCH')
 const jobOf = async (id) => (await kit.api('/model-jobs')).jobs.find((j) => j.id === id)
 const openaiAsked = () => model.requests().length
-const GROQ = 'groq:llama-3.3-70b-versatile'
+const GROQ = 'groq:openai/gpt-oss-120b' // Groq's current model, as unkeyed() names it
 
 let b = null
 try {
@@ -177,7 +178,7 @@ try {
   let drawn = await kit.api('/boards/draw', { prompt: 'a flowchart of how we ship' })
   let last = (await jobOf('diagrams')).last
   ok(drawn.model === 'openai:gpt-5' && anth.asked > asked && !!drawn.mermaid, 'Diagrams: its model over its limit, so the next in its list drew it', drawn)
-  ok(last?.model === 'openai:gpt-5' && last.passed?.[0]?.id === 'anthropic:claude-opus-5-5' && /^claude-opus-5-5 · Anthropic couldn't answer: Anthropic says you're over your limit for now \(Rate limited\)/.test(last.passed[0].why), 'its last run: what drew it, and what couldn\'t and why', last)
+  ok(last?.model === 'openai:gpt-5' && last.passed?.[0]?.id === 'anthropic:claude-opus-5-5' && /^Claude Opus 5\.5 · Anthropic couldn't answer: Anthropic says you're over your limit for now \(Rate limited\)/.test(last.passed[0].why), 'its last run: what drew it, and what couldn\'t and why', last)
   await until(() => usage().some((l) => l.feature === 'board' && l.model === 'gpt-5' && l.instead === 'anthropic:claude-opus-5-5'), 5000, 200)
   const line = usage().find((l) => l.feature === 'board' && l.instead === 'anthropic:claude-opus-5-5')
   ok(!!line && /over your limit/.test(line.why), 'and the usage log: the answer that stood in, for which, and why', line)
@@ -220,7 +221,7 @@ try {
   asked = anth.asked
   let sent = ollama.sent().length
   m = await notes('No key yet')
-  ok(/^Meeting notes can't run: llama-3\.3-70b-versatile isn't set up here: no Groq key for it in Model Providers\. Set it up in Settings › Agents & Models › Model Providers, or set Meeting notes to Automatic in Settings › Agents & Models › Which Model Does What\./.test(m.summaryError || '') && !m.summaryModel, 'Meeting notes with only a model whose key isn\'t there: the meeting says it can\'t run, and why', m.summaryError)
+  ok(/^Meeting notes can't run: openai\/gpt-oss-120b isn't set up here: no Groq key for it in Model Providers\. Set it up in Settings › Agents & Models › Model Providers, or set Meeting notes to Automatic in Settings › Agents & Models › Which Model Does What\./.test(m.summaryError || '') && !m.summaryModel, 'Meeting notes with only a model whose key isn\'t there: the meeting says it can\'t run, and why', m.summaryError)
   ok(openaiAsked() === n && anth.asked === asked && ollama.sent().length === sent, 'and nothing else wrote it')
 
   // A model on this computer that can't run never goes elsewhere, unless its list says so.
@@ -262,7 +263,7 @@ try {
   const box = p.locator('[data-model-jobs]')
   const row = box.locator('li[data-job="notes"]')
   ok(/Models for Each Task/.test(await box.locator('h4').innerText()) && /Automatic/.test(await row.locator('.pv-job-model').innerText()) && (await row.locator('select').count()) === (here ? 1 : 0) && /\S/.test(await row.locator('[data-job-now]').innerText()), 'Models for Each Task: Meeting notes on Automatic, with where it runs and what it runs on now', await row.innerText())
-  ok(/Last run .* on gpt-5: llama-3\.3-70b-versatile isn't set up here: no Groq key/.test(await box.locator('li[data-job="diagrams"] [data-job-last]').innerText()), 'Diagrams\' last run: what ran it, and why the one before it couldn\'t', await box.locator('li[data-job="diagrams"]').innerText())
+  ok(/Last run .* on gpt-5: openai\/gpt-oss-120b isn't set up here: no Groq key/.test(await box.locator('li[data-job="diagrams"] [data-job-last]').innerText()), 'Diagrams\' last run: what ran it, and why the one before it couldn\'t', await box.locator('li[data-job="diagrams"]').innerText())
   await row.locator('.pv-job-model').click()
   const picker = row.locator('[data-model-pick]')
   await picker.waitFor({ timeout: 5000 })
@@ -286,7 +287,7 @@ try {
   ok((await row.locator('[data-model-pick] [data-pick="auto"]').count()) === 0, 'the picker closed')
   await row.getByRole('button', { name: 'Move gpt-5 up' }).click()
   ok(!!(await until(async () => JSON.stringify((await saved()).notes) === JSON.stringify(['openai:gpt-5', GROQ]), 8000, 200)), 'moved up: first choice', await saved())
-  await row.getByRole('button', { name: 'Remove llama-3.3-70b-versatile' }).click()
+  await row.getByRole('button', { name: 'Remove openai/gpt-oss-120b' }).click()
   ok(!!(await until(async () => JSON.stringify((await saved()).notes) === JSON.stringify(['openai:gpt-5']) && !/Can't run/.test(await row.innerText()), 8000, 200)), 'removed', await saved())
   await row.locator('.pv-job-model').click()
   await row.locator('[data-model-pick] [data-pick="auto"]').click()

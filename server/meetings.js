@@ -2433,7 +2433,8 @@ async function replyAny(use, msgs, { anywhere = false, own = null, passed = [], 
   const o = { feature: 'meetings', ...o0 }
   const once = async (id, more = {}) => {
     for (let i = 0; ; i++) {
-      try { return { ...(await helpers.reply(id, msgs, { ...o, ...more })), model: id } } catch (e) {
+      // (A model its provider has retired: its current one answered, and is the one named.)
+      try { const r = await helpers.reply(id, msgs, { ...o, ...more }); return { ...r, model: r.retired?.instead || id } } catch (e) {
         // A model on this computer that ran out of time was working, not cut off: no second go.
         // At its usage limit (on every account it has): not something a few seconds fix.
         if (i >= 2 || !passing(e) || e.code === 'too_long' || e.code === 'limit' || (isLocal(id) && /Timeout|Abort/.test(e.name))) throw e
@@ -2443,7 +2444,7 @@ async function replyAny(use, msgs, { anywhere = false, own = null, passed = [], 
   }
   const ran = (r) => { if (job) helpers.ran?.(job, r) }
   const before = use === picked ? passed : []
-  try { const r = await once(use); ran({ model: use, passed: before }); return r } catch (first) {
+  try { const r = await once(use); ran({ model: r.model, passed: r.retired ? [...before, { id: use, why: helpers.retiredWhy?.(r.retired) || 'retired' }] : before }); return r } catch (first) {
     const failed = modelList.failed(use, first)
     const rest = modelList.after(own, use)
     if (first.code === 'too_long' && (rest || !(anywhere && isLocal(use)))) { ran({ passed: [...before, failed], error: failed.why }); throw first }

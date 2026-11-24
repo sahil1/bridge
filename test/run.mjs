@@ -148,6 +148,7 @@ const SUITES = [
   { name: 'room-voices', build: null, covers: [/^server\/(voices|speech|asr|asr-worker|machine|meetings)\.js$/, /^test\/stand-ins\/(sherpa\.cjs|model\.mjs)$/] },
   { name: 'builtin-model', build: 'dist', browser: true, covers: [/^server\/(llm|chatmodels|consult|meetings|machine|index)\.js$/, /^src\/components\/settings\/(Providers|Dictation)\.jsx$/, /^scripts\/llama\.js$/, /^test\/stand-ins\/llama-server\.mjs$/] },
   { name: 'local-models', build: null, covers: [/^server\/(chatmodels|consult|meetings|insights|pr|providers|index)\.js$/, /^test\/stand-ins\/local-model\.mjs$/] },
+  { name: 'model-lists', build: 'dist', browser: true, covers: [/^server\/(livemodels|chatmodels|consult|modellist|providers|meetings|agents|commands|prices|index)\.js$/, /^src\/components\/settings\/Providers\.jsx$/] },
   { name: 'model-jobs', build: 'dist', browser: true, covers: [/^server\/(modeljobs|modellist|botanswer|chatmodels|usagelog|meetings|meetprep|boards|signing|mailassist|pr|index)\.js$/, /^src\/components\/settings\/(Providers\.jsx|providers\.css|search\.js)$/, /^test\/stand-ins\/(model|local-model)\.mjs$/] },
   { name: 'speech', build: null, covers: [/^server\/(speech|voice|asr|asr-worker|machine|meetmemory|meetings)\.js$/, /^test\/stand-ins\/(sherpa|whisper-cli)\.cjs$/] },
   { name: 'transcribe-files', build: null, covers: [/^server\/(meetfiles|audiofile|meetings|speech|asr|asr-worker|voices|machine|index)\.js$/, /^shared\/telemetry-schema\.json$/, /^test\/stand-ins\/(afconvert|sherpa)\.cjs$/, /^test\/lib\/harness\.mjs$/] },

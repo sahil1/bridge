@@ -4,11 +4,12 @@
 // providers you pay by the token with a key you saved: a plan (a sign-in), a cloud (Azure,
 // Bedrock and Vertex price by contract and region) and a model on this computer have no cost, and
 // a model not listed here says so rather than guess. OpenRouter says each answer's cost itself.
-export const AS_OF = '2026-10'
+export const AS_OF = '2026-11'
 
 // [route, model name or the start of one, [in, out, cache read]]. The longest name that fits wins,
 // so "gpt-5-mini" isn't priced as "gpt-5", and a dated name ("claude-sonnet-4-5-20250929") as its model.
 const TABLE = [
+  ['anthropic', 'claude-fable-5-2', [8, 40, 0.2]],
   ['anthropic', 'claude-fable-5-1', [10, 50, 0.25]],
   ['anthropic', 'claude-fable-5', [10, 50, 1]],
   ['anthropic', 'claude-opus-5-5', [4, 20, 0.2]],
@@ -27,6 +28,8 @@ const TABLE = [
   ['anthropic', 'claude-haiku-5-5', [0.1, 0.5, 0.01]],
   ['anthropic', 'claude-haiku-4-5', [1, 5, 0.1]],
   ['anthropic', 'claude-3-5-haiku', [0.8, 4, 0.08]],
+  ['openai', 'gpt-6.2-astra', [8, 40, 0.4]],
+  ['openai', 'gpt-6.2-sol', [2, 10, 0.1]],
   ['openai', 'gpt-5', [1.25, 10, 0.125]],
   ['openai', 'gpt-5.1', [1.25, 10, 0.125]],
   ['openai', 'gpt-5-mini', [0.25, 2, 0.025]],
@@ -41,12 +44,15 @@ const TABLE = [
   ['openai', 'o3-mini', [1.1, 4.4, 0.55]],
   ['openai', 'o3-pro', [20, 80, 20]],
   ['openai', 'o4-mini', [1.1, 4.4, 0.275]],
+  ['xai', 'grok-4.7', [2, 6, 0.5]],
   ['xai', 'grok-4', [3, 15, 0.75]],
   ['xai', 'grok-4-fast', [0.2, 0.5, 0.05]],
   ['xai', 'grok-4-1-fast', [0.2, 0.5, 0.05]],
   ['xai', 'grok-3', [3, 15, 0.75]],
   ['xai', 'grok-3-mini', [0.3, 0.5, 0.075]],
   ['xai', 'grok-code-fast-1', [0.2, 1.5, 0.02]],
+  ['gemini', 'gemini-4-neon', [3, 15, 0.15]],
+  ['gemini', 'gemini-4-hydrogen', [1.5, 7.5, 0.075]],
   ['gemini', 'gemini-2.5-pro', [1.25, 10, 0.31]],
   ['gemini', 'gemini-2.5-flash', [0.3, 2.5, 0.03]],
   ['gemini', 'gemini-2.5-flash-lite', [0.1, 0.4, 0.01]],

@@ -2173,9 +2173,11 @@ meetFiles.recover()
 if (cfg.setupDone) projects.upgrading()
 // The model notes are written with when you haven't picked one: your Claude sign-in first (no key
 // needed), then another sign-in, a key, your cloud, a model on this computer (your own Ollama's or
-// LM Studio's before the local model built in, which is only there once you've downloaded it).
+// LM Studio's before the local model built in, which is only there once you've downloaded it). A
+// provider's usual model before its others (more: chatmodels.js), so falling back goes to another
+// provider before a second model of the same one.
 const VIA_ORDER = ['sign-in', 'key', 'cloud', 'local']
-const rank = (m) => (m.id === 'cli:claude' ? -1 : VIA_ORDER.indexOf(m.via) + (m.builtin ? 0.5 : 0))
+const rank = (m) => (m.id === 'cli:claude' ? -1 : VIA_ORDER.indexOf(m.via) + (m.builtin ? 0.5 : 0) + (m.more ? VIA_ORDER.length : 0))
 const ranked = async () => [...await chatModels.models().catch(() => [])].sort((a, b) => rank(a) - rank(b))
 async function pickMeetingModel() { return (await ranked())[0]?.id || null }
 // The models to fall back on when the one picked can't be reached, in the same order.
@@ -2246,10 +2248,12 @@ function replyFor(job) {
     const ready = at >= 0 ? await chatModels.models().catch(() => []) : []
     const before = at > 0 ? own.slice(0, at).map((x) => ({ id: x, why: modelList.whyNot(x, ready, providerName) })).filter((x) => x.why) : []
     try {
+      // (One its provider has retired: its current model answered, said in the job's last run.)
       const r = await chatModels.reply(id, msgs, opts)
-      modelJobs.ran(job, { model: id, passed: before })
-      reply.used = id
-      return { ...r, model: id }
+      const used = r.retired?.instead || id
+      modelJobs.ran(job, { model: used, passed: r.retired ? [...before, { id, why: chatModels.retiredWhy(r.retired) }] : before })
+      reply.used = used
+      return { ...r, model: used }
     } catch (raw) {
       // Said as what happened and what to do (its provider not reached, too slow, its key turned
       // down: modellist.js explain), the same for every job; "fetch failed" was all AI Assist said.
@@ -2284,7 +2288,7 @@ app.get('/api/model-jobs', wrap(async () => {
   const limit = local ? await localLimit(local) : null
   const name = (m) => (m ? { id: m.id, label: m.label, provider: m.provider || null } : null)
   const anyHere = !!(await localFor(list, { any: true }))
-  const entry = (id) => { const m = list.find((x) => x.id === id); return { id, label: m?.label || modelList.labelOf(id), provider: m?.provider || providerName(id.split(':')[0]), route: id.split(':')[0], local: modelList.isLocal(id), why: modelList.whyNot(id, list, providerName) } }
+  const entry = (id) => { const m = list.find((x) => x.id === id); return { id, label: m?.label || modelList.labelOf(id), provider: m?.provider || providerName(id.split(':')[0]), route: id.split(':')[0], local: modelList.isLocal(id), why: modelList.whyNot(id, list, providerName), retired: chatModels.retiredInfo(id) } }
   return {
     jobs: modelJobs.JOBS.filter((j) => j.id !== 'mail' || IS_MAC).map((j) => ({
       id: j.id, label: j.label, about: j.about, set: modelJobs.setting(cfg, j.id), cloudBetter: !!j.cloud, canLocal: j.id !== 'live' || !!st?.onGpu || !!(local && !local.builtin),
@@ -2294,10 +2298,24 @@ app.get('/api/model-jobs', wrap(async () => {
     limit: limit ? { tokens: limit.tokens, minutes: Math.floor(limit.tokens / modelJobs.PER_MINUTE), by: limit.by } : null,
     offered: !!st?.offered, missing: await llm.whyNot().catch(() => null),
     models: list.map((m) => ({ id: m.id, label: m.label, provider: m.provider, via: m.via, route: m.id.split(':')[0] })), unkeyed: chatModels.unkeyed(), most: modelJobs.MOST,
+    retired: retiredPicks(),
   }
 }))
+// The models you picked outside a job's own list (whose rows say it of each: retired) that their
+// providers have retired, each with where it was picked and what answers in its place
+// (chatmodels.js retiredInfo), for Settings to say: AI Assist in Studio and in a folder, Tidy what I
+// say, and the Chief of Staff's questions to a provider ("consult": { "models": … } in your config).
+function retiredPicks() {
+  const where = new Map()
+  const add = (id, place) => { if (typeof id === 'string' && id.includes(':')) where.set(id, [...new Set([...(where.get(id) || []), place])]) }
+  add(cfg.studio?.model, 'Studio')
+  add(cfg.filesAssist?.model, 'AI Assist in a folder')
+  add(cfg.dictation?.tidyModel, 'Tidy what I say')
+  for (const [api, m] of Object.entries(cfg.consult?.models || {})) if (typeof m === 'string' && m && api !== 'local' && api !== 'ollama') add(`${api}:${m}`, 'Chief of Staff')
+  return [...where].map(([id, places]) => { const r = chatModels.retiredInfo(id); return r && { ...r, where: places, why: chatModels.retiredWhy(r) } }).filter(Boolean)
+}
 meetings.setHelpers({
-  reply: (id, msgs, o) => chatModels.reply(id, msgs, o), pickModel: pickMeetingModel, pickFor, models: meetingModels, mailRelated: (o) => mail.related(o), mailMessage: (id) => mail.message(id),
+  reply: (id, msgs, o) => chatModels.reply(id, msgs, o), retiredWhy: (g) => chatModels.retiredWhy(g), pickModel: pickMeetingModel, pickFor, models: meetingModels, mailRelated: (o) => mail.related(o), mailMessage: (id) => mail.message(id),
   // A kind of job's own list, and each of its runs, for its row in Settings › Model Providers
   // (modeljobs.js).
   ownOf: (job) => modelJobs.listOf(cfg, job), ran: (job, r) => modelJobs.ran(job, r),

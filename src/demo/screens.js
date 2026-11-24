@@ -103,7 +103,7 @@ function gemini(a) {
     else if (m.role === 'tool') out.push('', gray(`╭${'─'.repeat(COLS - 2)}╮`), `${gray('│')} ${green('✓')} ${bold('Shell')} ${fit(m.hint, COLS - 14)}`, gray(`╰${'─'.repeat(COLS - 2)}╯`))
   }
   if (a.status === 'working') out.push('', `${orange('⠋')} ${a.doing || 'Working'} ${gray('(esc to cancel)')}`)
-  out.push('', gray(`╭${'─'.repeat(COLS - 2)}╮`), `${gray('│')} ${blue('>')} ${a.draft || gray('Type your message')}`, gray(`╰${'─'.repeat(COLS - 2)}╯`), gray(' ~/code/docs-site (main)        no sandbox        gemini-3-pro'))
+  out.push('', gray(`╭${'─'.repeat(COLS - 2)}╮`), `${gray('│')} ${blue('>')} ${a.draft || gray('Type your message')}`, gray(`╰${'─'.repeat(COLS - 2)}╯`), gray(' ~/code/docs-site (main)        no sandbox        gemini-4-neon'))
   return out
 }
 

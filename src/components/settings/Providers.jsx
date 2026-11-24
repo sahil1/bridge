@@ -267,6 +267,12 @@ function Editor({ p, labels, installedSet, onSaved }) {
           <div>{p.models.slice(0, 12).map((m) => <code key={m}>{m}</code>)}{p.models.length > 12 && <span className="muted small"> {t('and {n} others', { n: p.models.length - 12 })}</span>}</div>
         </div>
       )}
+      {/* Its own list of models (server/livemodels.js): when it was last had, or why it couldn't be. */}
+      {p.list && (p.list.error
+        ? <p className="pv-note small pv-local-warn" data-model-list="error">{p.list.at
+          ? t('Couldn\'t ask {name} for its models again ({error}): its list from {when} is shown where you pick a model.', { name: p.name, error: p.list.error, when: ago(p.list.at) })
+          : t('Couldn\'t get {name}\'s list of models ({error}), so its usual ones are shown where you pick a model.', { name: p.name, error: p.list.error })}</p>
+        : p.list.at && <p className="pv-note small muted" data-model-list="ok">{t('Models from {name}\'s own list, {when}. It\'s asked again every few hours.', { name: p.name, when: ago(p.list.at) })}</p>)}
 
       <div className="pv-actions">
         {p.keyUrl && <a className="ghost-btn strong" href={p.keyUrl} target="_blank" rel="noreferrer">
@@ -400,7 +406,7 @@ function ModelPick({ d, taken = [], auto = false, onPick, onAuto = null, onKey, 
   const groups = []
   const group = (name, local) => { let g = groups.find((x) => x.name === name); if (!g) { g = { name, local, items: [] }; groups.push(g) } return g }
   for (const m of d.models || []) if (hits(m.label, m.provider, m.id)) group(m.provider, m.via === 'local').items.push({ id: m.id, label: m.label, provider: m.provider, route: m.route })
-  for (const u of d.unkeyed || []) if (hits(u.label, u.model, u.route)) group(u.label, false).items.push(u.model ? { id: u.model, label: u.model.split(':').slice(1).join(':'), provider: u.label, route: u.route, nokey: true } : { id: null, provider: u.label, route: u.route, nokey: true })
+  for (const u of d.unkeyed || []) if (hits(u.label, u.model, u.route)) group(u.label, false).items.push(u.model ? { id: u.model, label: u.name || u.model.split(':').slice(1).join(':'), provider: u.label, route: u.route, nokey: true } : { id: null, provider: u.label, route: u.route, nokey: true })
   const showAuto = onAuto && hits(t('Automatic'))
   return (
     <div className="pv-pick" data-model-pick onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); onClose() } }}>
@@ -479,6 +485,10 @@ function ModelJobs({ stamp, providers = [], labels, installedSet, onSaved }) {
     <section className="pv-sec pv-jobs" data-setting="model-jobs" data-model-jobs>
       <h4>{t('Models for Each Task')}</h4>
       {err && <p className="pv-note pv-err">{err}</p>}
+      {/* A model picked elsewhere (Studio, a folder's AI Assist, Tidy what I say, the Chief of Staff) that its provider has retired. */}
+      {d.retired?.map((r) => (
+        <p key={r.id} className="pv-note small pv-local-warn" data-retired-pick={r.id}>{t('{why}. Picked for {where}: pick another there to change it.', { why: r.why, where: r.where.join(', ') })}</p>
+      ))}
       <ul className="pv-jobs-list">
         {d.jobs.map((j) => {
           const [label, about] = JOB_TEXT[j.id] || [j.label, j.about]
@@ -524,6 +534,7 @@ function ModelJobs({ stamp, providers = [], labels, installedSet, onSaved }) {
                             <span className="muted small">{i === 0 ? t('first choice') : t('fallback')}</span>
                             {leaves && <span className="muted small pv-job-full">{t('Leaves this computer only when the ones above can\'t run.')}</span>}
                             {e.why && <span className="small pv-local-warn pv-job-full" data-why>{nokey ? t('No {provider} key yet.', { provider: nokey.name }) : e.why}</span>}
+                            {!e.why && e.retired && <span className="small pv-local-warn pv-job-full" data-retired>{e.retired.how === 'refused' ? t('{provider} doesn\'t serve it any more: {model}, its current model, answers in its place.', { provider: e.retired.provider, model: e.retired.insteadLabel }) : t('Retired by {provider}: {model}, its current model, answers in its place.', { provider: e.retired.provider, model: e.retired.insteadLabel })}</span>}
                           </span>
                           <span className="pv-job-entry-acts">
                             {nokey && <button type="button" className="ghost-btn strong" onClick={() => setKeyOf(keyOf?.job === j.id && keyOf.route === e.route ? null : { job: j.id, route: e.route })} aria-expanded={!!key && keyOf.route === e.route}>{t('Add a key')}</button>}

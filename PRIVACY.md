@@ -55,8 +55,9 @@ under GitHub's terms. Unless you turn crash reports off
 How much of your plan is left is off until you turn it on (the Usage card, or Settings › General).
 Then Bridge AI asks each agent's own provider, with the sign-in that agent uses on your computer,
 through quota-axi. If you add an API key for a model provider (Settings › Model Providers),
-Bridge AI uses it to check the key and, when you or the chief of staff ask, to put a question to
-that model. Both go straight from your computer to that provider.
+Bridge AI uses it to check the key and the provider's list of models (asked again every few hours)
+and, when you or the chief of staff ask, to put a question to that model.
+Both go straight from your computer to that provider.
 
 Who said what in a room (a meeting with your mic only) is worked out on your computer by a small
 voice model you download from Hugging Face the first time you ask for it. What it works out from

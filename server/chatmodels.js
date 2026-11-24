@@ -6,8 +6,10 @@
 //     (Azure OpenAI, AWS Bedrock, Google Vertex AI);
 //   a model server on this computer (Ollama, LM Studio), or the local model built into Bridge AI
 //     (llm.js), once you've downloaded it.
-// A model is named "<route>:<model>": "cli:gemini", "openai:gpt-5", "ollama:llama3.2". Any model
-// the provider has can be used by name, not only the ones listed.
+// A model is named "<route>:<model>": "cli:gemini", "openai:gpt-6.2-sol", "ollama:llama3.2". With a
+// key saved, a provider's models are the ones its own list has now (livemodels.js), else a short list
+// of its current ones; any model the provider has can be used by name, not only the ones listed. One
+// it has retired answers with its current model instead, and says so (reply's retired).
 //
 // The conversation goes in as [{ role: 'user'|'assistant'|'tool', text, calls?, id?, name?, error? }]:
 // an assistant turn may call tools (calls: [{ id, name, args }]) and each call's result comes back
@@ -31,6 +33,7 @@ import { installed, adapter, loginPath } from './agents.js'
 import { providerEnv, subscriptions, keysStamp } from './providers.js'
 import { moreOn, hiddenModel, OFF } from './labs.js'
 import { machine } from './machine.js'
+import { NOT_CHAT, SOURCES, listOf, listed, nameOf, retired, learnGone, unknownModel } from './livemodels.js'
 import * as llm from './llm.js'
 import * as usagelog from './usagelog.js'
 import * as counts from './counts.js'
@@ -42,25 +45,19 @@ const env = () => ({ ...process.env, ...providerEnv() })
 const trim = (u) => String(u || '').replace(/\/+$/, '')
 
 // OpenAI-style routes beyond consult.js's (whose default model each has), from Settings › Model
-// providers. Their models come from the provider's own list, or a short one where there's none.
+// providers. Their models come from the provider's own list (livemodels.js SOURCES), else fallback
+// (a short one), or only fixed where there's no list to ask.
 const MORE = {
-  moonshot: { label: 'Moonshot AI (Kimi)', base: () => 'https://api.moonshot.ai/v1', key: 'MOONSHOT_API_KEY' },
+  moonshot: { label: 'Moonshot AI (Kimi)', base: () => 'https://api.moonshot.ai/v1', key: 'MOONSHOT_API_KEY', fallback: ['kimi-k3.1-pro', 'kimi-k3'] },
   together: { label: 'Together AI', base: () => 'https://api.together.xyz/v1', key: 'TOGETHER_API_KEY' },
   fireworks: { label: 'Fireworks AI', base: () => 'https://api.fireworks.ai/inference/v1', key: 'FIREWORKS_API_KEY' },
   cerebras: { label: 'Cerebras', base: () => 'https://api.cerebras.ai/v1', key: 'CEREBRAS_API_KEY' },
   // Cohere's OpenAI-compatible API has no model list: its own API does.
-  cohere: {
-    label: 'Cohere', base: () => 'https://api.cohere.ai/compatibility/v1', key: 'COHERE_API_KEY',
-    list: (k) => getJSON('https://api.cohere.com/v1/models?endpoint=chat&page_size=100', { authorization: `Bearer ${k}` }).then((j) => (j.models || []).filter((m) => !m.is_deprecated).map((m) => m.name)),
-    fallback: ['command-a-03-2025'],
-  },
+  cohere: { label: 'Cohere', base: () => 'https://api.cohere.ai/compatibility/v1', key: 'COHERE_API_KEY', fallback: ['command-a-plus-05-2026', 'command-a-03-2025'] },
   // A Coding Plan key has its own base URL (Settings › Model Providers › Z.ai).
   zai: { label: 'Z.ai (GLM)', base: () => trim(env().ZAI_BASE_URL) || 'https://api.z.ai/api/paas/v4', key: 'ZAI_API_KEY', fixed: ['glm-5.3', 'glm-5.3-flash', 'glm-4.7'] },
   // Models any live provider serves; "org/model:provider" picks one.
-  huggingface: {
-    label: 'Hugging Face', base: () => 'https://router.huggingface.co/v1', key: 'HF_TOKEN',
-    list: (k) => getJSON('https://router.huggingface.co/v1/models', { authorization: `Bearer ${k}` }).then((j) => (j.data || []).filter((m) => (m.providers || []).some((p) => p.status === 'live')).map((m) => m.id)),
-  },
+  huggingface: { label: 'Hugging Face', base: () => 'https://router.huggingface.co/v1', key: 'HF_TOKEN' },
 }
 const LMSTUDIO = () => trim(env().LM_STUDIO_BASE_URL || 'http://127.0.0.1:1234/v1')
 const OLLAMA = () => { const h = env().OLLAMA_HOST || 'http://127.0.0.1:11434'; return trim(/^https?:\/\//.test(h) ? h : `http://${h}`) }
@@ -78,8 +75,6 @@ const postJSON = async (url, body, ms = 2500) => {
   if (!r.ok) throw new Error(`HTTP ${r.status}`)
   return r.json()
 }
-// Not chat models, in an OpenAI-style model list.
-const NOT_CHAT = /embed|whisper|tts|dall-e|audio|realtime|moderation|image|transcri|search|davinci|babbage|rerank|guard|vision-preview/i
 // Ollama's embedding models (nomic-embed-text, all-minilm, bge-m3) are BERT-family: they can't chat.
 const ollamaChats = (m) => !NOT_CHAT.test(m.name) && !/bert$/i.test(m.details?.family || '')
 
@@ -204,8 +199,12 @@ const vertex = () => {
   const loc = e.GOOGLE_CLOUD_LOCATION || 'global'
   return { project: e.GOOGLE_CLOUD_PROJECT, loc, root: `https://${loc === 'global' ? '' : `${loc}-`}aiplatform.googleapis.com/v1/projects/${e.GOOGLE_CLOUD_PROJECT}/locations/${loc}` }
 }
-// No model list on Vertex's OpenAI-compatible endpoint: the ones its docs use. Others by name.
-const VERTEX_MODELS = [['google/gemini-3.5-flash', 'Gemini 3.5 Flash'], ['claude-opus-5-5', 'Claude Opus 5.5'], ['claude-sonnet-5-5', 'Claude Sonnet 5.5'], ['claude-haiku-5-5', 'Claude Haiku 5.5']]
+// No model list on Vertex's OpenAI-compatible endpoint (Model Garden's is every publisher's whole
+// catalogue, not your project's): Google's and Anthropic's current ones on Vertex, as their model
+// pages name them (docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/model-versions,
+// platform.claude.com/docs/en/about-claude/models/overview), the first the one a retired pick falls
+// back on. Others by name.
+const VERTEX_MODELS = [['google/gemini-4-hydrogen', 'Gemini 4 Hydrogen'], ['google/gemini-4-carbon', 'Gemini 4 Carbon'], ['claude-opus-5-5', 'Claude Opus 5.5'], ['claude-sonnet-5-5', 'Claude Sonnet 5.5'], ['claude-haiku-5-5', 'Claude Haiku 5.5']]
 async function vertexHeaders() {
   const t = await googleToken()
   return { authorization: `Bearer ${t.value}`, ...(t.user ? { 'x-goog-user-project': t.quota || vertex().project } : {}) }
@@ -213,10 +212,24 @@ async function vertexHeaders() {
 
 // ---------- The list ----------
 let cache = { at: 0, list: null, keys: 0 }
-// Every model you can talk to right now: [{ id, label, provider, via }], subscriptions first.
-// via: 'sign-in' (an agent's one-shot mode, no tools), 'key', 'cloud' or 'local'.
-// Kept a minute, or until a key is saved or removed. The more models (labs.js) only when they're
-// on, wherever they're served.
+// Where a provider's list is asked (livemodels.js): its own API's address, or another server's at
+// OPENAI_BASE_URL (custom: its models whatever they're called).
+const listBase = (route) => (route === 'openai' ? trim(env().OPENAI_BASE_URL || API.openai.base) : route === 'anthropic' ? anthropicUrl() : MORE[route] ? MORE[route].base() : API[route]?.base || '')
+// A key's models, as the list shows them: its provider's own list, else its short one (consult.js
+// API's model and also; MORE's fixed or fallback). The usual one first; the rest more: true, so
+// what's picked for you (index.js ranked) still takes one from each provider before a second.
+// Never one the provider has retired.
+async function keyModels(route, key, { label, first = null, short = [], keep = false }) {
+  const live = SOURCES[route] ? await listOf(route, { key, base: listBase(route), custom: route === 'openai' && !!env().OPENAI_BASE_URL, first }).catch(() => null) : null
+  let l = (live || [first, ...short].filter(Boolean).map((id) => ({ id }))).filter((m) => m.id && !NOT_CHAT.test(m.id) && !retired(route, m.id))
+  if (keep && first && !l.some((m) => m.id === first)) l = [{ id: first }, ...l]
+  return l.map((m, i) => ({ id: `${route}:${m.id}`, label: m.label || nameOf(m.id) || m.id, provider: label, via: 'key', ...(i ? { more: true } : {}) }))
+}
+// Every model you can talk to right now: [{ id, label, provider, via, more? }], subscriptions first.
+// via: 'sign-in' (an agent's one-shot mode, no tools), 'key', 'cloud' or 'local'. more: a key's
+// model after the provider's usual one.
+// Kept a minute, or until a key is saved or removed (a provider's own list longer: livemodels.js).
+// The more models (labs.js) only when they're on, wherever they're served.
 export async function models({ fresh = false } = {}) {
   if (!fresh && cache.list && cache.keys === keysStamp() && cache.more === moreOn() && cache.llm === llm.listStamp() && Date.now() - cache.at < 60 * 1000) return cache.list
   const out = []
@@ -225,18 +238,15 @@ export async function models({ fresh = false } = {}) {
   for (const kind of Object.keys(CLI)) {
     if (have.has(kind) && !signedOut.has(kind)) out.push({ id: `cli:${kind}`, label: VIA[kind] || adapter(kind).label, provider: `Your ${adapter(kind).label} sign-in`, via: 'sign-in' })
   }
-  for (const [id, a] of Object.entries(API)) {
-    if (a.local || !keyFor(a)) continue
-    out.push({ id: `${id}:${a.model}`, label: a.model, provider: PROVIDER[id] || a.label, via: 'key' })
-  }
   const e = env()
+  const keyed = await Promise.all(Object.entries(API).filter(([, a]) => !a.local && keyFor(a)).map(([id, a]) => keyModels(id, keyFor(a), { label: PROVIDER[id] || a.label, first: a.model, short: a.also || [], keep: !!a.keep })))
+  for (const l of keyed) out.push(...l)
   const az = azure()
   if (az.key && az.endpoint) for (const d of az.deployments) out.push({ id: `azure:${d}`, label: d, provider: PROVIDER.azure, via: 'cloud' })
   const v = vertex()
   if (v.project) for (const [id, label] of VERTEX_MODELS) out.push({ id: `vertex:${id}`, label, provider: PROVIDER.vertex, via: 'cloud' })
   const lists = await Promise.all([
-    ...Object.entries(MORE).filter(([, m]) => e[m.key]).map(([id, m]) => (m.fixed ? Promise.resolve(m.fixed) : (m.list || ((k) => getJSON(`${m.base()}/models`, { authorization: `Bearer ${k}` }).then((j) => (j.data || []).map((x) => x.id))))(e[m.key]).catch(() => m.fallback || []))
-      .then((ids) => ids.filter((x) => x && !NOT_CHAT.test(x)).slice(0, 30).map((x) => ({ id: `${id}:${x}`, label: x, provider: m.label, via: 'key' })))),
+    ...Object.entries(MORE).filter(([, m]) => e[m.key]).map(([id, m]) => (m.fixed ? m.fixed.map((x) => ({ id: `${id}:${x}`, label: nameOf(x) || x, provider: m.label, via: 'key' })) : keyModels(id, e[m.key], { label: m.label, first: m.fallback?.[0] || null, short: m.fallback?.slice(1) || [] }))),
     awsReady() ? bedrockModels().then((l) => l.map((m) => ({ id: `bedrock:${m.id}`, label: m.label, provider: PROVIDER.bedrock, via: 'cloud' }))).catch(() => []) : [],
     getJSON(`${OLLAMA()}/api/tags`, {}, 1200).then((j) => (j.models || []).filter(ollamaChats).map((m) => ({ id: `ollama:${m.name}`, label: m.name, provider: PROVIDER.ollama, via: 'local' }))).catch(() => []),
     getJSON(`${LMSTUDIO()}/models`, {}, 1200).then((j) => (j.data || []).map((m) => m.id).filter((x) => x && !NOT_CHAT.test(x)).map((x) => ({ id: `lmstudio:${x}`, label: x, provider: PROVIDER.lmstudio, via: 'local' }))).catch(() => []),
@@ -252,14 +262,14 @@ export async function models({ fresh = false } = {}) {
 
 // The providers a key would reach, with none saved yet, for a job's model to be picked from before
 // its key is there (Settings › Model Providers): [{ route, label, model }], model the one it uses
-// unless told ("groq:llama-3.3-70b-versatile"), or null where only its key's list says.
+// unless told ("groq:openai/gpt-oss-120b"), or null where only its key's list says. name: that model's name.
 export function unkeyed() {
   const e = env()
   const out = []
-  for (const [id, a] of Object.entries(API)) if (!a.local && !keyFor(a)) out.push({ route: id, label: PROVIDER[id] || a.label, model: `${id}:${a.model}` })
+  for (const [id, a] of Object.entries(API)) if (!a.local && !keyFor(a)) out.push({ route: id, label: PROVIDER[id] || a.label, model: `${id}:${a.model}`, name: nameOf(a.model) || a.model })
   for (const [id, m] of Object.entries(MORE)) {
     const first = (m.fixed || m.fallback || [])[0]
-    if (!e[m.key]) out.push({ route: id, label: m.label, model: first ? `${id}:${first}` : null })
+    if (!e[m.key]) out.push({ route: id, label: m.label, model: first ? `${id}:${first}` : null, ...(first ? { name: nameOf(first) || first } : {}) })
   }
   return out.filter((x) => !hiddenModel(x.model || `${x.route}:`))
 }
@@ -305,16 +315,23 @@ const parseArgs = (s) => { if (s && typeof s === 'object') return s; try { retur
 // ---------- Pictures ----------
 const pictures = (m) => (m.role === 'user' && Array.isArray(m.images) ? m.images.filter((u) => /^data:image\/(png|jpeg|webp);base64,/.test(u)) : [])
 // Whether a model can look at a picture. A model on this computer says so itself (Ollama's
-// capabilities, LM Studio's), asked once; others are known by name. A sign-in's one-shot mode takes
-// words only, and so does the local model built in (it runs without Gemma's picture part).
-const SEES = /claude|gpt-4o|gpt-4\.1|gpt-5|\bo[34]\b|o[34]-|gemini|grok-(2-vision|4)|pixtral|llava|vision|[-_.]vl\b|vl[-:]|qwen[\d.]*-?vl|gemma-?3|minicpm-v|moondream|llama-?4|mistral-(small|medium)-3|nova-(pro|lite|premier)|glm-4\.\dv/i
+// capabilities, LM Studio's), asked once; one in a provider's list that says so (Anthropic's, xAI's)
+// as it says; others are known by name. A sign-in's one-shot mode takes words only, and so does the
+// local model built in (it runs without Gemma's picture part).
+// By name, from each provider's models page (November 2026): every Claude and Gemini; OpenAI's
+// GPT-4o, GPT-4.1, GPT-5 and GPT-6 families (not gpt-oss) and o3/o4; xAI's Grok 4 and later
+// (grok-4.7: "text, image"); Mistral's Small, Medium and Large 3 and 4 (and their -latest), Ministral
+// 3 and Pixtral; Meta's Llama 4 and Muse models; DeepSeek's Flash; Kimi K3; Cohere's Command A Plus
+// and Vision; GLM-5.3 Flash; and the open vision models.
+const SEES = /claude|gpt-4o|gpt-4\.1|gpt-([5-9]|\d{2})(\.\d+)?(-|$)|\bo[34]\b|o[34]-|gemini|grok-(2-vision|[4-9])|pixtral|llava|vision|[-_.]vl\b|vl[-:]|qwen[\d.]*-?vl|gemma-?3|minicpm-v|moondream|llama-?4|muse-(spark|wonder|ember)|mistral-(small|medium|large)-(3|4|latest)|ministral-\d+b-2512|deepseek-(v4\.1-)?flash|kimi-k3|command-a-(plus|vision)|glm-5(\.\d)?-flash|nova-(pro|lite|premier)|glm-4\.\dv/i
 const seeing = new Map()
 export async function canSee(id) {
   const [route, ...rest] = String(id || '').split(':')
   const model = rest.join(':')
   if (!model || route === 'cli' || route === 'bridge') return false
   if (seeing.has(id)) return seeing.get(id)
-  let yes = SEES.test(model)
+  const said = listed(route, model)?.sees
+  let yes = typeof said === 'boolean' ? said : SEES.test(model)
   if (route === 'ollama' || route === 'lmstudio') yes = await localInfo(id).then((i) => i?.vision ?? yes).catch(() => yes)
   seeing.set(id, yes)
   return yes
@@ -681,14 +698,59 @@ export const SMALLEST = 8192
 // instead: { of, why }, the model it answers for, which couldn't (a job's fallback: modeljobs.js).
 // noTools: with no tools at all, a sign-in's one-shot mode too (what places a meeting's action items,
 // meetitems.js): one that can't be run so refuses (code 'tools').
+// A model its provider has retired (livemodels.js retired) answers with the provider's current one
+// (insteadOf), and so does one the provider says it doesn't know (a 404) when its current one then
+// answers, which is remembered (learnGone): the answer says so, in retired ({ id, since, how,
+// instead, provider, label, insteadLabel }), for the job to note and Settings to show.
 export async function reply(id, messages, { signal, tools, system = SYSTEM, json = null, think = false, feature = null, instead = null, noTools = false } = {}) {
   if (hiddenModel(id)) throw new Error(OFF)
   const started = Date.now()
-  const { usage, ...r } = await answer(id, messages, { signal, tools: canUseTools(id) && !noTools ? tools : null, system, json, think, noTools })
-  usagelog.record({ id, feature, usage, ms: Date.now() - started, instead })
+  const ask = (m) => answer(m, messages, { signal, tools: canUseTools(m) && !noTools ? tools : null, system, json, think, noTools })
+  let gone = retiredInfo(id)
+  let use = gone?.instead || id
+  let got
+  try { got = await ask(use) } catch (e) {
+    const [route, ...rest] = String(id || '').split(':')
+    const other = !gone && unknownModel(e) && !signal?.aborted ? insteadOf(route) : null
+    if (!other || other === id) throw e
+    try { got = await ask(other) } catch { throw e }
+    learnGone(route, rest.join(':'), e.message)
+    gone = retiredInfo(id)
+    use = other
+  }
+  const { usage, ...r } = got
+  usagelog.record({ id: use, feature, usage, ms: Date.now() - started, instead: instead || (gone ? { of: id, why: retiredWhy(gone) } : null) })
   // The usage counts, when they're shared: the model's family, how it was reached, what asked.
-  counts.answered(id, feature, usage?.model).catch(() => {})
-  return r
+  counts.answered(use, feature, usage?.model).catch(() => {})
+  return gone ? { ...r, retired: gone } : r
+}
+
+// ---------- Retired models ----------
+// What a provider's retired model falls back on: the provider's current one (consult.js API's model,
+// Vertex's first), or null where there's none to name (a sign-in, a model on this computer, Azure's
+// deployments, Bedrock's and the open-model hosts' lists).
+export function insteadOf(route) {
+  if (API[route] && !API[route].local) return API[route].model ? `${route}:${API[route].model}` : null
+  if (route === 'vertex') return `vertex:${VERTEX_MODELS[0][0]}`
+  return null
+}
+const nameIn = (id) => (cache.list || []).find((m) => m.id === id)?.label || nameOf(String(id).split(':').slice(1).join(':')) || String(id).split(':').slice(1).join(':')
+// Whether a model's provider has retired it, and what answers instead: { id, since ('YYYY-MM-DD' or
+// null), how, instead, provider, label, insteadLabel }, or null.
+export function retiredInfo(id) {
+  const [route, ...rest] = String(id || '').split(':')
+  const model = rest.join(':')
+  const instead = insteadOf(route)
+  if (!model || !instead || instead === id) return null
+  const r = retired(route, model)
+  return r ? { id, ...r, instead, provider: routeInfo(route).label, label: nameOf(model) || model, insteadLabel: nameIn(instead) } : null
+}
+const longDay = (d) => (d ? new Date(`${d}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : null)
+// In words: "Google retired gemini-2.5-pro on 1 December 2026, so Gemini 4 Neon, its current model,
+// answers in its place."
+export function retiredWhy(g) {
+  const on = g.how === 'refused' ? `doesn't know ${g.label}` : `retired ${g.label}${g.since ? ` on ${longDay(g.since)}` : ''}`
+  return `${g.provider} ${on}, so ${g.insteadLabel}, its current model, answers in its place`
 }
 async function answer(id, messages, o) {
   const { signal, system } = o
