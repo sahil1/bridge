@@ -27,8 +27,8 @@ built on the same open parts as GenOffice (https://github.com/genspark-ai/genoff
 it isn't affiliated with Genspark or GenOffice, whose names belong to Mainfunc, Inc.
 
 Whiteboards are drawn with Excalidraw (https://github.com/excalidraw/excalidraw, MIT License), which
-turns Mermaid into shapes with mermaid-to-excalidraw (MIT) and Mermaid
-(https://github.com/mermaid-js/mermaid, MIT). Excalidraw's fonts are included as it ships them:
+turns Mermaid into shapes with mermaid-to-excalidraw (MIT), Pele (https://github.com/obsidianmd/pele,
+MIT) and Mermaid (https://github.com/mermaid-js/mermaid, MIT). Excalidraw's fonts are included as it ships them:
 Excalifont, Virgil, Nunito, Lilita One, Assistant, Cascadia Code and Liberation Sans under the SIL
 Open Font License 1.1, and Comic Shanns under the MIT License. Diagrams are laid out with dagre
 (https://github.com/dagrejs/dagre, MIT, in the dagre-d3-es form Mermaid uses, MIT, with lodash-es,
