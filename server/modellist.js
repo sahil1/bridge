@@ -42,7 +42,7 @@ export const failed = (id, e, models = []) => ({ id, why: `${labelOf(id, models)
 const SAID = /fetch failed|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|EHOSTUNREACH|ENETUNREACH|ENETDOWN|socket hang up|other side closed|UND_ERR_SOCKET|UND_ERR_CONNECT_TIMEOUT|getaddrinfo/i
 const TIMED = /TimeoutError|UND_ERR_(HEADERS|BODY)_TIMEOUT|ETIMEDOUT|aborted due to timeout/i
 export function explain(id, e, provider = (r) => r) {
-  if (!e || e.code === 'too_long' || e.code === 'stopped' || e.name === 'AbortError' || /^(cli|bridge):/.test(String(id || ''))) return e
+  if (!e || e.code === 'too_long' || e.code === 'stopped' || e.code === 'consent' || e.name === 'AbortError' || /^(cli|bridge):/.test(String(id || ''))) return e
   const route = String(id || '').split(':')[0]
   const who = provider(route) || route
   const seen = `${e.name || ''} ${e.message || ''} ${e.code || ''} ${e.cause?.name || ''} ${e.cause?.code || ''} ${e.cause?.message || ''}`
@@ -75,7 +75,8 @@ export async function inTurn(ids, call, { ready = [], stop = () => false, provid
     const why = whyNot(id, ready, provider)
     if (why) { passed.push({ id, why }); continue }
     try { return { ...(await call(id)), model: id, passed } } catch (e) {
-      if (stop(e)) throw e
+      // (A phone's request that needs your OK for this model's provider first: asked, not tried around.)
+      if (e?.code === 'consent' || stop(e)) throw e
       first ||= e
       passed.push(failed(id, e, ready))
     }

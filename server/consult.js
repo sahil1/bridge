@@ -20,6 +20,7 @@ import { hiddenAgent, hiddenProvider, hiddenModel, OFF } from './labs.js'
 import * as accounts from './accounts.js'
 import * as usagelog from './usagelog.js'
 import * as counts from './counts.js'
+import * as aiConsent from './aiconsent.js'
 import { placeEn } from '../shared/places.js'
 import { learnGone, unknownModel } from './livemodels.js'
 
@@ -206,6 +207,8 @@ export const isLimit = (text) => String(text || '').length < 600 && LIMIT.test(S
 // consultant's own settings): as it says, on that alone. { text, usage }: the answer, and what it
 // took when the agent says (SAYS), else null.
 export async function oneShot(kind, prompt, model, extraEnv = {}, signal, o = {}) {
+  // Asked for from a phone: not to the agent's provider until you've allowed it there (aiconsent.js).
+  aiConsent.needAgent(kind, o.feature || null)
   const ids = Object.keys(extraEnv).length || !accounts.supports(kind) ? [null] : accounts.forRun(kind)
   let last = null
   for (const id of ids) {
@@ -258,6 +261,7 @@ async function runApi(id, prompt, model, feature, ms = TIMEOUT) {
   // What the answer took, on this computer, and its model's family in the usage counts (when shared).
   const noted = (j, m) => { const usage = usagelog.usageOf(j); usagelog.record({ id: `${id}:${m}`, feature, usage, ms: Date.now() - started }); counts.answered(`${id}:${m}`, feature, usage?.model, usage).catch(() => {}) }
   const a = API[id]
+  if (!a.local) aiConsent.needModel(`${id}:${model || a.model || ''}`, feature)
   if (a.local) {
     const m = await localModel(model)
     if (!m) throw new Error(`No model is running on this computer. Start Ollama or LM Studio, download the local model in ${placeEn('providers')}, or pick another consultant.`)

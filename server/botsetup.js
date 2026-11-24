@@ -236,6 +236,8 @@ export function makeBotSetup({ ask, context, you = () => 'the owner' }) {
     const { system, prompt } = promptOf({ you: you(), words, ctx, current, live })
     let text
     try { text = await ask(system, prompt) } catch (e) {
+      // From a phone, the model's provider not yet allowed there: asked, not noted (aiconsent.js).
+      if (e.code === 'consent') throw e
       note(s, e.code === 'no-model' ? 'no-model' : 'failed', { why: clean(e.message, 300) })
       return null
     }

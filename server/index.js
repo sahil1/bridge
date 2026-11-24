@@ -76,6 +76,7 @@ import { makeDelegate } from './delegate.js'
 import { providerRoutes, providerEnv, subscriptions, signedInNow } from './providers.js'
 import { signInScreen, SIGN_IN_ENDED, firstRun, knows } from './firstrun.js'
 import * as settings from './settings.js'
+import * as aiConsent from './aiconsent.js'
 import * as consult from './consult.js'
 import * as insights from './insights.js'
 import * as chatModels from './chatmodels.js'
@@ -350,6 +351,26 @@ app.use((req, res, next) => {
   if (['GET', 'HEAD', 'OPTIONS'].includes(req.method) || /^\/api\/agents\/[^/]+\/fileop$/.test(req.path) || req.path === '/api/transfers') return next()
   const named = [req.query?.root, req.query?.pane, req.body?.root, req.body?.pane, req.body?.from?.root, req.body?.to?.pane, req.body?.into?.pane]
   if (named.some((r) => String(r || '').startsWith('botfiles:'))) return res.status(403).json({ error: 'A bot\'s files are only to open and send on from here', code: 'readOnly' })
+  next()
+})
+
+// A phone's request held to your OK for each AI provider it would send to (aiconsent.js): kept in
+// your settings (aiConsent), refused with 409 (code 'consent') until allowed. isPhone is below.
+aiConsent.use({ read: () => settings.readUser().aiConsent, write: (next) => afterChange(settings.setKey('aiConsent', Object.keys(next).length ? next : null)) })
+app.use(aiConsent.phoneScope((req) => isPhone(req)))
+// A phone's request whose work for an AI provider goes on after it has answered, or that answers
+// 200 whatever became of it, is asked about here, before its route does anything (no agent
+// interrupted, no worktree made, no task added): the providers it would go to now, worked out as
+// the route will (PHONE_GATES, below). The rest are asked where the content goes (need() in
+// chatmodels.js, consult.js), while the request is answered.
+app.use(async (req, res, next) => {
+  if (req.method === 'GET' || req.method === 'HEAD' || !aiConsent.fromPhone()) return next()
+  const at = `${req.method} ${req.path}`
+  const gate = PHONE_GATES.find(([re]) => re.test(at))
+  if (!gate) return next()
+  let goes = []
+  try { goes = [].concat((await gate[1](req, gate[0].exec(at))) || []).filter((x) => x?.provider) } catch { /* not worked out: the route says what's wrong */ }
+  try { for (const g of goes) aiConsent.need(g.provider, g.feature) } catch (e) { if (aiConsent.isConsent(e)) return res.status(409).json({}); throw e }
   next()
 })
 
@@ -2262,7 +2283,7 @@ async function pickFor(job, { text = null, tokens = null, cloudBetter = false } 
 // is noted for the job (modeljobs.js ran): what answered, and what was passed over and why (the ones
 // before it in the list that can't run now, and one that failed). The answer says which model it
 // was (model; fellBack and why when another stood in); reply.used, the one that answered last.
-const stopped = (e) => e?.name === 'AbortError' || e?.code === 'too_long'
+const stopped = (e) => e?.name === 'AbortError' || e?.code === 'too_long' || e?.code === 'consent'
 function replyFor(job) {
   const reply = async (id, msgs, opts = {}) => {
     const own = modelJobs.listOf(cfg, job)
@@ -3490,6 +3511,135 @@ const whoAsks = (req, from) => {
   const f = plainName(from)
   return d.kind === 'computer' && f && f !== d.name ? `${f}, through ${plainName(d.name)}` : plainName(d.name)
 }
+// ---------- What a phone's request would send to an AI provider (aiconsent.js) ----------
+// For PHONE_GATES: { provider, feature } for each provider a route would send to now.
+// An agent by its kind ('chat': the model it talks to, else the first you reach, as it picks).
+async function kindGoes(kind, model, feature = 'agent') {
+  if (!kind || kind === 'shell') return null
+  if (kind === 'chat') return { provider: aiConsent.ofModel(model || (await chatModels.models().catch(() => []))[0]?.id), feature: 'chat' }
+  return { provider: aiConsent.ofAgent(kind, adapter(kind).label), feature }
+}
+// An agent by its pane (a cloud agent's: cloud:<provider>:<id>); the Chief of Staff as itself.
+const paneOf = async (paneId) => (await rt.fleet().catch(() => null))?.agents?.find((x) => x.paneId === String(paneId || '')) || null
+async function paneGoes(paneId, feature = 'agent') {
+  const id = String(paneId || '')
+  const cloud = /^cloud:([a-z]+):/.exec(id)
+  if (cloud) return { provider: aiConsent.ofCloud(cloud[1]), feature: 'cloud' }
+  const a = await paneOf(id)
+  return a ? kindGoes(a.kind, a.model, a.chief ? 'chief' : feature) : null
+}
+const chiefGoes = () => kindGoes(mainChief(lastFleet)?.kind || cfg.chief?.kind || 'claude', null, 'chief')
+const defaultGoes = (feature) => kindGoes(cfg.defaultAgent || 'claude', null, feature)
+// A model job's (Settings › Models for Each Task), or a meeting's job.
+const jobGoes = async (job, feature, o = {}) => ({ provider: aiConsent.ofModel((await pickFor(job, o).catch(() => null))?.id), feature })
+const meetingGoes = async (id, job, feature, model = null) => ({ provider: aiConsent.ofModel(await meetings.modelFor(id, job, model)), feature })
+// A meeting's transcription with this engine (none: the one set), and what runs by itself once it's
+// transcribed (the cleanup and the summary, unless they're off).
+const speechGoes = (engine) => ({ provider: aiConsent.ofSpeech(engine || speech.engineOf(cfg)), feature: 'speech' })
+// (As meetings.js settle decides: the cleanup by itself when the summary is, unless set on its own.)
+const afterGoes = async (id) => {
+  const sum = cfg.meetings?.autoSummary !== false
+  const clean = cfg.meetings?.cleanup ?? sum
+  return [...(sum ? [await meetingGoes(id, 'notes', 'meetings')] : []), ...(clean ? [await meetingGoes(id, 'tidy', 'meetings')] : [])]
+}
+// Live suggestions (and their look on the web, where a key for it is saved), and the live board.
+const liveGoes = async (id, model) => [await meetingGoes(id, 'live', 'live', model || cfg.meetings?.assistModel || null), ...(consult.searchVia() ? [{ provider: aiConsent.ofModel('perplexity:sonar'), feature: 'search' }] : [])]
+const boardGoes = (id, model) => meetingGoes(id, 'diagrams', 'board', model || null)
+// Typed into an agent's terminal: only what would be sent (Enter), and not a choice made on its
+// question's card (keys alone, while it waits on you); a first-run screen's answer isn't content.
+const submits = (steps) => (Array.isArray(steps) ? steps : []).some((x) => (Array.isArray(x?.keys) && x.keys.some((k) => /^enter$/i.test(String(k)))) || /[\r\n]/.test(String(x?.text ?? '')))
+const freeText = (steps) => (Array.isArray(steps) ? steps : []).some((x) => String(x?.text ?? '').replace(/[\r\n]/g, '').trim().length > 1)
+const kindOr = (kind) => kind || cfg.defaultAgent || 'claude'
+// Each route, as "METHOD /path", and what it would send to.
+const PHONE_GATES = [
+  // An agent: a message (the chat box, a quick reply, a voice note's words, an attachment's line),
+  // held for later, steered in, sent again from an earlier point, or an answer typed for Codex.
+  [/^POST \/api\/agents\/([^/]+)\/(prompt|queue|steer|rewind|asks)$/, (req, m) => paneGoes(decodeURIComponent(m[1]))],
+  [/^PATCH \/api\/agents\/([^/]+)\/queue\/[^/]+$/, (req, m) => paneGoes(decodeURIComponent(m[1]))],
+  [/^POST \/api\/panes\/([^/]+)\/input$/, async (req, m) => {
+    if (req.body?.setup || !submits(req.body?.steps)) return null
+    const a = await paneOf(decodeURIComponent(m[1]))
+    return a && !(a.status === 'blocked' && !freeText(req.body?.steps)) ? kindGoes(a.kind, a.model, a.chief ? 'chief' : 'agent') : null
+  }],
+  [/^POST \/api\/panes\/([^/]+)\/text$/, (req, m) => (req.body?.enter || /[\r\n]/.test(String(req.body?.text ?? '')) ? paneGoes(decodeURIComponent(m[1])) : null)],
+  [/^POST \/api\/(agents|panes)\/([^/]+)\/keys$/, async (req, m) => {
+    if (!(req.body?.keys || []).some((k) => /^enter$/i.test(String(k)))) return null
+    const a = await paneOf(decodeURIComponent(m[2]))
+    return a && a.status !== 'blocked' ? kindGoes(a.kind, a.model, a.chief ? 'chief' : 'agent') : null
+  }],
+  // Starting one with something to do: a new agent (and the one it's compared with), a chat, Ask an
+  // agent in Studio, a handoff to another kind, an email or the day's calendar to an agent.
+  [/^POST \/api\/agents\/launch$/, async (req) => (String(req.body?.prompt || '').trim() ? [await kindGoes(kindOr(req.body?.kind), req.body?.model), ...(req.body?.alsoKind ? [await kindGoes(req.body.alsoKind, req.body?.alsoModel)] : [])] : null)],
+  [/^POST \/api\/chats$/, (req) => (String(req.body?.prompt || '').trim() ? kindGoes(kindOr(req.body?.kind), req.body?.model) : null)],
+  [/^POST \/api\/studio\/ask$/, (req) => (req.body?.pane ? paneGoes(req.body.pane, 'studio') : kindGoes(kindOr(req.body?.agent), null, 'studio'))],
+  [/^POST \/api\/agents\/([^/]+)\/handoff$/, (req) => kindGoes(String(req.body?.to || ''), req.body?.model)],
+  [/^POST \/api\/(mail\/[^/]+\/agent|mail\/triage|calendar\/prep)$/, () => kindGoes(kindOr(cfg.assistant?.kind), null, 'mail')],
+  // The Chief of Staff: started, a new thread, a task or an idea sent, a task answered, a helper.
+  [/^POST \/api\/chief\/(launch|threads)$/, () => chiefGoes()],
+  [/^POST \/api\/chief\/tasks$/, (req) => (req.body?.send ? chiefGoes() : null)],
+  [/^POST \/api\/chief\/tasks\/[^/]+\/reply$/, async () => [await chiefGoes(), await jobGoes('notes', 'meetings')]],
+  [/^POST \/api\/ideas\/[^/]+\/send$/, () => chiefGoes()],
+  [/^POST \/api\/chief\/delegate$/, (req) => kindGoes(kindOr(req.body?.kind), null, 'chief')],
+  [/^POST \/api\/chief\/delegate\/([^/]+)\/retry$/, (req, m) => kindGoes(kindOr(delegate.ofTask(decodeURIComponent(m[1]))?.kind), null, 'chief')],
+  [/^POST \/api\/chief\/items\/[^/]+$/, (req) => (req.body?.to === 'agent' ? paneGoes(req.body?.pane) : req.body?.to === 'helper' ? kindGoes(kindOr(req.body?.kind), null, 'chief') : null)],
+  // A meeting's action items: to an agent, to the Chief of Staff, approved, redirected, answered,
+  // or placed by a model (which then hands them on: to agents of the default kind, or the chief).
+  [/^POST \/api\/meetings\/[^/]+\/work\/[^/]+\/agent$/, (req) => kindGoes(kindOr(req.body?.kind), null, 'meetings')],
+  [/^POST \/api\/meetings\/[^/]+\/chief$/, () => chiefGoes()],
+  [/^POST \/api\/meetings\/([^/]+)\/work\/([^/]+)\/approve$/, (req, m) => { const h = meetItems.handedOf(decodeURIComponent(m[1]), decodeURIComponent(m[2])); return h?.paneId ? paneGoes(h.paneId, 'meetings') : h?.kind ? kindGoes(h.kind, null, 'meetings') : null }],
+  [/^POST \/api\/meetings\/[^/]+\/work\/[^/]+\/redirect$/, async (req) => (req.body?.to === 'agent' ? paneGoes(req.body?.pane, 'meetings') : req.body?.to === 'chief' ? [await chiefGoes(), await jobGoes('notes', 'meetings')] : req.body?.to === 'helper' ? defaultGoes('meetings') : null)],
+  [/^POST \/api\/meetings\/[^/]+\/(work\/[^/]+\/answer|handoff)$/, async () => [await jobGoes('notes', 'meetings'), await defaultGoes('meetings'), await chiefGoes()]],
+  // A meeting: recording it (its transcription, and what runs by itself as it records and once it
+  // ends), its notes, who said what, transcribing it again, combined or merged, live suggestions and
+  // the live board turned on, a file to transcribe.
+  [/^POST \/api\/meetings$/, async () => [speechGoes(), ...(await afterGoes(null)), ...(cfg.meetings?.assist === true ? await liveGoes(null) : []), ...(cfg.meetings?.board === true ? [await boardGoes(null)] : [])]],
+  [/^POST \/api\/meetings\/([^/]+)\/reopen$/, async (req, m) => [speechGoes(), ...(await afterGoes(decodeURIComponent(m[1])))]],
+  [/^POST \/api\/meetings\/([^/]+)\/(summary|voices)$/, (req, m) => meetingGoes(decodeURIComponent(m[1]), 'notes', 'meetings', req.body?.model)],
+  [/^POST \/api\/meetings\/([^/]+)\/(transcribe|retry)$/, async (req, m) => [speechGoes(req.body?.engine), ...(await afterGoes(decodeURIComponent(m[1])))]],
+  [/^POST \/api\/meetings\/bulk$/, async (req) => {
+    const a = req.body?.action
+    const id = [].concat(req.body?.ids || [])[0] || null
+    return a === 'chief' ? chiefGoes() : a === 'summarize' ? meetingGoes(id, 'notes', 'meetings') : a === 'transcribe' ? [speechGoes(req.body?.engine), ...(await afterGoes(id))] : null
+  }],
+  [/^POST \/api\/meetings\/(combine|[^/]+\/merge)$/, () => afterGoes(null)],
+  [/^POST \/api\/meetings\/files$/, async (req) => [speechGoes(req.body?.with?.engine), ...(await afterGoes(null))]],
+  [/^POST \/api\/meetings\/([^/]+)\/assist$/, (req, m) => (req.body?.on === true || (req.body?.on == null && req.body?.level == null) ? liveGoes(decodeURIComponent(m[1]), req.body?.model) : null)],
+  [/^POST \/api\/meetings\/([^/]+)\/board$/, (req, m) => (req.body?.on === true ? boardGoes(decodeURIComponent(m[1]), req.body?.model) : null)],
+  // AI Assist in a folder (it runs on after answering), and Insights on your agents' sessions.
+  [/^POST \/api\/files\/insights\/[^/]+\/ask$/, (req) => ({ provider: aiConsent.ofModel(req.body?.model || cfg.filesAssist?.model || null), feature: 'files' })],
+  [/^POST \/api\/insights\/run$/, async (req) => ({ provider: await insights.writerOf(String(req.body?.who || '')), feature: 'insights' })],
+  // Routines: one run now, or one made or changed to run later (its command goes as it's set).
+  [/^POST \/api\/routines\/([^/]+)\/run$/, (req, m) => {
+    const def = routines.readDefs().find((d) => d.id === decodeURIComponent(m[1]))
+    return !def ? null : def.to === 'bot' ? botGoes(def.bot) : def.to === 'chief' ? chiefGoes() : kindGoes(kindOr(def.kind))
+  }],
+  [/^(POST \/api\/routines|PATCH \/api\/routines\/[^/]+)$/, (req) => (req.body?.command == null ? null : req.body?.to === 'chief' ? chiefGoes() : req.body?.to === 'bot' ? botGoes(req.body?.bot) : kindGoes(kindOr(req.body?.kind)))],
+  // Bots: Try It and a session started or steered from here; AI Assist setting one up in words.
+  [/^POST \/api\/bots\/([^/]+)\/(try|sessions)$/, (req, m) => botGoes(decodeURIComponent(m[1]))],
+  [/^POST \/api\/bots\/sessions\/[^/]+\/steer$/, () => kindGoes('claude', null, 'bot')],
+  [/^POST \/api\/bots\/(assist|quick|[^/]+\/assist)$/, async () => (cfg.studio?.model ? { provider: aiConsent.ofModel(cfg.studio.model), feature: 'bot' } : jobGoes('assist', 'bot'))],
+  // Cloud agents this computer runs: one started, a message to one.
+  [/^POST \/api\/cloud\/launch$/, (req) => ({ provider: aiConsent.ofCloud(req.body?.provider), feature: 'cloud' })],
+  [/^POST \/api\/cloud\/agents\/([^/]+)\/send$/, (req, m) => paneGoes(decodeURIComponent(m[1]))],
+]
+// A bot's next answer: the first of its answerers that can answer now (an agent, or a model).
+async function botGoes(id) {
+  const bot = botsStore.get(String(id || ''))
+  const e = bot ? await desk.firstAnswerer(bot).catch(() => null) : null
+  return !e ? null : e.kind === 'agent' ? kindGoes(e.agent, null, 'bot') : { provider: aiConsent.ofModel(e.model), feature: 'bot' }
+}
+
+// ---------- AI providers a phone may send to (aiconsent.js) ----------
+// The list (Settings › Devices & Access › Phone), the OK given on a phone's sheet (with the device
+// it came from and when), and one taken back, from anywhere you are: the phone asks again.
+const consentFrom = (req) => { let from = ''; try { from = decodeURIComponent(String(req.headers['x-bridge-for-name'] || '')) } catch { /* not a name */ } return whoAsks(req, from) }
+app.get('/api/ai-consent', wrap((req) => ({ allowed: aiConsent.list(), phone: isPhone(req) })))
+app.post('/api/ai-consent', wrap((req) => {
+  const p = req.body?.provider
+  if (!p || typeof p !== 'object') throw Object.assign(new Error('Which provider?'), { status: 400 })
+  return { allowed: aiConsent.allow({ id: String(p.id || ''), name: String(p.name || ''), via: p.via ? String(p.via) : null }, consentFrom(req)) }
+}))
+app.delete('/api/ai-consent/:id', wrap((req) => ({ allowed: aiConsent.revoke(String(req.params.id)) })))
 const remoteHere = (req) => { if (!atThisComputer(req)) throw Object.assign(new Error(`Do this at ${relay.thisName()} itself.`), { status: 403, code: 'here' }) }
 const sayErr = (res, e) => res.status(e.status || 502).json({ error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}) })
 app.get('/api/remote', async (req, res) => { try { res.json({ ...(await remote.status({ sources: req.query.sources === '1', device: atThisComputer(req) ? null : String(req.headers['x-bridge-relay'] || '') || 'page' })), here: atThisComputer(req) }) } catch (e) { sayErr(res, e) } })
@@ -4114,6 +4264,9 @@ const plus = (a, b) => [...new Set([...a, ...b])]
 app.patch('/api/settings', async (req, res) => {
   try {
     if (req.body && typeof req.body === 'object' && !Array.isArray(req.body)) {
+      // The AI providers a phone may send to change only through their own routes, which say when
+      // and from which device (/api/ai-consent).
+      delete req.body.aiConsent
       const next = settings.merged(settings.readUser(), req.body)
       channelKept(req, next)
       remoteTrialKept(req, next)

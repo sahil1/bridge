@@ -662,5 +662,7 @@ export function makeMeetItems({ on, you, meetings, work, tasks, delegate, decide
     } catch { /* no meetings yet */ }
   }, 0)
 
-  return { summarized, run, place, undo, redirect, approve, answer, answerTask, runOf, status, shown, MAX, DAY_MAX, STALE_MS }
+  // Where an item waiting for your OK goes ({ paneId, kind }), for the OK a phone asks first (index.js).
+  const handedOf = (id, key) => { try { const h = itemOf(id, key).w.handed; return h ? { paneId: h.paneId || null, kind: h.kind || null } : null } catch { return null } }
+  return { summarized, run, place, undo, redirect, approve, answer, answerTask, runOf, status, shown, handedOf, MAX, DAY_MAX, STALE_MS }
 }

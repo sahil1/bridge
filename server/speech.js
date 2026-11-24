@@ -29,6 +29,7 @@ import * as asr from './asr.js'
 import * as memory from './meetmemory.js'
 import { placeEn } from '../shared/places.js'
 import * as counts from './counts.js'
+import * as aiConsent from './aiconsent.js'
 
 const env = () => ({ ...process.env, ...providerEnv() })
 const fatal = (msg, more) => Object.assign(new Error(msg), { fatal: true }, more)
@@ -502,6 +503,8 @@ async function answer(r, label) {
 }
 
 async function service(id, wav, { cfg, language, prompt }) {
+  // Asked for from a phone: not to a speech service elsewhere until you've allowed it there (aiconsent.js).
+  aiConsent.needSpeech(id)
   const s = SERVICES[id]
   const e = env()
   const key = e[s.key] || (id === 'gemini' && (e.GOOGLE_API_KEY || e.GOOGLE_GENERATIVE_AI_API_KEY))

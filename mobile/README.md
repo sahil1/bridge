@@ -371,6 +371,18 @@ Apple gives.
 > Permissions are asked when first used, never at launch: the camera when you tap Scan the QR code
 > (or take a photo to attach), the microphone when you first hold the mic button, record a voice note
 > or start a meeting.
+>
+> Sending to an AI provider is asked first, in the app (Guidelines 5.1.1(i) and 5.1.2(i)). To see it
+> in the demo: tap **Try the demo**, then **Chief** at the bottom (the Chief of Staff, on Claude
+> Code), type a message and tap Send. Before anything is sent, a sheet says who gets it (Anthropic,
+> through Claude Code), what is sent (the message and any files or photos attached), how (from the
+> phone to the user's computer, end-to-end encrypted, then to that provider under its own terms),
+> and links the privacy policy; **Allow** sends it, **Not Now** sends nothing and says so. Each
+> provider is asked once. AI Assist asks the same way: tap **See everything** at the top, then
+> **Meetings**, open "Checkout launch sync" and ask a question in its Ask box (the sheet names
+> OpenAI, the model for AI Assist). Settings (the gear) › Devices & Access › Phone › AI Providers
+> lists what was allowed, with Take Back. In Cloud Agents the app asks before the first task to each
+> provider. The demo keeps its answers in memory only, so it asks again each time it's opened.
 
 Attach a short screen recording of pairing and using it with a real computer: reviewers can't pair
 one themselves.
@@ -384,9 +396,12 @@ one themselves.
   in WebKit, as a website does in a browser. The demo and Cloud Agents are in the app itself.
 - **Needs another device (2.1, 4.2.3)**: Try the demo and Cloud Agents work on the phone alone; the
   notes above and the video cover pairing.
-- **Third-party AI (5.1.2)**: Cloud Agents sends your task and repo to the provider you add a key
-  for. The screen says the key goes only to that provider; App Review may want a plainer "what's
-  sent where" before the first task.
+- **Third-party AI (5.1.1(i), 5.1.2(i))**: the first time anything from the phone would go to an AI
+  provider (an agent's, AI Assist's model, a speech service, a cloud agent), the app says what is
+  sent, to whom and how, links the privacy policy and the provider's, and asks: Allow or Not Now.
+  Your computer refuses anything from a phone for a provider not allowed yet (`server/aiconsent.js`),
+  so it's enforced, not only shown; the demo and Cloud Agents ask the same way. PRIVACY.md's "AI
+  providers and your phone" says what's collected, how, what for, and who receives it, by provider.
 - **Other companies' names and logos (5.2)**: Cursor, GitHub Copilot, Jules and Claude are shown as
   services you use with your own account, through their public APIs.
 - **Encryption**: the export compliance answers above.
@@ -446,7 +461,11 @@ networks, third-party SDKs, or other external vendors whose code you've added to
   "you as the developer never have access to the payment information, it is not collected".
 - No analytics, ads, crash reporting or third-party SDKs.
 
-If App Review sees it differently, the type is User Content › Other User Content, used for App
+Before anything from the phone goes to an AI provider, through the user's computer or with Cloud
+Agents straight from the phone, the app asks (Allow or Not Now, once per provider: PRIVACY.md, "AI
+providers and your phone"). That doesn't change the answer: the project still never receives or has
+access to it. If App Review sees it differently, the type is User Content › Other User Content (and
+Audio Data, for a meeting recorded on the phone with a speech service picked), used for App
 Functionality, not linked to identity by the project and not used for tracking. Keep this in step
 with `PRIVACY.md` and Android's Data safety answers (`android/play/console.md`), which declare it,
 because Google's definition of collection is wider.

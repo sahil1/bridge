@@ -19,6 +19,7 @@ import StudioSettings from './settings/Studio.jsx'
 import Voice, { Spoken } from './settings/Voice.jsx'
 import Dictation from './settings/Dictation.jsx'
 import CloudKeys from './settings/CloudKeys.jsx'
+import AiProviders from './settings/AiProviders.jsx'
 import BackUp from './settings/BackUp.jsx'
 import { RemoteAccess } from './remote/Settings.jsx'
 import ErrorBoundary from './ErrorBoundary.jsx'
@@ -174,6 +175,7 @@ export default function Settings({ section = 'all', onClose, onOpenAgent }) {
     {at === 'backup' && <BackUp />}
     {at === 'about' && <About />}
     {at === 'cloud' && <CloudKeys focus="cloud" bare />}
+    {at === 'cloud' && cloudOnly && <AiProviders local />}
     </AdvancedFrame>
     </ErrorBoundary>
     </SettingsAt.Provider>

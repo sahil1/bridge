@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { locale, t } from './i18n/index.js'
+import { consentAsked, settleConsent } from './aiconsent.js'
 
 // Opened on a phone through your own relay (relay/): the app runs inside the relay's page, which
 // carries its requests to your computer over an end-to-end encrypted link.
@@ -101,7 +102,7 @@ function shutOut(url, data) {
 }
 
 const SETTLE = 1500
-async function call(url, opts = {}) {
+async function call(url, { asked = [], ...opts } = {}) {
   const later = LATER.test(url)
   if (later && machineId && apart && performance.now() < SETTLE) await new Promise((r) => setTimeout(r, SETTLE - performance.now()))
   const res = await fetch(url, {
@@ -115,6 +116,13 @@ async function call(url, opts = {}) {
   // again, once, the server says how to get back in (server/apiauth.js).
   if (res.status === 401 && data.code === 'apiKey') signedOut()
   if (res.status === 403) shutOut(url, data)
+  // From a phone, what this sends would go on to an AI provider you haven't allowed yet: the sheet
+  // asks (aiconsent.js). Allow tells the computer it showed and sends this again (once for each
+  // provider it goes to); Not Now sends nothing and throws, saying so (code 'consentDeclined').
+  if (consentAsked(res.status, data, asked)) {
+    await settleConsent(url, data)
+    return call(url, { ...opts, asked: [...asked, data.consent.provider.id] })
+  }
   // code: set when the app can offer a fix (EPERM, noBrew, calendarAccess...). status: there was an
   // answer (a failed fetch has none). data: all of it (what came with it: the account's devices...).
   if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), { status: res.status, data }, data.code ? { code: data.code } : {})
@@ -123,9 +131,13 @@ async function call(url, opts = {}) {
 
 // The device this page comes from, whichever one it shows: its list of your devices says where
 // each one is (/m/<id>/ here).
-export async function hostApi(path, opts = {}) {
+export async function hostApi(path, { asked = [], ...opts } = {}) {
   const res = await fetch(`/api${path}`, { ...opts, headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) }, body: opts.body ? JSON.stringify(opts.body) : undefined })
   const data = await res.json().catch(() => ({}))
+  if (consentAsked(res.status, data, asked)) {
+    await settleConsent(`/api${path}`, data)
+    return hostApi(path, { ...opts, asked: [...asked, data.consent.provider.id] })
+  }
   if (res.status === 403) shutOut(`/api${path}`, data)
   if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), { status: res.status, code: typeof data.code === 'string' ? data.code : undefined, data })
   return data

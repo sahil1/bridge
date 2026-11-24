@@ -37,6 +37,7 @@ import { NOT_CHAT, SOURCES, listOf, listed, nameOf, retired, learnGone, unknownM
 import * as llm from './llm.js'
 import * as usagelog from './usagelog.js'
 import * as counts from './counts.js'
+import * as aiConsent from './aiconsent.js'
 import { placeEn } from '../shared/places.js'
 
 const TIMEOUT = 5 * 60 * 1000
@@ -704,6 +705,8 @@ export const SMALLEST = 8192
 // instead, provider, label, insteadLabel }), for the job to note and Settings to show.
 export async function reply(id, messages, { signal, tools, system = SYSTEM, json = null, think = false, feature = null, instead = null, noTools = false } = {}) {
   if (hiddenModel(id)) throw new Error(OFF)
+  // Asked for from a phone: not to a provider elsewhere until you've allowed it there (aiconsent.js).
+  aiConsent.needModel(id, feature)
   const started = Date.now()
   const ask = (m) => answer(m, messages, { signal, tools: canUseTools(m) && !noTools ? tools : null, system, json, think, noTools })
   let gone = retiredInfo(id)

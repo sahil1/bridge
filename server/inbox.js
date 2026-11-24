@@ -144,6 +144,8 @@ async function deliver(plain, device, base) {
     r = await call('POST', `/api/panes/${encodeURIComponent(pane)}/input`, { steps })
     if (r.status < 300) return { ok: true }
   }
+  // Its agent's provider not yet allowed from a phone (aiconsent.js): sent again from the phone, it asks.
+  if (r.json?.code === 'consent') return fail('consent', `${r.json.consent?.provider?.name || 'its AI provider'} needs your OK first. Send it again from the agent, and Bridge AI asks`)
   return /^No (agent|pane)/.test(r.json?.error || '') ? fail('gone') : fail('error', r.json?.error || `your computer answered ${r.status}`)
 }
 

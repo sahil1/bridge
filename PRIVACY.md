@@ -745,6 +745,9 @@ and, through it, end to end to your computer.
   meeting. The sound goes end-to-end encrypted to your computer, which turns it into text there
   (or, for a meeting, with the speech service you picked on it). The phone asks for the microphone
   the first time you use one of them.
+- **AI providers**: what you send an agent from the phone, and what AI Assist works on there, goes on
+  from your computer to that agent's or model's provider, once you've allowed it on the phone (AI
+  providers and your phone, below).
 - **Lock screen**: the agents notification on Android and the Live Activity on iPhone are made on
   the phone from what your computer sends over the encrypted link.
 
@@ -758,6 +761,8 @@ computer, with keys you add on the phone.
   Keystore, which can't be taken off the phone, and leaves them out of backups and transfers. The
   page you see in the app never gets a key: the app adds it to each request itself, and only to
   requests for that provider's own address.
+- **Asked first**: before the first task to each provider, the app says what goes to it and asks you
+  (AI providers and your phone, below).
 - **Where things go**: the app talks to each provider directly, over HTTPS: Cursor
   (api.cursor.com), GitHub (api.github.com), Jules (jules.googleapis.com) and Anthropic
   (api.anthropic.com). Nothing goes through your relay, your computer or the project. A provider
@@ -772,6 +777,84 @@ computer, with keys you add on the phone.
   the app checks on your agents about every 15 minutes while it's closed, talking only to those
   providers, and tells you when one finishes, fails or needs you. Remove your keys and it stops.
   The iPhone app checks only while it's open.
+
+## AI providers and your phone
+
+Bridge AI works with AI services that other companies run: the coding agents you install and sign
+in to on your computer (Claude Code, Codex, Gemini CLI and the others), the model providers you add
+a key for, and a speech service if you pick one for meetings. When you use Bridge AI from a phone
+(the iPhone or Android app, or the relay's page in a phone's browser), some of what you do there
+goes to one of those services. This part says what goes, how, what for and to whom, and how your
+phone asks you first.
+
+**What is sent, and what for.** Only what you give Bridge AI for the thing you asked, and only to do
+it:
+
+- A message you write to an agent or to the Chief of Staff, and the files and photos you attach to
+  it: to that agent's provider, for the agent to work on.
+- An agent, chat or thread started with something to do; a handoff to another kind of agent; a task,
+  an idea, a routine or a meeting's action item sent to an agent or the Chief of Staff: to that
+  agent's provider, for the same.
+- For AI Assist, the text it works on and what you ask of it: a meeting's transcript and your notes
+  (its notes, your questions, who said what, live suggestions and the live board), an email you're
+  answering, a document or the part of it you picked in Studio, the names and text of the files it
+  looks at, a dictation it tidies, and Insights' summary of what your agents worked on lately: to
+  the model you picked for that task (Settings › Agents & Models › Which Model Does What), or for a
+  question about something current, the question alone to Perplexity, when you've added a key for it.
+- A meeting you record on your phone: its sound, to the speech service you picked for meetings, if
+  you picked one (otherwise it's turned into text on your computer); and its transcript and your
+  notes, to the model that writes its notes and cleans up its transcript, unless you turned those
+  off.
+- Cloud Agents on the phone: the task you write and the repository and branch you pick, straight
+  from the phone to Cursor, GitHub, Jules or Anthropic (above).
+
+**How it's collected and how it goes.** You type, say or attach it on your phone. It goes end-to-end
+encrypted, through your relay, to your computer (Your relay, above), and your computer sends it to
+the provider over HTTPS, with your own sign-in or key, into your account there. The answer comes back
+the same way. Neither the project nor Bold Bridge receives any of it, and Bridge AI sends it nowhere
+else: the usage stats (above) count how often things are used, never what was in them.
+
+**Who receives it**, each only when you use something that goes to it, and each under its own terms
+and privacy policy, which you agreed to when you signed up or made your key, and which say how it
+protects what it receives:
+
+- Anthropic (Claude Code, the Anthropic API, Claude Managed Agents):
+  https://www.anthropic.com/legal/privacy
+- OpenAI (Codex, the OpenAI API and its speech to text): https://openai.com/policies/privacy-policy/
+- Google (Gemini CLI, Antigravity CLI, the Gemini API, Vertex AI, Jules):
+  https://policies.google.com/privacy
+- xAI (Grok): https://x.ai/legal/privacy-policy
+- Microsoft (Azure OpenAI): https://privacy.microsoft.com/privacystatement
+- Amazon Web Services (Bedrock): https://aws.amazon.com/privacy/
+- GitHub (GitHub Copilot CLI and its coding agent):
+  https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement
+- Cursor (Cursor Agent and its cloud agents): https://cursor.com/privacy
+- Hugging Face: https://huggingface.co/privacy
+- The others you can add in Settings › Model Providers or pick for meetings, each under the privacy
+  policy on its own website: Meta, Mistral AI, Groq, DeepSeek, Perplexity, OpenRouter, Moonshot AI,
+  Together AI, Fireworks AI, Cerebras, Cohere, Z.ai, Sourcegraph (Amp), Alibaba Cloud (Qwen Code),
+  AssemblyAI, Deepgram and ElevenLabs. OpenCode, Aider, Goose and Crush send it on to whichever model
+  provider you set each one up with.
+
+A model that runs on your computer (Ollama, LM Studio, the local model built into Bridge AI, the
+Mac's own speech) isn't a third party: what it reads stays on your computer, and nothing is asked.
+
+**Asked first.** The first time something from your phone would go to a provider, the phone says
+what will be sent, who gets it and how, links this policy and the provider's, and asks: **Allow** or
+**Not Now**. Not Now sends nothing, and the phone says so. Your computer keeps your answer for that
+provider (in your settings, `~/.bridge-ai/config.json`, with when and from which device), so each
+provider is asked once, and it refuses anything from your phone for a provider you haven't allowed.
+The demo asks the same way and keeps its answers only until it's closed. Cloud Agents asks before the
+first task to each provider and keeps the answer on the phone, with that provider's key.
+
+**Taking it back.** Settings › Devices & Access › Phone › AI Providers lists each provider you
+allowed, with when and from which device, and **Take Back**. Nothing more goes to it from your phone
+until you allow it again. In Cloud Agents, removing a provider's key takes it back too. What a
+provider already received stays with it, in your account there, under its terms: ask that provider
+to delete it.
+
+On your computer itself nothing is asked: you installed and signed in to those agents, and added
+those keys, there.
 
 ## Notifications from the Home Screen page
 

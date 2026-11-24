@@ -7,6 +7,7 @@ import { MachinesSettings } from '../Machines.jsx'
 import { where } from './search.js'
 import { t, tn } from '../../i18n/index.js'
 import { Advanced, More } from './Advanced.jsx'
+import AiProviders from './AiProviders.jsx'
 
 // Settings › Devices & Access, its Phone and Computers tabs (Settings.jsx; tab: the one showing; the
 // Remote Access tab is remote/Settings.jsx, Share Links Sharing.jsx). Phone: open Bridge AI on your
@@ -14,7 +15,8 @@ import { Advanced, More } from './Advanced.jsx'
 // other computers (through each one's relay: the same sign-in, so it's one section). All optional;
 // Bridge AI works on this computer without any of it. focus: 'machines' starts at your devices.
 // Under the Phone tab's Advanced: Tailscale (until it's the way picked, or on). What you're notified
-// about, and where, is Settings › Notifications (Notifications.jsx).
+// about, and where, is Settings › Notifications (Notifications.jsx). Last on the Phone tab: the AI
+// providers your phone has allowed what you send from it to go on to (AiProviders.jsx).
 export default function Phone({ tab = 'phone', focus = null }) {
   // With Bridge AI's relay offered, Relay starts with a choice of three ways; Tailscale's section
   // shows when it's the one picked (or already on). (One picked on the Account tab comes with it.)
@@ -24,6 +26,7 @@ export default function Phone({ tab = 'phone', focus = null }) {
     <div className="st-sections">
       {tab === 'phone' && <Relay way={way} setWay={setWay} onOffer={setOffer} />}
       {tab === 'phone' && <PhoneAccess quiet={offer && way !== 'tailscale'} picked={offer && way === 'tailscale'} />}
+      {tab === 'phone' && <AiProviders />}
       {tab === 'machines' && <MachinesSettings embedded focus={focus === 'machines'} />}
     </div>
   )

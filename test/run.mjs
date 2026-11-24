@@ -137,6 +137,10 @@ const SUITES = [
   { name: 'phone-composer', build: 'dist', browser: true, covers: [/^src\/enter\.js$/, /^src\/components\/EnterHint\.jsx$/, /^src\/components\/(Composer|ModelChip|Console|Handoff|Rail)\.jsx$/, /^src\/styles\.css$/, /^test\/stand-ins\/claude\.cjs$/] },
   { name: 'mention-meetings', build: 'dist', browser: true, covers: [/^src\/components\/Composer\.jsx$/, /^src\/styles\.css$/, /^server\/(meetings|machines|index)\.js$/, /^shared\/mentions\.js$/, /^test\/stand-ins\/(relay|older-meetings)\.mjs$/, /^test\/stand-ins\/claude\.cjs$/] },
   { name: 'demo-ui', build: 'dist-demo', browser: true, covers: [/^src\/demo\//, /^src\/components\/meetings\//, /^src\/(App|api)\.jsx?$/, /^vite\.config\.js$/] },
+  // Your OK on a phone before what you send goes to an AI provider: every route that sends refused
+  // until it's allowed, the sheet on the phone page and in the demo (built by the test when it's
+  // older than its source), Settings' list, the computer's window never asked.
+  { name: 'ai-consent', build: 'dist', browser: true, minutes: 8, covers: [/^server\/(aiconsent|chatmodels|consult|speech|modellist|meetprep|pr|botsetup|inbox|settings|insights|meetitems|frontdesk|index)\.js$/, /^shared\/(aiproviders|places)\.js$/, /^src\/(aiconsent|api)\.js$/, /^src\/components\/(AiConsent\.jsx|aiconsent\.css|Console\.jsx|NeedsYou\.jsx|Settings\.jsx)$/, /^src\/components\/settings\/(AiProviders|Phone)\.jsx$/, /^src\/components\/files\/Assist\.jsx$/, /^src\/(standalone|demo|cloud)\//, /^PRIVACY\.md$/, /^test\/stand-ins\/(claude\.cjs|model\.mjs|relay\.mjs)$/, /^test\/lib\/linkclient\.mjs$/] },
   { name: 'herdr', build: null, covers: [/^server\/runtime\/(herdr[\w-]*|index)\.js$/, /^server\/(index|agents|chatagent)\.js$/] },
   { name: 'saves', build: null, covers: [/^server\/paths\.js$/] },
   { name: 'desktop-menu', build: null, covers: [/^desktop\/(contextmenu|main)\.js$/, /^desktop\/package\.json$/] },
