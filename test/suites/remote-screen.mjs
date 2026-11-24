@@ -83,7 +83,7 @@ import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import WebSocket, { WebSocketServer } from 'ws'
-import { startKit, startRelay, checks, until, browser, page, sleep, shot, changeAnswer, noServiceWorker, phoneFaults, ROOT, TEST, IS_WIN, freePort, stopTree } from '../lib/harness.mjs'
+import { startKit, startRelay, checks, until, browser, page, sleep, shot, changeAnswer, noServiceWorker, phoneFaults, phoneNotes, phoneSaw, browserNotice, ROOT, TEST, IS_WIN, freePort, stopTree } from '../lib/harness.mjs'
 import { linkAs } from '../lib/linkclient.mjs'
 import { K, json, text } from '../../relay/web/link.js'
 import { unpackFrame, keyFor, fitIn, pointAt, captureSize, bitrateFor, sdpBitrate } from '../../shared/remote.js'
@@ -358,10 +358,13 @@ try {
     await sleep(1500)
     ok(v.frames.length === 1, 'and no more until it\'s been shown (ack)', v.frames.length)
     for (let i = 0; i < 6; i++) { await v.send({ t: 'ack' }); await v.wait((s) => s.frames.length >= i + 2, 4000) }
-    // (On average: one picture held up on the way and the next not makes a short gap between them.)
+    // (Timed as they come here: a picture held up on the way makes the gap before it longer and the
+    // one after it shorter by as much, and the first after the pause, sent the moment it's acked,
+    // has only its short side counted. So the middle gap, which one held up doesn't move: CI's
+    // macOS WebKit machine once had 153 ms after the first, the four after it 247 to 254.)
     const gaps = v.frames.slice(2).map((x, i) => x.at - v.frames[i + 1].at)
-    const avg = gaps.reduce((a, g) => a + g, 0) / Math.max(1, gaps.length)
-    ok(v.frames.length >= 7 && avg >= 1000 / 4 - 15, `each acked, the next comes, no faster than 4 a second through a relay of your own (${Math.round(avg)} ms apart on average)`, gaps)
+    const mid = [...gaps].sort((a, b) => a - b)[Math.floor(gaps.length / 2)]
+    ok(v.frames.length >= 7 && mid >= 1000 / 4 - 15, `each acked, the next comes, no faster than 4 a second through a relay of your own (${Math.round(mid)} ms apart, the middle of ${gaps.length} gaps)`, gaps)
     await v.send({ t: 'input', evs: [{ t: 'move', x: 0.5, y: 0.5 }, { t: 'down', b: 0, x: 0.5, y: 0.5 }] })
     await sleep(600)
     ok(!lines(inputs).length, 'with control off, nothing it sends is pressed', lines(inputs))
@@ -769,7 +772,11 @@ try {
     const r4 = await ph.request('POST', '/api/notify/answer', { token: b4.note.actions.find((a) => a.action === 'block').token })
     ok(r4.json?.ok === true && r4.json.said === 'Tablet can\'t connect through Laptop any more.', 'Block on a device that came through Laptop: said so', r4.json)
     await v4.wait((s) => msg(s, 'error') || s.closed, 6000)
-    ok(msg(v4, 'error')?.code === 'blocked' && msg(v4, 'error').at === 'Laptop' && /^Laptop stopped letting this device connect/.test(msg(v4, 'error').why), 'the Tablet is told Laptop stopped letting it connect', msg(v4, 'error'))
+    // (Both computers end it: Studio as it's blocked there, and Laptop as the Tablet is unticked there
+    // and what it reaches through Laptop is cut. Whichever comes first says it, and both say it the
+    // same way, at Laptop: on CI's macOS WebKit machine Laptop's came first once.)
+    const e4 = msg(v4, 'error')
+    ok(['blocked', 'device'].includes(e4?.code) && e4.at === 'Laptop' && /^Laptop stopped letting this device connect/.test(e4.why), 'the Tablet is told Laptop stopped letting it connect', e4)
     const onLaptop = (await laptop.api('/remote')).access.devices.find((d) => d.name === 'Tablet')
     const onStudio = (await studio.api('/remote')).access.devices.find((d) => d.name === 'Laptop')
     ok(onLaptop?.allowed === false && onStudio?.allowed === true, 'the Tablet is unticked on Laptop; Laptop itself still may connect to Studio', [onLaptop, onStudio])
@@ -2329,12 +2336,19 @@ try {
   const relayPhone = async (mode = 'light') => {
     const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: which === 'chromium', hasTouch: true, deviceScaleFactor: 2, colorScheme: mode })
     await ctx.addInitScript(({ mode }) => { try { localStorage.setItem('cc-toured', JSON.stringify({ desktop: true, phone: true })); localStorage.setItem('cc-appearance', JSON.stringify({ mode, theme: 'sky', text: 'm' })) } catch { /* no storage */ } }, { mode })
+    await phoneNotes(ctx)
     const p = await ctx.newPage()
     const errs = []
-    p.on('pageerror', (e) => errs.push(e.message))
+    // (Not WebKit's notice of a ResizeObserver that couldn't hand over every change in one frame, as
+    // a page() leaves out too: once on CI's macOS WebKit machine.)
+    p.on('pageerror', (e) => { if (!browserNotice(e.message)) errs.push(e.message) })
     await p.goto((await studio.api('/relay/pair', {})).pairing.link, { waitUntil: 'commit' })
     await p.locator('#pair-go').click({ timeout: 20000 })
     const f = await until(() => p.frames().find((x) => x !== p.mainFrame() && x.url().startsWith(ra.url)), 30000, 100)
+    // Paired, and Bridge AI never opened in the phone page's frame (CI's macOS WebKit machine, 3 times
+    // in 100 runs, as other suites' phones there): how far the page got, its worker and frame, for the
+    // log, rather than a null frame further on.
+    if (!f) throw new Error(`the phone page didn't open Bridge AI within 30 s: ${JSON.stringify({ frames: p.frames().map((x) => x.url()), page: await phoneSaw(p), errors: errs.slice(0, 3) }).slice(0, 2000)}`)
     // Paired once Studio has a password: it starts unticked there (from its first request, its page),
     // and gets nothing until it's ticked at Studio; then its page opens by itself. (The app's top bar
     // can show for a moment before the card does, so the list is looked at first.)
