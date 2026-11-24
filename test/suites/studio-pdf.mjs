@@ -220,7 +220,8 @@ try {
   // Sealed: no picture anywhere in the data folder, not as a PNG nor as the text the page sent; the
   // list sealed too (no name in the open).
   const plain = Buffer.from(png().split(',')[1], 'base64')
-  const everything = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? everything(path.join(d, e.name)) : [path.join(d, e.name)]))
+  // (Files only: the host's socket is in the data folder where its path is short enough.)
+  const everything = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? everything(path.join(d, e.name)) : e.isFile() ? [path.join(d, e.name)] : []))
   const showing = everything(kit.data).filter((f) => { const b = fs.readFileSync(f); return b.includes(plain.subarray(0, 64)) || b.includes(Buffer.from(png().split(',')[1].slice(40, 140))) || (f.startsWith(sigDir) && (b.includes(Buffer.from([0x89, 0x50, 0x4e, 0x47])) || b.includes(Buffer.from('Signature')))) })
   ok(!showing.length && fs.readFileSync(path.join(sigDir, 'store.bin')).subarray(0, 5).toString() === 'BSIG1', 'no signature in the open anywhere in the data folder: each picture and the list sealed (BSIG1)', showing)
   // The picture: to the app's own windows (their secret), never to the key alone (a program here,

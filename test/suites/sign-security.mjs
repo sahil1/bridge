@@ -50,7 +50,9 @@ function png(w = 240, h = 80) {
 }
 const dataUrl = (b) => `data:image/png;base64,${b.toString('base64')}`
 const sha = (b) => crypto.createHash('sha256').update(b).digest('hex')
-const everything = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? everything(path.join(d, e.name)) : [path.join(d, e.name)]))
+// Every file in a folder. Files only: the host's socket (server/runtime/hostlink.js) is in the data
+// folder where its path is short enough, as on GitHub's runners, and opening it fails.
+const everything = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? everything(path.join(d, e.name)) : e.isFile() ? [path.join(d, e.name)] : []))
 
 // A kit with the stand-in helper (told what to do in bridgesign.json), the app's keys given at start
 // (as the app gives them on its pipe: appKeysFor; more: in place of some of them), and before: what's
