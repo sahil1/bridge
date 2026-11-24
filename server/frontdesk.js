@@ -165,6 +165,7 @@ import * as store from './bots.js'
 import * as botmcp from './botmcp.js'
 import * as botanswer from './botanswer.js'
 import { isLimit } from './consult.js'
+import * as counts from './counts.js'
 // (isPublic: a channel everyone there can read, by its platform's registry: a Discord or Teams
 // channel is public to its server or team unless it says it's private.)
 import { platformOf, PLATFORMS, CAPS, laterTs, isPublic } from './connector.js'
@@ -3203,6 +3204,8 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
         if (lost.length) queue(o.bot, q, 'files', botfiles.noteOf(lost, `${you()} has ${lost.length > 1 ? 'them' : 'it'} in Bridge AI on ${computer()}.`))
         if (o.kind === 'answer') {
           noted(o.bot, q, o.text)
+          counts.botAnswered(platOf(q)).catch(() => {})
+          counts.first('bot').catch(() => {})
           for (const ts of [q.ts, ...q.more.map((x) => x.ts)]) { await react(o.bot, q, ts, 'white_check_mark'); await react(o.bot, q, ts, 'eyes', true); await react(o.bot, q, ts, 'hourglass_flowing_sand', true) }
           fs.rmSync(path.join(OUT, q.id), { recursive: true, force: true })
           done(q)
@@ -3287,6 +3290,7 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     if (!send) {
       if (waiting) await denyWrite(id, q, { by, via, device })
       record(id, 'discarded', at(q, { by, via }))
+      if (!q.needsOwner) counts.add('bots.drafts.rejected').catch(() => {})
       if (waiting) queue(id, q, 'told', `${ownerName(bot)} didn't approve the change, so nothing was changed.`)
       // (A session's copy goes back to before this change, for its next turn; a run's goes.)
       // (Never back past what's been pushed already, with your OK: that stays.)
@@ -3304,6 +3308,8 @@ export function makeFrontDesk({ delegate, fleet, resolve, installed, on = () => 
     let reply = String(text ?? q.draft ?? '').trim()
     if (!reply) throw Object.assign(new Error('Write the reply first'), { status: 400 })
     if (reply.length > KEPT) throw Object.assign(new Error(`Keep it under ${KEPT.toLocaleString('en')} characters`), { status: 400 })
+    // Usage stats: the bot's answer approved as it was, or edited first (not one you wrote yourself).
+    if (!q.needsOwner) counts.add(reply !== String(q.draft || '').trim() ? 'bots.drafts.edited' : 'bots.drafts.approved').catch(() => {})
     if (reply !== String(q.draft || '').trim()) {
       const before = q.draft || ''
       record(id, 'draft.edited', at(q, { before, after: reply, by, via }))

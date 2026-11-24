@@ -709,11 +709,13 @@ export async function reply(id, messages, { signal, tools, system = SYSTEM, json
   let gone = retiredInfo(id)
   let use = gone?.instead || id
   let got
+  // One that failed is counted in the usage stats, by why (not one you stopped).
+  const failed = (e) => { if (!signal?.aborted) counts.modelFailed(counts.failReason(e)).catch(() => {}); return e }
   try { got = await ask(use) } catch (e) {
     const [route, ...rest] = String(id || '').split(':')
     const other = !gone && unknownModel(e) && !signal?.aborted ? insteadOf(route) : null
-    if (!other || other === id) throw e
-    try { got = await ask(other) } catch { throw e }
+    if (!other || other === id) throw failed(e)
+    try { got = await ask(other) } catch { throw failed(e) }
     learnGone(route, rest.join(':'), e.message)
     gone = retiredInfo(id)
     use = other
@@ -721,7 +723,7 @@ export async function reply(id, messages, { signal, tools, system = SYSTEM, json
   const { usage, ...r } = got
   usagelog.record({ id: use, feature, usage, ms: Date.now() - started, instead: instead || (gone ? { of: id, why: retiredWhy(gone) } : null) })
   // The usage counts, when they're shared: the model's family, how it was reached, what asked.
-  counts.answered(use, feature, usage?.model).catch(() => {})
+  counts.answered(use, feature, usage?.model, usage).catch(() => {})
   return gone ? { ...r, retired: gone } : r
 }
 

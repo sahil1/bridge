@@ -16,7 +16,10 @@
 //   the models behind Bridge AI's own answers (a chat, AI Assist, meeting notes, dictation…) and
 //   the ones agents start on, each as its family on the list ("claude-sonnet", "gpt-5"), never its
 //   name; how each answer was reached (a sign-in, a key, a cloud, this computer); and which part of
-//   Bridge AI asked.
+//   Bridge AI asked. And amounts, each as a range ("1-10M"): the tokens Claude Code and Codex used
+//   for Bridge AI (from their own logs, for the conversations it ran) and those in its own answers,
+//   hours of meetings recorded, words dictated (never the words), and time in use in each part of
+//   Bridge AI (Meetings, Studio, an agent…).
 // - a day's (<data>/telemetry/days/<day>.json), sent the next day: the version that day (and the
 //   one before it, the day it updated), its channel, bucket and tester as the week's has them, the
 //   OS and how it's installed, how many times it started, whether it crashed, and how long it was
@@ -92,6 +95,17 @@ export function bucket(n) {
   if (n === 1) return '1'
   return n <= 5 ? '2-5' : n <= 20 ? '6-20' : n <= 100 ? '21-100' : '100+'
 }
+// "1-10M": how a week's tokens are sent.
+export function tokenRange(n) {
+  return !(n > 0) ? '0' : n < 1e5 ? 'under 100K' : n < 1e6 ? '100K-1M' : n < 1e7 ? '1-10M' : n < 1e8 ? '10-100M' : n < 1e9 ? '100M-1B' : '1B+'
+}
+// "1K-5K": how a week's words dictated are sent.
+export function wordRange(n) {
+  return !(n > 0) ? '0' : n < 100 ? 'under 100' : n < 1000 ? '100-1K' : n < 5000 ? '1K-5K' : n < 20000 ? '5K-20K' : '20K+'
+}
+// The amounts on the list (tokens, minutes, words), each sent as one of its ranges.
+const AMOUNTS = Object.fromEntries(Object.entries(SCHEMA.amounts || {}).filter(([k]) => k !== 'about'))
+const RANGE = { tokenRanges: tokenRange, wordRanges: wordRange, timeRanges: timeRange }
 // The ISO week a moment is in, on this computer's calendar: '2026-W44'. BRIDGE_COUNTS_NOW (tests)
 // stands in for now.
 export const now = () => (process.env.BRIDGE_COUNTS_NOW ? new Date(process.env.BRIDGE_COUNTS_NOW) : new Date())
@@ -111,7 +125,7 @@ export function configure(c, { about, save } = {}) { cfg = c; if (about) context
 const sharing = () => !!(cfg && cfg.counts?.share !== false && endpoint() && !refused())
 
 // This week's counts, in memory and written down a few seconds after they change.
-let week = null // { week, counts: { name: n }, days: [1..7], active, open (minutes), nonce, installAge, about }
+let week = null // { week, counts: { name: n }, amounts: { name: n }, days: [1..7], active, open (minutes), nonce, installAge, about }
 let writing = null
 const fileOf = (w) => path.join(DIR, `${w}.json`)
 let loading = null // two counts at once wait for the same week
@@ -128,14 +142,29 @@ function current() {
 }
 // A week with nothing counted yet. What it says about this install is taken when it starts and
 // with each count, so the report sent after the week is the one shown during it.
-const fresh = async (w) => ({ week: w, counts: {}, days: [], active: 0, open: 0, nonce: crypto.randomBytes(12).toString('hex'), installAge: await installAge(), about: await context() })
+const fresh = async (w) => ({ week: w, counts: {}, amounts: {}, days: [], active: 0, open: 0, before: await weeksBefore(w), nonce: crypto.randomBytes(12).toString('hex'), installAge: await installAge(), about: await context() })
 // A week with nothing in it isn't written down. One that was only open, never used, is kept while
 // the week goes on (it may be used yet) but isn't sent (send()).
-const used = (w) => !!(Object.keys(w.counts).length || w.active > 0)
+const used = (w) => !!(Object.keys(w.counts).length || Object.keys(w.amounts || {}).length || w.active > 0)
 async function flush() {
   if (!week || !(used(week) || week.open > 0)) return
   await fs.promises.mkdir(DIR, { recursive: true })
+  if (used(week) && !week.noted) { await noteWeek(week.week); week.noted = true }
   await fs.promises.writeFile(fileOf(week.week), JSON.stringify(week))
+}
+// The weeks Bridge AI was used (telemetry/weeks.json, the last eight), for how many of the last four
+// it was used (recentWeeks): kept on this computer, never sent, so no report says which weeks.
+const WEEKS = path.join(DIR, 'weeks.json')
+const weeksUsed = () => fs.promises.readFile(WEEKS, 'utf8').then(JSON.parse, () => [])
+async function noteWeek(w) {
+  const list = await weeksUsed()
+  if (!list.includes(w)) await fs.promises.writeFile(WEEKS, JSON.stringify([...list, w].sort().slice(-8)))
+}
+// The week k weeks before w (its Thursday decides it, as for weekOf).
+const weekBack = (w, k) => weekOf(new Date(weekSpan(w)[0] - (7 * k - 3) * 864e5))
+async function weeksBefore(w) {
+  const list = await weeksUsed()
+  return [1, 2, 3].filter((k) => list.includes(weekBack(w, k))).length
 }
 const later = () => { clearTimeout(writing); writing = setTimeout(() => flush().catch(() => {}), Number(process.env.BRIDGE_COUNTS_WRITE_MS || 5000)); writing.unref?.() }
 function today(w) { const d = ((now().getDay() + 6) % 7) + 1; if (!w.days.includes(d)) w.days.push(d) }
@@ -152,6 +181,15 @@ async function addAll(names, by = 1) {
   today(w)
   later()
 }
+// More of an amount on the list (amounts): tokens, minutes or words. While sharing is off, nothing.
+export async function amount(name, by) {
+  if (!sharing() || !AMOUNTS[name] || !(by > 0)) return
+  const w = await current()
+  w.amounts ||= {}
+  w.amounts[name] = (w.amounts[name] || 0) + by
+  today(w)
+  later()
+}
 // The most of something at once this week (agents.peak).
 export async function most(name, n) {
   if (!sharing() || !NAMES.has(name) || !(n > (week?.counts[name] || 0))) return
@@ -164,16 +202,75 @@ export const started = (kind) => add(NAMES.has(`agents.started.${kind}`) ? `agen
 // other. Never the name, which can be anything a provider or a model server calls it.
 const FAMILIES = Object.entries(SCHEMA.modelFamilies || {}).filter(([k]) => k !== 'about').map(([k, re]) => [k, new RegExp(re, 'i')])
 export const familyOf = (model) => FAMILIES.find(([, re]) => re.test(String(model || '')))?.[0] || 'other'
+// Its vendor, by the list's vendors (anthropic, openai, google, xai, open), else other.
+const VENDOR = Object.fromEntries(Object.entries(SCHEMA.vendors || {}).filter(([k]) => k !== 'about').flatMap(([v, fams]) => fams.map((f) => [f, v])))
+export const vendorOf = (model) => VENDOR[familyOf(model)] || 'other'
 // An agent started on a model, or switched to one: its family, or default when none was picked.
 export const agentModel = (model) => add(model ? `agents.model.${familyOf(model)}` : 'agents.model.default')
 // An answer Bridge AI asked a model for itself (chatmodels.js reply()): the model's family (the one
 // the provider says answered, when it says), how it was reached, and the part of Bridge AI that
-// asked (usagelog.js FEATURES).
+// asked (usagelog.js FEATURES). And its tokens (usagelog.js usageOf: in, the cache included, and
+// out), but for one through an agent's sign-in: that agent's own logs have it (agentTokens()).
 const VIA = (route) => (route === 'cli' ? 'signin' : route === 'bridge' ? 'builtin' : /^(ollama|lmstudio)$/.test(route) ? 'local' : /^(azure|bedrock|vertex)$/.test(route) ? 'cloud' : 'key')
-export async function answered(id, feature, said) {
+export async function answered(id, feature, said, usage = null) {
   const [route, ...rest] = String(id || '').split(':')
   await addAll([`models.${familyOf(said || rest.join(':') || route)}`, `models.via.${VIA(route)}`, NAMES.has(`ai.${feature}`) ? `ai.${feature}` : 'ai.other'])
+  const tokens = (usage?.in || 0) + (usage?.out || 0)
+  if (route !== 'cli') { await amount('tokens.models', tokens); await amount(`tokens.vendor.${vendorOf(said || rest.join(':') || route)}`, tokens) }
 }
+// An answer that failed (reason: key, limit, timeout or other), not one you stopped.
+export const modelFailed = (reason) => add(NAMES.has(`fail.model.${reason}`) ? `fail.model.${reason}` : 'fail.model.other')
+// Why an answer failed, as modelFailed says it: the key or sign-in refused, a usage or rate
+// limit, too long, or anything else.
+export function failReason(e) {
+  const s = `${e?.code || ''} ${e?.status || ''} ${e?.message || e || ''}`
+  if (e?.code === 'limit' || /\b429\b|rate.?limit|usage limit|quota|out of (credits|usage)|hit your/i.test(s)) return 'limit'
+  if (/\b40[13]\b|unauthori[sz]ed|forbidden|invalid.{0,20}(api.?)?key|api key|\bno .{0,40}key\b|key saved|needs its key|turned the key down|authenticat|not signed in|sign in|log ?in/i.test(s)) return 'key'
+  if (e?.name === 'TimeoutError' || /timed? ?out|timeout|took too long|ETIMEDOUT/i.test(s)) return 'timeout'
+  return 'other'
+}
+// An agent that couldn't start (reason: notInstalled, signIn, limit or other).
+export const agentFailed = (reason) => add(NAMES.has(`fail.agent.${reason}`) ? `fail.agent.${reason}` : 'fail.agent.other')
+// An agent at its plan's usage limit (kind: claude, codex, gemini, else other).
+export const limited = (kind) => add(NAMES.has(`limits.${kind}`) ? `limits.${kind}` : 'limits.other')
+// Something an agent needed you for, answered: on the phone or here, and how long it waited.
+export function needAnswered({ waited = null, phone = false } = {}) {
+  const fast = waited == null ? null : waited < 60e3 ? 'needs.within.1m' : waited < 600e3 ? 'needs.within.10m' : waited < 3600e3 ? 'needs.within.1h' : 'needs.later'
+  return addAll([phone ? 'needs.answered.phone' : 'needs.answered.desktop', ...(fast ? [fast] : [])])
+}
+// Minutes of speech turned into text, by engine (parakeet, whisper, apple, or a service's id).
+export const transcribed = (engine, seconds) => amount(AMOUNTS[`time.speech.${engine}`] ? `time.speech.${engine}` : 'time.speech.other', (seconds || 0) / 60)
+// A bot's answer posted (platform: slack, discord, teams, else other).
+export const botAnswered = (platform) => add(NAMES.has(`bots.answered.${platform}`) ? `bots.answered.${platform}` : 'bots.answered.other')
+// What a window says was used (POST /api/counts/add): only what's counted there, AI Assist's
+// suggestions kept or dismissed.
+export const fromWindow = (name) => (/^assist\.(accepted|dismissed)\.[a-z]+$/.test(String(name)) ? add(name) : Promise.resolve())
+
+// A phone opening Bridge AI on this computer (phone.sessions; key: the phone's device, or tailnet):
+// once a visit, a new visit after half an hour without one.
+const visits = new Map()
+export function phoneVisit(key) {
+  const t = Date.now(), last = visits.get(key)
+  visits.set(key, t)
+  return last && t - last < 30 * 60e3 ? Promise.resolve() : add('phone.sessions')
+}
+
+// First-time milestones (firsts.*): each counted once on this computer, the week it happens. The
+// ones reached are kept in telemetry/firsts.json (forgotten, as the rest is, when sharing is off).
+const FIRSTS = path.join(DIR, 'firsts.json')
+let firstsDone = null
+export async function first(what) {
+  if (!sharing() || !NAMES.has(`firsts.${what}`)) return
+  firstsDone ||= fs.promises.readFile(FIRSTS, 'utf8').then(JSON.parse, () => [])
+  const done = await firstsDone
+  if (done.includes(what)) return
+  done.push(what)
+  await fs.promises.mkdir(DIR, { recursive: true })
+  await fs.promises.writeFile(FIRSTS, JSON.stringify(done))
+  await add(`firsts.${what}`)
+}
+// Words dictated (the count, never the words).
+export const dictated = (text) => amount('words.dictated', String(text || '').split(/\s+/).filter(Boolean).length)
 
 // How long Bridge AI has been on this computer, from when its data folder was made.
 async function installAge() {
@@ -193,13 +290,46 @@ export function report(w) {
     install: c.install, layout: c.layout, runtime: c.runtime, phone: c.phone, phones: c.phones, computers: c.computers,
     installAge: w.installAge || null,
     daysActive: w.days.length,
+    recentWeeks: Math.min(4, (w.before || 0) + (used(w) ? 1 : 0)),
     activeTime: timeRange(w.active),
     openTime: timeRange(w.open),
     features: features({ ...(c.features || {}), ...(w.window || {}) }),
     agents: (c.agents || []).filter((k) => AGENT_KINDS.has(k)).sort(),
     counts: Object.fromEntries(Object.entries(w.counts).filter(([k, n]) => NAMES.has(k) && n > 0).sort(([a], [b]) => a.localeCompare(b)).map(([k, n]) => [k, bucket(n)])),
+    amounts: Object.fromEntries(amountsOf(w).map(([k, n]) => [k, RANGE[AMOUNTS[k].ranges](n)])),
+    totals: Object.fromEntries(amountsOf(w).filter(([k]) => AMOUNTS[k].total).map(([k, n]) => [k, twoFigures(n)])),
     nonce: w.nonce,
   }
+}
+// A week's amounts that aren't 0, by name: its own, and the tokens agents used (agentTokens()).
+function amountsOf(w) {
+  const all = { ...(w.amounts || {}) }
+  for (const [k, n] of Object.entries(w.agentTokens || {})) all[k] = (all[k] || 0) + n
+  return Object.entries(all).filter(([k, n]) => AMOUNTS[k] && n > 0).sort(([a], [b]) => a.localeCompare(b))
+}
+// A total as it's sent: two significant figures (3,417,882 as 3,400,000; 7.25 minutes as 7.3).
+export const twoFigures = (n) => (n > 0 ? Number(Number(n).toPrecision(2)) : 0)
+// When an ISO week starts and ends, on this computer's calendar: [Monday 00:00, the next one).
+export function weekSpan(w) {
+  const [y, n] = String(w).split('-W').map(Number)
+  const jan4 = new Date(y, 0, 4)
+  const start = new Date(y, 0, 4 - ((jan4.getDay() + 6) % 7) + (n - 1) * 7)
+  return [start.getTime(), new Date(start.getFullYear(), start.getMonth(), start.getDate() + 7).getTime()]
+}
+// The tokens Claude Code and Codex used for Bridge AI in a week, from their own logs (usagesplit.js
+// viaBridge): looked up as the week's report is shown or sent, rather than counted as they go.
+async function agentTokens(w) {
+  if (!sharing()) return w
+  const [from, to] = weekSpan(w.week)
+  const { viaBridge } = await import('./usagesplit.js')
+  const out = {}
+  for (const kind of ['claude', 'codex']) {
+    const { tokens, byModel } = await viaBridge(kind, from, to).catch(() => ({ tokens: 0, byModel: {} }))
+    if (!(tokens > 0)) continue
+    out[`tokens.agents.${kind}`] = tokens
+    for (const [model, n] of Object.entries(byModel)) out[`tokens.vendor.${vendorOf(model)}`] = (out[`tokens.vendor.${vendorOf(model)}`] || 0) + n
+  }
+  return { ...w, agentTokens: out }
 }
 // The update channel (stable, early or nightly), for Early Access from a Bold Bridge account who the
 // code is for (the account's id; none with no code), and the staged rollout's bucket (0-99, random):
@@ -231,6 +361,7 @@ export async function status() {
     to,
     stopped: cfg?.counts?.stopped || null,
     counters: SCHEMA.counters,
+    amounts: Object.fromEntries(Object.entries(AMOUNTS).map(([k, v]) => [k, v.about])),
     sent,
   }
 }
@@ -241,7 +372,7 @@ export async function preview() {
   if (!sharing()) return { share: false, week: weekOf(), report: report({ ...(await fresh(weekOf())), nonce: '(new for each report)' }) }
   const waiting = (await pending())[0]
   const w = waiting ? JSON.parse(await fs.promises.readFile(fileOf(waiting), 'utf8')) : await current()
-  return { share: true, week: w.week, report: report(w), goes: waiting ? 'next' : 'after this week', empty: !used(w) }
+  return { share: true, week: w.week, report: report(await agentTokens(w)), goes: waiting ? 'next' : 'after this week', empty: !used(w) }
 }
 export async function sentReport(w) {
   if (!/^\d{4}-W\d\d$/.test(String(w))) throw new Error('No such week')
@@ -259,6 +390,9 @@ export async function setShare(on) {
     for (const f of await fs.promises.readdir(DIR).catch(() => [])) if (/^\d{4}-W\d\d\.json$/.test(f)) await fs.promises.rm(path.join(DIR, f), { force: true })
     await fs.promises.rm(DAYS, { recursive: true, force: true })
     await fs.promises.rm(LAST, { force: true })
+    await fs.promises.rm(WEEKS, { force: true })
+    await fs.promises.rm(FIRSTS, { force: true })
+    firstsDone = null
   }
   return status()
 }
@@ -279,7 +413,7 @@ export async function send() {
     const file = fileOf(w)
     const kept = await fs.promises.readFile(file, 'utf8').then(JSON.parse, () => null)
     if (!kept || !used({ counts: {}, ...kept })) { await fs.promises.rm(file, { force: true }); continue }
-    const body = report(kept)
+    const body = report(await agentTokens(kept))
     let r
     try {
       r = await fetch(endpoint(), { method: 'POST', headers: { 'content-type': 'application/json', 'user-agent': 'bridge-ai' }, body: JSON.stringify(body), signal: AbortSignal.timeout(10000) })
@@ -391,15 +525,19 @@ export async function sendFirst() {
 }
 
 // A minute of Bridge AI in use, said by a window of it (POST /api/counts/active): counted once a
-// minute, however many windows and phones say so.
+// minute, however many windows and phones say so, to the part of Bridge AI it was in (area: one of
+// the amounts' time.area.*, else other).
 let lastActive = -1
-export async function activity() {
+export async function activity(area) {
   if (!sharing()) return { counted: false }
   const minute = Math.floor(now() / 60000)
   if (minute === lastActive) return { counted: false }
   lastActive = minute
   const w = await current()
   w.active = (w.active || 0) + 1
+  const where = AMOUNTS[`time.area.${area}`] ? `time.area.${area}` : 'time.area.other'
+  w.amounts ||= {}
+  w.amounts[where] = (w.amounts[where] || 0) + 1
   today(w)
   later()
   // And on the day's: written down every five minutes in use, and as the server stops.

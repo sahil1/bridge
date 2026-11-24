@@ -6,6 +6,7 @@ import { keys } from './keys.js'
 import { commentKey } from './docview.js'
 import { commentsOf, threadsOf, newComment, usedIds, anchor, writeComments, AI_AUTHOR } from './wordcomments.js'
 import './threads.css'
+import { assistKept } from '../../counts.js'
 
 // Comments in a Word file, as threads (Comments and @bridge): a comment on the words you pick,
 // replies, resolved and opened again, deleted, all written into the file itself (wordcomments.js),
@@ -258,6 +259,7 @@ export function useThreads({ editor, model, on, author, dirty, name = '' }) {
     if (rootId) { const a = anchorsOf(doc).get(rootId); if (a?.cs == null || a?.ce == null) return; from = a.cs + 1; to = a.ce }
     const spans = suggestionsIn(doc, from, to)
     if (!spans.length) return
+    assistKept('studio', keep)
     const x = editor.state.tr
     for (const r of spans.reverse()) { if (r.ins === keep) x.removeMark(r.from, r.to, r.mark); else x.delete(r.from, r.to) }
     editor.view.dispatch(x)

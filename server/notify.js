@@ -168,7 +168,7 @@ export async function answer(t, ctx = {}) {
   if (c.x < now) return { ok: false, why: 'expired', url }
   if (used.has(c.i)) return { ok: false, why: 'used', url }
   used.set(c.i, c.x)
-  return { ...(await pick(c.p, { seq: c.s, qid: c.h, n: c.k })), url }
+  return { ...(await pick(c.p, { seq: c.s, qid: c.h, n: c.k })), url, paneId: c.p }
 }
 
 // Type one of a question's simple answers (n), if the agent is still waiting on that same question

@@ -12,6 +12,7 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { PDFDocument, StandardFonts, PDFSignature, PDFTextField, PDFName, PDFRef, PDFString, degrees, rgb } from 'pdf-lib'
+import * as counts from './counts.js'
 import { safePath } from './files.js'
 import * as store from './signstore.js'
 import * as auth from './signauth.js'
@@ -427,6 +428,7 @@ export function routes(app, { wrap, rootOf, sq, window: fromWindow, phone: phone
     const rec = { id, on: nameOf(req), via: a.here ? 'window' : 'phone', how, places: r.places, at: new Date().toISOString(), copy: r.path, from: String(q.path), sha256: r.sha256, fromSha256: r.fromSha256 }
     rec.mac = await store.macOf(rec, { orig: r.from, copy: r.real }).catch(() => null)
     await record({ original: r.from, copy: r.real, rec }).catch((e) => console.error(`signing: signed, but its versions couldn't say so: ${e.message}`))
+    counts.add('pdfs.signed').catch(() => {})
     const { real: _r, from: _f, ...out } = r
     return { root: q.root, ...out, record: rec }
   }))

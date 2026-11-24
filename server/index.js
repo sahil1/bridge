@@ -377,7 +377,8 @@ const launchAgent = (o) => {
   const picked = o.account === 'auto' || accounts.has(kind, o.account) ? o.account : accounts.accountOf(kind, null, o.resume || o.fork)
   const model = o.model === 'default' ? null : o.model || modelFor(kind)
   return rt.launch({ ...o, model, effort: effortFor(kind, o) || undefined, account: accounts.resolve(kind, picked) || accounts.activeId(kind) })
-    .then((out) => { insights.noteLaunch(out?.paneId, o.prompt); if (kind !== 'shell') { counts.started(kind); counts.agentModel(model) } return out })
+    .then((out) => { insights.noteLaunch(out?.paneId, o.prompt); if (kind !== 'shell') { counts.started(kind); counts.agentModel(model); counts.first('agent') } return out },
+      (e) => { if (kind !== 'shell') counts.agentFailed('other'); throw e })
 }
 
 // How hard it thinks (Recommended Settings): the level a task's effort chip picked (New, Home's
@@ -534,6 +535,7 @@ app.get('/api/agents/:pane/mentions', wrap(async (req) => {
 const answered = new Map() // pane -> { setup, at }
 app.post('/api/panes/:pane/input', wrap(async (req) => {
   const steps = Array.isArray(req.body?.steps) ? req.body.steps.slice(0, 200) : []
+  if (!req.body?.setup) answeredFrom(req, req.params.pane)
   if (req.body?.atPrompt && draftIn(await rt.read(req.params.pane, 30)) === null) return { ok: false, notAtPrompt: true }
   if (req.body?.setup) {
     const was = answered.get(req.params.pane)
@@ -803,9 +805,14 @@ app.get('/api/studio/draft/file', (req, res) => {
   res.sendFile(file, { dotfiles: 'allow' }, (e) => { if (e && !res.headersSent) res.status(404).json({ error: 'No draft' }) })
 })
 app.delete('/api/studio/draft', wrap((req) => { const q = sq(req); return studio.dropDraft(q.root, q.path) }))
+// What a new file in Studio is, for usage stats (studio.made.*).
+const MADE = { '.docx': 'document', '.md': 'document', '.xlsx': 'sheet', '.csv': 'sheet', '.pptx': 'deck' }
 app.post('/api/studio/new', wrap(async (req) => {
   const q = sq(req)
-  return studio.create(await rootOf(q.root), String(req.body?.dir || ''), String(req.body?.name || ''), req.body?.data ? Buffer.from(String(req.body.data), 'base64') : Buffer.from(String(req.body?.text || '')))
+  const out = await studio.create(await rootOf(q.root), String(req.body?.dir || ''), String(req.body?.name || ''), req.body?.data ? Buffer.from(String(req.body.data), 'base64') : Buffer.from(String(req.body?.text || '')))
+  counts.add(`studio.made.${MADE[path.extname(out.name).toLowerCase()] || 'other'}`)
+  counts.first('studio')
+  return out
 }))
 app.get('/api/studio/packs', wrap(async () => ({ packs: await studio.packs() })))
 app.post('/api/studio/packs', express.json({ limit: '1mb' }), wrap((req) => studio.savePack(req.body || {})))
@@ -1264,6 +1271,7 @@ app.post('/api/agents/:pane/prompt', wrap(async (req) => {
       return { agent, r: { ok: true, queued: true, reason: why, id: item.id, position: queue.placeOf(pane, item.id) } }
     })
     insights.noteSent(pane, text)
+    if (isPhone(req)) counts.add('phone.messages')
     noteTyped(req.body, agent)
     // Typed by you (Chief of Staff's `bridge send` comes this way too, unmarked).
     if (req.body?.typed && agent) touched(pane, agent)
@@ -1279,6 +1287,7 @@ app.post('/api/agents/:pane/keys', wrap(async (req) => {
   if (!keys.length || !keys.every((k) => ALLOWED_KEYS.test(k))) throw new Error('Unsupported key')
   await rt.keys(req.params.pane, keys)
   touched(req.params.pane)
+  answeredFrom(req, req.params.pane)
   return { ok: true }
 }))
 
@@ -1292,13 +1301,14 @@ async function startChief() {
   const home = f.agents.find((a) => a.chief)?.workspaceId
   const out = await launchAgent({ kind, cwd: CHIEF_DIR, label: 'Chief of Staff', workspaceId: home || null, newSpace: home ? undefined : 'Chief of Staff', env: { BRIDGE_THREAD: 'main' } })
   counts.add('chief.started')
+  counts.first('chief')
   pushFleet()
   return out
 }
 async function chiefKind() {
   if (!(await exists(CHIEF_DIR))) throw new Error(`Chief of Staff folder not found at ${CHIEF_DIR}`)
   const kind = cfg.chief?.kind || 'claude'
-  if (!(await installed()).some((k) => k.kind === kind)) throw notInstalled(kind, `The chief of staff runs on ${adapter(kind).label}, which isn't installed yet.`)
+  if (!(await installed()).some((k) => k.kind === kind)) throw cantStart(kind, `The chief of staff runs on ${adapter(kind).label}, which isn't installed yet.`)
   return kind
 }
 // A new thread: another chief in the same folder, in a tab of the Chief of Staff space named for
@@ -1314,6 +1324,7 @@ app.post('/api/chief/threads', wrap(async (req) => {
     const out = await launchAgent({ kind, cwd: CHIEF_DIR, label: name, workspaceId: home || null, newSpace: home ? undefined : 'Chief of Staff', prompt: String(req.body?.prompt || '').trim() || undefined, env: { BRIDGE_THREAD: id } })
     threads.started(id, { paneId: out.paneId, session: f.session })
     counts.add('chief.threads')
+    counts.first('chief')
     pushFleet()
     return { ...out, thread: id }
   } finally { threads.release() }
@@ -1331,7 +1342,7 @@ app.post('/api/chief/threads/link', wrap(async (req) => {
 // ---------- The chief of staff's helpers (delegate.js) ----------
 // `bridge delegate`: a task on its list and a helper on it, now or once there's room. (Always the
 // chief's own list: another one's helpers are started only from here, frontdesk.js.)
-app.post('/api/chief/delegate', wrap((req) => delegate.add({ ...(req.body || {}), list: undefined })))
+app.post('/api/chief/delegate', wrap(async (req) => { const out = await delegate.add({ ...(req.body || {}), list: undefined }); counts.add('chief.delegated'); return out }))
 // Try again, on a task whose helper couldn't start or was closed before it finished.
 app.post('/api/chief/delegate/:task/retry', wrap((req) => delegate.retry(req.params.task)))
 // `bridge item`: a meeting's action item on its list placed (meetitems.js), once: with an agent, a
@@ -1367,7 +1378,7 @@ async function launchHelper({ kind, cwd, own, label, space, prompt, access, dirs
   // (A read-only one, a bot's answer, is started as it is: its folders were checked, and it isn't
   // work of yours to remember the folder for.)
   if (!own && !fork && !botRun) return { ...(await launchFrom({ kind, cwd, label, ...where, prompt, effort: 'suggest', access })), session: f.session || '' }
-  if (!(await installed()).some((k) => k.kind === kind)) throw notInstalled(kind)
+  if (!(await installed()).some((k) => k.kind === kind)) throw cantStart(kind)
   const out = await launchAgent({ kind, cwd, label, workspaceId: ws?.id || null, newSpace: ws ? undefined : space, prompt, access, dirs: botRun ? dirs : undefined, fork, ...(resume && botRun ? { resume } : {}), effort: 'suggest', ...(model ? { model, pinModel: true } : {}), ...(botRun && env ? { env } : {}) })
   pushFleet()
   return { ...out, session: f.session || '' }
@@ -1391,6 +1402,8 @@ const plainScreen = (text) => String(text || '').replace(/\x1b\[[0-9;?]*[A-Za-z]
 
 // An agent that isn't installed: code install:<kind> lets the app offer its Install button. One
 // that's hidden (Qwen Code, while Show more models is off) says how to show it.
+// Starting one that isn't installed: said so, and counted in the usage stats (fail.agent.notInstalled).
+function cantStart(kind, message) { counts.agentFailed('notInstalled'); return notInstalled(kind, message) }
 function notInstalled(kind, message = `${adapter(kind).label} isn't installed`) {
   if (labs.hiddenAgent(kind)) return new Error(labs.OFF)
   return Object.assign(new Error(message), installCommand(kind) ? { code: `install:${kind}` } : {})
@@ -1460,7 +1473,7 @@ app.delete('/api/agents/:pane/queue/:id', wrap(async (req) => { queue.remove(req
 // The message box's model menu: what the agent is on, and switching it (models.js).
 makeModels({ rt, cfg, findAgent, launchAgent, archiveWhere, archive, pushFleet: () => pushFleet() }).routes(app, wrap)
 // Hand off to another agent from the same menu (handoff.js): Claude Code to Codex, say, with a handover.
-makeHandoff({ rt, cfg, chiefDir: CHIEF_DIR, findAgent, launchAgent, archiveWhere, pushFleet: () => pushFleet(), setChiefKind: (kind) => afterChange(settings.patch({ chief: { kind } })) }).routes(app, wrap)
+makeHandoff({ rt, cfg, chiefDir: CHIEF_DIR, findAgent, launchAgent: (o) => launchAgent(o).then((out) => { counts.add('agents.handedOff'); return out }), archiveWhere, pushFleet: () => pushFleet(), setChiefKind: (kind) => afterChange(settings.patch({ chief: { kind } })) }).routes(app, wrap)
 asks.routes(app, { wrap, findAgent, sendPrompt })
 
 app.get('/api/places', wrap(async () => {
@@ -1484,6 +1497,7 @@ app.get('/api/repo', wrap(async (req) => {
 app.post('/api/agents/launch', wrap(async (req) => {
   const b = req.body || {}
   const out = await launchFrom(b)
+  if (isPhone(req)) counts.add('phone.agentsStarted')
   if (b.typed && b.prompt) noteTyped({ typed: b.typed, text: b.prompt }, { kind: b.kind || cfg.defaultAgent || 'claude', title: b.label, cwd: await places.resolveDir(b.cwd).catch(() => String(b.cwd || '')), paneId: out?.paneId })
   // A new agent you started (New, Home's box): you're working in that folder.
   if (b.typed) places.resolveDir(b.cwd).then((dir) => engaged.folder(dir), () => {})
@@ -1493,7 +1507,7 @@ app.post('/api/agents/launch', wrap(async (req) => {
 // where in the sidebar, on its own branch or not, and its first message.
 async function launchFrom(body) {
   const { kind = cfg.defaultAgent || 'claude', cwd, workspaceId, newSpace, label, prompt, account, alsoKind, ownBranch, branch, base, setup, remember, model, access, effort } = body
-  if (kind !== 'shell' && kind !== 'chat' && !(await installed()).some((k) => k.kind === kind)) throw notInstalled(kind)
+  if (kind !== 'shell' && kind !== 'chat' && !(await installed()).some((k) => k.kind === kind)) throw cantStart(kind)
   // Any model, on the one picked (its agent started on it, so the model button names it before its
   // first reply), and allowed what the access chip says.
   const chatModel = kind === 'chat' && typeof model === 'string' && model.trim() ? model.trim().slice(0, 200) : null
@@ -1636,7 +1650,7 @@ app.post('/api/sessions/resume', wrap(async (req) => {
   if (!adapter(kind).resume || !/^[\w-]{8,64}$/.test(String(sessionId || ''))) throw new Error("That conversation can't be resumed")
   const live = (await liveBySession())[sessionId]
   if (live) return { paneId: live, already: true }
-  if (kind !== 'chat' && !(await installed()).some((k) => k.kind === kind)) throw notInstalled(kind)
+  if (kind !== 'chat' && !(await installed()).some((k) => k.kind === kind)) throw cantStart(kind)
   // On its own branch: its worktree may live outside your home folder, and if it was removed when
   // the agent closed, it's checked out again at the same path first (then the setup command runs).
   const own = worktrees.folderOf(expand(String(cwd || '')))
@@ -1684,6 +1698,7 @@ app.post('/api/agents/:pane/continue', wrap(async (req) => {
   const model = forLaunch(a.kind, a.sessionId) || a.model || undefined // on the same model
   const out = await launchAgent({ kind: a.kind, cwd: a.cwd, label: name.slice(0, 60), workspaceId: still ? a.workspaceId : null, newSpace: still ? undefined : a.workspace, resume: a.sessionId, account: id, model, pinModel: !!model, effort: a.effort || undefined })
   archive.removeSession(a.sessionId)
+  counts.add('accounts.switched.manual')
   // Stopped by a usage limit: tell it to carry on, once it's ready on the new account.
   if (req.body?.nudge && out?.paneId) queue.add(out.paneId, 'Continue from where you stopped.')
   pushFleet()
@@ -1710,6 +1725,7 @@ app.post('/api/routines/:id/run', wrap(async (req) => {
 // A routine's run: a new agent in its folder, typed its command (the same agent, space and words
 // each time), or its command to the Chief of Staff, started first if it isn't running.
 async function startRoutine(def) {
+  counts.add('routines.run')
   // A bot's scheduled post: put to the bot, answered and posted in its channel (frontdesk.js).
   if (def.to === 'bot') {
     if (!botsOn()) throw new Error(`Bots is off: turn it on in ${placeEn('bots')}`)
@@ -1732,7 +1748,7 @@ async function startRoutine(def) {
   const cwd = routines.resolveCwd(def)
   if (!(await exists(cwd))) throw new Error(`Folder not found: ${def.cwd}`)
   const kind = def.kind || cfg.defaultAgent || 'claude'
-  if (!(await installed()).some((k) => k.kind === kind)) throw notInstalled(kind)
+  if (!(await installed()).some((k) => k.kind === kind)) throw cantStart(kind)
   const f = await rt.fleet()
   const ws = def.workspace && f.workspaces.find((w) => w.label.toLowerCase() === def.workspace.toLowerCase())
   return launchAgent({ kind, cwd, label: def.name, workspaceId: ws?.id, newSpace: ws ? undefined : def.workspace || def.name, prompt: def.command }).then((out) => { pushFleet(); return out })
@@ -1813,6 +1829,7 @@ app.post('/api/chief/tasks', wrap(async (req) => {
   const send = !!req.body?.send
   const item = chiefTasks.add(req.body?.title, { status: req.body?.status, link: req.body?.link, from: send ? 'you' : null })
   counts.add('chief.tasks')
+  counts.first('chief')
   if (req.body?.typed) noteTyped({ typed: 'tasks', text: req.body.title }, { chief: true, kind: cfg.chief?.kind || 'claude' })
   if (!send) return { item }
   return { item, ...(await tellChief(`Task ${item.id} from my Tasks panel: ${item.title}\n\n(It's on your task list as ${item.id}. Keep it current with \`node bin/bridge task\`.)`)) }
@@ -1885,6 +1902,8 @@ app.get('/api/events', (req, res) => {
   // (Which device it's for: what another computer that keeps it out said is left out of its feed.)
   res.bridgeDevice = req.headers['x-bridge-relay'] || null
   clients.add(res)
+  // Usage stats: a phone's visit over Tailscale (one through a relay is counted as its link opens).
+  if (!req.headers['x-bridge-relay'] && guard.viaTailnet(req)) counts.phoneVisit('tailnet').catch(() => {})
   if (lastFleet) res.write(`event: fleet\ndata: ${JSON.stringify(shownFleet(lastFleet))}\n\n`)
   // Who's viewing a screen of yours now, here or on another of your computers (screentell.js).
   res.write(`event: screen\ndata: ${JSON.stringify({ list: screensFor(res.bridgeDevice) })}\n\n`)
@@ -1925,6 +1944,7 @@ async function pollFleet() {
         lastFleet = f
         insights.observe(f.agents)
         counts.most('agents.peak', f.agents.length)
+        watchNeeds(f.agents)
         runs.observe(f.agents)
         routines.observe(f.agents, { said: routineSaid })
         delegate.observe(f).catch((e) => console.log(`Watching the helpers: ${e.message}`))
@@ -2053,6 +2073,8 @@ let hearing = 0
 app.post('/api/transcribe', express.raw({ type: () => true, limit: '30mb' }), async (req, res) => {
   hearing++
   try { res.json(await voice.transcribe(req.body, req.headers['content-type'], { more: dictation.hints(dictationSources) })); counts.add('voice.transcribed') } catch (e) {
+    // (Not one waiting on something to set up first: a model to download, whisper, ffmpeg.)
+    if (!/^needs-/.test(String(e.code || ''))) counts.add('fail.speech')
     res.status(e.status || 502).json({ error: e.message, ...(typeof e.code === 'string' ? { code: e.code } : {}), ...(e.model ? { model: e.model } : {}) })
   } finally { hearing-- }
 })
@@ -2137,7 +2159,7 @@ const said = (fn) => async (req, res) => { try { res.json(await fn(req)) } catch
 app.get('/api/dictations', said((req) => dictations.list({ q: String(req.query.q || ''), before: req.query.before || null, limit: req.query.limit })))
 // The names said in each one kept go on memory's names (memoryview.js said).
 const toMemory = (r) => { if (r?.kept && r.id) dictations.get(r.id).then((d) => memoryView.said(d)).catch(() => {}); return r }
-app.post('/api/dictations', said(async (req) => toMemory(await (req.body?.restore ? dictations.add(req.body.restore, { restore: true }) : (counts.add('dictations.saved'), dictations.add(req.body || {}))))))
+app.post('/api/dictations', said(async (req) => toMemory(await (req.body?.restore ? dictations.add(req.body.restore, { restore: true }) : (counts.add('dictations.saved'), counts.dictated(req.body?.text), counts.first('dictation'), dictations.add(req.body || {}))))))
 app.delete('/api/dictations', said(() => dictations.clear()))
 app.get('/api/dictations/icons/:bundle', async (req, res) => {
   const f = dictations.iconFile(req.params.bundle)
@@ -2396,7 +2418,7 @@ app.get('/api/meetings', wrap(() => {
   const hints = meetings.mergeHints(list)
   return { meetings: list.map(({ captures, links, ...m }) => ({ ...m, pictures: captures?.length || 0, files: links?.length || 0, ...(hints[m.id] ? { mergeHint: hints[m.id] } : {}) })), folder: meetings.folder(), kinds: Object.entries(meetings.KINDS).map(([id, k]) => ({ id, label: k.label })), ...(auto && !auto.said ? { insightsOn: { at: auto.at, meetings: auto.meetings } } : {}) }
 }))
-app.post('/api/meetings', wrap(async (req) => { prompt = null; const m = await meetings.start({ ...(req.body || {}), callApps: calls.now().calls.map((c) => c.app) }); counts.add('meetings.recorded'); return m }))
+app.post('/api/meetings', wrap(async (req) => { prompt = null; const m = await meetings.start({ ...(req.body || {}), callApps: calls.now().calls.map((c) => c.app) }); counts.add('meetings.recorded'); counts.first('meeting'); return m }))
 // Before a recording starts: the meeting it would carry on, one that stopped when Bridge AI closed
 // (meetings.js carryOn), for the app to offer Resume recording first. event: the one it's for.
 app.post('/api/meetings/carry-on', wrap((req) => ({ meeting: meetings.carryOn({ event: req.body?.event || null }) })))
@@ -3281,7 +3303,7 @@ app.post('/api/agents/:pane/mute', wrap(async (req) => {
 }))
 // A notification's answer button (the token says which agent, question and answer), or another
 // kind's (Remote Screen's Stop and Block This Device), saying which device it was pressed on.
-app.post('/api/notify/answer', wrap((req) => notify.answer(req.body?.token, { by: whoAsks(req), h: onBehalf(req) })))
+app.post('/api/notify/answer', wrap(async (req) => { const r = await notify.answer(req.body?.token, { by: whoAsks(req), h: onBehalf(req) }); if (r?.ok && r.paneId) answeredFrom(req, r.paneId); return r }))
 // You're using Bridge AI on this computer: phones stay quiet meanwhile. Phones can't say this.
 app.post('/api/presence', wrap((req) => { if (fromHere(req)) notify.presence(req.body || {}); return { ok: true } }))
 
@@ -3428,6 +3450,38 @@ app.post('/api/machines/:id/preview', async (req, res) => {
 // devices may connect, a lockout lifted, stopping a session, and what you've seen of who looked.
 // The password goes no further than remote.js, which keeps only its hash; it's never in a log.
 const atThisComputer = (req) => !req.headers['x-bridge-relay'] && !req.machinePage && !guard.viaTailnet(req)
+
+// ---------- Usage stats: Needs You, an agent's limit, and what a phone does ----------
+// A request from a phone: through a relay (Bridge AI's or your own), straight or by way of a linked
+// computer, or over Tailscale.
+const isPhone = (req) => { const d = relay.deviceOf(req.headers['x-bridge-relay']); return d ? d.kind !== 'computer' || req.headers['x-bridge-for-kind'] === 'phone' : guard.viaTailnet(req) }
+// Each agent that needs you (blocked), from when it was first seen so, and whether a phone answered;
+// once it carries on (or waits on something new), how long it waited and where it was answered. One
+// closed while it waits wasn't answered. And an agent that stopped at its plan's limit, once each
+// time it stops (seen in the fleet poll, pollFleet).
+const waits = new Map() // paneId -> { seq, since, phone }
+const statusSeen = new Map() // paneId -> its status at the last look
+function watchNeeds(agents) {
+  const now = Date.now()
+  const live = new Set()
+  for (const a of agents) {
+    if (a.helper?.list) continue
+    live.add(a.paneId)
+    const w = waits.get(a.paneId)
+    if (w && (a.status !== 'blocked' || w.seq !== a.seq)) { waits.delete(a.paneId); counts.needAnswered({ waited: now - w.since, phone: w.phone }) }
+    if (a.status === 'blocked' && !waits.has(a.paneId)) { waits.set(a.paneId, { seq: a.seq, since: now, phone: false }); counts.add('needs.raised') }
+    const was = statusSeen.get(a.paneId)
+    statusSeen.set(a.paneId, a.status)
+    if (was && was !== 'done' && a.status === 'done' && !a.cloud) { try { if (transcript(a, 1).limit) counts.limited(a.kind) } catch { /* no transcript */ } }
+  }
+  for (const id of waits.keys()) if (!live.has(id)) waits.delete(id)
+  for (const id of statusSeen.keys()) if (!live.has(id)) statusSeen.delete(id)
+}
+// An answer to an agent that needs you: from a phone, said once for that wait (phone.approvals).
+function answeredFrom(req, paneId) {
+  const w = waits.get(paneId)
+  if (w && !w.phone && isPhone(req)) { w.phone = true; counts.add('phone.approvals') }
+}
 // Who a Stop or Block came from, for the record: this computer, a device paired here, or one of
 // another computer's devices, as that computer says (from); names as they're shown (plainName).
 const whoAsks = (req, from) => {
@@ -3506,6 +3560,7 @@ app.get('/api/remote/preview-check', async (req, res) => {
 relay.whenAsked((a) => notify.send({ kind: 'machine', title: `${a.name} asks to link`, body: 'Open Bridge AI to check the six digits on both devices, then allow it.', url: '/#settings/machines', tag: `machine-ask-${a.id}` }).catch(() => {}))
 // One paired once Remote Access had a guardrail starts not let in (remote.js): it says how to let it in.
 relay.whenPaired((d) => {
+  if (d.kind !== 'computer') counts.first('phone').catch(() => {})
   const out = !remote.admits(d.id)
   notify.send({ kind: 'machine', title: `${d.name} is paired`, body: out ? `It can't use ${relay.thisName()} until you allow it there, in Needs You. If that wasn't you, remove it in Bridge AI.` : 'If that wasn\'t you, remove it in Bridge AI.', url: '/#settings/machines', tag: `paired-${d.id}` }).catch(() => {})
 })
@@ -3573,7 +3628,7 @@ const outsideView = (x) => {
 }
 app.post('/api/needs-you/answer', wrap(async (req) => {
   const r = await waiting.answer(req.body || {})
-  if (r.ok) { pushFleet(); touched(String(req.body?.paneId || '')) }
+  if (r.ok) { pushFleet(); touched(String(req.body?.paneId || '')); answeredFrom(req, String(req.body?.paneId || '')) }
   return r
 }))
 app.post('/api/needs-you/clear', wrap((req) => waiting.clear(req.body?.id)))
@@ -3756,6 +3811,8 @@ counts.configure(cfg, {
       agents: (await installed().catch(() => [])).map((a) => a.kind),
       features: {
         chief: cfg.chief?.kind || 'claude', defaultAgent: cfg.defaultAgent || 'claude', planUsage: onOff(cfg.quota?.read),
+        // Any bot answering without asking you first (none: no bots, or Bots off).
+        botsAuto: ((live) => (live.length ? onOff(live.some((b) => b.auto && !b.paused)) : 'none'))(trialOn('slack-bot') ? botsStore.live() : []),
         updateChecks: onOff(cfg.updates?.check !== false), meetingsDetect: onOff(cfg.meetings?.detect !== false),
         callAudio: onOff(cfg.meetings?.callAudio !== false), nameSpeakers: onOff(cfg.meetings?.nameSpeakers !== false),
         editByVoice: onOff(!!cfg.dictation?.editModel || (await llm.ready().catch(() => false))), localModel: onOff(await llm.ready().catch(() => false)),
@@ -3775,7 +3832,9 @@ app.get('/api/counts/preview', wrap(() => counts.preview()))
 app.get('/api/counts/sent/:week', wrap((req) => counts.sentReport(req.params.week)))
 // A minute of Bridge AI in use, from a window of it (src/activeTime.js): counted only while sharing
 // is on, once a minute however many windows say so.
-app.post('/api/counts/active', wrap(() => counts.activity()))
+app.post('/api/counts/active', wrap((req) => counts.activity(String(req.body?.area || ''))))
+// What the window counts itself: AI Assist's suggestions kept or dismissed (counts.js fromWindow).
+app.post('/api/counts/add', wrap(async (req) => { await counts.fromWindow(String(req.body?.name || '')); return { ok: true } }))
 
 // refresh=1: a person asked (Check now, Check for Updates…), so GitHub is asked now, and a release
 // out to some computers and not this one yet is offered here too.
@@ -4467,7 +4526,7 @@ app.get('/api/chat/models', wrap(async (req) => {
 }))
 app.post('/api/chats', wrap(async (req) => {
   const kind = String(req.body?.kind || cfg.defaultAgent || 'claude')
-  if (kind !== 'chat' && !(await installed()).some((k) => k.kind === kind)) throw notInstalled(kind)
+  if (kind !== 'chat' && !(await installed()).some((k) => k.kind === kind)) throw cantStart(kind)
   const model = typeof req.body?.model === 'string' ? req.body.model.trim().slice(0, 200) : ''
   const dir = ensureDir(path.join(DATA, 'chats'))
   for (const f of ['CLAUDE.md', 'AGENTS.md', 'GEMINI.md']) fs.writeFileSync(path.join(dir, f), CHAT_NOTE)
@@ -4477,6 +4536,7 @@ app.post('/api/chats', wrap(async (req) => {
   const out = await launchAgent({ kind, model: model || undefined, cwd: dir, label: title, workspaceId: ws?.id, newSpace: ws ? undefined : 'Chats', prompt: String(req.body?.prompt || '').trim() || undefined, account: req.body?.account ? String(req.body.account) : undefined, effort: typeof req.body?.effort === 'string' ? req.body.effort : undefined, ...(kind === 'chat' && model ? { env: { BRIDGE_CHAT_MODEL: model } } : {}) })
   pushFleet()
   if (req.body?.typed && req.body?.prompt) noteTyped({ typed: req.body.typed, text: req.body.prompt }, { kind, title, plainChat: true, paneId: out?.paneId })
+  if (isPhone(req)) counts.add('phone.agentsStarted')
   return out
 }))
 

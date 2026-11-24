@@ -16,6 +16,7 @@
 // wide), a little roomy, since a server can't measure a font: none is cut off once it's drawn.
 import crypto from 'node:crypto'
 import * as boards from './boards.js'
+import * as usage from './counts.js'
 
 // The four parts, left to right: each a column with its heading, in the board's soft colours
 // (src/components/whiteboard/look.js SCHEMES: a start's green, a process's white, a note's yellow, a
@@ -225,6 +226,8 @@ export async function settle(mid, id, key, state) {
     })
     return data
   })
+  // Usage stats: AI Assist's board in a meeting, kept or discarded (each time, one or all).
+  usage.add(state === 'kept' ? 'assist.accepted.meetings' : 'assist.dismissed.meetings').catch(() => {})
   return { kept, discarded }
 }
 

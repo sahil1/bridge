@@ -54,7 +54,7 @@ function d1() {
   }
 }
 const rows = (db, table) => { try { return db.sql.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all().map((r) => ({ ...r })) } catch (e) { if (/no such table/.test(e.message)) return []; throw e } }
-const everything = (db) => JSON.stringify(['seen', 'reports', 'counts'].map((t) => { try { return rows(db, t) } catch { return [] } }))
+const everything = (db) => JSON.stringify(['seen', 'reports', 'counts', 'totals', 'dims'].map((t) => { try { return rows(db, t) } catch { return [] } }))
 const post = (env, body, headers = {}) => worker.fetch(new Request('https://counts.boldbridge.ai/v1/week', { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: typeof body === 'string' ? body : JSON.stringify(body) }), env)
 const answer = async (res) => ({ status: res.status, body: await res.json().catch(() => null) })
 
@@ -98,17 +98,31 @@ try {
     const ranges = SCHEMA.buckets.filter((b) => b !== '0')
     const full = await answer(await post(env, report({ nonce: nonce(3), counts: Object.fromEntries(names.map((n, i) => [n, ranges[i % ranges.length]])) })))
     ok(full.body?.ok === true && !full.body.dropped && names.every((n) => rows(db, 'counts').some((x) => x.name === n)), `every name on the public list is taken (${names.length})`, full)
+    // Every amount, in a range of its own kind (tokens, hours, words), kept beside the counts.
+    const amounts = Object.entries(SCHEMA.amounts).filter(([k]) => k !== 'about')
+    const inRange = ([n, v], i) => { const rs = SCHEMA[v.ranges].filter((x) => x !== '0'); return [n, rs[i % rs.length]] }
+    const sent = Object.fromEntries(amounts.map(inRange))
+    const am = await answer(await post(env, report({ nonce: nonce(4), amounts: sent })))
+    ok(am.body?.ok === true && !am.body.dropped && amounts.every(([n]) => rows(db, 'counts').some((x) => x.name === n && x.bucket === sent[n])), `every amount on the public list is taken, with its range (${amounts.length})`, am)
+    // Totals: each number only added to the week's sum for its name, with how many gave one;
+    // rounded to two significant figures again, whatever came.
+    await post(env, report({ nonce: nonce(5), totals: { 'tokens.models': 3400000, 'words.dictated': 1284, 'time.meetings': 75 }, recentWeeks: 3 }))
+    await post(env, report({ nonce: nonce(6), totals: { 'tokens.models': 1200000, 'time.meetings': 30 }, recentWeeks: 1 }))
+    const tot = Object.fromEntries(rows(db, 'totals').map((x) => [x.name, [x.total, x.reports]]))
+    ok(JSON.stringify(tot) === JSON.stringify({ 'tokens.models': [4600000, 2], 'words.dictated': [1300, 1], 'time.meetings': [105, 2] }) && rows(db, 'totals').every((x) => x.week === lastWeek && Object.keys(x).join() === 'week,name,total,reports'), 'totals: the week\'s sum for each name and how many reports gave one, never a report\'s own number or anything about it', rows(db, 'totals'))
+    const rw = rows(db, 'dims').filter((x) => x.dim === 'recentWeeks').map((x) => `${x.value}:${x.n}`).sort()
+    ok(rw.join() === '1:1,3:1', 'and how many of the last four weeks each was used in, as its own total', rw)
   }
 
   // ---------- What isn't on the list ----------
   {
     const db = d1()
     const env = { DB: db }
-    const odd = await answer(await post(env, report({ os: 'freebsd', arch: 'riscv', app: 'my fork', layout: undefined, daysActive: 12, extra: 'secret-project/notes-of-priya.txt', counts: { 'agents.started.claude': '2-5', 'repo.name': 'acme/secret', 'meetings.recorded': '7', 'prs.opened': '0' } })))
+    const odd = await answer(await post(env, report({ os: 'freebsd', arch: 'riscv', app: 'my fork', layout: undefined, daysActive: 12, extra: 'secret-project/notes-of-priya.txt', counts: { 'agents.started.claude': '2-5', 'repo.name': 'acme/secret', 'meetings.recorded': '7', 'prs.opened': '0' }, amounts: { 'tokens.models': '2-5', 'words.dictated': '1234', 'time.area.secret-project': 'under 1 hour', 'time.meetings': '0' }, totals: { 'tokens.models': 'lots', 'words.dictated': 5e9, 'time.area.home': 30, 'repo.secret': 12 }, recentWeeks: 9 })))
     const r = rows(db, 'reports')[0]
-    ok(odd.status === 200 && odd.body?.dropped === 3 && r.os === 'other' && r.arch === 'other' && r.app === 'other' && r.layout === 'unknown' && r.days_active === -1, 'something unknown about the install is kept as "other" (or "unknown" when it isn\'t said), never as sent', { odd, r })
+    ok(odd.status === 200 && odd.body?.dropped === 11 && !rows(db, 'totals').length && rows(db, 'dims').some((x) => x.dim === 'recentWeeks' && x.value === 'other') && r.os === 'other' && r.arch === 'other' && r.app === 'other' && r.layout === 'unknown' && r.days_active === -1, 'something unknown about the install is kept as "other" (or "unknown" when it isn\'t said), never as sent', { odd, r })
     const all = everything(db)
-    ok(rows(db, 'counts').length === 1 && !/secret|priya|freebsd|riscv|my fork|repo\.name/.test(all), 'a name that isn\'t on the list, or a value that isn\'t a range (or 0), is dropped and never kept', all)
+    ok(rows(db, 'counts').length === 1 && !/secret|priya|freebsd|riscv|my fork|repo\.name|tokens|words|time\./.test(all), 'a name that isn\'t on the list, or a value that isn\'t its range (or 0), counts and amounts alike, is dropped and never kept', all)
   }
 
   // ---------- Turned away ----------
@@ -136,14 +150,14 @@ try {
     const get = await worker.fetch(new Request('https://counts.boldbridge.ai/v1/week'), env)
     const other = await worker.fetch(new Request('https://counts.boldbridge.ai/admin'), env)
     ok(get.status === 405 && other.status === 404, 'reading the reports address, or any other, gives nothing', { get: get.status, other: other.status })
-    ok(everything(db) === '[[],[],[]]', 'and none of it was kept', everything(db))
+    ok(everything(db) === '[[],[],[],[],[]]', 'and none of it was kept', everything(db))
   }
 
   // ---------- The kill switch ----------
   {
     const db = d1()
     const stop = await answer(await post({ DB: db, COUNTS_OFF: '1' }, report()))
-    ok(stop.body?.stop === true && /stopped collecting/.test(stop.body.why) && everything(db) === '[[],[],[]]', 'COUNTS_OFF=1: every report is answered "stop", with nothing kept', stop)
+    ok(stop.body?.stop === true && /stopped collecting/.test(stop.body.why) && everything(db) === '[[],[],[],[],[]]', 'COUNTS_OFF=1: every report is answered "stop", with nothing kept', stop)
     const said = await answer(await post({ DB: db, COUNTS_OFF: 'Paused while we move to a new database.' }, report()))
     ok(said.body?.why === 'Paused while we move to a new database.', 'COUNTS_OFF with a sentence of its own: that sentence is the reason', said)
   }
