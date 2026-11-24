@@ -38,14 +38,15 @@ function ensure(data) {
 const cookieName = (port) => `bridge-ai-${port}`
 const cookieValue = (token) => crypto.createHmac('sha256', String(token)).update('bridge-ai browser').digest('base64url')
 
-// The cookie on this computer's addresses (every port of them: another computer's window is at a
-// port of its own, served by the same server), for the windows of the app's session.
+// The cookie on this computer's address (every port of it: another computer's window is at a port of
+// its own, served by the same server), for the windows of the app's session. 127.0.0.1 only, where
+// the server is: localhost can be another program's (desktop/senders.js), so the one an older
+// version left there goes.
 async function letIn(session, { port, token }) {
   const value = cookieValue(token)
   const expirationDate = Math.floor(Date.now() / 1000) + 400 * 86400
-  for (const host of ['127.0.0.1', 'localhost']) {
-    await session.cookies.set({ url: `http://${host}:${port}/`, name: cookieName(port), value, path: '/', httpOnly: true, sameSite: 'strict', expirationDate })
-  }
+  await session.cookies.set({ url: `http://127.0.0.1:${port}/`, name: cookieName(port), value, path: '/', httpOnly: true, sameSite: 'strict', expirationDate })
+  await session.cookies.remove(`http://localhost:${port}/`, cookieName(port)).catch(() => {})
 }
 
 module.exports = { read, ensure, cookieName, cookieValue, letIn }

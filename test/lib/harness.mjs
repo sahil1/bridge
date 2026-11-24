@@ -289,7 +289,7 @@ export async function startKit(name, { env = {}, config = {}, node = process.exe
   if (IS_WIN) Object.assign(base, { USERPROFILE: home, APPDATA: path.join(home, 'AppData', 'Roaming'), LOCALAPPDATA: path.join(home, 'AppData', 'Local'), SystemRoot: process.env.SystemRoot, ComSpec: process.env.ComSpec, PATHEXT: process.env.PATHEXT, TEMP: os.tmpdir(), TMP: os.tmpdir(), PSModuleAnalysisCachePath: path.join(os.tmpdir(), 'bridge-tests-ModuleAnalysisCache') })
   else base.BRIDGE_SHELL = base.SHELL = '/bin/sh'
   const log = fs.openSync(path.join(dir, 'server.log'), 'w')
-  const more = typeof env === 'function' ? env({ bin, data, home, PATH }) : env
+  const more = typeof env === 'function' ? env({ bin, data, home, PATH, port }) : env
   // GitHub turned away (stand-ins/no-github.mjs), before what the test loads itself.
   const NODE_OPTIONS = [`--import=${pathToFileURL(path.join(TEST, 'stand-ins', 'no-github.mjs')).href}`, more.NODE_OPTIONS].filter(Boolean).join(' ')
   githubLogs.set(`${name}-${port}`, more.BRIDGE_TEST_GITHUB_LOG || base.BRIDGE_TEST_GITHUB_LOG)
@@ -673,6 +673,33 @@ export const changeAnswer = (ctx, url, change, { orElse } = {}) => ctx.route(url
   }
 })
 export const noServiceWorker = (ctx) => ctx.addInitScript(() => { try { delete Navigator.prototype.serviceWorker } catch { /* none */ } })
+
+// ---------- The desktop app's own window (server/appkeys.js, windowkey.js) ----------
+// What the app hands the server it starts on fd 3 (its window secret, the signatures' key, this
+// start's secret, what it last heard of the signatures' list), given to a kit's server by a file of
+// the test's own instead (BRIDGE_TEST_WINDOW_FILE, read again at each start: the tests only). In a
+// kit's env(): const keys = appKeysFor(bin); return { BRIDGE_TEST_WINDOW_FILE: keys.file }.
+// keys.write(more): the file again, changed (another start's secret, a state, none of it).
+// testHeader (on unless more says not): its browser pages may send "test.<secret>" (asWindow below).
+export function appKeysFor(bin, more = {}) {
+  const keys = { window: crypto.randomBytes(32).toString('base64url'), key: crypto.randomBytes(32).toString('base64'), launch: crypto.randomBytes(32).toString('base64url'), testHeader: true, ...more }
+  const file = path.join(bin, 'app-keys.json')
+  const write = (o = keys) => fs.writeFileSync(file, typeof o === 'string' ? o : JSON.stringify(o))
+  write()
+  return { ...keys, file, write }
+}
+// The MAC a window's request carries, made as the app makes it (desktop/windowauth.js).
+const windowAuth = createRequire(import.meta.url)('../../desktop/windowauth.js')
+// body: what the request sends (a string or bytes), in the MAC as its SHA-256.
+export const windowHeader = (secret, method, url, body = null) => windowAuth.windowHeader(secret, method, url, { body: body == null ? '' : crypto.createHash('sha256').update(body).digest('hex') })
+// A page as the app's own window. The app adds a MAC to each of its windows' requests outside the
+// page (desktop/main.js); a test's page can't do that once the app's service worker has it (WebKit
+// shows a test no request it handles), so it sends "test.<secret>", which the server takes in the
+// tests only, for a kit whose keys say so (appKeysFor's testHeader). The MAC itself is checked with
+// windowFetch and windowHeader (sign-security, studio-pdf).
+export const asWindow = (ctx, secret) => ctx.setExtraHTTPHeaders({ 'x-bridge-window': `test.${secret}` })
+// fetch as the app's window: (url, init) with the key (the harness's fetch) and the window's MAC.
+export const windowFetch = (secret) => (url, init = {}) => fetch(url, { ...init, headers: { ...(init.headers || {}), 'x-bridge-window': windowHeader(secret, init.method || 'GET', url, init.body ?? null) } })
 // The phone page (relay/web) on its way to Bridge AI, for a test to say how far it got when Bridge AI
 // didn't open in it: phoneNotes(ctx) before the page opens notes, from its start (ms), when its
 // service worker took it over, each request the worker handed it to send to the computer (Bridge

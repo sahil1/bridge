@@ -8,7 +8,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { DATA, NODE, IS_WIN } from '../paths.js'
+import { DATA, NODE, IS_WIN, OWN_NODE_FLAGS } from '../paths.js'
 import { PROTOCOL } from './screen.js'
 
 const HOST_JS = fileURLToPath(new URL('./ptyhost.js', import.meta.url))
@@ -169,7 +169,8 @@ function launch() {
   try { if (fs.statSync(LOG).size > 1024 * 1024) fs.rmSync(LOG) } catch { /* none yet */ }
   const out = fs.openSync(LOG, 'a', 0o600)
   try {
-    const child = spawn(NODE.bin, [HOST_JS, DIR, sock], { cwd: DIR, detached: true, stdio: ['ignore', out, out], windowsHide: true, env: { ...process.env, ...NODE.env } })
+    // (On the app's Node with the server's own flags: lockdown.js first, SIGUSR1 opening nothing.)
+    const child = spawn(NODE.bin, [...OWN_NODE_FLAGS, HOST_JS, DIR, sock], { cwd: DIR, detached: true, stdio: ['ignore', out, out], windowsHide: true, env: { ...process.env, ...NODE.env } })
     child.on('error', () => {})
     child.unref()
   } finally { fs.closeSync(out) }

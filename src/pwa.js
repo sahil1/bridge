@@ -1,4 +1,4 @@
-import { api, viaRelay, embedded, machineId } from './api.js'
+import { api, viaRelay, embedded, machineId, signsLive } from './api.js'
 
 // Bridge AI as an app on your phone (or in your browser): the service worker, push notifications
 // for this device, and links from notifications. The desktop app has its own notifications, so
@@ -15,7 +15,8 @@ export function registerServiceWorker() {
 // ?agent=<pane> opens that agent (&ask=1: at its Chat, where its question card is; &inbox=1: the
 // needs-you inbox instead, at that agent's question; &file=<path>: its Files at that file, a video
 // it made, say, which plays there); ?card=<id> shows a Today card; ?settings=<section> opens Settings
-// there. Used by notifications.
+// there; ?sign=<id> the pad your computer asked this phone to sign on (Sign on Phone). Used by
+// notifications.
 export function openLink(href = location.href) {
   const url = new URL(href, location.origin)
   const agent = url.searchParams.get('agent')
@@ -27,8 +28,10 @@ export function openLink(href = location.href) {
   // ?settings=<section>: Settings there (a Share Link opened: Settings › Sharing).
   const settings = url.searchParams.get('settings')
   if (settings && /^[\w-]{1,30}$/.test(settings)) window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section: settings } }))
+  const sign = url.searchParams.get('sign')
+  if (sign && /^[\w-]{10,60}$/.test(sign)) signsLive.open(sign)
   // (What history keeps for this page stays: Back and Forward's step, src/backForward.js.)
-  if (agent || card || settings) history.replaceState(history.state, '', url.pathname)
+  if (agent || card || settings || sign) history.replaceState(history.state, '', url.pathname)
 }
 
 // Say when you're using Bridge AI on this computer (its window in front, or you typed or clicked in

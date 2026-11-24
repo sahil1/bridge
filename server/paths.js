@@ -4,7 +4,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 export const HOME = os.homedir()
@@ -20,6 +20,11 @@ export const IS_MAC = process.platform === 'darwin'
 export const IN_APP = !!process.versions.electron
 if (IN_APP) delete process.env.ELECTRON_RUN_AS_NODE
 export const NODE = { bin: process.execPath, env: IN_APP ? { ELECTRON_RUN_AS_NODE: '1' } : {} }
+// What a process of the server's own on the app's Node starts with, as the server does
+// (desktop/serverflags.js): SIGUSR1 opening no inspector, and lockdown.js before anything of it, so it
+// loads nothing from outside the app's copy. The terminal host (runtime/hostlink.js) starts with them;
+// a fork takes the server's own (Node passes them on, as long as no execArgv is given in its place).
+export const OWN_NODE_FLAGS = IN_APP ? ['--disable-sigusr1', '--import', pathToFileURL(path.join(ROOT, 'server', 'lockdown.js')).href] : []
 
 export const expand = (p) => (typeof p === 'string' && p.startsWith('~') ? path.join(HOME, p.slice(1)) : p)
 export const dataFile = (...parts) => path.join(DATA, ...parts)

@@ -4,6 +4,7 @@ import { api, apiUrl } from '../../api.js'
 import { download } from '../../download.js'
 import { t } from '../../i18n/index.js'
 import { where } from './search.js'
+import { grantFor } from '../studio/pdf/grant.jsx'
 import { Advanced, More } from './Advanced.jsx'
 import './backup.css'
 
@@ -15,7 +16,7 @@ import './backup.css'
 // and what's coming or paused: a file is made and opened on the computer itself. Exactly what goes
 // and what's left out is under Advanced.
 const PLATFORM = { slack: 'Slack', discord: 'Discord', teams: 'Microsoft Teams' }
-const PARTS = () => [['bots', t('Bots')], ['connections', t('Connections')], ['routines', t('Routines')], ['chief', t('Chief of Staff')], ['mcp', t('MCP Servers')], ['settings', t('Settings')]]
+const PARTS = () => [['bots', t('Bots')], ['connections', t('Connections')], ['routines', t('Routines')], ['chief', t('Chief of Staff')], ['mcp', t('MCP Servers')], ['settings', t('Settings')], ['signatures', t('Your Signatures')]]
 const when = (iso) => (iso ? new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '')
 // What a bot's file asks for that would let it act for you or say more than it's asked, in words.
 const asksOf = (a = {}) => [
@@ -38,8 +39,8 @@ const asksOf = (a = {}) => [
 // unticked until you tick them.
 function Plan({ plan, onApply, onCancel, busy, cancelLabel }) {
   const [parts, setParts] = useState(Object.fromEntries(PARTS().map(([k]) => [k, !(plan.optIn || []).includes(k)])))
-  const has = { bots: plan.bots.length, connections: plan.connections.length, routines: plan.routines.length, chief: plan.chief.length, mcp: plan.mcp.length, settings: plan.settings.keys.length }
-  const box = (k, label) => (has[k] ? <label className="bk-part" data-part={k}><input type="checkbox" checked={parts[k]} onChange={(e) => setParts((p) => ({ ...p, [k]: e.target.checked }))} /> <b>{label}</b>{(plan.optIn || []).includes(k) && <span className="muted small"> · {t('off unless you tick it: it runs things on this computer')}</span>}</label> : null)
+  const has = { bots: plan.bots.length, connections: plan.connections.length, routines: plan.routines.length, chief: plan.chief.length, mcp: plan.mcp.length, settings: plan.settings.keys.length, signatures: plan.signatures?.length || 0 }
+  const box = (k, label) => (has[k] ? <label className="bk-part" data-part={k}><input type="checkbox" checked={parts[k]} onChange={(e) => setParts((p) => ({ ...p, [k]: e.target.checked }))} /> <b>{label}</b>{(plan.optIn || []).includes(k) && <span className="muted small"> · {k === 'signatures' ? t('off unless you tick it') : t('off unless you tick it: it runs things on this computer')}</span>}</label> : null)
   const sub = (text, bad = false) => <span className={`bk-sub ${bad ? 'is-bad' : ''}`}>{text}</span>
   return (
     <div className="bk-plan" role="region" aria-label={t('What comes')}>
@@ -110,6 +111,8 @@ function Plan({ plan, onApply, onCancel, busy, cancelLabel }) {
           </ul>
         </>
       )}
+      {box('signatures', t('Your Signatures'))}
+      {parts.signatures && has.signatures > 0 && <p className="muted small bk-list">{plan.signatures.map((x) => `${x.name} (${x.kind === 'initials' ? t('initials') : t('signature')})`).join(' · ')}. {t('Sealed again here, with this computer\'s key.')}</p>}
       <div className="st-row">
         <button type="button" className="btn small primary" disabled={busy} onClick={() => onApply(parts)}><Icon name="check" size={12} /> {busy ? t('Applying…') : t('Apply')}</button>
         <button type="button" className="btn small" disabled={busy} onClick={onCancel}>{cancelLabel}</button>
@@ -123,7 +126,7 @@ function Plan({ plan, onApply, onCancel, busy, cancelLabel }) {
 function Applied({ r, from, onStart, onAgain, busy }) {
   const n = (k) => r[k]?.length || 0
   const mcpOk = r.mcp?.filter((s) => s.ok).length || 0
-  const done = [[n('bots'), t('Bots')], [n('connections'), t('Connections')], [n('routines'), t('Routines')], [n('chief'), t('Chief of Staff')], [mcpOk, t('MCP Servers')], [n('settings'), t('Settings')]].filter(([k]) => k)
+  const done = [[n('bots'), t('Bots')], [n('connections'), t('Connections')], [n('routines'), t('Routines')], [n('chief'), t('Chief of Staff')], [mcpOk, t('MCP Servers')], [n('settings'), t('Settings')], [r.signatures || 0, t('Your Signatures')]].filter(([k]) => k)
   return (
     <div className="bk-plan" role="status">
       <p className="small"><Icon name="check" size={13} /> {done.length ? t('Added: {list}', { list: done.map(([k, l]) => `${l} ${k}`).join(' · ') }) : t('Nothing was added.')}</p>
@@ -154,6 +157,9 @@ export default function BackUp() {
   const [openPass, setOpenPass] = useState('')
   const [opened, setOpened] = useState(null) // { id, plan, kind, from }
   const [applied, setApplied] = useState(null)
+  // Your saved signatures go too only when ticked (they're opened from this computer's key, and
+  // sealed again with the other's).
+  const [sigs, setSigs] = useState(false)
   const fileIn = useRef(null)
   const load = () => api('/backup').then((x) => { setS(x); setErr((v) => (v?.kept !== undefined ? null : v)); setTo((v) => v || x.linked.find((m) => m.online)?.id || '') }, (e) => setErr(e.code === 'not-kept' ? { kept: e.data?.computer || null } : e.message))
   useEffect(() => { load(); const id = setInterval(() => { if (!document.hidden) load() }, 5000); return () => clearInterval(id) }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -168,7 +174,9 @@ export default function BackUp() {
 
   const backUp = () => run('file', async () => {
     if (pass.a !== pass.b) throw new Error(t('The two passphrases aren\'t the same'))
-    const r = await fetch(apiUrl('/backup/file'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ passphrase: pass.a }) })
+    // (Your signatures go only once it's asked that it's you: Touch ID, or your PIN.)
+    const grant = sigs ? await grantFor('export') : null
+    const r = await fetch(apiUrl('/backup/file'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ passphrase: pass.a, signatures: sigs, grant }) })
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`)
     const name = /filename="([^"]+)"/.exec(r.headers.get('content-disposition') || '')?.[1] || 'Bridge-AI.bridge-backup'
     download(await r.arrayBuffer(), name, 'application/json')
@@ -184,14 +192,19 @@ export default function BackUp() {
   })
   const seeMove = (m) => run(`see-${m.id}`, async () => { const r = await api(`/backup/pending/${m.id}`); setApplied(null); setOpened({ ...r, from: r.from }) })
   const apply = (parts) => run('apply', async () => {
-    const r = await api('/backup/apply', { method: 'POST', body: { id: opened.id, parts } })
+    // (Your signatures added here are a change to them: asked first while Ask Before Signing is on.
+    // Not asked, or not from here: the rest is restored, and it says why they weren't.)
+    const sigs = opened.plan?.signatures?.length && (opened.kind === 'file' ? parts.signatures === true : parts.signatures !== false)
+    const grant = sigs ? await grantFor('change').catch(() => null) : null
+    const r = await api('/backup/apply', { method: 'POST', body: { id: opened.id, parts, grant } })
     setApplied({ ...r, from: opened.from })
     setOpened(null)
   })
   const cancel = () => run('cancel', async () => { if (opened.kind === 'move') await api('/backup/discard', { method: 'POST', body: { id: opened.id } }); setOpened(null) })
   const start = (ids) => run('start', async () => { await api('/backup/start', { method: 'POST', body: ids ? { connections: ids } : {} }); setApplied(null) })
   const again = () => run('handoff', async () => { const r = await api('/backup/handoff', { method: 'POST', body: {} }); setApplied((a) => (a ? { ...a, ...r } : a)) })
-  const move = () => run('move', () => api('/backup/move', { method: 'POST', body: { to } }))
+  const move = () => run('move', async () => api('/backup/move', { method: 'POST', body: { to, signatures: sigs, grant: sigs ? await grantFor('export') : null } }))
+  const withSigs = <label className="st-check bk-sigs" data-setting="backup-signatures"><input type="checkbox" checked={sigs} onChange={(e) => setSigs(e.target.checked)} /> <span><b>{t('With your signatures')}</b> <span className="muted small">{t('Your saved signatures and initials too ({place}). Off, they stay only here.', { place: where('signatures') })}</span></span></label>
   const undo = (id) => run(`undo-${id}`, () => api(`/backup/moves/${id}/undo`, { method: 'POST', body: {} }))
   const linked = s.linked || []
   const moveLine = (m) => (m.state === 'moved' ? t('Moved to {name} on {date}: the bots, connections and scheduled routines here are paused.', { name: m.toName, date: when(m.pausedAt) })
@@ -250,6 +263,7 @@ export default function BackUp() {
               </select>
               <button type="button" className="btn small primary" disabled={!!busy || !to} onClick={move}><Icon name="send" size={12} /> {busy === 'move' ? t('Sending…') : t('Move')}</button>
             </div>
+            {withSigs}
             <p className="muted small">{t('Sent straight over the end-to-end encrypted link between them, with no passphrase. The other computer shows what\'s coming and asks before applying it; once it has, the bots, connections and scheduled routines here pause, so nothing answers twice.')}</p>
           </>
         )}
@@ -280,6 +294,7 @@ export default function BackUp() {
               <input type="password" className="st-input" autoComplete="new-password" value={pass.b} onChange={(e) => setPass((p) => ({ ...p, b: e.target.value }))} placeholder={t('The same again')} aria-label={t('The passphrase again')} />
               <button type="button" className="btn small primary" disabled={!!busy || [...pass.a].length < s.passMin || !pass.b} onClick={backUp}><Icon name="archive" size={12} /> {busy === 'file' ? t('Sealing…') : t('Back Up')}</button>
             </div>
+            {withSigs}
             {made && <p className="st-note ok small" role="status"><Icon name="check" size={13} /><span>{t('Saved {name}.', { name: made })}</span></p>}
           </section>
           <section className="st-sec">
@@ -299,7 +314,7 @@ export default function BackUp() {
       <Advanced order={50}>
         <section className="st-sec bk" data-setting="backup-what">
           <h4>{t('What Goes')}</h4>
-          <p className="small"><b>{t('In it:')}</b> {t('your bots (their settings, instructions and what they remember); their connections, with their tokens; your routines; the Chief of Staff\'s playbook, ledger and task list; your agents\' MCP servers; and the settings that mean the same on another computer (your name and location, beta features, models picked for each job, Meetings and Dictation).')}</p>
+          <p className="small"><b>{t('In it:')}</b> {t('your bots (their settings, instructions and what they remember); their connections, with their tokens; your routines; the Chief of Staff\'s playbook, ledger and task list; your agents\' MCP servers; and the settings that mean the same on another computer (your name and location, beta features, models picked for each job, Meetings and Dictation).')} {t('Your saved signatures and initials too, only when you tick them.')}</p>
           <p className="small muted"><b>{t('Left out:')}</b> {t('what\'s this computer\'s own (its name and keys, its relay, the phones and computers linked with it, your Bold Bridge sign-in, the agents\' and model providers\' sign-ins, its port, update channel and caches); meetings and recordings, which are often gigabytes (Files › Send to… copies them); and each bot\'s Activity, the files it made and drafts waiting.')}</p>
         </section>
       </Advanced>

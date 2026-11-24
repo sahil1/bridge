@@ -394,9 +394,24 @@ names, sizes and dates (never what's in a file) to the model you pick for it, an
 and where it runs first. A model on your computer keeps them there.
 
 AI Assist's Sign this (Sign PDFs, in Studio) keeps the
-signature and initials you draw as two pictures in `~/.bridge-ai/studio/signatures`, readable by you
-only; they're never sent to a model or anywhere else, and removing one deletes it from the disk. A
-PDF you sign is read on your computer to find where to sign. Only when you press Explain it does the
+signatures and initials you draw in `~/.bridge-ai/studio/signatures`, readable by you only and
+encrypted (AES-256-GCM) with a key the desktop app keeps in your computer's keychain (the Mac's
+Keychain, Windows' DPAPI, a Linux secret service) and gives only to the server it starts; a server
+started without the app keeps a key file beside them, readable by you only, and Settings › Studio
+says so. That keeps them from a copy of the folder read anywhere else; programs running as you are
+kept from them by Bridge AI itself, which uses them only in its own windows and your phones
+(SECURITY.md says how far that goes). They're never sent to a model, a bot, an MCP client, a Share Link or a crash report,
+and removing one deletes it from the disk. Back Up & Move carries them only when you tick them and
+confirm it's you (Touch ID, your password or Windows Hello, or your signing PIN where the computer has none of these), inside its own sealed file or encrypted link. Signing on the trackpad reads
+where your finger is on it only while the pad is listening, on your computer. Sign on Phone sends
+the request to your own phones paired with this computer through your relay (and a notification to
+them), and what you draw there comes back the same way, end-to-end encrypted. Ask Before Signing asks
+macOS for Touch ID or your password (or Windows Hello) on your computer; Bridge AI only learns
+whether you confirmed, and keeps your signing PIN as a salted hash. Each signing is noted in the
+document's versions, on your computer: which of your devices, how it was confirmed, the places, the
+time and the fingerprints (SHA-256) of the original and the signed copy; the signed copy itself
+isn't copied into Bridge AI's data folder, wherever it's moved. A signed copy carries a mark in its
+own information (BridgeAISigned) that says it is one. A PDF you sign is read on your computer to find where to sign. Only when you press Explain it does the
 PDF's text go to the model you pick, as any other request to that model does (one on your computer
 keeps it there); a scan with no text in it is read on a Mac first, on your computer. The signed copy
 is a new file in a `_signed` folder beside the PDF, and the PDF itself isn't changed.

@@ -229,7 +229,10 @@ try {
     calls = KINDS[0].calls
     await card.mouse.move(1, 1)
     await until(() => card.$(KINDS[0].ready), 8000, 100)
-    const slim = await card.$$eval('.fc-grip', (g) => g.map((x) => x.className.replace('fc-grip ', '')).sort().join(' '))
+    // (Its grips change a moment after it turns slim, as it's fitted again: read once they've settled.)
+    const gripsNow = () => card.$$eval('.fc-grip', (g) => g.map((x) => x.className.replace('fc-grip ', '')).sort().join(' '))
+    await until(async () => ((await gripsNow()) === 'e w' ? true : null), 4000, 100)
+    const slim = await gripsNow()
     const ls = await until(async () => { const x = await look(); return whole(x) ? x : null }, 4000, 100)
     ok(slim === 'e w' && ls?.w === l1.w, 'slim, it resizes only sideways, at the width it was given', { slim, card: ls })
     // Zoomed, the edge still follows the pointer and the card still fits (open first: the pointer

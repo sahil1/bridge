@@ -15,7 +15,8 @@
 //   'always'   the same, and asked to be left out of screenshots too, where macOS keeps to it.
 //   'never'    the meeting being recorded's card stays on the screen while you share, in every
 //              picture. (Any other card still waits until you stop sharing.)
-// make({ bin, mac, spawn, onChange, wait }): bin, the helper (null: none); onChange(), when hidden(),
+// make({ bin, mac, spawn, onChange, wait }): bin, the helper (null: none; or a function, asked each
+// time it's started, which may say null); onChange(), when hidden(),
 // sharing() or waiting() may have changed; wait, how long its first answer is waited for.
 const { spawn: spawnReal } = require('node:child_process')
 
@@ -38,9 +39,10 @@ function make({ bin = null, mac = process.platform === 'darwin', spawn = spawnRe
       said(null)
       return
     }
-    if (proc || !mac || !bin || mute) return
+    const helper = typeof bin === 'function' ? bin() : bin
+    if (proc || !mac || !helper || mute) return
     let p
-    try { p = spawn(bin, ['sharing'], { stdio: ['ignore', 'pipe', 'ignore'] }) } catch { mute = true; return }
+    try { p = spawn(helper, ['sharing'], { stdio: ['ignore', 'pipe', 'ignore'] }) } catch { mute = true; return }
     proc = p
     asking = true
     let spoke = false

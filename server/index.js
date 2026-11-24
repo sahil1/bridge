@@ -1,8 +1,14 @@
+// First: in the built app, nothing loaded from outside its own copy (lockdown.js; the app also
+// starts the server with it, before this file). Then what the desktop app handed this server on its
+// pipe, read and the pipe closed before anything else here starts a program that could inherit it
+// (appkeys.js).
+import './lockdown.js'
+import { appKeys } from './appkeys.js'
 import express from 'express'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { randomInt, randomUUID } from 'node:crypto'
+import { randomInt, randomUUID, createHash } from 'node:crypto'
 import { transcript, earlier, replyDiffs, markUndone, preview, locate, imageFrom, written } from './transcripts.js'
 import { listSubagents, runningFor, forgetExcept } from './subagents.js'
 import { ttyHandler } from './tty.js'
@@ -95,6 +101,10 @@ import * as callEvent from './callevent.js'
 import * as perf from './perf.js'
 import * as studio from './studio.js'
 import * as signing from './signing.js'
+import * as signPhone from './signphone.js'
+import * as signStore from './signstore.js'
+import * as windowkey from './windowkey.js'
+import { provenDevice } from './relayproof.js'
 import * as doctext from './doctext.js'
 import * as studioFound from './studiofound.js'
 import * as commentAssist from './commentassist.js'
@@ -161,6 +171,9 @@ ensureDir(CACHE)
 // Beta Features switches saved before 3.22.0 for the features out of beta: their settings now (paths.js outOfBeta).
 if (settings.settle().length) console.log('settings: the Beta Features switches for Home, Tidy What I Say, Meeting Insights, Scheduled Routines and the MCP server are their own settings now')
 const cfg = loadConfig()
+// Started by the desktop app: where the app talks to it, and nowhere else (appkeys.js listen), so no
+// other program can sit at the address the app uses while this listens somewhere config.json says.
+if (appKeys().listen) Object.assign(cfg, appKeys().listen)
 labs.configure(cfg) // more models (Qwen, DeepSeek, Kimi, GLM): hidden unless cfg.moreModels
 llm.configure(cfg) // the local model you picked in Settings › Model Providers (llmModel), if any
 const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version
@@ -278,17 +291,23 @@ app.use(perf.timing)
 app.use('/m', (req, res) => machines.proxy(req, res, { frames: pages.frames, ui: UI_DIR }))
 // A project's app on this computer, for another of your devices (devpreview.js), before anything reads the body.
 app.use('/_preview', (req, res) => { servePreview.http(req, res).catch((e) => { if (!res.headersSent) res.status(502).json({ error: e.message }) }) })
+// A request from one of the app's windows has its body in the window's MAC (windowkey.js): its
+// SHA-256, as it came, kept to check it with.
+function bodyHash(req, _res, buf) { if (req.headers['x-bridge-window']) req.bodySha256 = createHash('sha256').update(buf).digest('hex') }
 // Saving a file from the viewer can send more than the usual 1 MB.
-const jsonSmall = express.json({ limit: '1mb' })
-const jsonFile = express.json({ limit: '6mb' })
+const jsonSmall = express.json({ limit: '1mb', verify: bodyHash })
+const jsonFile = express.json({ limit: '6mb', verify: bodyHash })
 // And a whiteboard, with the pictures pasted into it (boards.js).
-const jsonBoard = express.json({ limit: '45mb' })
+const jsonBoard = express.json({ limit: '45mb', verify: bodyHash })
 // And Studio: a picture put in a document or a deck, a new file (a Word copy), a deck for AI Assist
 // with its pictures. Every limit is here, read before any route: one a route gave itself came after
 // the 1 MB here, which had turned a phone's photo away already.
-const jsonStudio = express.json({ limit: '30mb' })
-const jsonDeckAi = express.json({ limit: '40mb' })
+const jsonStudio = express.json({ limit: '30mb', verify: bodyHash })
+const jsonDeckAi = express.json({ limit: '40mb', verify: bodyHash })
+// Studio's signatures: a drawing (1.5 MB at most, as base64) and no more (signstore.js).
+const jsonSig = express.json({ limit: '2200kb', verify: bodyHash })
 const jsonFor = (req) => (req.method === 'PUT' && /^\/api\/agents\/[^/]+\/file$/.test(req.path) ? jsonFile
+  : /^\/api\/studio\/signatures?(\/|$)/.test(req.path) ? jsonSig
   // An outside app's new file or suggestion, through MCP (mcptools.js takes up to 2 MB of text).
   : /^\/(mcp|api\/mcp-server\/call)$/.test(req.path) ? jsonFile
   : /^\/api\/boards(\/|$)/.test(req.path) ? jsonBoard
@@ -791,7 +810,50 @@ signing.setHelpers({
   describe: (id) => chatModels.describe(id), via: async (id) => (await chatModels.models().catch(() => [])).find((m) => m.id === id)?.via || null,
   contextOf: (id) => chatModels.contextOf(id), scanText: doctext.ocrBin() ? (file) => doctext.textOf(file, 200_000) : null,
 })
-signing.routes(app, { wrap, rootOf, sq })
+// Who may sign (signing.js): one of the app's own windows on this computer (windowkey.js: a secret
+// the app gives its server, each of its windows' requests carrying a MAC of it, which a program that
+// only has the key can't make), or one of your phones: paired here, kept, let in (Which Devices May Connect), the
+// relay proving it ran the request for it (relayproof.js). Never another computer, a device not kept
+// yet, Tailscale, a browser tab or a program with the key alone.
+windowkey.fromStart()
+const signWindow = (req) => windowkey.fromWindow(req, atThisComputer(req))
+function signPhoneOf(req) {
+  const id = provenDevice(req)
+  const d = id ? relay.deviceOf(id) : null
+  return d && d.kind !== 'computer' && !d.fresh && remote.admits(id) ? id : null
+}
+// (The app's own feeds, for what signing tells the app: Start Over, signing.js. With none connected
+// yet, as for a few seconds after the app starts its server, it's kept for the first that connects,
+// so a Start Over confirmed then isn't lost.)
+const appFeeds = new Set()
+const toApp = []
+const tellApp = (event, data) => {
+  const line = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
+  if (!appFeeds.size) { toApp.push(line); toApp.splice(0, toApp.length - 5); return }
+  for (const res of appFeeds) res.write(line)
+}
+signing.routes(app, { wrap, rootOf, sq, window: signWindow, phone: signPhoneOf, nameOf: (req) => whoAsks(req), record: (x) => studio.noteSigned(x), tellApp })
+// The app checking this server before it sends anything (windowkey.js): that it's the one the app
+// started (proof, to the app's nonce), and that it has the app's window secret (hello: a nonce, then
+// the app's MAC of it; from source, with none yet, the secret itself once). Only at this computer.
+const windowHere = (req) => { if (!atThisComputer(req)) throw Object.assign(new Error('Only the app on this computer'), { status: 403 }) }
+const windowAnswer = (fn) => async (req, res) => { try { windowHere(req); res.json(await fn(req)) } catch (e) { res.status(e.status || 502).json({ error: e.message, ...(e.code ? { code: e.code } : {}) }) } }
+// (The proof is of this connection too: this server's own address and port, and the port the app's
+// end of it has, which a program passing requests on from elsewhere can't give.)
+app.get('/api/window/proof', windowAnswer((req) => { const mac = windowkey.proof(String(req.query.n || ''), req.socket); if (!mac) throw Object.assign(new Error('Not started by the app'), { status: 404, code: 'not-started' }); return { mac } }))
+app.get('/api/window/hello', windowAnswer(() => windowkey.helloNonce()))
+app.post('/api/window/hello', windowAnswer((req) => windowkey.hello({ nonce: req.body?.nonce, mac: req.body?.mac, secret: req.body?.secret })))
+// A signature kept open before 3.22, sealed at start (signstore.js), not only once Studio's signing opens.
+setTimeout(() => { signStore.atStart().catch((e) => console.error(`signing: an old signature couldn't be sealed yet: ${e.message}`)) }, 3000).unref()
+// Sign on Phone (signphone.js): your phones paired here, kept and let in, told on their own feed
+// (event: sign) and by a notification to them alone, which opens the pad there (?sign=<id>).
+signPhone.setHelpers({
+  phones: () => relay.status().devices.filter((d) => d.kind !== 'computer' && !d.fresh).map((d) => ({ id: d.id, name: d.name, connected: d.connected, push: push.hasDevice(d.id) })),
+  admits: (id) => { const d = relay.deviceOf(id); return !!d && d.kind !== 'computer' && !d.fresh && remote.admits(id) },
+  tell: (targets) => { for (const c of clients) if (c.signDevice && targets.includes(c.signDevice)) c.write(`event: sign\ndata: ${JSON.stringify({ list: signPhone.waitingFor(c.signDevice) })}\n\n`) },
+  notify: (r) => notify.send({ kind: 'sign', title: r.what === 'initials' ? `Initials for ${relay.thisName()}` : `A signature for ${relay.thisName()}`, body: `${r.doc ? `${r.doc}: ` : ''}draw it on this phone, then press Use. It ends in 2 minutes.`, url: `/?sign=${r.id}`, tag: `sign-${r.id}`, only: { devices: r.targets } }),
+  computer: () => relay.thisName(),
+})
 // Your files wherever they are, for Studio's home (studiofound.js): asked for only once it's open,
 // and let go of if you leave before it's done. Each found in an agent's folder or a place opens
 // through it, and one in Studio's own folder (a deck made from a meeting) through that.
@@ -1771,6 +1833,10 @@ app.get('/api/events', (req, res) => {
   if (lastFleet) res.write(`event: fleet\ndata: ${JSON.stringify(shownFleet(lastFleet))}\n\n`)
   // Who's viewing a screen of yours now, here or on another of your computers (screentell.js).
   res.write(`event: screen\ndata: ${JSON.stringify({ list: screensFor(res.bridgeDevice) })}\n\n`)
+  // A phone: what's waiting for it to sign (Sign on Phone, signphone.js), to the phone the relay
+  // proves this feed is for only.
+  res.signDevice = provenDevice(req)
+  if (res.signDevice) res.write(`event: sign\ndata: ${JSON.stringify({ list: signPhone.waitingFor(res.signDevice) })}\n\n`)
   // The desktop app's own feed (desktop/main.js says so): it also hears when another of your devices
   // asks this computer to allow something (fixes.js askHere).
   // (Only from this computer itself: never a device's, nor a browser through Tailscale.)
@@ -1779,7 +1845,12 @@ app.get('/api/events', (req, res) => {
   // ...and what Remote Screen and Preview needs of it (remote.js): its capture window, a project's
   // app drawn off screen for a phone, and the badge that says this screen is being seen.
   const offRemote = appFeed ? remote.onDesktop((ev) => res.write(`event: remote\ndata: ${JSON.stringify(ev)}\n\n`)) : null
-  req.on('close', () => { clients.delete(res); off?.(); offRemote?.() })
+  // ...and your signatures' list's version and whether Ask Before Signing is on, which the app keeps
+  // where a copy of the list put back can't reach (signstore.js, appkeys.js).
+  const offSign = appFeed ? signStore.onChange((st) => res.write(`event: sign-state\ndata: ${JSON.stringify(st)}\n\n`)) : null
+  if (appFeed) { appFeeds.add(res); for (const line of toApp.splice(0)) res.write(line) }
+  if (appFeed) signStore.olderNote().then((o) => (o ? null : signStore.state())).then((st) => { if (st && !res.writableEnded) res.write(`event: sign-state\ndata: ${JSON.stringify(st)}\n\n`) }, () => {})
+  req.on('close', () => { clients.delete(res); appFeeds.delete(res); off?.(); offRemote?.(); offSign?.() })
 })
 // A switch to another herdr session: a fleet read before it is dropped, not shown or announced.
 let fleetGen = 0
@@ -3690,10 +3761,13 @@ async function servedUi() {
 // (apiauth.js), or one with a key that's wrong.
 // in: this browser or program is let in (the page saying how to get in looks, to open by itself).
 // With Bots on, each bot's connection too, asked on this computer (the Docker image's health check
-// says it): its name and whether it's connected, and why not.
+// says it): its name and whether it's connected, and why not. And, asked on this computer, which
+// build this is (bundled, build), for the desktop app to tell an older one of its own before it
+// sends this server its key (desktop/main.js replaceStale).
 const localAsk = (req) => !req.headers['x-bridge-relay'] && !guard.viaTailnet(req) && /^(::1|127\.\d+\.\d+\.\d+|::ffff:127\.\d+\.\d+\.\d+)$/.test(String(req.socket?.remoteAddress || ''))
 app.get('/api/health', (req, res) => res.json({
   ok: true, app: 'Bridge AI', version: VERSION, in: auth.allowed(req),
+  ...(localAsk(req) ? { bundled: !!process.versions.electron, build: BUILD } : {}),
   ...(localAsk(req) && trialOn('slack-bot') ? { bots: botsStore.live().map((b) => { const st = desk.channel(b.id)?.state() || { state: 'off' }; return { id: b.id, name: b.name, state: st.state, why: st.why || null, paused: b.paused, where: Object.fromEntries(Object.entries(st.platforms || {}).filter(([, x]) => x.state !== 'no-tokens').map(([k, x]) => [k, { state: x.state, why: x.why || null }])) } }) } : {}),
 }))
 // A one-time link that lets a browser on this computer in (apiauth.js): View › Open in Browser in
@@ -3738,6 +3812,8 @@ function applyConfig() {
   const fresh = loadConfig()
   for (const k of Object.keys(cfg)) if (!(k in fresh)) delete cfg[k]
   Object.assign(cfg, fresh)
+  // (Started by the app: still where the app talks to it, whatever config.json says now.)
+  if (appKeys().listen) Object.assign(cfg, appKeys().listen)
   TZ = cfg.location?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone
   routines.scheduling(featureOn('routines'))
   weather = makeWeather(cfg)
@@ -5589,6 +5665,9 @@ backup.routes(app, {
   kept: (req) => !req.headers['x-bridge-relay'] || relay.isKept(req.headers['x-bridge-relay']), deviceOf: (req) => relay.deviceOf(req.headers['x-bridge-relay'])?.name || null,
   machineOf: (req) => (viaMachine(req) ? machines.ofDevice(relay.deviceOf(req.headers['x-bridge-relay'])) : null),
   notify: (o) => notify.send(o).catch(() => {}),
+  // Your signatures into a backup or a move: from your window or a phone, with a grant for it (signing.js).
+  signaturesOk: (req) => signing.exportAllowed(req, req.body?.grant, { window: signWindow, phone: signPhoneOf }),
+  signaturesIn: (req) => signing.importAllowed(req, req.body?.grant, { window: signWindow, phone: signPhoneOf }),
 })
 // The files a bot's runs made and sent back, newest first (its Activity lists them, with Open and
 // Send to…).

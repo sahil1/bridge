@@ -316,7 +316,7 @@ try {
     await p.locator('.fx-side-sec h3', { hasText: 'Favorites' }).waitFor({ timeout: 15000 }).catch(() => {})
     const sections = await p.locator('.fx-side-sec h3').allInnerTexts()
     const shelves = await p.locator('.fx-side-row[data-shelf]').evaluateAll((els) => els.map((e) => e.dataset.shelf))
-    ok(sections[0] === 'Studio' && JSON.stringify(shelves) === JSON.stringify(['recent', 'kind:doc', 'kind:deck', 'kind:sheet', 'kind:pdf', 'kind:page', 'kind:board', 'packs', 'signature', 'shared']), 'Studio\'s lists first: Recent, each kind, Design Packs, Your Signature and Shared', { sections, shelves })
+    ok(sections[0] === 'Studio' && JSON.stringify(shelves) === JSON.stringify(['recent', 'kind:doc', 'kind:deck', 'kind:sheet', 'kind:pdf', 'kind:page', 'kind:board', 'packs', 'signature', 'shared']), 'Studio\'s lists first: Recent, each kind, Design Packs, Your Signatures and Shared', { sections, shelves })
     await p.locator('.fx-side-row[data-label="Home"]').click()
     ok(await p.locator('.fx .fx-row[data-name="Projects"]').waitFor({ timeout: 15000 }).then(() => true, () => false), 'Home in its sidebar: your home folder')
     const sideRows = await p.locator('.fx-side-row').evaluateAll((els) => els.map((e) => e.dataset.label || e.dataset.computer))

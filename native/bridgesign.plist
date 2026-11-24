@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- native/bridgesign's own Info.plist, put into the binary as it's built (scripts/calltap.js), so
+     macOS names it Bridge AI when it asks for Touch ID or the Mac's password before a document is
+     signed, and in the Keychain. -->
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>dev.bridge-ai.app.sign</string>
+  <key>CFBundleName</key>
+  <string>Bridge AI</string>
+  <key>CFBundleDisplayName</key>
+  <string>Bridge AI</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>LSUIElement</key>
+  <true/>
+</dict>
+</plist>

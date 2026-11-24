@@ -108,6 +108,7 @@ const PATHS = {
   'settings:voice': { phone: 'Settings › Meetings & Voice › Speech Models' },
   'settings:spoken': { phone: 'Settings › Meetings & Voice › Spoken Answers' },
   'settings:mail': { phone: 'Settings › Mail & Calendar', mac: true },
+  'settings:studio': { phone: 'Settings › Studio', shows: '[data-setting="ask-before-signing"]' },
   // A beta feature's section: there, marked Beta, on or off (its switch is in it).
   'settings:bots': { phone: 'Settings › Bots' },
   'settings:devices': { phone: 'Settings › Devices & Access' },
@@ -315,7 +316,7 @@ try {
 
     // Opened at a section: there, with ‹ Settings back to the list. A link to it (from Meetings, the
     // tour, a fix), ⌘K, a link from inside Settings, and a link to the section it opened at.
-    const deep = [['voice', 'Meetings & Voice'], ['dictation', 'Meetings & Voice'], ['accounts', 'Agents & Models'], ['machines', 'Devices & Access'], ['remote-devices', 'Devices & Access'], ['notify', 'Notifications'], ['permissions', 'You'], ['general', 'You'], ['about', 'About & Updates']]
+    const deep = [['ask-before-signing', 'Studio'], ['voice', 'Meetings & Voice'], ['dictation', 'Meetings & Voice'], ['accounts', 'Agents & Models'], ['machines', 'Devices & Access'], ['remote-devices', 'Devices & Access'], ['notify', 'Notifications'], ['permissions', 'You'], ['general', 'You'], ['about', 'About & Updates']]
     const missed = []
     const open = (section) => ph.p.evaluate((section) => window.dispatchEvent(new CustomEvent('bridge-open-settings', { detail: { section } })), section)
     for (const [section, name] of deep) {

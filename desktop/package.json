@@ -20,6 +20,13 @@
     "afterSign": "./notarize-app.js",
     "afterAllArtifactBuild": "./notarize-dmg.js",
     "npmRebuild": false,
+    "electronFuses": {
+      "runAsNode": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true
+    },
     "directories": {
       "output": "dist"
     },
@@ -37,6 +44,13 @@
       "screenpick.js",
       "remote.js",
       "apitoken.js",
+      "windowauth.js",
+      "serverflags.js",
+      "servergate.js",
+      "startgate.js",
+      "rootlist.js",
+      "codesig.js",
+      "app-root.list",
       "package.json",
       "!node_modules/uiohook-napi/{libuiohook,src,binding.gyp}{,/**}"
     ],

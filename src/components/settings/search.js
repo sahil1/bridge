@@ -119,6 +119,10 @@ export const SETTINGS = [
     ['find-a-time-more', tx('Kept clear around meetings'), 'buffer travel how many times offer'],
     ['mail-read-only', tx('Read-Only'), 'mail never changes send'],
   ]),
+  ...at('studio', [
+    ['signatures', tx('Your Signatures'), 'signature signatures initials sign pdf draw trackpad phone default studio'],
+    ['ask-before-signing', tx('Ask Before Signing'), 'touch id password pin windows hello confirm sign signing signature security studio'],
+  ]),
   ...at('bots', [
     ['bots-beta', tx('Bots'), 'beta bots slack discord teams bot'],
     ['bots-open', tx('Open Bots'), 'bots connections who can ask instructions reads from answers limits channels scheduled posts export activity memory pause tokens socket mode manifest'],
@@ -163,6 +167,7 @@ export const SETTINGS = [
   ...at('backup', [
     ['backup', tx('Back Up & Move'), 'backup back up restore move new computer migrate transfer passphrase bots connections tokens'],
     ['backup-what', tx('What Goes'), 'what goes backup included keys settings', { near: 'backup' }],
+    ['backup-signatures', tx('With your signatures'), 'backup move signatures initials studio', { near: 'backup' }],
   ]),
   ...at('about', [
     ['version', tx('Check for new versions'), 'version update check'],
