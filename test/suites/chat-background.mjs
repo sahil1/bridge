@@ -67,6 +67,32 @@ try {
     ok(first.every((n) => n === 3) && then.every((n) => n === 5), 'a subagent\'s steps asked for by three at once, as its log grows: each counted once', { first, then })
   }
 
+  // Claude Code 2.1.311's notices: a subagent waiting on work of its own is "completed" too, and
+  // one sent a message after it's done is at work again; neither is shown as done (which left only
+  // the footer's rows, "Only its terminal shows this one").
+  {
+    const sub = await import('../../server/subagents.js')
+    const dir = path.join(kit.home, 'waiting')
+    const subs = path.join(dir, 's2', 'subagents')
+    fs.mkdirSync(subs, { recursive: true })
+    const ago = (min) => new Date(Date.now() - min * 60000)
+    const note = (min, body) => `${JSON.stringify({ type: 'user', timestamp: ago(min).toISOString(), message: { role: 'user', content: `<task-notification>\n${body}\n</task-notification>` } })}\n`
+    const waits = (id) => `<task-id>${id}</task-id>\n<tool-use-id>toolu_${id}</tool-use-id>\n<status>completed</status>\n<summary>Agent "${id}" is waiting on its own background work</summary>`
+    const done = (id) => `<task-id>${id}</task-id>\n<status>completed</status>\n<summary>Agent "${id}" finished</summary>`
+    fs.writeFileSync(path.join(dir, 's2.jsonl'), `${JSON.stringify({ type: 'user', message: { content: 'Build three things' } })}\n${note(50, waits('w1'))}${note(60, waits('w2'))}${note(40, done('w2'))}${note(50, waits('w3'))}${note(30, done('w3'))}`)
+    for (const [id, min] of [['w1', 52], ['w2', 10], ['w3', 31]]) {
+      fs.writeFileSync(path.join(subs, `agent-${id}.meta.json`), JSON.stringify({ description: `Job ${id}`, agentType: 'general-purpose', toolUseId: `toolu_${id}`, requestShape: 'background' }))
+      const log = path.join(subs, `agent-${id}.jsonl`)
+      fs.writeFileSync(log, `${JSON.stringify({ type: 'user', timestamp: ago(70).toISOString(), message: { content: 'Go' } })}\n`)
+      fs.utimesSync(log, ago(min), ago(min))
+    }
+    const items = (await sub.listSubagents(path.join(dir, 's2.jsonl'))).items
+    const of = (id) => items.find((i) => i.id === `agent-${id}`)?.status
+    ok(of('w1') === 'running' && !items.some((i) => i.fromScreen), 'a subagent waiting on its own background work is at work, even with nothing written for 50 minutes', items.map((i) => [i.id, i.status]))
+    ok(of('w2') === 'running', 'one written to after it said it finished (sent a message) is at work again', items.map((i) => [i.id, i.status]))
+    ok(of('w3') === 'done', 'and one that finished after waiting, a notice with no tool-use id, is done', items.map((i) => [i.id, i.status]))
+  }
+
   // An image you pasted, read back out of the log (Chat shows it in your message).
   const img = await fetch(`${kit.url}/api/agents/${encodeURIComponent(one.paneId)}/image?uuid=img-0001-abcd&i=1`)
   const bytes = Buffer.from(await img.arrayBuffer())
