@@ -558,8 +558,9 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
       if (shownFile.current !== f) return
       metaRef.current = { ...metaRef.current, mtime: r.mtime, size: r.size, versions: r.versions, keep: r.keep ?? metaRef.current?.keep }
       setMeta((m) => ({ ...m, mtime: r.mtime, size: r.size, versions: r.versions, keep: r.keep ?? m.keep }))
-      // Changed again while it saved: still unsaved, and saved again in a moment.
-      if (edits.current === n) setDirty(false)
+      // Changed again while it saved: still unsaved, and saved again in a moment. (Known at once, for
+      // a restore waiting on this save.)
+      if (edits.current === n) { dirtyRef.current = false; setDirty(false) }
       else if (SAVES_ITSELF.has(meta.kind)) later()
       setConflict(null)
       if (auto) setNote((x) => (x?.error ? null : x))
@@ -628,7 +629,11 @@ function FilePage({ root, path: rel, onBack, onOpen }) {
     } catch (e) { setNote({ text: app ? t("Couldn't open it in {app}: {error}", { app, error: e.message }) : t("Couldn't open it in its app: {error}", { error: e.message }), bad: true }) }
   }
   const restore = async (id) => {
-    if (dirty && !window.confirm(t('Restore this version? Your unsaved changes here are lost (what\'s in the file now is kept as a version).'))) return
+    // A save on its way (Saving…) is waited for: what it saves is kept as a version, so it isn't
+    // lost, and only changes it doesn't have are asked about. (A big file's save is written, then
+    // kept as a version, for seconds on a slow disk.)
+    while (inFlight.current) await inFlight.current
+    if (dirtyRef.current && !window.confirm(t('Restore this version? Your unsaved changes here are lost (what\'s in the file now is kept as a version).'))) return
     // One that can't be put back (gone from the list meanwhile, its computer away) says why; the
     // file as it was, and the page with it. Put back and not read again: said as a file that didn't open.
     writing.current++

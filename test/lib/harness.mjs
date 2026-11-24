@@ -677,7 +677,10 @@ export const noServiceWorker = (ctx) => ctx.addInitScript(() => { try { delete N
 // didn't open in it: phoneNotes(ctx) before the page opens notes, from its start (ms), when its
 // service worker took it over, each request the worker handed it to send to the computer (Bridge
 // AI's own page first), each address its frame was given and each load there; phoneSaw(page) adds
-// what's there now: the worker's state, the frame's address, and which screen the page shows.
+// what's there now: the worker's state (registered: whether the browser has its registration at
+// all), the frame's address, which screen the page shows, and from the relay stand-in, which of the
+// page's own files were asked for, how long ago and how they were answered (asked: whether the
+// worker's script, /sw.js, and the one it imports, /link-sw.js, ever were).
 export const phoneNotes = (ctx) => ctx.addInitScript(() => {
   if (window !== window.top || !navigator.serviceWorker) return
   const notes = window.__phoneNotes = []
@@ -697,11 +700,18 @@ export const phoneNotes = (ctx) => ctx.addInitScript(() => {
   }
   frame()
 })
-export const phoneSaw = (p) => p.evaluate(async () => {
-  const r = await navigator.serviceWorker?.getRegistration().catch(() => null)
-  const shown = ['pair', 'wait', 'home', 'away', 'bar'].filter((id) => document.getElementById(id) && !document.getElementById(id).hidden).map((id) => `${id}: ${document.getElementById(id).innerText.trim().slice(0, 80)}`)
-  return { worker: { controls: !!navigator.serviceWorker?.controller, active: r?.active?.state || null, installing: r?.installing?.state || null, waiting: r?.waiting?.state || null }, frame: document.getElementById('app')?.getAttribute('src') ?? null, shown, notes: window.__phoneNotes || null }
-}).catch((e) => e.message)
+export async function phoneSaw(p) {
+  const saw = await p.evaluate(async () => {
+    const r = await navigator.serviceWorker?.getRegistration().catch(() => null)
+    const shown = ['pair', 'wait', 'home', 'away', 'bar'].filter((id) => document.getElementById(id) && !document.getElementById(id).hidden).map((id) => `${id}: ${document.getElementById(id).innerText.trim().slice(0, 80)}`)
+    return { worker: { registered: !!r, controls: !!navigator.serviceWorker?.controller, active: r?.active?.state || null, installing: r?.installing?.state || null, waiting: r?.waiting?.state || null }, frame: document.getElementById('app')?.getAttribute('src') ?? null, shown, notes: window.__phoneNotes || null }
+  }).catch((e) => e.message)
+  // (Asked here, not by the page, whose worker would take the request to the computer.)
+  const asked = await fetch(new URL('/_test/state', p.url())).then((x) => x.json()).then((j) => (j.asked || []).slice(-8).map((a) => `${a.p} ${Date.now() - a.at} ms ago: ${a.status ?? 'unanswered'}${a.ms != null ? ` in ${a.ms} ms` : ''}`), () => null)
+  if (typeof saw === 'string') return { saw, asked }
+  const { notes, ...rest } = saw
+  return { ...rest, asked, notes }
+}
 // The time a test runs at: now, or what BRIDGE_TEST_CLOCK names, a time today ("21:30") or a weekday
 // and a time ("Sat 00:30": that weekday nearest today), so a test can be tried at any hour on any day.
 // The clock flows on from there as the real one does.

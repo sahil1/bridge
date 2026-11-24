@@ -662,23 +662,28 @@ try {
   // computer or a Bluetooth headset switches over to its mic (its audio context held suspended).
   // Nothing the recording sends before then reaches the page, even should the context run a moment
   // before its suspend takes hold; window.__late says, for the last recording, when it was made, when
-  // its sound came, when the page first heard it, and how much was held back.
-  const hudPage = (pending = null, late = 0, mode = 'light') => page(b, `${kit.url}/?dictate=1`, { mode, store: { 'cc-ws': { tabs: [one.paneId], active: one.paneId } }, before: async (c) => {
+  // its sound came, when the page first heard it, how much was held back, and after that how much
+  // sound came (samples) and how far apart its first levels were (gaps, ms). stall: ms the sound
+  // stops again once its first piece has come (the context held suspended once more), as an audio
+  // device starting up can hand over a moment of sound and then little for a second (CI's macOS
+  // WebKit did: a hold timed from that first piece had under 0.3 s of sound).
+  const hudPage = (pending = null, late = 0, mode = 'light', stall = 0) => page(b, `${kit.url}/?dictate=1`, { mode, store: { 'cc-ws': { tabs: [one.paneId], active: one.paneId } }, before: async (c) => {
     await before(c)
     if (late) {
-      await c.addInitScript((ms) => {
+      await c.addInitScript(({ ms, stall }) => {
         const Real = window.AudioContext
         window.AudioContext = class extends Real {
           constructor(o) {
             super(o)
             if (o?.sampleRate !== 16000) return
             const resume = Real.prototype.resume.bind(this)
-            const late = { made: Math.round(performance.now()), on: null, heard: null, held: 0 }
+            const late = { made: Math.round(performance.now()), on: null, heard: null, held: 0, samples: 0, gaps: [] }
             this.late = late
             window.__late = late
             this.suspend()
             setTimeout(() => { late.on = Math.round(performance.now()); resume().catch(() => {}) }, ms)
             this.resume = () => (late.on != null ? resume() : Promise.resolve())
+            this.stallAfterFirst = stall ? () => { Real.prototype.suspend.call(this).catch(() => {}); setTimeout(() => resume().catch(() => {}), stall) } : null
           }
         }
         const Node = window.AudioWorkletNode
@@ -689,14 +694,17 @@ try {
             const late = ctx.late
             if (!late) return
             const port = this.port
+            let level = null
             Object.defineProperty(port, 'onmessage', { configurable: true, get: () => handler.get.call(port), set: (f) => handler.set.call(port, (e) => {
               if (late.on == null && !e.data?.flushed) { late.held++; return }
-              if (late.heard == null) late.heard = Math.round(performance.now())
+              if (late.heard == null) { late.heard = Math.round(performance.now()); ctx.stallAfterFirst?.() }
+              if (e.data?.pcm) late.samples += e.data.pcm.byteLength / 2
+              if (e.data?.level != null) { const now = performance.now(); if (level != null && late.gaps.length < 8) late.gaps.push(Math.round(now - level)); level = now }
               f(e)
             }) })
           }
         }
-      }, late)
+      }, { ms: late, stall })
     }
     await c.route(/\/api\/agents\/[^/]+\/(prompt|queue)$/, async (route) => { prompts.push({ url: route.request().url(), body: route.request().postDataJSON() }); await route.fulfill({ json: promptAnswer }) })
     await c.addInitScript((p0) => {
@@ -884,7 +892,7 @@ try {
     const free = !!(await until(async () => /again when you're done/.test(await hint()) && await h.locator('.hud .dp-ok').isEnabled(), 5000, 100))
     await sleep(800)
     await key(h, 'down')
-    ok(waiting && free && !!(await until(async () => (await h.locator('.hud-text').innerText().catch(() => '')) === 'Heard in the end.', 8000, 100)), 'the mic\'s sound coming late: not listening till it comes, a let go before then keeps it listening hands-free, and pressed again, the words', { waiting, free, hud: await h.locator('.hud').innerText().catch(() => '') })
+    ok(waiting && free && !!(await until(async () => (await h.locator('.hud-text').innerText().catch(() => '')) === 'Heard in the end.', 8000, 100)), 'the mic\'s sound coming late: not listening till it comes, a let go before then keeps it listening hands-free, and pressed again, the words', { waiting, free, hud: await h.locator('.hud').innerText().catch(() => ''), late: await h.evaluate(() => window.__late).catch(() => null) })
     // Held from when it hears you, as you'd see it: ✓ on and the bars up. (With no sound after 3 s
     // it listens all the same, ✓ on and the bars flat, and on a busy computer the late sound can
     // come after that.)
@@ -898,6 +906,23 @@ try {
     const words = !!(await until(async () => (await h.locator('.hud-text').innerText().catch(() => '')) === 'Held from when it listened.', 8000, 100))
     ok(!!hearing && words && real(he).length === 0, 'and held from when it listens: the words, not "Recording too short"', [await h.locator('.hud').innerText().catch(() => ''), { hearing: !!hearing, after, late: await h.evaluate(() => window.__late).catch(() => null) }, he])
     // Never heard (when that fails): not left for the next dictation to be answered with.
+    said.splice(0)
+    await hc.close()
+  }
+  {
+    // The mic's sound late, then a moment of it and nothing more for 1.2 s (an audio device starting
+    // up): not listening on that moment, only once the sound keeps coming, so a hold timed from ✓
+    // and the bars up has the words, not "Recording too short".
+    const { ctx: hc, p: h, errors: he } = await hudPage(null, 2000, 'light', 1200)
+    await h.waitForSelector('.hud', { timeout: 10000 })
+    said.push('heard once it kept coming')
+    const t0 = Date.now()
+    await key(h, 'down')
+    const hearing = await until(() => h.locator('.hud .dp-listening').evaluate((el) => !!el.querySelector('.dp-ok:enabled') && parseFloat(/scaleY\(([\d.]+)\)/.exec(el.querySelector('.dp-wave i:last-child')?.style.transform || '')?.[1] || '0') > 0.5).catch(() => false), 15000, 50)
+    const after = Date.now() - t0
+    await sleep(1300); await key(h, 'up')
+    const words = !!(await until(async () => (await h.locator('.hud-text').innerText().catch(() => '')) === 'Heard once it kept coming.', 8000, 100))
+    ok(!!hearing && words && real(he).length === 0, 'the sound late, then a moment of it and a pause: listening once it keeps coming, and a hold from then has the words', [await h.locator('.hud').innerText().catch(() => ''), { hearing: !!hearing, after, late: await h.evaluate(() => window.__late).catch(() => null) }, he])
     said.splice(0)
     await hc.close()
   }
