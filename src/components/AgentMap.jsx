@@ -3,6 +3,7 @@ import Icon, { StatusDot } from './Icon.jsx'
 import { hostApi } from '../api.js'
 import { ago, onFor, goMachine } from './Machines.jsx'
 import { t, tx } from '../i18n/index.js'
+import { whyNot } from './machineWhy.js'
 import './agentmap.css'
 
 // The agent map: what's running on which of your computers (server/agentmap.js), and in the
@@ -62,7 +63,7 @@ function Row({ a, d, off, hl, onOpen, onShow, from }) {
   const id = `am-${d.id || 'here'}-${a.paneId}`
   return (
     <div className={`am-row s-${a.status} ${hl === id ? 'hl' : ''}`} id={id}>
-      <button type="button" className="am-main" disabled={off} onClick={() => onOpen(d, a)} title={off ? t('{name} is offline', { name: d.name }) : t('Open {name}', { name: a.name || a.title })}>
+      <button type="button" className="am-main" disabled={off} onClick={() => onOpen(d, a)} title={off ? d.error || t('{name} is offline', { name: d.name }) : t('Open {name}', { name: a.name || a.title })}>
         <span className="am-l1">
           <StatusDot status={off ? 'unknown' : a.status} size={8} />
           <b className="am-name">{a.chief && <Icon name="helm" size={11} />}<span className="am-cut">{a.name || a.title}</span></b>
@@ -120,9 +121,9 @@ function Lane({ d, list, cloud = false, filter, hl, onOpen, onShow }) {
         {cloud ? <Icon name="cloud" size={15} /> : <span className={`mc-dot ${d.online ? 'on' : ''}`} />}
         <div className="am-lane-name">
           <b>{cloud ? t('Cloud Agents') : d.name}</b>
-          <small className="muted">
+          <small className="muted" title={!cloud && !d.online && d.error ? d.error : undefined}>
             {cloud ? t("Running on each provider's computers")
-              : [OS[d.os], d.here ? t('this computer') : d.notLetIn ? t('Not let in') : d.online ? t('Online') : (d.at || d.lastSeen) ? t('Offline · as of {when}', { when: ago(d.at || d.lastSeen) }) : t('Offline')].filter(Boolean).join(' · ')}
+              : [OS[d.os], d.here ? t('this computer') : d.notLetIn ? t('Not let in') : d.online ? t('Online') : whyNot(d) || ((d.at || d.lastSeen) ? t('Offline · as of {when}', { when: ago(d.at || d.lastSeen) }) : t('Offline'))].filter(Boolean).join(' · ')}
           </small>
         </div>
         <span className="am-lane-count" title={said}>{list.length}</span>

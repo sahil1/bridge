@@ -120,6 +120,29 @@ try {
   serve = { counts: { working: 1 }, agents: [] }
   ok(!!(await until(async () => /1 working/.test(await fp.locator('.rail-machines').innerText().catch(() => '')), 20000)), 'answered right again: they\'re back by themselves')
   await shot(fp, `${tag}devices-back`)
+
+  // ---------- one that can't be reached, and why ----------
+  // Turned away (its answer couldn't be checked): said as that wherever it's listed, with the whole
+  // sentence beside it, never only "Offline".
+  const why = "Can't connect to Laptop: Laptop said it doesn't know this computer (it unlinked it, or was set up again). That answer came through its relay and couldn't be checked, so nothing was changed here. Trying again. If Laptop was set up again, link it again with a code from Laptop."
+  serve = { online: false, why: 'unchecked', error: why, counts: {}, agents: [] }
+  await fp.evaluate(() => window.dispatchEvent(new Event('bridge-machines')))
+  const offRow = fp.locator('.rail-machines .rmc', { hasText: 'Laptop' })
+  ok(!!(await until(async () => /Can't connect/.test(await offRow.innerText().catch(() => '')), 10000)) && !/Offline/.test(await offRow.innerText()) && (await offRow.locator('.rmc-head').getAttribute('title')) === why, 'a computer that turned this one away: the sidebar says Can\'t connect, not Offline, with why in full beside it', await offRow.innerText().catch(() => ''))
+  await fp.locator('.mc-chip').click()
+  const menuRow = fp.locator('.mc-menu .mc-row', { hasText: 'Laptop' })
+  ok(/Can't connect/.test(await menuRow.innerText().catch(() => '')) && !/Offline/.test(await menuRow.innerText().catch(() => '')) && (await menuRow.locator('.mc-item').getAttribute('title')) === why, 'and so do the top bar\'s devices', await menuRow.innerText().catch(() => ''))
+  await fp.keyboard.press('Escape')
+  await devices(fp)
+  const whyRow = fp.locator('#st-machines .mch-row', { hasText: 'Laptop' })
+  await whyRow.waitFor({ timeout: 10000 }).catch(() => {})
+  ok(/Can't connect/.test(await whyRow.innerText().catch(() => '')) && (await whyRow.innerText().catch(() => '')).includes('link it again with a code from Laptop'), 'and Settings › Devices & Access says it in full, with what to do', await whyRow.innerText().catch(() => ''))
+  // Online from here, but it can't reach this computer: in its own words.
+  serve = { online: true, reach: { error: 'Studio is offline.' }, counts: {}, agents: [] }
+  await fp.evaluate(() => window.dispatchEvent(new Event('bridge-machines')))
+  ok(!!(await until(async () => /Laptop can't reach Studio, though Studio reaches it\. Laptop says: Studio is offline\. On Laptop, Fix next to Studio tries each step again\./.test((await whyRow.innerText().catch(() => '')).replace(/\s+/g, ' ')), 10000)), 'one online from here that can\'t reach this computer: Settings says so, in its words, and what to do there', await whyRow.innerText().catch(() => ''))
+  await shot(fp, `${tag}devices-why`)
+  await fp.locator('button[aria-label="Close settings"]').click()
   await fresh.ctx.close()
 
   // ---------- Pair a device ----------

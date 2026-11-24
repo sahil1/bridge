@@ -264,12 +264,14 @@ try {
     return { paneId: `${dev}-${i}`, title: `${['Fix', 'Add', 'Refactor', 'Test', 'Review'][i % 5]} ${['checkout totals', 'refund flow with a much longer name than usual so it has to be cut short', 'search index', 'onboarding copy', 'nightly export'][(i + n) % 5]}`, name: null, status, kind, kindLabel, model, account: i % 4 === 0 ? 'Work' : null, chief: false, project: PROJECTS[(i + n) % 5], branch: i % 3 === 0 ? `fix/very-long-branch-name-${i}-for-the-thing` : null, doing: status === 'working' ? { tool: i % 2 ? 'Bash: npm test -- --run src/components/very/deep/path/test.spec.ts' : null, text: 'Looking through the billing module for every place a total is rounded before it is summed' } : { text: 'All 40 tests pass and the branch is pushed.' }, asking: status === 'blocked' ? 'Do you want to proceed?' : null, subagents: status === 'working' && i % 3 === 1 ? { count: 3, items: [{ title: 'Look for rounding in billing', type: 'Explore' }, { title: 'Check the refunds tests', type: 'general-purpose' }] } : null, from: i === 1 ? ['Main'] : [], since: iso(30 + i * 13), statusSince: iso(i * 3) }
   }
   const chiefAgent = (dev) => ({ paneId: `${dev}-chief`, title: 'Chief of Staff', name: 'Chief of Staff', status: 'idle', kind: 'claude', kindLabel: 'Claude Code', chief: true, thread: { id: 'main', name: 'Main', main: true }, from: [], since: iso(400), statusSince: iso(20), model: 'claude-opus-5-5' })
+  const LX_WHY = 'Can\'t reach relay.example.net, the relay Linux workstation uses. Check the address, this computer\'s network, or that the relay is up.'
   const big = {
     devices: [
       { id: null, name: 'Studio Mac', os: 'mac', here: true, online: true, at: iso(0), agents: [chiefAgent('s'), ...Array.from({ length: 11 }, (_, i) => fake('s', 0, i))] },
       { id: 'mb', name: 'MacBook Pro', os: 'mac', online: true, at: iso(0), agents: Array.from({ length: 8 }, (_, i) => fake('m', 1, i)) },
       { id: 'pc', name: 'Windows PC', os: 'windows', online: true, at: iso(0), agents: [...Array.from({ length: 7 }, (_, i) => fake('w', 2, i)), { ...fake('w', 2, 9), paneId: 'cl1', cloud: { label: 'Cursor', repo: 'acme/shop', prUrl: 'https://github.com/acme/shop/pull/9' }, kind: 'cloud', kindLabel: 'Cursor cloud agent', status: 'done', project: 'shop' }, { ...fake('w', 2, 10), paneId: 'cl2', cloud: { label: 'Jules', repo: 'acme/docs' }, kind: 'cloud', kindLabel: 'Jules cloud agent', status: 'working', project: 'docs' }] },
-      { id: 'lx', name: 'Linux workstation', os: 'linux', online: false, lastSeen: iso(42), at: iso(42), agents: Array.from({ length: 5 }, (_, i) => fake('l', 3, i)) },
+      // (Its relay out of reach from here: said as that, with the whole sentence beside it.)
+      { id: 'lx', name: 'Linux workstation', os: 'linux', online: false, lastSeen: iso(42), at: iso(42), why: 'unreachable', error: LX_WHY, agents: Array.from({ length: 5 }, (_, i) => fake('l', 3, i)) },
     ],
   }
   const total = big.devices.reduce((n, d) => n + d.agents.length, 0)
@@ -329,6 +331,8 @@ try {
     ok(geo.spill.length === 0 && geo.wide <= 1, `${what}: nothing spills out of its lane, nothing wider than the window`, geo)
     ok(phone ? geo.perRow === 1 : geo.perRow >= 3 && geo.minW >= 280, phone ? `${what}: one lane under another` : `${what}: lanes side by side, each wide enough to read`, geo)
     ok(/Cursor cloud/.test(await m.locator('.am-lane.cloud').innerText()) && /Started from Windows PC/.test(await m.locator('.am-lane.cloud').innerText()), `${what}: cloud agents in a lane of their own, saying which computer started them`)
+    const lx = m.locator('.am-lane', { hasText: 'Linux workstation' })
+    ok(/Can't reach its relay/.test(await lx.locator('.am-lane-name small').innerText()) && !/Offline/.test(await lx.locator('.am-lane-name small').innerText()) && (await lx.locator('.am-lane-name small').getAttribute('title')) === LX_WHY && (await lx.locator('.am-main').first().getAttribute('title')) === LX_WHY, `${what}: a computer whose relay can't be reached says so, not just Offline, with why in full beside it`, await lx.locator('.am-lane-name small').innerText())
     // Filters: what's waiting, everywhere.
     await m.locator('.am-filters .fchip', { hasText: 'Waiting' }).click()
     const waitingRows = await m.locator('.am-row').count()

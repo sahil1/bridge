@@ -49,13 +49,29 @@ export function makeLetIn({ shutFor, turnedAway = () => {}, deviceOf, versionOf 
     const key = req.headers['x-bridge-for-key']
     return { id, name, kind: req.headers['x-bridge-for-kind'] === 'computer' ? 'computer' : 'phone', key: typeof key === 'string' && key.length <= 200 ? key : null }
   }
+  // Another of your computers turned away here: said in the log too, once an hour for each (and what),
+  // so a computer that can't use this one says why here as well as there.
+  // no: shutFor's answer; via: the device of its it asked for, if any.
+  const noted = new Map() // computer and what -> when it was said
+  function note(d, no, via) {
+    if (d?.kind !== 'computer') return
+    const what = no === 'update' ? 'update' : no === 'computer' || !via ? 'itself' : 'through'
+    const now = Date.now()
+    for (const [k, at] of noted) if (at < now - 3600000) noted.delete(k)
+    const k = `${d.id}:${what}`
+    if (noted.has(k)) return
+    noted.set(k, now)
+    const name = plainName(d.name) || 'Another computer'
+    console.log(`Which Devices May Connect: ${name} (a linked computer) was turned away here: ${what === 'itself' ? `it isn't let in (${placeEn('remote-devices')})` : what === 'update' ? 'it runs an older Bridge AI, which can\'t say which of its devices it asks for' : `${plainName(via?.name) || 'a device'}, which comes through it, isn't let in`}`)
+  }
   // null, or who isn't let in.
   function out(req) {
     const id = idOf(req)
     if (!id) return null
     const d = deviceOf(id)
-    const no = shutFor(id, viaOf(req, d))
-    if (no) turnedAway(id)
+    const via = viaOf(req, d)
+    const no = shutFor(id, via)
+    if (no) { turnedAway(id); note(d, no, via) }
     return no ? { no, hop: d } : null
   }
   // What it's told: through, the computer it came through when that's the one not let in here, or
