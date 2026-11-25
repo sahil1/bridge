@@ -279,10 +279,24 @@ export const WINDOW = 512 * 1024
 export const GRANT = 128 * 1024
 export const more = (n) => { const b = new Uint8Array(4); new DataView(b.buffer).setUint32(0, n); return b }
 export const moreOf = (body) => (body.byteLength >= 4 ? new DataView(body.buffer, body.byteOffset, 4).getUint32(0) : 0)
-// The asker's side: counts what its reader took in and gives it back GRANT at a time.
-export function granter(give) {
+// The asker's side: counts what its reader took in and gives it back GRANT at a time. On a link that
+// takes long to answer (a phone far away, a slow mobile network), WINDOW in flight caps a big answer
+// at WINDOW per round trip (512 KB at 600 ms: under 1 MB/s), whatever the network could carry. So
+// while an answer keeps being taken in, each grant also gives back as much again (as TCP's slow
+// start grows its window), up to MAX_WINDOW in all: a big download fills a slow-to-answer link, and
+// no more than MAX_WINDOW is ever on its way. An end from before just gets its credit sooner.
+export const MAX_WINDOW = 4 * 1024 * 1024
+export function granter(give, { start = WINDOW, max = MAX_WINDOW } = {}) {
   let owed = 0
-  return (n) => { owed += n; if (owed >= GRANT) { give(owed); owed = 0 } }
+  let window = start
+  return (n) => {
+    owed += n
+    if (owed < GRANT) return
+    const grow = Math.max(0, Math.min(owed, max - window))
+    window += grow
+    give(owed + grow)
+    owed = 0
+  }
 }
 export function pack(kind, id, body) {
   const b = body == null ? new Uint8Array(0) : body instanceof Uint8Array ? body : body instanceof ArrayBuffer ? new Uint8Array(body) : enc.encode(JSON.stringify(body))
