@@ -114,11 +114,14 @@ ok(c.weekOf(new Date(2026, 9, 31)) === '2026-W44' && c.weekOf(new Date(2026, 0, 
 
 // ---------- The project's endpoint, stood in for ----------
 const got = []
+// (Past the new install's own case, a kit turning usage stats on sends its first report too, as an
+// install in its first week does: not what the cases after it look at.)
+let keepFirsts = true
 let answer = { ok: true }
 const srv = http.createServer((req, res) => {
   let b = ''
   req.on('data', (d) => { b += d })
-  req.on('end', () => { got.push({ method: req.method, path: req.url, type: req.headers['content-type'], cookie: req.headers.cookie || null, body: b }); res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(answer)) })
+  req.on('end', () => { if (keepFirsts || req.url !== '/v1/first') got.push({ method: req.method, path: req.url, type: req.headers['content-type'], cookie: req.headers.cookie || null, body: b }); res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(answer)) })
 })
 const port = await freePort()
 await new Promise((r) => srv.listen(port, '127.0.0.1', r))
@@ -151,12 +154,17 @@ try {
   const d0 = await dnt.api('/counts')
   ok(d0.available === false && d0.refused === 'DO_NOT_TRACK' && await dnt.api('/counts', { share: true }).then(() => false, () => true), 'DO_NOT_TRACK=1: off, and it can\'t be turned on', d0)
 
-  // On unless turned off: a new install shares. Nothing pops up to say so: Settings › About & Updates
-  // and PRIVACY.md do.
+  // Off unless turned on: a new install shares nothing, sends no first report, and counts nothing
+  // until its person turns usage stats on (Settings › About & Updates, or beside Bridge AI's relay).
   {
     const fresh = await kitWith('default', { BRIDGE_COUNTS_URL: URL_ })
     const f0 = await fresh.api('/counts')
-    ok(f0.available && f0.share === true && !('notice' in f0), 'on unless turned off: a new install shares usage stats, with no card to say so', f0)
+    await new Promise((r) => setTimeout(r, 2500))
+    ok(f0.available && f0.share === false && !('notice' in f0) && !got.some((g) => g.path === '/v1/first'), 'off unless turned on: a new install shares no usage stats and sends no first report', { f0, got: got.map((g) => g.path) })
+    await fresh.api('/counts/window', { language: 'fr' })
+    ok((await fresh.api('/counts/preview')).report.features.language !== 'fr', 'while it\'s off, nothing a window says is kept')
+    const on = await fresh.api('/counts', { share: true })
+    ok(on.share === true, 'turned on, it shares', on)
     const pf = (await fresh.api('/counts/preview')).report
     const allowed = (k, v) => SCHEMA.values[k].includes(v)
     ok(/^macOS \d+\.\d+$|^Windows 1[01]|^[A-Z][a-z]+/.test(pf.osVersion) && typeof pf.chip === 'string' && pf.chip.length > 1 && allowed('memory', pf.memory) && allowed('cores', pf.cores) && allowed('phones', pf.phones) && allowed('computers', pf.computers), 'a report says the system\'s version, the chip\'s family, memory and cores (ranges), and the phones and other computers linked', { osVersion: pf.osVersion, chip: pf.chip, memory: pf.memory, cores: pf.cores, phones: pf.phones, computers: pf.computers })
@@ -176,6 +184,7 @@ try {
     ok(got.filter((g) => g.path === '/v1/first').length === 1, 'started again: the first report isn\'t sent twice', got.map((g) => g.path))
     again.stop()
     got.length = 0
+    keepFirsts = false
   }
 
   // Turned off: nothing at all.
@@ -273,7 +282,7 @@ try {
     const { ctx, p } = await page(b, kc.url)
     await p.locator('.topbar .search-btn').waitFor({ timeout: 15000 }).catch(() => {})
     await p.waitForTimeout(1500)
-    ok(!/anonymous usage stats/i.test(await p.locator('body').innerText()) && (await kc.api('/counts')).share === true, 'after setup, nothing pops up about usage stats, and they\'re on')
+    ok(!/anonymous usage stats/i.test(await p.locator('body').innerText()) && (await kc.api('/counts')).share === false, 'after setup, nothing pops up about usage stats, and they\'re off')
     // What's on screen says which part of Bridge AI it is (time in each, src/activeTime.js).
     const parts = await p.evaluate(() => [...document.querySelectorAll('[data-area]')].map((e) => e.dataset.area))
     ok(parts.length > 0 && parts.every((a) => AREAS.includes(a)), 'what\'s on screen says which part of Bridge AI it is, each on the list', parts)

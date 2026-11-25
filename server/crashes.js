@@ -107,7 +107,9 @@ let cfg = null // the server's settings: crashReports.send, crashReports.stopped
 let context = async () => ({}) // { version, settings, names } for report()
 let saveSettings = () => {}
 export function configure(c, { about, save } = {}) { cfg = c; if (about) context = about; if (save) saveSettings = save }
-const on = () => !!(cfg && cfg.crashReports?.send !== false && endpoint() && !refused())
+// Off unless you turned it on (crashReports.send true); one report at a time with Send to Bold
+// Bridge needs nothing turned on.
+const on = () => !!(cfg && cfg.crashReports?.send === true && endpoint() && !refused())
 const hostOf = (u) => { try { return new URL(u).host } catch { return null } }
 
 async function sentList() {

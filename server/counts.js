@@ -1,7 +1,8 @@
 // Usage stats: which of Bridge AI's features are on and get used, how long it's used, the computer
 // it runs on, and whether it crashed, as numbers in ranges, sent to the project to see what to build
-// and fix. On unless you turn it off (Settings › About & Updates, Share anonymous usage stats), and
-// said once, in a card, the first time it's on. DO_NOT_TRACK=1 or BRIDGE_TELEMETRY=0 keeps it off,
+// and fix. Off unless you turn it on (Settings › About & Updates, Share anonymous usage counts, or
+// the offer beside Bridge AI's relay, which works the same either way): nothing is counted or sent
+// before then. DO_NOT_TRACK=1 or BRIDGE_TELEMETRY=0 keeps it off,
 // and with no endpoint set it isn't offered. Turning it off stops it at once and forgets what wasn't
 // sent yet.
 //
@@ -118,11 +119,16 @@ export function weekOf(d = now()) {
   return `${t.getFullYear()}-W${String(n).padStart(2, '0')}`
 }
 
-let cfg = null // the server's settings: counts.share (on unless false), counts.stopped
+let cfg = null // the server's settings: counts.share (off unless true), counts.stopped
 let context = async () => ({}) // what the report says about this install (index.js)
 let saveSettings = () => {} // (patch) => saved
 export function configure(c, { about, save } = {}) { cfg = c; if (about) context = about; if (save) saveSettings = save }
-const sharing = () => !!(cfg && cfg.counts?.share !== false && endpoint() && !refused())
+// Off unless you turned it on (counts.share true): nothing is counted or sent before that, not even
+// the first report. An install from before 3.22.1, when it was on unless turned off, is off now too
+// unless its person turned it on.
+const sharing = () => !!(cfg && cfg.counts?.share === true && endpoint() && !refused())
+// Whether it's on now, for Bridge AI's relay (relay.js): it counts a computer only then.
+export const sharingNow = () => sharing()
 
 // This week's counts, in memory and written down a few seconds after they change.
 let week = null // { week, counts: { name: n }, amounts: { name: n }, days: [1..7], active, open (minutes), nonce, installAge, about }
@@ -383,6 +389,9 @@ export async function sentReport(w) {
 export async function setShare(on) {
   if (on && (!endpoint() || refused())) throw new Error(refused() ? `Usage counts are off on this computer (${refused()})` : 'There\'s nowhere to send usage counts yet')
   saveSettings({ counts: { share: !!on, stopped: null } })
+  // Turned on in an install's first week: its first report goes a little later, as it would have
+  // from the start (sendFirst sends it once, never before this).
+  if (on) setTimeout(() => { sendFirst().catch(() => {}) }, Number(process.env.BRIDGE_COUNTS_FIRST_MS || 120000)).unref?.()
   if (!on) {
     clearTimeout(writing)
     week = null

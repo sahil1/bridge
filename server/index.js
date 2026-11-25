@@ -3977,7 +3977,7 @@ counts.configure(cfg, {
 app.get('/api/counts', wrap(() => counts.status()))
 // What a window says about itself as it opens (src/activeTime.js): its language and its look.
 app.post('/api/counts/window', wrap((req) => (fromHere(req) ? counts.windowSaid(req.body || {}) : { counted: false })))
-app.post('/api/counts', wrap((req) => counts.setShare(!!req.body?.share)))
+app.post('/api/counts', wrap(async (req) => { const was = counts.sharingNow(); const out = await counts.setShare(!!req.body?.share); if (counts.sharingNow() !== was) relay.statsChanged(); return out }))
 app.get('/api/counts/preview', wrap(() => counts.preview()))
 app.get('/api/counts/sent/:week', wrap((req) => counts.sentReport(req.params.week)))
 // A minute of Bridge AI in use, from a window of it (src/activeTime.js): counted only while sharing

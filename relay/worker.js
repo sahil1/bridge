@@ -372,7 +372,11 @@ const REPORT_MS = 5 * 60000 // how often an Account reports its use while it's u
 const STATUS_MS = 60000 // how long an Account keeps what the accounts service said
 
 // Anonymous counts for the project (Workers Analytics Engine, if bound as STATS): by computer id
-// only. HOSTED.md lists every one.
+// only, and only for a computer whose person turned on usage stats in Bridge AI (it says so with
+// X-Bridge-Stats: 1 as it connects, and stats: true as it registers). Using the relay never needs
+// them: a computer that didn't turn them on is carried exactly the same, and nothing about it is
+// counted here but a refusal, which has no id. HOSTED.md lists every one.
+const statsOn = (req, body = null) => req?.headers?.get('X-Bridge-Stats') === '1' || body?.stats === true
 function count(env, id, what, blobs = [], doubles = []) {
   try { env.STATS?.writeDataPoint({ indexes: [id || ''], blobs: [what, ...blobs], doubles }) } catch { /* counting never gets in the way */ }
 }
@@ -520,7 +524,8 @@ async function register(req, env, url) {
     return json({ id, url: `${url.protocol}//${id}.${url.host}`, token })
   }
   // This device has an address here: the same one, with a new token.
-  if (acc.id && (await idOk(env, acc.id)) && (await init(acc.id)).ok) { count(env, acc.id, 'register', [v, 'again']); return done(acc.id) }
+  const counted = statsOn(req, body)
+  if (acc.id && (await idOk(env, acc.id)) && (await init(acc.id)).ok) { if (counted) count(env, acc.id, 'register', [v, 'again']); return done(acc.id) }
   const lim = limits(env)
   for (let i = 0; i < 4; i++) {
     const id = await newId(env)
@@ -534,7 +539,7 @@ async function register(req, env, url) {
     const r = await init(id)
     if (r.status === 201) {
       await toAccount(env, t.a, 'computer', { d: t.d, id }).catch(() => {})
-      count(env, id, 'register', [v])
+      if (counted) count(env, id, 'register', [v])
       return done(id)
     }
     await registry(env, 'left', { id }).catch(() => {}) // its place back (the registry's daily look finds it otherwise)
@@ -906,13 +911,13 @@ export class Hub {
     // From its Account: a limit reached, or lifted, or the account itself stopped.
     if (p === '/_hosted/account') { this.acctSaid(await req.json()); return new Response(null, { status: 204 }) }
     if (p === '/_hosted/remove') {
-      count(this.env, this.meta.id, 'removed', ['account'])
+      if (this.meta.stats) count(this.env, this.meta.id, 'removed', ['account'])
       await this.remove(4008, 'account deleted')
       return new Response(null, { status: 204 })
     }
     if (p === '/_relay/forget') {
       if (!(await this.tokenOk(req))) return new Response('Not allowed', { status: 403 })
-      count(this.env, this.meta.id, 'removed', ['forget'])
+      if (this.meta.stats) count(this.env, this.meta.id, 'removed', ['forget'])
       await this.remove(4007, 'removed')
       return new Response(null, { status: 204 })
     }
@@ -959,7 +964,11 @@ export class Hub {
   // The computer connected: it hears its account's use (Settings shows it), and that phones are
   // stopped for now if they are.
   async hostIn(ws, req) {
-    count(this.env, this.meta.id, 'computer', [version(req.headers.get('X-Bridge-Version'))])
+    // (Whether its person turned usage stats on, as it says each time it connects: kept for the
+    // counts below, and off again the moment it connects saying nothing.)
+    const stats = statsOn(req)
+    if (!!this.meta.stats !== stats) { this.meta.stats = stats; await this.ctx.storage.put('meta', this.meta) }
+    if (stats) count(this.env, this.meta.id, 'computer', [version(req.headers.get('X-Bridge-Version'))])
     await this.ctx.storage.put('last', Date.now())
     if (!(await this.ctx.storage.getAlarm())) await this.ctx.storage.setAlarm(Date.now() + this.lim.idleDays * DAY)
     if (this.use) { ws.send(JSON.stringify({ t: 'use', ...this.use })); this.useSent = Date.now() }
@@ -1018,7 +1027,7 @@ export class Hub {
     const wk = (await st.get('wk')) || {}
     if (wk.w === w && wk.boxes.includes(box)) return
     await st.put('wk', { w, boxes: wk.w === w ? [...wk.boxes, box].slice(-64) : [box] })
-    count(this.env, this.meta.id, 'phone', [utcDay((w * 7 - 3) * DAY)]) // the week, by its Monday
+    if (this.meta.stats) count(this.env, this.meta.id, 'phone', [utcDay((w * 7 - 3) * DAY)]) // the week, by its Monday
   }
 
   today(now = Date.now()) {

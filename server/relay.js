@@ -272,8 +272,9 @@ function connect() {
     retry = setTimeout(connect, 5 * 60000)
     return
   }
-  // (Bridge AI's relay hears which version this is, for its counts: HOSTED.md.)
-  const ws = new WebSocket(`${conf.url.replace(/^http/, 'ws').replace(/\/$/, '')}/_relay/host`, { headers: { Authorization: `Bearer ${conf.token}`, ...(conf.hosted ? { 'X-Bridge-Version': VERSION, 'X-Relay-Token': relayToken } : {}) }, handshakeTimeout: 15000, ...(onThisComputer(conf.url) ? { lookup: loopback } : {}) })
+  // (Bridge AI's relay hears which version this is, and counts this computer only when usage stats
+  // are on here: X-Bridge-Stats, HOSTED.md.)
+  const ws = new WebSocket(`${conf.url.replace(/^http/, 'ws').replace(/\/$/, '')}/_relay/host`, { headers: { Authorization: `Bearer ${conf.token}`, ...(conf.hosted ? { 'X-Bridge-Version': VERSION, 'X-Relay-Token': relayToken, ...(counts.sharingNow() ? { 'X-Bridge-Stats': '1' } : {}) } : {}) }, handshakeTimeout: 15000, ...(onThisComputer(conf.url) ? { lookup: loopback } : {}) })
   link = ws
   failed = null
   let opened = false // (usage stats: a try that never connected, once each time the relay is down)
@@ -383,6 +384,14 @@ export function accountChanged() {
   if (!conf.url) return maybeAuto()
   if (!conf.hosted) return
   if (['token', 'suspended', 'relay', 'deleted'].includes(limit?.why)) limit = null
+  disconnect()
+  connect()
+}
+
+// Usage stats turned on or off here: on Bridge AI's relay, connected again, so it hears at once whether
+// it may count this computer (X-Bridge-Stats). A relay of your own counts nothing either way.
+export function statsChanged() {
+  if (!conf.url || !conf.hosted) return
   disconnect()
   connect()
 }
@@ -1550,7 +1559,7 @@ async function registerHosted() {
     const ask = async () => {
       const token = await acct.relayToken()
       if (!token) needsAccount({ ...acct.relayState(), relay: acct.relayState().relay === 'approved' ? 'none' : acct.relayState().relay })
-      const res = await fetch(`${where}/_relay/register`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ version: VERSION }), signal: AbortSignal.timeout(20000) })
+      const res = await fetch(`${where}/_relay/register`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ version: VERSION, ...(counts.sharingNow() ? { stats: true } : {}) }), signal: AbortSignal.timeout(20000) })
       return { res, d: await res.json().catch(() => ({})) }
     }
     let { res, d } = await ask()
@@ -1644,7 +1653,7 @@ function connectPrior() {
   if (prior.ws && prior.ws.readyState <= 1) return
   const relayToken = m.hosted ? acct?.relayTokenNow() : null
   if (m.hosted && !relayToken) { prior.retry = setTimeout(connectPrior, 5 * 60000); return }
-  const ws = new WebSocket(`${m.url.replace(/^http/, 'ws')}/_relay/host`, { headers: { Authorization: `Bearer ${m.token}`, ...(m.hosted ? { 'X-Bridge-Version': VERSION, 'X-Relay-Token': relayToken } : {}) }, handshakeTimeout: 15000, ...(onThisComputer(m.url) ? { lookup: loopback } : {}) })
+  const ws = new WebSocket(`${m.url.replace(/^http/, 'ws')}/_relay/host`, { headers: { Authorization: `Bearer ${m.token}`, ...(m.hosted ? { 'X-Bridge-Version': VERSION, 'X-Relay-Token': relayToken, ...(counts.sharingNow() ? { 'X-Bridge-Stats': '1' } : {}) } : {}) }, handshakeTimeout: 15000, ...(onThisComputer(m.url) ? { lookup: loopback } : {}) })
   prior.ws = ws
   let heard = Date.now()
   let gone = false

@@ -193,7 +193,7 @@ export default function Relay({ way, setWay, onOffer }) {
         {pick === 'hosted' && (
           <div className="relay-box">
             <p className="small">{t('A relay run by Bold Bridge passes your phone\'s connection on to this computer. It comes with a Bold Bridge account, by request; nothing to set up.')}</p>
-            {current === 'hosted' ? <p className="muted small"><Icon name="check" size={12} /> {t('This is how your phone connects now.')}</p>
+            {current === 'hosted' ? <><p className="muted small"><Icon name="check" size={12} /> {t('This is how your phone connects now.')}</p><StatsOffer /></>
               : busy ? <p className="st-note"><Icon name="refresh" size={13} className="spin" /> {st.busy || t('Working…')}</p>
               : <Needs acct={acct} asking={asking} onAsk={askRelay} onIn={signedIn} byItself={!!st.autoNext}>{full || <div className="st-row"><button type="button" className="btn primary" onClick={useHosted}><Icon name="phone" size={14} /> {t('Use Bridge AI\'s relay')}</button></div>}</Needs>}
             {/* What to do comes first; what the relay sees and its fair use, a click away. */}
@@ -472,3 +472,27 @@ function PairCode({ p, onStop, forPhone = false }) {
 }
 
 export { PairCode }
+
+// Beside Bridge AI's relay, once it's in use: usage stats offered on their own, off unless taken up
+// (server/counts.js). The relay works exactly the same either way, and says so; No Thanks is kept on
+// this computer's browser, and Settings › About & Updates has the same switch. Not shown when they're
+// on already, can't be sent (no server, DO_NOT_TRACK), or were declined here.
+const OFFER_KEY = 'cc-stats-offer-declined'
+function StatsOffer() {
+  const [s, setS] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [no, setNo] = useState(() => { try { return localStorage.getItem(OFFER_KEY) === '1' } catch { return false } })
+  useEffect(() => { api('/counts').then(setS, () => setS(null)) }, [])
+  if (no || !s || !s.available || s.refused || s.share) return null
+  const decline = () => { try { localStorage.setItem(OFFER_KEY, '1') } catch { /* this time only */ } setNo(true) }
+  const share = async () => { setBusy(true); try { setS(await api('/counts', { method: 'POST', body: { share: true } })) } catch { /* the switch in About & Updates says why */ } setBusy(false) }
+  return (
+    <div className="st-note stats-offer" data-setting="relay-stats-offer">
+      <Icon name="info" size={13} />
+      <span>
+        {t('Help improve Bridge AI? You can share anonymous usage counts with Bold Bridge: which features you use and this computer\'s kind, as ranges, once a week. Nothing you typed or said, and no ID. Bridge AI\'s relay works exactly the same whether you do or not.')}
+        <span className="st-row"><button type="button" className="btn small" disabled={busy} onClick={share}>{t('Share usage counts')}</button><button type="button" className="btn small" disabled={busy} onClick={decline}>{t('No thanks')}</button></span>
+      </span>
+    </div>
+  )
+}

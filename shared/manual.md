@@ -8,7 +8,7 @@ How Bridge AI works and where everything is, for you, Chief of Staff, your agent
 
 **One app for the AI you already use.** Bridge AI takes notes in your meetings with nothing joining the call, types what you say into any app, and passes work to the right assistant. If you write code, Claude Code, Codex, Gemini CLI and your other agents run side by side, each on its own branch, and you can answer them from your phone.
 
-It runs on your computer. Meetings and dictation are transcribed there, your agents sign in with their own accounts, and your notes are files in a folder you choose. It's free and open source (Apache-2.0), with no account. Anonymous usage stats and crash reports are on unless you turn them off.
+It runs on your computer. Meetings and dictation are transcribed there, your agents sign in with their own accounts, and your notes are files in a folder you choose. It's free and open source (Apache-2.0), with no account. Anonymous usage stats and crash reports are off unless you turn them on.
 
 **For everyone**
 
@@ -496,7 +496,7 @@ Testing these without changing anything on your Mac: `BRIDGE_FIX_DRYRUN=1` makes
 
 Apache-2.0. See NOTICE.
 
-Bridge AI is provided as is, with no warranty, and you're responsible for what your agents do and for following the terms of the services you connect. It's an independent project, not affiliated with or endorsed by Anthropic, OpenAI, Google, GitHub, Cursor, Cloudflare or any other company whose tools it works with; their names and logos belong to them. The project collects nothing that identifies you: the app sends it anonymous usage stats and crash reports, on unless you turn them off in Settings › About & Updates.
+Bridge AI is provided as is, with no warranty, and you're responsible for what your agents do and for following the terms of the services you connect. It's an independent project, not affiliated with or endorsed by Anthropic, OpenAI, Google, GitHub, Cursor, Cloudflare or any other company whose tools it works with; their names and logos belong to them. The project collects nothing that identifies you: the app can send it anonymous usage stats and crash reports, off unless you turn them on in Settings › About & Updates.
 
 ## Settings
 

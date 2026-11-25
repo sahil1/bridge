@@ -28,6 +28,13 @@ this:
 - Each account gets a Durable Object of its own, an Account (`idFromName(a)`), which keeps its use
   across its computers in an 8-hour window and a week, like Claude's, and what the accounts service
   last said of it.
+- Counts for the project (Workers Analytics Engine, bound as `STATS`): a computer registering
+  (`register`, with its version), connecting (`computer`), its paired phones once a week (`phone`)
+  and its removal (`removed`), each by its random id only, and **only for a computer whose person
+  turned usage stats on in Bridge AI** (`stats: true` as it registers, `X-Bridge-Stats: 1` each time
+  it connects; Bridge AI connects again at once when they're turned on or off). Using the relay
+  never needs them, and a computer without them is carried exactly the same. A refusal (`refused`,
+  with why) is counted with no id at all.
 - Phones work exactly as with a relay of your own: they open the computer's address, pair, and
   everything past the handshake is end-to-end encrypted between phone and computer. In a browser
   that's done by the page the relay serves, and the page says so before pairing; the iPhone and
