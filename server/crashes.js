@@ -143,7 +143,8 @@ export async function sentReport(id) {
 export async function send(text, kind, { byItself = false } = {}) {
   if (!endpoint() || refused()) throw Object.assign(new Error(refused() ? `Crash reports are off on this computer (${refused()})` : 'There\'s nowhere to send crash reports yet'), { status: 400 })
   const ctx = await context()
-  const opts = { home: os.homedir(), app: ROOT, names: ctx.names || [] }
+  // (By itself, no one read it first: web addresses and failed lookups cut to a public host or <host>.)
+  const opts = { home: os.homedir(), app: ROOT, names: ctx.names || [], hosts: byItself }
   const m = await machine().catch(() => ({}))
   const report = {
     schema: counts.SCHEMA.schema,

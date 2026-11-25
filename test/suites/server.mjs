@@ -11,6 +11,8 @@ import { forCommandLine } from '../../server/runtime/spawn.js'
 
 const { ok, skip, done } = checks('server')
 const kit = await startKit('server', { env: { BRIDGE_TAILNET_OWNER: 'me@example.com' } }) // who this computer is on Tailscale
+// The data folder (recordings, transcripts, notes, logs) is readable by you only, whatever the umask.
+if (process.platform !== 'win32') ok((fs.statSync(kit.data).mode & 0o077) === 0, 'the data folder is readable by you only (700)', (fs.statSync(kit.data).mode & 0o777).toString(8))
 const model = await startModel('server')
 try {
   const cfg = await kit.api('/config')

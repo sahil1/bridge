@@ -30,6 +30,13 @@ export const expand = (p) => (typeof p === 'string' && p.startsWith('~') ? path.
 export const dataFile = (...parts) => path.join(DATA, ...parts)
 export const cacheFile = (...parts) => path.join(CACHE, ...parts)
 export const ensureDir = (dir) => { fs.mkdirSync(dir, { recursive: true }); return dir }
+// The data folder is yours alone (meeting recordings, transcripts, notes and logs are in it): made, and
+// kept, readable by you only, whatever the umask, so another user on a shared computer or a container
+// host can't read it. (Windows keeps a profile's folders to its user already.)
+export function ownDataFolder(dir = DATA) {
+  try { fs.mkdirSync(dir, { recursive: true, mode: 0o700 }) } catch { /* said where it's used */ }
+  if (process.platform !== 'win32') try { if ((fs.statSync(dir).mode & 0o077) !== 0) fs.chmodSync(dir, 0o700) } catch { /* not ours to change */ }
+}
 
 // Saves a file whole or not at all: written next to it, flushed to disk and renamed over it, so a
 // crash or a power cut leaves the last save or this one, never half of each. mode: as

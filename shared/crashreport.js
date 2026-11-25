@@ -26,8 +26,18 @@ const KEEP_PATH = /^~[\\/]\.bridge-ai(?:[\\/](?:logs|cache|models|tools|host|tel
 // text, with what's personal taken out. home: this computer's home folder; app: where Bridge AI
 // itself is (its paths are kept, as <app>); names: [value, what to put instead], for the names
 // that are yours (your name, this computer's, your projects').
-export function scrub(text, { home = '', app = '', names = [] } = {}) {
+// hosts (a report sent by itself, which no one read first): every web address cut to its scheme and
+// a host that's a public service's (anything else: <host>), and a name a lookup failed for, so a
+// company's own servers, a private repository's name or a page's path never go.
+const PUBLIC_HOST = /^(?:[\w-]+\.)*(?:github\.com|githubusercontent\.com|anthropic\.com|openai\.com|googleapis\.com|google\.com|x\.ai|npmjs\.org|nodejs\.org|boldbridge\.(?:ai|app)|cloudflare\.com|tailscale\.com|microsoft\.com|azure\.com|amazonaws\.com|apple\.com)$/i
+const LOCAL_HOST = /^(?:127\.0\.0\.1|localhost|\[::1\])$/i
+export function scrub(text, { home = '', app = '', names = [], hosts = false } = {}) {
   let s = String(text ?? '')
+  if (hosts) {
+    s = s.replace(/\b(https?|wss?):\/\/([^\s/:'"()<>]+)(:\d+)?[^\s'"()<>]*/gi, (m, scheme, host, port) => (LOCAL_HOST.test(host) ? m : `${scheme}://${PUBLIC_HOST.test(host) ? host : '<host>'}`))
+    s = s.replace(/\b(ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ETIMEDOUT|ECONNRESET|EHOSTUNREACH|getaddrinfo)\s+([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b/g, (m, what, host) => (PUBLIC_HOST.test(host) ? m : `${what} <host>`))
+    s = s.replace(/\bgit@([\w.-]+):[^\s'"]+/g, (m, host) => `git@${PUBLIC_HOST.test(host) ? host : '<host>'}:<repo>`)
+  }
   for (const [, re] of SECRETS) s = s.replace(all(re), '<key>')
   s = s.replace(/\b(Bearer|Basic|token)\s+[A-Za-z0-9._~+/=-]{12,}/gi, '$1 <key>')
   s = s.replace(/([?&#](?:token|key|code|secret|password|auth|sig|signature|access_token|apikey|api_key)=)[^&#\s"')]+/gi, '$1<key>')

@@ -71,6 +71,11 @@ const tailnet = ['studio', 'tail1234', 'ts', 'net'].join('.')
   ok(s('relay https://bridge-relay.priya-acct.workers.dev/x') === 'relay https://<host>.workers.dev/x', 'a relay on someone\'s Cloudflare account')
   ok(s('Chrome/156.0.7000.12 Safari/605.1.15 macOS 14.6.1') === 'Chrome/156.0.7000.12 Safari/605.1.15 macOS 14.6.1', 'version numbers stay')
   ok(s('Priya Raman ran acme-billing on Priyas-MacBook-Pro') === '<name> ran <project> on <computer>', 'your name, your project and this computer\'s name', s('Priya Raman ran acme-billing on Priyas-MacBook-Pro'))
+  {
+    const t = 'getaddrinfo ENOTFOUND git.corp.example; GET https://jira.corp.example/browse/X-1?q=1; https://github.com/acme/private-thing/pull/9; ws://127.0.0.1:7420/api/x; git@git.corp.example:acme/thing.git; api.anthropic.com'
+    const cut = scrub(t, { hosts: true })
+    ok(!/corp\.example|private-thing|jira|X-1|acme/.test(cut) && /ENOTFOUND <host>/.test(cut) && /https:\/\/github\.com(?![\/\w])/.test(cut) && /ws:\/\/127\.0\.0\.1:7420\/api\/x/.test(cut) && /api\.anthropic\.com/.test(cut), 'sent by itself: web addresses cut to a public service\'s host or <host>, failed lookups and git remotes too; this computer\'s own address kept', cut)
+  }
   ok(scrub(`at f (${HOME}/a/b.js:1:2)`) === 'at f (<path>:1:2)', 'with nothing known about this computer (the page, when the server can\'t answer), a home folder still goes')
 }
 

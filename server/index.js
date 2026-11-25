@@ -68,7 +68,7 @@ import { AGENTS, installed, caps, adapter, readOnly, canChange, catalog as agent
 import * as nodejs from './nodejs.js'
 import { devTools } from './gitready.js'
 import { quoteCommand } from './runtime/spawn.js'
-import { loadConfig, outOfBeta, ROOT, DATA, CACHE, expand, ensureDir, cacheFile, IS_MAC, brewInstall, writeFileAtomic } from './paths.js'
+import { loadConfig, outOfBeta, ROOT, DATA, CACHE, expand, ensureDir, ownDataFolder, cacheFile, IS_MAC, brewInstall, writeFileAtomic } from './paths.js'
 import { prepareChief } from './chief.js'
 import { makeTasks } from './chieftasks.js'
 import { makeThreads, isChiefName } from './threads.js'
@@ -170,7 +170,7 @@ import * as manual from './manual.js'
 import * as agentNote from './agentnote.js'
 import { makeTidy } from './compact.js'
 
-ensureDir(DATA)
+ownDataFolder()
 // Meetings, transcripts, settings and keys: for you only, not other people with an account on this
 // computer (the folder, so nothing in it can be reached).
 try { fs.chmodSync(DATA, 0o700) } catch { /* Windows, or a folder that isn't yours */ }
