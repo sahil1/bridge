@@ -3337,6 +3337,13 @@ app.post('/api/system/stopping', wrap((req) => {
   rt.systemStopping?.('system')
   return { ok: true }
 }))
+// The wake-up ping, from this computer only (the desktop app, as it wakes, unlocks, or its network
+// changes, and every few minutes): its relay and its links to your other computers checked now, and
+// started again where they've gone (relay.js wake, machines.js wake).
+app.post('/api/system/wake', wrap((req) => {
+  if (!fromHere(req)) throw Object.assign(new Error('Only this computer can ask that'), { status: 403 })
+  return { ...relay.wake(), ...machines.wake() }
+}))
 // Whether Tailscale publishes this computer decides, with the relay's phones, whether it stays awake.
 const tailnetSaid = (st) => { relay.setTailnet(!!st?.enabled); return st }
 app.get('/api/phone', wrap(() => phone.status(cfg.port).then(tailnetSaid)))

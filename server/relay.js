@@ -251,10 +251,38 @@ export function start(serverBase) {
   if (!conf.url) setTimeout(maybeAuto, 20000).unref()
 }
 
+// The wake-up ping. Whatever state the link was left in (a retry lost to an error, a connection that
+// looks open after a sleep or a change of network), this computer finds its relay again by itself,
+// so no one has to be at it: every minute a link that's set up but neither open nor about to try is
+// started again; and wake() (the desktop app on waking, unlocking or a network change, POST
+// /api/system/wake, and every few minutes) checks the open one at once, starting over if it doesn't
+// answer within 5 s, and starts one that's waiting a backoff out now. A wait the relay asked for
+// (a limit, an account stopped) is kept.
+const WATCH_MS = Number(process.env.BRIDGE_RELAY_WATCH_MS) || 60000
+const WAKE_MS = 5000
+const waitAsked = () => conf.hosted && limit?.until > Date.now() && ['off', 'gone', 'shut', 'suspended', 'relay', 'deleted', 'token'].includes(limit.why)
+let retryDue = 0 // when the try waiting its backoff out goes (0: none waiting)
+let lastHeard = 0 // when the relay last sent anything on the open link
+setInterval(() => {
+  if (!conf.url || !conf.token || waitAsked()) return
+  if (!link && !(retryDue > Date.now())) { backoff = FIRST_TRY; connect() }
+}, WATCH_MS).unref()
+export function wake() {
+  if (!conf.url || !conf.token || waitAsked()) return { relay: 'idle' }
+  if (!link) { backoff = FIRST_TRY; connect(); return { relay: 'connecting' } }
+  if (link.readyState !== 1) return { relay: 'connecting' }
+  const ws = link
+  const at = Date.now()
+  try { ws.send('ping') } catch { /* closing */ }
+  setTimeout(() => { if (link === ws && lastHeard < at) { backoff = FIRST_TRY; try { ws.terminate() } catch { /* closed */ } } }, WAKE_MS).unref?.()
+  return { relay: 'checked' }
+}
+
 // Usage stats: the relay down, counted once until it connects again (fail.relay).
 let relayDown = false
 function connect() {
   clearTimeout(retry)
+  retryDue = 0
   if (!conf.url || !conf.token) return
   if (link && link.readyState <= 1) return
   // One still closing is let go first, with its phones' sessions.
@@ -270,6 +298,7 @@ function connect() {
     limit = { why: !st.signedIn ? 'token' : st.status === 'suspended' ? 'suspended' : st.relay !== 'approved' ? 'relay' : 'token', text: lastError, until: Date.now() + 5 * 60000 }
     if (st.signedIn && st.relay === 'approved') acct?.relayToken().then((t) => { if (t) connect() }).catch(() => {})
     retry = setTimeout(connect, 5 * 60000)
+    retryDue = Date.now() + 5 * 60000
     return
   }
   // (Bridge AI's relay hears which version this is, and counts this computer only when usage stats
@@ -307,6 +336,7 @@ function connect() {
   })
   ws.on('message', (data, isBinary) => {
     heard = Date.now()
+    lastHeard = heard
     if (!isBinary) {
       const s = String(data)
       if (s[0] === '{') try { const m = JSON.parse(s); if (m.t === 'note' && m.note) onNote(m.box, m.note); else if (m.t === 'limit') onLimit(m); else if (m.t === 'use') onUse(m) } catch { /* not ours */ }
@@ -350,7 +380,9 @@ function connect() {
     if (conf.hosted && limit?.why === 'token' && failed?.status !== 403) acct?.refresh().catch(() => {})
     const wait = conf.hosted && limit?.until > Date.now() && ['off', 'gone', 'shut', 'suspended', 'relay', 'deleted', 'token'].includes(limit.why) ? limit.until - Date.now() + Math.random() * 60000 : 0
     const offNet = !wait && failed?.code && (!conf.hosted || NO_NET.test(failed.code))
-    retry = setTimeout(connect, offNet ? Math.min(backoff, OFF_NET_TRY) + Math.random() * 500 : Math.max(backoff, wait))
+    const ms = offNet ? Math.min(backoff, OFF_NET_TRY) + Math.random() * 500 : Math.max(backoff, wait)
+    retry = setTimeout(connect, ms)
+    retryDue = Date.now() + ms
     backoff = Math.min(backoff * 2, 60000)
   })
 }

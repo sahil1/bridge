@@ -998,6 +998,20 @@ export function viaHosted(id) {
 export function start() {
   for (const m of conf.machines) if ((m.state === 'linked' || m.state === 'asking') && !m.norelay) linkOf(m).start()
 }
+// The wake-up ping (relay.js wake, POST /api/system/wake: the desktop app on waking, unlocking or a
+// network change, and every few minutes): each linked device connected is asked if it's still there
+// (probe: no answer in 4 s, the link starts over), and one that isn't connected is tried again now,
+// rather than at the end of its backoff or the next minute's look.
+export function wake() {
+  let n = 0
+  for (const m of conf.machines) {
+    if (m.state !== 'linked' || m.norelay) continue
+    const l = linkOf(m)
+    if (l.session) l.probe()
+    else if (!l.stopped && !l.waiting) { l.again(); n++ }
+  }
+  return { machines: n }
+}
 // Every minute: a linked device with no connection and nothing on its way is started again; and one
 // whose relay said RECHECK_MS ago that it isn't connected, with no word since, asks its relay again.
 setInterval(() => {

@@ -1175,6 +1175,36 @@ function startUpdatingWhileAway() {
   setInterval(() => { updateWhileAway().catch(() => {}) }, 60 * 1000)
 }
 
+// The wake-up ping: a computer you reach from your phone or another computer finds its way back by
+// itself, with no one at it. As this Mac wakes, its screen unlocks, or Electron sees the network come
+// back, and every WAKE_EVERY besides: the server is checked first (one that's gone, though nothing
+// said so, is started again, unless the app is quitting, stopping it, or waiting out tryLater), then
+// asked to check its relay and its links to your other computers now and start again any that have
+// gone (POST /api/system/wake). A few seconds after waking, as the network comes up.
+const WAKE_EVERY = 5 * 60_000
+let pinging = false
+async function wakePing(why) {
+  if (pinging || quitting || stoppingServer || relaunching) return
+  pinging = true
+  try {
+    if (!(await serverUp())) {
+      if (BUNDLED && !serverChild && !later && startedServer) { desktopLog(`Bridge AI's server wasn't answering (${why}); starting it again.`); await connect().catch(() => {}) }
+      return
+    }
+    if (BUNDLED && !gate.proven) return // (nothing goes to a server that hasn't proved itself)
+    await local('/system/wake', {}).catch(() => null)
+  } finally { pinging = false }
+}
+function startWakePing() {
+  const soon = (why) => setTimeout(() => { wakePing(why).catch(() => {}) }, 4000)
+  powerMonitor.on('resume', () => soon('woke'))
+  powerMonitor.on('unlock-screen', () => soon('unlocked'))
+  // (Electron says whether the network is up, but not when it changes: looked at every 20 s.)
+  let was = true
+  setInterval(() => { let on = true; try { on = require('electron').net.isOnline() } catch { /* can't tell */ } if (on && !was) soon('back online'); was = on }, 20_000).unref?.()
+  setInterval(() => { wakePing('every few minutes').catch(() => {}) }, WAKE_EVERY).unref?.()
+}
+
 // What the window remembers about its layout (open tabs, panel sizes, what's expanded), forgotten,
 // as the crash screen's Reset this window's layout does: for a window that can't show that screen.
 const resetLayout = () => win?.webContents.executeJavaScript(`(() => { const keep = new Set(['cc-appearance', 'cc-theme', 'cc-toured', 'cc-lang']); try { for (const k of Object.keys(localStorage)) if (k.startsWith('cc-') && !keep.has(k)) localStorage.removeItem(k) } catch {} location.reload() })()`).catch(() => {})
@@ -1616,6 +1646,7 @@ app.whenReady().then(async () => {
   watchFleet()
   watchCalls()
   startUpdatingWhileAway()
+  startWakePing()
   // Files dropped on the Dock icon as the app opened: transcribed now it's up.
   if (toTranscribe.length) transcribeOpened()
   // The dictation key from any app (dictation.js): the main window, an agent's own window and
