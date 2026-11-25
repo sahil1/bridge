@@ -1,5 +1,5 @@
 {
-  "about": "Usage stats and crash reports: everything Bridge AI can count and send. Both are on unless you turn them off (Settings › About & Updates), DO_NOT_TRACK=1 or BRIDGE_TELEMETRY=0 keeps them off, and the first time they're on a card says so. server/counts.js sends only the names and values here, and a test fails if the code counts any other; server/crashes.js sends only the report described under crashReports. Adding to either is a change to this file, in public.",
+  "about": "Usage stats and crash reports: everything Bridge AI can count and send. Both are off unless you turn them on (Settings › About & Updates, or the offer beside Bridge AI's relay, which works the same either way), and DO_NOT_TRACK=1 or BRIDGE_TELEMETRY=0 keeps them off. server/counts.js sends only the names and values here, and a test fails if the code counts any other; server/crashes.js sends only the report described under crashReports. Adding to either is a change to this file, in public.",
   "schema": 1,
   "endpoint": "https://counts.boldbridge.ai/v1/week",
   "endpointAbout": "Where a week's report goes (HTTPS POST, JSON): the project's usage counts server, counts/worker.js in this repo, which keeps only weekly totals. Empty: there's nowhere to send them, so sharing isn't offered. A fork or a company sends them, and crash reports, to its own server instead with one setting, stats.url (counts/README.md, Running your own).",
@@ -473,7 +473,7 @@
     ]
   },
   "crashReports": {
-    "about": "Unless you turn off Send crash reports by themselves (at most five a day, the same crash once), and when you click Send to Bold Bridge on a crash's report, Bridge AI sends that report: the same text Report on GitHub shows, with names, folders, emails and keys taken out on your computer, and taken out again on the server.",
+    "about": "When you turn on Send crash reports by themselves (at most five a day, the same crash once), and when you click Send to Bold Bridge on a crash's report, Bridge AI sends that report: the same text Report on GitHub shows, with names, folders, emails and keys taken out on your computer, and taken out again on the server.",
     "endpoint": "https://crashes.boldbridge.ai/v1/report",
     "report": {
       "schema": "this file's schema number",
@@ -736,7 +736,7 @@
     }
   },
   "firstReport": {
-    "about": "Sent once, a couple of minutes after Bridge AI first runs on a computer (or the next time it runs, for a week, if it couldn't go), to the same server (/v1/first): that there's a new install, the day it was installed, its version, update channel, OS, chip and how it's installed. With no ID, so new installs can be counted the day they happen, never followed. Turning usage stats off before then means it never goes.",
+    "about": "Sent once, a couple of minutes after Bridge AI first runs on a computer (or the next time it runs, for a week, if it couldn't go), to the same server (/v1/first): that there's a new install, the day it was installed, its version, update channel, OS, chip and how it's installed. With no ID, so new installs can be counted the day they happen, never followed. Only once usage stats are turned on: a new install that never turns them on never sends it.",
     "report": {
       "schema": "this file's schema number",
       "day": "the day Bridge AI was installed, on the computer's calendar, e.g. 2026-11-04",

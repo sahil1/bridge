@@ -107,7 +107,9 @@ let cfg = null // the server's settings: crashReports.send, crashReports.stopped
 let context = async () => ({}) // { version, settings, names } for report()
 let saveSettings = () => {}
 export function configure(c, { about, save } = {}) { cfg = c; if (about) context = about; if (save) saveSettings = save }
-const on = () => !!(cfg && cfg.crashReports?.send !== false && endpoint() && !refused())
+// Off unless you turned it on (crashReports.send true); one report at a time with Send to Bold
+// Bridge needs nothing turned on.
+const on = () => !!(cfg && cfg.crashReports?.send === true && endpoint() && !refused())
 const hostOf = (u) => { try { return new URL(u).host } catch { return null } }
 
 async function sentList() {
@@ -141,7 +143,8 @@ export async function sentReport(id) {
 export async function send(text, kind, { byItself = false } = {}) {
   if (!endpoint() || refused()) throw Object.assign(new Error(refused() ? `Crash reports are off on this computer (${refused()})` : 'There\'s nowhere to send crash reports yet'), { status: 400 })
   const ctx = await context()
-  const opts = { home: os.homedir(), app: ROOT, names: ctx.names || [] }
+  // (By itself, no one read it first: web addresses and failed lookups cut to a public host or <host>.)
+  const opts = { home: os.homedir(), app: ROOT, names: ctx.names || [], hosts: byItself }
   const m = await machine().catch(() => ({}))
   const report = {
     schema: counts.SCHEMA.schema,

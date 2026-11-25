@@ -16,3 +16,20 @@ native/bin/
 native/llama/
 test/.out/
 .wrangler/
+# Secrets and signing material: never committed (wrangler's local secrets, Apple and Android keys,
+# certificates, Terraform state, a local Claude settings file).
+.env.*
+!.env.example
+.dev.vars
+*.p8
+*.p12
+*.pfx
+*.key
+*.jks
+*.keystore
+*.mobileprovision
+google-services.json
+GoogleService-Info.plist
+*.tfstate
+*.tfstate.*
+.claude/settings.local.json

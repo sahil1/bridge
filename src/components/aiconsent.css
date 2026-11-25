@@ -34,3 +34,4 @@
 .aip-text b { font-size: 13.5px; font-weight: 600; }
 .aip-text .muted { overflow-wrap: anywhere; }
 .aip-back { flex: none; min-height: 40px; }
+.aic-demo { margin: 0 0 8px; padding: 6px 10px; border-radius: 8px; background: var(--pane-2); color: var(--ink-2); }

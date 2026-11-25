@@ -68,6 +68,16 @@ try {
   const backIn = Date.now() - t1
   ok(!!back && backIn >= RECHECK - 1000, `with nothing asked of Mac, Air asks its relay again by itself and is back in ${backIn} ms (after ${RECHECK} ms of its relay's word, not at once)`, await other(air, 'Mac'))
 
+  // ---------- The wake-up ping (the desktop app on waking, unlocking, a network change) ----------
+  await hush(rm)
+  ok(!!(await until(async () => (await other(air, 'Mac'))?.online === false, 8000, 100)), 'told once more that Mac isn\'t there: offline on Air')
+  const t2 = Date.now()
+  const woke = await air.api('/system/wake', {})
+  const wokeBack = await online(air, 'Mac', RECHECK)
+  ok(woke.relay === 'checked' && woke.machines >= 1 && !!wokeBack && Date.now() - t2 < RECHECK - 2000, `the wake-up ping checks Air's relay and asks again for Mac at once: back in ${Date.now() - t2} ms, not at the next recheck`, woke)
+  const fromPhone = await fetch(`${air.url}/api/system/wake`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${air.key}`, 'x-bridge-relay': 'p1' }, body: '{}' }).then(async (r) => ({ status: r.status, error: (await r.json().catch(() => ({}))).error }), () => ({ status: 0 }))
+  ok(fromPhone.status >= 400 && /Only this computer/.test(fromPhone.error || ''), 'only that computer itself can send the wake-up ping, never a phone or another computer through the relay', fromPhone)
+
   // ---------- Mac doesn't know Air any more ----------
   // (Air's pairing taken out of Mac's relay.json while Mac is closed, with no word that it was
   // removed: as when Mac was set up again with its key kept.)

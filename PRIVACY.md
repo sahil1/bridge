@@ -2,8 +2,8 @@
 
 Bridge AI is an open-source app (https://github.com/sahil1/bridge) made of three parts: the app on
 your computer, a relay (on your own Cloudflare account, or Bridge AI's relay, run by the project),
-and the phone apps for iPhone and Android. The app on your computer sends the project anonymous
-usage stats and crash reports (below), which you can turn off in Settings › About & Updates. If you
+and the phone apps for iPhone and Android. The app on your computer can send the project anonymous
+usage stats and crash reports (below), both off unless you turn them on in Settings › About & Updates. If you
 choose Bridge AI's relay, your phone and computer talk through it, end-to-end encrypted, and it
 keeps only what it needs to work (below). Nothing else goes to the project or its author. A relay of
 your own and the phone apps send the project nothing. There are no ads, and there's no account unless you want Bridge AI's relay, or Early Access from a Bold
@@ -32,7 +32,7 @@ GitHub for a newer version, which you can turn off in Settings › About &
 Updates (and the new version from GitHub, when you update, or by itself while you're away in the
 desktop app on a Mac or Windows unless you turn that off there too; on Early Access or Nightly,
 the check asks for the list of recent releases, and an early-access code from your Bold Bridge
-account is checked on your computer and never sent), and, unless you turn them off, usage stats and crash reports to the project (below). Its fonts and icons are part of the app, so nothing is fetched to draw
+account is checked on your computer and never sent), and, only if you turn them on, usage stats and crash reports to the project (below). Its fonts and icons are part of the app, so nothing is fetched to draw
 it. On Windows and Linux, the desktop app's spell check gets the dictionaries for your languages
 once, from Google, as Chrome does; nothing you type goes with them (a Mac uses its own).
 
@@ -49,7 +49,7 @@ When something in Bridge AI crashes, it keeps a note of it on your computer (in 
 desktop app also keeps what its server printed, in `logs/server.log`) and offers **Report on
 GitHub**. That shows you the whole issue it would fill in, with names, folders, emails and keys taken
 out, for you to read and change; it reaches GitHub only if you open it there and send it yourself,
-under GitHub's terms. Unless you turn crash reports off
+under GitHub's terms. If you turn crash reports on
 (below), the same report also goes to the project by itself.
 
 How much of your plan is left is off until you turn it on (the Usage card, or Settings › General).
@@ -449,11 +449,15 @@ in your notes.
 If you run Bridge AI on a server or in Docker, all of this applies to that machine instead of your
 computer.
 
-## Usage stats (on unless you turn them off)
+## Usage stats (off unless you turn them on)
 
-Bridge AI on your computer sends the project anonymous usage stats, to see what to build and fix
-and which versions are out there. They're on unless you turn them off: **Share anonymous usage
-counts** in Settings › About & Updates, beside **Send crash reports by themselves**. `DO_NOT_TRACK=1` or `BRIDGE_TELEMETRY=0` in the
+Bridge AI on your computer can send the project anonymous usage stats, to see what to build and fix
+and which versions are out there. They're off unless you turn them on: **Share anonymous usage
+counts** in Settings › About & Updates, beside **Send crash reports by themselves**, or the offer
+shown when you choose Bridge AI's relay, which you can skip: the relay works exactly the same
+either way. Nothing is counted, kept or sent before you turn them on, not even the first report
+below. A computer from before 3.22.1, when they were on unless turned off, has them off after it
+updates unless you had turned them on yourself. `DO_NOT_TRACK=1` or `BRIDGE_TELEMETRY=0` in the
 environment keeps them off, and turning them off stops them at once and forgets what was counted
 and not yet sent. The phone apps and a relay of your own send nothing of the kind; Bridge AI's relay counts its own
 use (below).
@@ -511,7 +515,7 @@ Two reports go to the project's server, `counts.boldbridge.ai`, run on Cloudflar
   it was in use that day, as a range ("15-30 minutes").
 - **Once, a couple of minutes after Bridge AI first runs on a computer**: that there's a new
   install, the day it was installed, its version and update channel, the operating system, the
-  chip and how it's installed. Turn usage stats off before then and it never goes.
+  chip and how it's installed. It goes only once you've turned usage stats on.
 
 Neither has your name (with Early Access from your Bold Bridge account, that account's id goes
 with them), an ID for your computer (a random number new with each report lets the
@@ -539,15 +543,15 @@ with it are under that provider's terms. If you give Claude a GitHub token, it g
 with each task so the agent can reach your repo. "Use my GitHub CLI sign-in" reads the GitHub CLI's
 token once, when you click it.
 
-## Crash reports (on unless you turn them off)
+## Crash reports (off unless you turn them on)
 
 When something in Bridge AI crashes, its report (the same text **Report on GitHub** shows you: what
 crashed, the error and where in Bridge AI's code, its version and update channel (with Early
 Access from your Bold Bridge account, that account's id), your system, the settings that change how it runs, and
 the last lines of its log, with your name, your projects' and computers' names,
 folders, emails, keys and network addresses taken out on your computer) can go to the project, to
-help fix it. That happens by itself unless you turn off **Send crash reports by themselves** in
-Settings › About & Updates, and when you click **Send
+help fix it. That happens by itself only if you turn on **Send crash reports by themselves** in
+Settings › About & Updates, and otherwise only when you click **Send
 to Bold Bridge** on a crash's report after reading and changing it as you like. By themselves, at
 most five go in a day, and the same crash once. `DO_NOT_TRACK=1` or `BRIDGE_TELEMETRY=0` keeps it off, and there's nothing to
 send to while the project has no crash server.
@@ -663,8 +667,11 @@ while you use it. And because it takes a limited number of accounts at once, it 
 computers on it, by their random ids and their accounts' ids, with when each was set up and last
 used.
 
-**What it counts, for the project**: when a computer registers and connects (with its Bridge AI
-version), how many paired phones connect each week, how much data passes, when a limit is reached,
+**What it counts, for the project**: only for a computer whose usage stats are turned on (it tells
+the relay each time it connects, so turning them off stops this at its next connection, which
+Bridge AI makes at once): when a computer registers and connects (with its Bridge AI
+version), and how many paired phones connect each week. For every computer, to carry it within its
+limits and nothing else: how much data passes, when a limit is reached,
 and each day's totals with the day's busiest computers' use, kept 35 days. Each is by your
 computer's random id only: no IP addresses, no content, no names. The full list is in
 [relay/HOSTED.md](relay/HOSTED.md).
@@ -838,6 +845,15 @@ protects what it receives:
 
 A model that runs on your computer (Ollama, LM Studio, the local model built into Bridge AI, the
 Mac's own speech) isn't a third party: what it reads stays on your computer, and nothing is asked.
+
+**The same protection.** Bridge AI connects only to the providers listed here, and only into your
+own account with each, with your own sign-in or key. The project lists a provider only when its
+published terms and privacy policy commit it to protecting what it receives at least as well as this
+policy does: using it to provide its service to you, keeping it secure, and not selling it. If a
+provider stops doing so, Bridge AI stops offering it. Whether a provider keeps what it receives, for
+how long, and whether it may use it to improve its models is set by its terms and by your account's
+settings there (most API and business accounts aren't used for training by default); its privacy
+policy, linked above and in the sheet that asks you, says which.
 
 **Asked first.** The first time something from your phone would go to a provider, the phone says
 what will be sent, who gets it and how, links this policy and the provider's, and asks: **Allow** or

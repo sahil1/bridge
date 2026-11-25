@@ -485,6 +485,23 @@ try {
     ok((await r.register()).why === 'full', 'MAX_ACCOUNTS at 0 takes no new accounts at all')
   }
 
+  // ---------- Counted by its id only with usage stats on ----------
+  {
+    const r = relay()
+    const off = await r.register()
+    await r.computer(off)
+    const a = newAccount(), d = newDevice(), rt = relayToken(a, d)
+    const on = { ...(await (await r.registerWith(rt, { version: '3.9.2', stats: true })).json()), a, d, rt }
+    await r.call(`https://${on.id}.${DOMAIN}/_relay/host`, { headers: { Upgrade: 'websocket', Authorization: `Bearer ${on.token}`, 'X-Bridge-Version': '3.9.2', 'X-Relay-Token': rt, 'X-Bridge-Stats': '1' } })
+    await settle()
+    const by = (id) => r.points.filter((p) => p.indexes[0] === id).map((p) => p.blobs[0])
+    ok(by(off.id).length === 0 && by(on.id).includes('register') && by(on.id).includes('computer'), 'Bridge AI\'s relay counts a computer by its id only when its usage stats are on (stats: true, X-Bridge-Stats: 1), and carries both the same', { off: by(off.id), on: by(on.id) })
+    // Turned off since: it connects again saying nothing, and isn't counted from then on.
+    await r.call(`https://${on.id}.${DOMAIN}/_relay/host`, { headers: { Upgrade: 'websocket', Authorization: `Bearer ${on.token}`, 'X-Bridge-Version': '3.9.2', 'X-Relay-Token': rt } })
+    await settle()
+    ok(by(on.id).filter((x) => x === 'computer').length === 1 && r.env.HUB.of(on.id).hub.meta?.stats === false, 'turned off, its next connection isn\'t counted, and the relay keeps that', by(on.id))
+  }
+
   // ---------- The use reported, and an account deleted ----------
   {
     const r = relay()
@@ -505,7 +522,7 @@ try {
     await acc.alarm()
     await settle()
     ok(!acc.store.size && !r.env.HUB.of(c.id).store.has('meta') && host.closed, 'an account the service no longer has: its Account forgets everything, and its computers are removed', { account: acc.store.size, hub: r.env.HUB.of(c.id).store.size, host: host.closed })
-    ok(r.points.some((p) => p.blobs[0] === 'removed' && p.blobs[1] === 'account'), 'counted as removed for its account', r.points.map((p) => p.blobs))
+    ok(!r.points.some((p) => ['removed', 'computer', 'register', 'phone'].includes(p.blobs[0]) && p.indexes[0] === c.id), 'a computer whose usage stats are off is never counted by its id: not as it registered, connected or was removed', r.points.filter((p) => p.indexes[0] === c.id).map((p) => p.blobs))
   }
 
   // ---------- Too many phones, too big, too much at once ----------

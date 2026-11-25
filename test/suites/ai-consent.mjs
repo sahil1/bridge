@@ -23,6 +23,7 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { startKit, startRelay, startModel, startLocalModel, checks, until, sleep, browser, page, shot, freePort, phoneNotes, phoneSaw, ROOT, TEST } from '../lib/harness.mjs'
 import { linkAs } from '../lib/linkclient.mjs'
+import { pageGate } from '../../src/standalone/consent.js'
 
 const { ok, done } = checks('ai-consent')
 // The demo's build, made again when its source is newer (run.mjs builds the app's, dist).
@@ -84,6 +85,8 @@ try {
     ['POST', '/api/chats', { kind: 'claude', prompt: 'A chat from the phone' }, 'anthropic', 'agent', 'a new chat'],
     ['POST', '/api/studio/ask', { agent: 'claude', text: 'Tidy this document' }, 'anthropic', 'studio', 'Ask an agent in Studio'],
     ['POST', `/api/agents/${pane}/handoff`, { to: 'codex' }, 'openai', 'agent', 'a handoff to another kind of agent (Codex: OpenAI)'],
+    ['POST', `/api/agents/${pane}/handoff/ask`, { to: 'codex' }, 'anthropic', 'agent', 'the agent asked to write its own handover (its provider reads the conversation)'],
+    ['POST', `/api/agents/${pane}/continue`, { account: 'other', nudge: true }, 'anthropic', 'agent', 'an agent nudged to carry on, with a message of Bridge AI\'s'],
     ['POST', '/api/chief/launch', {}, 'anthropic', 'chief', 'the Chief of Staff started'],
     ['POST', '/api/chief/threads', { prompt: 'A new thread' }, 'anthropic', 'chief', 'a new thread with the Chief of Staff'],
     ['POST', '/api/chief/tasks', { title: 'Phone task', send: true }, 'anthropic', 'chief', 'a task sent to the Chief of Staff (none added first)'],
@@ -324,6 +327,25 @@ try {
     ok(!!(await until(async () => /this answer is made up/.test(await p.locator('.mt-ask').innerText().catch(() => '')), 10000)), 'Allow: AI Assist answers (made up, and saying so)')
     ok(errors.length === 0, 'no page errors in the demo', errors)
     await ctx.close()
+  }
+
+  // ---------- The demo's own gate: every way of sending to an agent asks first ----------
+  {
+    const { ofAgent, ofModel, ofCloud } = await import('../../shared/aiproviders.js')
+    const gate = pageGate({ agentOf: (p) => (p === 'w1:p1' ? { kind: 'claude' } : p === 'w1:q' ? { kind: 'claude', question: true } : null), assist: 'openai:gpt-5', ofAgent, ofModel, ofCloud })
+    const asks = (m, p, b) => gate(m, p, b)?.provider?.id || null
+    const cases = {
+      typedEnter: asks('POST', '/panes/w1%3Ap1/text', { text: 'hi', enter: true }),
+      typedNoEnter: asks('POST', '/panes/w1%3Ap1/text', { text: 'hi' }),
+      keysEnter: asks('POST', '/agents/w1%3Ap1/keys', { keys: ['Enter'] }),
+      keysOnQuestion: asks('POST', '/agents/w1%3Aq/keys', { keys: ['Enter'] }),
+      asks: asks('POST', '/agents/w1%3Ap1/asks', { text: 'yes' }),
+      handoverAsk: asks('POST', '/agents/w1%3Ap1/handoff/ask', { to: 'codex' }),
+      nudge: asks('POST', '/agents/w1%3Ap1/continue', { nudge: true }),
+      noNudge: asks('POST', '/agents/w1%3Ap1/continue', {}),
+      routine: asks('POST', '/routines/r1/run', {}),
+    }
+    ok(cases.typedEnter === 'anthropic' && !cases.typedNoEnter && cases.keysEnter === 'anthropic' && !cases.keysOnQuestion && cases.asks === 'anthropic' && cases.handoverAsk === 'anthropic' && cases.nudge === 'anthropic' && !cases.noNudge && cases.routine === 'anthropic', 'the demo asks before a line typed into a terminal and sent, an answer, an agent\'s own handover, a nudge and a routine run now; not for typing that isn\'t sent or a choice on a question\'s card', cases)
   }
 } catch (e) {
   ok(false, `the test ran to the end: ${e.message}`, e.stack)

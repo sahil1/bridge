@@ -71,6 +71,11 @@ const tailnet = ['studio', 'tail1234', 'ts', 'net'].join('.')
   ok(s('relay https://bridge-relay.priya-acct.workers.dev/x') === 'relay https://<host>.workers.dev/x', 'a relay on someone\'s Cloudflare account')
   ok(s('Chrome/156.0.7000.12 Safari/605.1.15 macOS 14.6.1') === 'Chrome/156.0.7000.12 Safari/605.1.15 macOS 14.6.1', 'version numbers stay')
   ok(s('Priya Raman ran acme-billing on Priyas-MacBook-Pro') === '<name> ran <project> on <computer>', 'your name, your project and this computer\'s name', s('Priya Raman ran acme-billing on Priyas-MacBook-Pro'))
+  {
+    const t = 'getaddrinfo ENOTFOUND git.corp.example; GET https://jira.corp.example/browse/X-1?q=1; https://github.com/acme/private-thing/pull/9; ws://127.0.0.1:7420/api/x; git@git.corp.example:acme/thing.git; api.anthropic.com'
+    const cut = scrub(t, { hosts: true })
+    ok(!/corp\.example|private-thing|jira|X-1|acme/.test(cut) && /ENOTFOUND <host>/.test(cut) && /https:\/\/github\.com(?![\/\w])/.test(cut) && /ws:\/\/127\.0\.0\.1:7420\/api\/x/.test(cut) && /api\.anthropic\.com/.test(cut), 'sent by itself: web addresses cut to a public service\'s host or <host>, failed lookups and git remotes too; this computer\'s own address kept', cut)
+  }
   ok(scrub(`at f (${HOME}/a/b.js:1:2)`) === 'at f (<path>:1:2)', 'with nothing known about this computer (the page, when the server can\'t answer), a home folder still goes')
 }
 
@@ -316,7 +321,7 @@ try {
     const byDefault = await startKit('crash-report-default', { env: { BRIDGE_CRASHES_URL: `http://127.0.0.1:${port}/v1/report` } })
     kits.push(byDefault)
     const dd = await byDefault.api('/crashes/sending')
-    ok(dd.available && dd.send === true, 'on unless turned off: with a crash server, crash reports go by themselves', dd)
+    ok(dd.available && dd.send === false, 'off unless turned on: with a crash server, crash reports still don\'t go by themselves', dd)
     byDefault.stop()
     const send = await startKit('crash-report-send', { config: { name: 'Priya Raman', crashReports: { send: false } }, env: { BRIDGE_CRASHES_URL: `http://127.0.0.1:${port}/v1/report` } })
     kits.push(send)
@@ -361,10 +366,10 @@ try {
     // Where they go and for how long, in a line; all of it under More.
     const part = p2.locator('[data-setting="privacy"] .ab-priv:has(h5:text("Crash Reports"))')
     const text = await p2.locator('.st-body').innerText().catch(() => '')
-    const before = /On unless you turn it off/.test(await part.innerText().catch(() => ''))
+    const before = /Off unless you turn it on/.test(await part.innerText().catch(() => ''))
     await part.locator('.st-more').first().click()
     const all = await part.locator('.st-more-text').first().innerText().catch(() => '')
-    ok(await box.isChecked().catch(() => false) && /Kept for 90 days/.test(text) && new RegExp(`127\\.0\\.0\\.1:${port}`).test(text) && !before && /On unless you turn it off/.test(all) && /update channel/.test(all), 'Settings › About & Updates › Privacy: Crash reports, on, saying where they go and for how long, and under More what they carry (the update channel too) and that they\'re on unless turned off', [text.slice(-700), all])
+    ok(await box.isChecked().catch(() => false) && /Kept for 90 days/.test(text) && new RegExp(`127\\.0\\.0\\.1:${port}`).test(text) && !before && /Off unless you turn it on/.test(all) && /update channel/.test(all), 'Settings › About & Updates › Privacy: Crash reports, on, saying where they go and for how long, and under More what they carry (the update channel too) and that they\'re off unless turned on', [text.slice(-700), all])
     await part.locator('.link-btn').first().click()
     const doc = await until(async () => { const x = await part.locator('.counts-doc').innerText().catch(() => ''); return /"kind": "ui"/.test(x) && x }, 5000)
     ok(!!doc && /y is null/.test(doc), 'each report sent can be read there, as it went', doc)

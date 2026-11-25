@@ -16,11 +16,20 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { createHash, randomBytes } from 'node:crypto'
 import WebSocket from 'ws'
-import { newKey, rawPublic, phoneHello, plainFrame, readPlain, K } from '../../relay/web/link.js'
+import { newKey, rawPublic, phoneHello, plainFrame, readPlain, K, granter, WINDOW, MAX_WINDOW } from '../../relay/web/link.js'
 import { ROOT, startKit, startRelay, checks, until, sleep } from '../lib/harness.mjs'
 import { linkAs } from '../lib/linkclient.mjs'
 
 const { ok, done } = checks('devices')
+
+// A big answer on a slow-to-answer link: each grant gives back what was taken in and as much again, so
+// what may be on its way grows from WINDOW to MAX_WINDOW, never past it (relay/web/link.js granter).
+{
+  let credit = WINDOW
+  const g = granter((n) => { credit += n })
+  for (let taken = 0; taken < 64 * 1024 * 1024; taken += 64 * 1024) { credit -= 64 * 1024; g(64 * 1024) }
+  ok(credit === MAX_WINDOW, `what may be on its way grows from ${WINDOW / 1024} KB to ${MAX_WINDOW / 1024 / 1024} MB as it keeps being taken in, and no further`, credit)
+}
 const QUIET = 1500 * 2.5 // BRIDGE_LINK_PING_MS below: a quiet link is started over after this
 const relays = []
 const kits = []

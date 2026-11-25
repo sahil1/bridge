@@ -54,6 +54,12 @@ export function whatGoes(feature) {
       return t('The document, or the part of it you picked, and what you ask AI Assist to do with it.')
     case 'files':
       return t('The names and text of the files AI Assist looks at, and what you ask.')
+    case 'pr':
+      return t('The changes in your branch (the code diff and its commit messages), to write a pull request about them.')
+    case 'consult':
+      return t('The question you ask, with the text you add to it.')
+    case 'assist':
+      return t('The text you picked or wrote, and what you ask AI Assist to do with it.')
     case 'board': case 'diagrams':
       return t("What's on the whiteboard, and what you ask AI Assist to draw.")
     default:
@@ -66,7 +72,7 @@ export const whoGets = (p) => (p.setUp
   ? t('{name}, and the model provider it is set up to use', { name: p.name })
   : p.via ? t('{name}, through {via}', { name: p.name, via: p.via }) : p.name)
 
-export default function AiConsent({ local = false }) {
+export default function AiConsent({ local = false, demo = false }) {
   const [ask, setAsk] = useState(() => consentAsk.get())
   const [said, setSaid] = useState(() => consentSaid.get())
   useEffect(() => consentAsk.subscribe(setAsk), [])
@@ -78,7 +84,7 @@ export default function AiConsent({ local = false }) {
   }, [said])
   return (
     <>
-      {ask && <Sheet key={ask.provider.id} ask={ask} local={local} />}
+      {ask && <Sheet key={ask.provider.id} ask={ask} local={local} demo={demo} />}
       {said && !ask && (
         <p className="aic-said" role="status">
           <Icon name="info" size={14} />
@@ -91,7 +97,7 @@ export default function AiConsent({ local = false }) {
 }
 
 // local: kept on this phone (the demo, Cloud Agents), not on a computer.
-function Sheet({ ask, local }) {
+function Sheet({ ask, local, demo }) {
   const p = ask.provider
   const ref = useRef(null)
   useEffect(() => {
@@ -105,7 +111,8 @@ function Sheet({ ask, local }) {
     <div className="aic-back" onMouseDown={(e) => { if (e.target === e.currentTarget) answerConsent(false) }}>
       <section className="aic-sheet" role="alertdialog" aria-modal="true" aria-labelledby="aic-title" aria-describedby="aic-intro" tabIndex={-1} ref={ref}>
         <h3 id="aic-title"><Icon name="wand" size={16} /> {t('Send this to {name}?', { name: p.name })}</h3>
-        <p id="aic-intro">{t('To do this, Bridge AI sends what you give it to {who}, an AI service outside Bridge AI.', { who: whoGets(p) })}</p>
+        <p id="aic-intro">{t('To do this, Bridge AI sends what you give it to {who}, a third-party AI service outside Bridge AI.', { who: whoGets(p) })}</p>
+        {demo && <p className="aic-demo small">{t('This is the demo: nothing is actually sent. Bridge AI on your own computer asks the same way.')}</p>}
         <dl className="aic-facts">
           <dt>{t("What's sent")}</dt>
           <dd>{whatGoes(ask.feature)}</dd>
@@ -113,6 +120,8 @@ function Sheet({ ask, local }) {
           <dd>{local
             ? t('{name}, straight from this phone. {name} handles it under its own terms and privacy policy.', { name: p.name })
             : t('{name}. It goes from this phone to your computer, end-to-end encrypted, and from your computer to {name}, which handles it under its own terms and privacy policy.', { name: p.name })}</dd>
+          <dt>{t('What Allow covers')}</dt>
+          <dd>{t('What you send to {name} from this phone, for this and Bridge AI\'s other features, until you take it back. Each other provider is asked about on its own.', { name: p.name })}</dd>
           <dt>{t('Until you allow it')}</dt>
           <dd>{local
             ? t('Nothing is sent to {name}. Your answer is kept on this phone, for {name} only.', { name: p.name })

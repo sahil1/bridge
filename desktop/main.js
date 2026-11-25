@@ -249,6 +249,7 @@ const NODE_BIN = (() => {
 async function startServer() {
   if (BUNDLED && (!rootOk || Date.now() - rootAt > 10000) && !(await checkRoot())) {
     if (win && !win.isDestroyed()) win.loadURL(splash(CHANGED())).catch(() => {})
+    tryLater('wasn\'t started: its own files didn\'t check out')
     return false
   }
   // (Built app: only what the server and what it starts need of the environment: serverflags.js.)
@@ -298,21 +299,35 @@ const STOPS = ['SIGTERM', 'SIGINT', 'SIGHUP']
 // three times in five minutes at most, and checked as at the start: the main window shows its page
 // again once it proves itself (its other windows reconnect by themselves: servergate.js), another
 // program's answer said as such, one that doesn't answer said too (showServer). One that doesn't come
-// back, or a fourth time in five minutes, is said in the main window, with Restart (RESTART).
+// back, or a fourth time in five minutes, is said in the main window, with Restart (RESTART), and
+// tried again by itself later (LATER_MS, longer each time up to an hour): a computer you reach from
+// your phone or another computer often has no one at it to click Restart, and one that gave up for
+// good stays out of reach until someone does. Each time is written in logs/desktop.log.
 const restarts = []
+const LATER_MS = [5, 15, 30, 60].map((m) => m * 60_000)
+let later = null // the try after giving up for now
+let laterN = 0
+function desktopLog(line) { try { fs.mkdirSync(path.join(DATA, 'logs'), { recursive: true }); fs.appendFileSync(path.join(DATA, 'logs', 'desktop.log'), `${new Date().toISOString()} ${line}\n`) } catch { /* not this time */ } }
+function tryLater(why) {
+  desktopLog(`Bridge AI's server ${why}; trying again in ${Math.round(LATER_MS[Math.min(laterN, LATER_MS.length - 1)] / 60_000)} minutes.`)
+  clearTimeout(later)
+  later = setTimeout(() => { later = null; restarts.length = 0; connect().catch(() => {}) }, LATER_MS[Math.min(laterN++, LATER_MS.length - 1)])
+  later.unref?.()
+}
 const RESTART_BUTTON = () => `<button onclick="document.title='${RESTART}'" style="-webkit-app-region:no-drag;margin-top:14px;padding:8px 18px;border:0;border-radius:8px;background:#3b6df5;color:#fff;font:inherit;cursor:pointer">Restart</button>`
 const NOT_BACK = () => `Bridge AI's server stopped and didn't come back.<br>${RESTART_BUTTON()}`
 function notBack() { if (win && !win.isDestroyed()) win.loadURL(splash(NOT_BACK())).catch(() => {}) }
 async function restartServer() {
   const now = Date.now()
   while (restarts.length && now - restarts[0] > 5 * 60_000) restarts.shift()
-  if (restarts.length >= 3) return notBack()
+  if (restarts.length >= 3) { tryLater('stopped 3 times in 5 minutes'); return notBack() }
   restarts.push(now)
   await new Promise((r) => setTimeout(r, 500))
   if (quitting || stoppingServer || serverChild || await serverUp() || serverChild) return
   if (!(await startServer())) return
   for (let i = 0; i < 300 && !(await serverUp()); i++) await new Promise((r) => setTimeout(r, 100))
-  if (!(await serverUp())) return notBack()
+  if (!(await serverUp())) { tryLater('didn\'t come back'); return notBack() }
+  laterN = 0
   if (win && !win.isDestroyed() && (!(await proveServer()) || !isLocal(win.webContents.getURL()))) await showServer()
 }
 // The Restart on that page (and on the one saying the server isn't answering): the page's title set
@@ -880,7 +895,7 @@ async function showServer() {
 }
 async function connect() {
   // (The app's own copy as built, before anything else: checkRoot.)
-  if (BUNDLED && !rootOk && !(await checkRoot())) return win.loadURL(splash(CHANGED()))
+  if (BUNDLED && !rootOk && !(await checkRoot())) { tryLater('wasn\'t started: its own files didn\'t check out'); return win.loadURL(splash(CHANGED())) }
   // Never in the way of opening: if the check fails, use whatever server is there.
   if (await serverUp()) await replaceStale().catch(() => {})
   if (await serverUp() && BUNDLED && !(await proveServer())) await replaceUnproven().catch(() => {})
@@ -1158,6 +1173,36 @@ function startUpdatingWhileAway() {
   powerMonitor.on('unlock-screen', () => { locked = false })
   powerMonitor.on('resume', () => { wokeAt = Date.now() })
   setInterval(() => { updateWhileAway().catch(() => {}) }, 60 * 1000)
+}
+
+// The wake-up ping: a computer you reach from your phone or another computer finds its way back by
+// itself, with no one at it. As this Mac wakes, its screen unlocks, or Electron sees the network come
+// back, and every WAKE_EVERY besides: the server is checked first (one that's gone, though nothing
+// said so, is started again, unless the app is quitting, stopping it, or waiting out tryLater), then
+// asked to check its relay and its links to your other computers now and start again any that have
+// gone (POST /api/system/wake). A few seconds after waking, as the network comes up.
+const WAKE_EVERY = 5 * 60_000
+let pinging = false
+async function wakePing(why) {
+  if (pinging || quitting || stoppingServer || relaunching) return
+  pinging = true
+  try {
+    if (!(await serverUp())) {
+      if (BUNDLED && !serverChild && !later && startedServer) { desktopLog(`Bridge AI's server wasn't answering (${why}); starting it again.`); await connect().catch(() => {}) }
+      return
+    }
+    if (BUNDLED && !gate.proven) return // (nothing goes to a server that hasn't proved itself)
+    await local('/system/wake', {}).catch(() => null)
+  } finally { pinging = false }
+}
+function startWakePing() {
+  const soon = (why) => setTimeout(() => { wakePing(why).catch(() => {}) }, 4000)
+  powerMonitor.on('resume', () => soon('woke'))
+  powerMonitor.on('unlock-screen', () => soon('unlocked'))
+  // (Electron says whether the network is up, but not when it changes: looked at every 20 s.)
+  let was = true
+  setInterval(() => { let on = true; try { on = require('electron').net.isOnline() } catch { /* can't tell */ } if (on && !was) soon('back online'); was = on }, 20_000).unref?.()
+  setInterval(() => { wakePing('every few minutes').catch(() => {}) }, WAKE_EVERY).unref?.()
 }
 
 // What the window remembers about its layout (open tabs, panel sizes, what's expanded), forgotten,
@@ -1601,6 +1646,7 @@ app.whenReady().then(async () => {
   watchFleet()
   watchCalls()
   startUpdatingWhileAway()
+  startWakePing()
   // Files dropped on the Dock icon as the app opened: transcribed now it's up.
   if (toTranscribe.length) transcribeOpened()
   // The dictation key from any app (dictation.js): the main window, an agent's own window and
