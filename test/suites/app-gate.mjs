@@ -147,7 +147,7 @@ const windowAuth = require(path.join(ROOT, 'desktop', 'windowauth.js'))
     keys: /const appKeys = \(\) => \{\n\s+if \(!rootOk\) throw/.test(mainJs) && /let rootOk = !BUNDLED/.test(mainJs),
     server: /async function startServer\(\) \{\n\s+if \(BUNDLED && \(!rootOk \|\| Date\.now\(\) - rootAt > 10000\) && !\(await checkRoot\(\)\)\) \{/.test(mainJs),
     atStart: /await checkRoot\(\)\n\s+windowsSendSecret\(\)\n\s+createWindow\(\)/.test(mainJs),
-    connect: /async function connect\(\) \{\n[^]*?if \(BUNDLED && !rootOk && !\(await checkRoot\(\)\)\) return win\.loadURL\(splash\(CHANGED\(\)\)\)\n[^]*?replaceStale/.test(mainJs),
+    connect: /async function connect\(\) \{\n[^]*?if \(BUNDLED && !rootOk && !\(await checkRoot\(\)\)\) \{ tryLater\([^\n]*\); return win\.loadURL\(splash\(CHANGED\(\)\)\) \}\n[^]*?replaceStale/.test(mainJs),
     fuses: pkg.build.electronFuses.enableEmbeddedAsarIntegrityValidation === true && pkg.build.electronFuses.onlyLoadAppFromAsar === true,
     packed: ['startgate.js', 'rootlist.js', 'app-root.list'].every((f) => pkg.build.files.includes(f)) && /require\('\.\/rootlist\.js'\)\.make\(OUT\)/.test(stage),
     devTools: /\.\.\.\(app\.isPackaged \? \[\] : \[\{ role: 'toggleDevTools' \}\]\)/.test(mainJs) && (mainJs.match(/toggleDevTools|openDevTools/g) || []).length === 1,
@@ -176,7 +176,23 @@ const windowAuth = require(path.join(ROOT, 'desktop', 'windowauth.js'))
   // This computer's own addresses never through a proxy, with what NO_PROXY said kept.
   const noProxy = flags.serverEnv({ PATH: '/usr/bin', HTTPS_PROXY: 'http://p', NO_PROXY: 'corp.example, 10.0.0.0/8' }, { platform: 'darwin' })
   const noProxyWin = flags.serverEnv({ Path: 'C:\\x' }, { platform: 'win32' })
-  ok(noProxy.NO_PROXY === 'corp.example,10.0.0.0/8,localhost,127.0.0.1,::1' && noProxy.no_proxy === noProxy.NO_PROXY && noProxyWin.NO_PROXY === 'localhost,127.0.0.1,::1', 'the server\'s NO_PROXY always has this computer\'s own addresses, with what it said kept', { mac: noProxy.NO_PROXY, win: noProxyWin.NO_PROXY })
+  // codesign that's slow or killed (a Mac still looking a fresh update over) is asked again, never taken
+  // for a changed program; only its own "doesn't hold" (1) or "not signed to that" (3) is.
+  const codesig = require(path.join(ROOT, 'desktop', 'codesig.js'))
+  const runOf = (answers) => { let n = 0; return (_c, _a, _o, cb) => { const a = answers[Math.min(n++, answers.length - 1)]; setImmediate(() => cb(a)) } }
+  const killed = Object.assign(new Error('timed out'), { killed: true, signal: 'SIGTERM', code: null })
+  const slowThenOk = await codesig.holds('/x', 'r', { waits: [1, 1, 1], run: runOf([killed, killed, null]) })
+  const bad1 = await codesig.holds('/x', 'r', { waits: [1, 1, 1], run: runOf([Object.assign(new Error('no'), { code: 1 })]) })
+  const bad3 = await codesig.holds('/x', 'r', { waits: [1, 1, 1], run: runOf([Object.assign(new Error('no'), { code: 3 })]) })
+  const neverAnswers = await codesig.holds('/x', 'r', { waits: [1, 1], run: runOf([killed]) })
+  ok(slowThenOk === true && bad1 === false && bad3 === false && neverAnswers === false, 'a slow codesign is asked again with longer to answer; only its own no counts as a changed program', { slowThenOk, bad1, bad3, neverAnswers })
+  const mainNow = fs.readFileSync(path.join(ROOT, 'desktop', 'main.js'), 'utf8')
+  ok(/restarts\.length >= 3\) \{ tryLater\(/.test(mainNow) && (mainNow.match(/tryLater\('wasn\\'t started: its own files didn\\'t check out'\)/g) || []).length === 2, 'a server that stopped 3 times, or a copy that didn\'t check out, is tried again later by itself, not left off until someone clicks Restart')
+
+  // A "no" to usage stats, your network's certificates and your agents' settings folders reach it too.
+  const said = flags.serverEnv({ PATH: '/usr/bin', DO_NOT_TRACK: '1', BRIDGE_TELEMETRY: '0', NODE_EXTRA_CA_CERTS: '/etc/corp.pem', CLAUDE_CONFIG_DIR: '/Users/me/.c', CODEX_HOME: '/Users/me/.x' }, { platform: 'darwin' })
+  ok(said.DO_NOT_TRACK === '1' && said.BRIDGE_TELEMETRY === '0' && said.NODE_EXTRA_CA_CERTS === '/etc/corp.pem' && said.CLAUDE_CONFIG_DIR === '/Users/me/.c' && said.CODEX_HOME === '/Users/me/.x', 'the server hears DO_NOT_TRACK and BRIDGE_TELEMETRY=0, the network\'s certificates and where agent CLIs keep their settings', Object.keys(said))
+  ok(noProxy.NO_PROXY ==='corp.example,10.0.0.0/8,localhost,127.0.0.1,::1' && noProxy.no_proxy === noProxy.NO_PROXY && noProxyWin.NO_PROXY === 'localhost,127.0.0.1,::1', 'the server\'s NO_PROXY always has this computer\'s own addresses, with what it said kept', { mac: noProxy.NO_PROXY, win: noProxyWin.NO_PROXY })
   const args = flags.serverArgs('/Applications/Bridge AI.app/Contents/Resources/app-root')
   ok(args[0] === '--disable-sigusr1' && args[1] === '--import' && /\/server\/lockdown\.js$/.test(args[2]) && /\/server\/index\.js$/.test(args[3]), 'the server is started with lockdown.js loaded before anything of its own', args)
 
