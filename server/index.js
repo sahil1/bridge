@@ -369,7 +369,9 @@ app.use(async (req, res, next) => {
   const gate = PHONE_GATES.find(([re]) => re.test(at))
   if (!gate) return next()
   let goes = []
-  try { goes = [].concat((await gate[1](req, gate[0].exec(at))) || []).filter((x) => x?.provider) } catch { /* not worked out: the route says what's wrong */ }
+  // Not worked out (the agents' list didn't answer, say): nothing goes from the phone, rather than
+  // going without the question (App Review 5.1.2(i): never sent before it's allowed).
+  try { goes = [].concat((await gate[1](req, gate[0].exec(at))) || []).filter((x) => x?.provider) } catch { return res.status(503).json({ error: 'Bridge AI couldn\'t tell which AI provider this would go to, so nothing was sent. Try again in a moment.', code: 'consentUnknown' }) }
   try { for (const g of goes) aiConsent.need(g.provider, g.feature) } catch (e) { if (aiConsent.isConsent(e)) return res.status(409).json({}); throw e }
   next()
 })
@@ -3520,7 +3522,8 @@ async function kindGoes(kind, model, feature = 'agent') {
   return { provider: aiConsent.ofAgent(kind, adapter(kind).label), feature }
 }
 // An agent by its pane (a cloud agent's: cloud:<provider>:<id>); the Chief of Staff as itself.
-const paneOf = async (paneId) => (await rt.fleet().catch(() => null))?.agents?.find((x) => x.paneId === String(paneId || '')) || null
+// (The agents' list not answering throws: from a phone, nothing is sent then, PHONE_GATES' use.)
+const paneOf = async (paneId) => (await rt.fleet())?.agents?.find((x) => x.paneId === String(paneId || '')) || null
 async function paneGoes(paneId, feature = 'agent') {
   const id = String(paneId || '')
   const cloud = /^cloud:([a-z]+):/.exec(id)
@@ -3573,6 +3576,10 @@ const PHONE_GATES = [
   [/^POST \/api\/chats$/, (req) => (String(req.body?.prompt || '').trim() ? kindGoes(kindOr(req.body?.kind), req.body?.model) : null)],
   [/^POST \/api\/studio\/ask$/, (req) => (req.body?.pane ? paneGoes(req.body.pane, 'studio') : kindGoes(kindOr(req.body?.agent), null, 'studio'))],
   [/^POST \/api\/agents\/([^/]+)\/handoff$/, (req) => kindGoes(String(req.body?.to || ''), req.body?.model)],
+  // The handover written by the agent itself (its provider reads the conversation and sums it up),
+  // and an agent nudged to carry on (on another account) with a message of Bridge AI's.
+  [/^POST \/api\/agents\/([^/]+)\/handoff\/ask$/, (req, m) => paneGoes(decodeURIComponent(m[1]))],
+  [/^POST \/api\/agents\/([^/]+)\/continue$/, (req, m) => (req.body?.nudge ? paneGoes(decodeURIComponent(m[1])) : null)],
   [/^POST \/api\/(mail\/[^/]+\/agent|mail\/triage|calendar\/prep)$/, () => kindGoes(kindOr(cfg.assistant?.kind), null, 'mail')],
   // The Chief of Staff: started, a new thread, a task or an idea sent, a task answered, a helper.
   [/^POST \/api\/chief\/(launch|threads)$/, () => chiefGoes()],

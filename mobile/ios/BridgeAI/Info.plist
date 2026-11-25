@@ -40,7 +40,7 @@
 	<key>NSCameraUsageDescription</key>
 	<string>Bridge AI uses the camera to scan the pairing code your computer shows, and to take photos you attach to messages for your agents.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Bridge AI uses the microphone while you dictate a message, record a voice note or take notes in a meeting. What you say goes end-to-end encrypted to your computer, which turns it into text.</string>
+	<string>Bridge AI uses the microphone while you dictate a message, record a voice note or take notes in a meeting. What you say goes end-to-end encrypted to your computer, which turns it into text there, or, for a meeting set to use one, sends it to the cloud speech service you chose, only after you allow it.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Bridge AI uses the photos you pick to attach them to messages for your agents.</string>
 	<key>UILaunchScreen</key>

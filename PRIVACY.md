@@ -846,6 +846,15 @@ protects what it receives:
 A model that runs on your computer (Ollama, LM Studio, the local model built into Bridge AI, the
 Mac's own speech) isn't a third party: what it reads stays on your computer, and nothing is asked.
 
+**The same protection.** Bridge AI connects only to the providers listed here, and only into your
+own account with each, with your own sign-in or key. The project lists a provider only when its
+published terms and privacy policy commit it to protecting what it receives at least as well as this
+policy does: using it to provide its service to you, keeping it secure, and not selling it. If a
+provider stops doing so, Bridge AI stops offering it. Whether a provider keeps what it receives, for
+how long, and whether it may use it to improve its models is set by its terms and by your account's
+settings there (most API and business accounts aren't used for training by default); its privacy
+policy, linked above and in the sheet that asks you, says which.
+
 **Asked first.** The first time something from your phone would go to a provider, the phone says
 what will be sent, who gets it and how, links this policy and the provider's, and asks: **Allow** or
 **Not Now**. Not Now sends nothing, and the phone says so. Your computer keeps your answer for that

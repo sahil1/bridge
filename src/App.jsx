@@ -1080,7 +1080,7 @@ function App() {
       <CallPrompt />
       {/* Your OK before what you send goes on to an AI provider (AiConsent.jsx): asked by your
           computer of a phone, by the demo, and by Cloud Agents, which sends from this phone. */}
-      <Quiet name="AI provider consent"><AiConsent local={cloudOnly} /></Quiet>
+      <Quiet name="AI provider consent"><AiConsent local={cloudOnly} demo={import.meta.env.MODE === 'demo'} /></Quiet>
       {!cloudOnly && <TranscribeHost />}
       {!cloudOnly && <Quiet name="Crash notice"><CrashNotice /></Quiet>}
       {inbox && !cloudOnly && <NeedsYouPanel data={ny.data} refresh={ny.refresh} phone={!wide} focus={inbox.focus} onClose={() => setInbox(null)} onOpen={openItem} />}

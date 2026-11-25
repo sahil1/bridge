@@ -382,7 +382,13 @@ Apple gives.
 > **Meetings**, open "Checkout launch sync" and ask a question in its Ask box (the sheet names
 > OpenAI, the model for AI Assist). Settings (the gear) › Devices & Access › Phone › AI Providers
 > lists what was allowed, with Take Back. In Cloud Agents the app asks before the first task to each
-> provider. The demo keeps its answers in memory only, so it asks again each time it's opened.
+> provider. The demo keeps its answers in memory only, so it asks again each time it's opened, and
+> its sheet adds that nothing is actually sent there. Every way the phone sends something to a
+> provider asks first, including a line typed into an agent's terminal view, an answer to an
+> agent's question, a routine run now and an agent's own handover; and the user's computer refuses
+> anything from the phone for a provider not allowed, or one it can't tell. The privacy policy's
+> "AI providers and your phone" part says what each provider receives, how, what for, and that each
+> gives the same protection as the policy (https://github.com/sahil1/bridge/blob/main/PRIVACY.md#ai-providers-and-your-phone).
 
 Attach a short screen recording of pairing and using it with a real computer: reviewers can't pair
 one themselves.

@@ -67,6 +67,17 @@ export function pageGate({ agentOf, assist, ofAgent, ofModel, ofCloud }) {
       return a && !body?.setup && submits(body?.steps) && !(a.question && !freeText(body?.steps)) ? kindGoes(a.kind, a.model, a.chief ? 'chief' : 'agent') : null
     }
     if (method !== 'POST') return null
+    // Typed into an agent's terminal and sent (Enter), an answer to its question, its own handover,
+    // a nudge to carry on, and a routine run now: each goes to the agent's provider, as the
+    // computer asks of a phone (server/index.js PHONE_GATES).
+    if ((m = /^\/panes\/([^/]+)\/text$/.exec(path))) return body?.enter || /[\r\n]/.test(String(body?.text ?? '')) ? paneGoes(decodeURIComponent(m[1])) : null
+    if ((m = /^\/(?:agents|panes)\/([^/]+)\/keys$/.exec(path))) {
+      const a = agentOf(decodeURIComponent(m[1]))
+      return a && !a.question && (body?.keys || []).some((k) => /^enter$/i.test(String(k))) ? kindGoes(a.kind, a.model, a.chief ? 'chief' : 'agent') : null
+    }
+    if ((m = /^\/agents\/([^/]+)\/(asks|handoff\/ask)$/.exec(path))) return paneGoes(decodeURIComponent(m[1]))
+    if ((m = /^\/agents\/([^/]+)\/continue$/.exec(path))) return body?.nudge ? paneGoes(decodeURIComponent(m[1])) : null
+    if (/^\/routines\/[^/]+\/run$/.test(path)) return { provider: ofAgent('claude'), feature: 'agent' }
     if (path === '/agents/launch' || path === '/chats') return String(body?.prompt || '').trim() ? kindGoes(body?.kind || 'claude', body?.model) : null
     if ((m = /^\/agents\/[^/]+\/handoff$/.exec(path))) return body?.to ? kindGoes(String(body.to), body?.model) : null
     if (path === '/chief/launch' || path === '/chief/threads' || (path === '/chief/tasks' && body?.send) || /^\/ideas\/[^/]+\/send$/.test(path)) return chief()
